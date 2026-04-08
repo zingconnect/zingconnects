@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BsEyeFill, BsEyeSlashFill, BsCloudUploadFill, BsCheckCircleFill, BsCopy, BsArrowRight } from 'react-icons/bs';
+import { BsEyeFill, BsEyeSlashFill, BsCloudUploadFill, BsCheckCircleFill, BsCopy, BsArrowRight, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
 export const Registration = () => {
@@ -20,7 +20,7 @@ export const Registration = () => {
   });
 
   useEffect(() => {
-    if (!selectedPlan) navigate('/');
+    if (!selectedPlan) navigate('/pricing');
     window.scrollTo(0, 0);
   }, [selectedPlan, navigate]);
 
@@ -64,15 +64,23 @@ export const Registration = () => {
         <img src={ZingConnectLogo} alt="ZingConnect" className="h-7 w-auto" />
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Plan:</span>
-          <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded">{selectedPlan.tier}</span>
+          <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded">
+            {selectedPlan.tier} — ${selectedPlan.price}
+          </span>
         </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-6 py-12">
         {!isSuccess ? (
           <div className="animate-in fade-in duration-700">
-            {/* Minimal Header */}
-            <div className="mb-10 text-center md:text-left">
+            {/* Minimal Header & Back Button */}
+            <div className="mb-10">
+              <button 
+                onClick={() => navigate('/pricing')}
+                className="flex items-center gap-2 text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6 hover:translate-x-[-4px] transition-transform"
+              >
+                <BsArrowLeft /> Back to Pricing
+              </button>
               <h1 className="text-2xl font-black tracking-tight mb-2">Create Agent Profile</h1>
               <p className="text-xs font-medium text-gray-500">Fill in your professional details to generate your live link.</p>
             </div>
@@ -115,12 +123,20 @@ export const Registration = () => {
                   <input required name="occupation" onChange={handleInputChange} type="text" className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 transition-colors bg-transparent" placeholder="Financial Advisor" />
                 </div>
                 <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">Date of Birth</label>
+                  <input required name="dob" onChange={handleInputChange} type="date" className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 transition-colors bg-transparent" />
+                </div>
+                <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase">Gender</label>
                   <select required name="gender" onChange={handleInputChange} className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 bg-transparent">
                     <option value="">Select</option>
                     <option value="male">Male</option>
                     <option value="female">Female</option>
                   </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">Program (Optional)</label>
+                  <input name="program" onChange={handleInputChange} type="text" className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 transition-colors bg-transparent" placeholder="Affiliate" />
                 </div>
                 <div className="md:col-span-2 space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase">Bio</label>
@@ -155,7 +171,7 @@ export const Registration = () => {
             </form>
           </div>
         ) : (
-          /* --- SUCCESS STATE (Professional & Compact) --- */
+          /* --- SUCCESS STATE --- */
           <div className="text-center py-10 animate-in slide-in-from-bottom-8 duration-1000">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-50 text-blue-600 rounded-full mb-6">
               <BsCheckCircleFill size={30} />

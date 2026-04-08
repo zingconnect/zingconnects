@@ -8,7 +8,7 @@ const plans = [
   {
     tier: 'BASIC',
     term: '1 Month',
-    price: '20',
+    price: '15',
     frequency: '/mo',
     popular: false,
     features: ['Instant Link', 'Unlimited Chats', 'Dashboard'],
@@ -16,7 +16,7 @@ const plans = [
   {
     tier: 'GROWTH',
     term: '6 Months',
-    price: '60',
+    price: '45',
     frequency: '',
     popular: true,
     features: ['All Basic', 'Priority Routing', '24/7 Support'],
@@ -24,7 +24,7 @@ const plans = [
   {
     tier: 'PROFESSIONAL',
     term: '1 Year',
-    price: '125',
+    price: '110',
     frequency: '',
     popular: false,
     features: ['All Growth', 'Voice Changer', 'Analytics'],
