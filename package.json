@@ -8,7 +8,7 @@
   "server": "nodemon api/index.js",
   "client": "vite",
   "build": "chmod +x node_modules/.bin/vite && vite build",
-  "start": "node api/index.js"
+  "start": "cross-env PORT=5000 node api/index.js"
 },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
