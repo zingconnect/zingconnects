@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "description": "ZingConnect Live Chat App",
   "type": "module",
-"scripts": {
-  "dev": "concurrently \"npm run server\" \"npm run client\"",
-  "server": "nodemon api/index.js",
-  "client": "vite",
-  "build": "chmod +x node_modules/.bin/vite && vite build",
-  "start": "cross-env PORT=5000 node api/index.js"
-},
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon api/index.js",
+    "client": "vite",
+    "build": "chmod +x node_modules/.bin/vite && vite build",
+    "start": "cross-env PORT=5000 node api/index.js"
+  },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
     "cors": "^2.8.6",
