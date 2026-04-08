@@ -34,8 +34,14 @@ const plans = [
 const PricingCard = ({ plan }) => {
   const navigate = useNavigate();
 
-  const handleSelectPlan = () => {
-    navigate('/Registration', { state: { selectedPlan: plan } });
+const handleSelectPlan = () => {
+    console.log("Button clicked! Attempting to navigate with plan:", plan.tier);
+    try {
+      navigate('/Registration', { state: { selectedPlan: plan } });
+      console.log("Navigation command sent.");
+    } catch (error) {
+      console.error("Navigation failed:", error);
+    }
   };
 
   return (

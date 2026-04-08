@@ -11,7 +11,7 @@ function App() {
         <Route path="/" element={<PricingPage />} />
         
         {/* Step 2: Registration */}
-        <Route path="/register" element={<Registration />} />
+        <Route path="/Registration" element={<Registration />} />
 
         {/* Redirect any random URL back to pricing */}
         <Route path="*" element={<Navigate to="/" />} />
