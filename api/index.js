@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import jwt from 'jsonwebtoken'; // New: JWT Import
+import jwt from 'jsonwebtoken'; 
 import { fileURLToPath } from 'url';
 import { agentSchema } from './models/Agent.js'; 
 
@@ -39,18 +39,30 @@ const authenticateToken = (req, res, next) => {
 
 // --- API ROUTES ---
 
-// 1. Register New Agent
 app.post('/api/agents/register', async (req, res) => {
   try {
+    // 2. Validate that secret exists
+    if (!process.env.JWT_SECRET) {
+      console.error("CRITICAL ERROR: JWT_SECRET is missing in .env");
+      return res.status(500).json({ success: false, message: "Server configuration error" });
+    }
+
     const newAgent = new Agent(req.body);
     await newAgent.save();
     
-    // Generate token immediately on registration so they are logged in
-    const token = jwt.sign({ id: newAgent._id, slug: newAgent.slug }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign(
+      { id: newAgent._id, slug: newAgent.slug }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '24h' }
+    );
     
     res.status(201).json({ success: true, token, slug: newAgent.slug });
   } catch (err) {
-    res.status(400).json({ success: false, message: "Email or Slug already exists" });
+    console.error("Registration Error Detail:", err); // 3. Look at your terminal for this!
+    res.status(400).json({ 
+      success: false, 
+      message: err.code === 11000 ? "Email or Slug already exists" : err.message 
+    });
   }
 });
 

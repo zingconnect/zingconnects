@@ -47,13 +47,12 @@ export const Registration = () => {
   const agentSlug = getUniqueSlug();
   const fullLink = `${window.location.origin}/agent/${agentSlug}`;
 
-  // --- UPDATED SUBMIT LOGIC FOR REAL DB ---
+// --- UPDATED SUBMIT LOGIC FOR REAL DB ---
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
     
     try {
-      // Point this to your Express server endpoint
       const response = await fetch('/api/agents/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -64,17 +63,31 @@ export const Registration = () => {
         }),
       });
 
-      if (response.ok) {
-        setIsSuccess(true);
-        window.scrollTo(0, 0);
+      const contentType = response.headers.get("content-type");
+      
+      if (contentType && contentType.includes("application/json")) {
+        const data = await response.json();
+
+        if (response.ok) {
+          if (data.token) {
+            localStorage.setItem('zingToken', data.token);
+            localStorage.setItem('agentSlug', data.slug);
+          }
+          
+          setIsSuccess(true);
+          window.scrollTo(0, 0);
+        } else {
+          alert(`Registration Error: ${data.message || 'Validation failed'}`);
+        }
       } else {
-        const errData = await response.json();
-        alert(`Registration Error: ${errData.message || 'Check your connection'}`);
+        const textError = await response.text();
+        console.error("Server returned non-JSON response:", textError);
+        alert("The server encountered an internal error. Please check backend logs.");
       }
+
     } catch (error) {
       console.error("Connection to backend failed:", error);
-      // Fallback for demo purposes if backend isn't live yet:
-      // setIsSuccess(true); 
+      alert("Could not connect to the server. Please check your internet connection.");
     } finally {
       setIsSubmitting(false);
     }
