@@ -30,15 +30,20 @@ app.get('/api/test', (req, res) => {
   res.send("ZingConnect API is running with Dual DBs...");
 });
 
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+})
+
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../dist')));
+  const distPath = path.resolve(__dirname, '../dist');
+  app.use(express.static(distPath));
 
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../dist', 'index.html'));
+    res.sendFile(path.resolve(distPath, 'index.html'));
   });
 }
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5173;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server launched on port ${PORT}`);
 });
