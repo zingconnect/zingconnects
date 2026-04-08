@@ -111,7 +111,9 @@ app.get('/health', (req, res) => res.status(200).send('OK'));
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.resolve(__dirname, '../dist');
   app.use(express.static(distPath));
-  app.get('*', (req, res) => res.sendFile(path.resolve(distPath, 'index.html')));
+app.get('/:path*', (req, res) => {
+  res.sendFile(path.resolve(distPath, 'index.html'));
+});
 }
 
 export default app;
