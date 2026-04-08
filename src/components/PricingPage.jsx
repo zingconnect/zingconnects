@@ -1,7 +1,6 @@
 import React from 'react';
-import { BsCheckCircleFill, BsLightningChargeFill } from 'react-icons/bs';
-
-/* Ensure your logo is in public/logo.png */
+import { useNavigate } from 'react-router-dom';
+import { BsCheckCircleFill } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
 const plans = [
@@ -11,7 +10,7 @@ const plans = [
     price: '20',
     frequency: '/mo',
     popular: false,
-    features: ['Instant Live Link', 'Unlimited User Chats', 'Real-time Dashboard'],
+    features: ['Instant Link', 'Unlimited Chats', 'Dashboard'],
   },
   {
     tier: 'GROWTH',
@@ -19,7 +18,7 @@ const plans = [
     price: '60',
     frequency: '',
     popular: true,
-    features: ['All Basic Features', 'Priority Message Routing', '24/7 Agent Support'],
+    features: ['All Basic', 'Priority Routing', '24/7 Support'],
   },
   {
     tier: 'PROFESSIONAL',
@@ -27,166 +26,164 @@ const plans = [
     price: '125',
     frequency: '',
     popular: false,
-    features: ['All Growth Features', 'Voice Changer Access', 'Advanced Analytics'],
+    features: ['All Growth', 'Voice Changer', 'Analytics'],
   },
 ];
 
-const PricingCard = ({ plan }) => (
-  <div className={`relative bg-white p-6 md:p-8 rounded-3xl border ${plan.popular ? 'border-blue-600 shadow-2xl' : 'border-gray-100 shadow-lg'} flex-1 flex flex-col transition-transform hover:-translate-y-2 duration-300`}>
-    {plan.popular && (
-      <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-5 py-1.5 rounded-full font-bold text-xs uppercase tracking-widest z-10 shadow-md">
-        Most Popular
-      </div>
-    )}
-    <div className="flex flex-col mb-8">
-      <span className="text-gray-500 font-semibold tracking-wider text-xs mb-1">{plan.tier}</span>
-      <span className="text-3xl font-extrabold text-blue-950 mb-3">{plan.term}</span>
-      <div className="flex items-end text-blue-950">
-        <span className="text-4xl md:text-5xl font-extrabold tracking-tight">${plan.price}</span>
-        {plan.frequency && <span className="text-lg font-medium text-gray-600 ml-1 mb-1">{plan.frequency}</span>}
-      </div>
-    </div>
-    <ul className="space-y-3 mb-10 flex-grow">
-      {plan.features.map((feature) => (
-        <li key={feature} className="flex items-center text-gray-700">
-          <BsCheckCircleFill className="text-green-500 text-base mr-3 shrink-0" />
-          <span className="font-medium text-sm md:text-base">{feature}</span>
-        </li>
-      ))}
-    </ul>
-    <button className={`${plan.popular ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 border border-blue-600'} w-full py-4 rounded-xl font-bold text-lg hover:shadow-lg transition-all`}>
-      Start a Plan
-    </button>
-  </div>
-);
+const PricingCard = ({ plan }) => {
+  const navigate = useNavigate();
 
+  const handleSelectPlan = () => {
+    // This sends the plan object to the /registration route via React Router state
+    navigate('/registration', { state: { selectedPlan: plan } });
+  };
+
+  return (
+    <div className={`relative bg-white p-5 md:p-8 rounded-2xl border ${plan.popular ? 'border-blue-600 shadow-xl' : 'border-gray-100 shadow-md'} flex-1 flex flex-col transition-transform hover:-translate-y-1 duration-300`}>
+      {plan.popular && (
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full font-bold text-[10px] uppercase tracking-widest z-10 shadow-sm">
+          Most Popular
+        </div>
+      )}
+      <div className="flex flex-col mb-4 md:mb-8">
+        <span className="text-gray-400 font-bold tracking-wider text-[10px] mb-1">{plan.tier}</span>
+        <span className="text-2xl md:text-3xl font-extrabold text-blue-950 mb-2">{plan.term}</span>
+        <div className="flex items-end text-blue-950">
+          <span className="text-3xl md:text-5xl font-black tracking-tight">${plan.price}</span>
+          {plan.frequency && <span className="text-sm md:text-lg font-medium text-gray-500 ml-1 mb-1">{plan.frequency}</span>}
+        </div>
+      </div>
+      <ul className="space-y-2 md:space-y-3 mb-6 md:mb-10 flex-grow">
+        {plan.features.map((feature) => (
+          <li key={feature} className="flex items-center text-gray-600">
+            <BsCheckCircleFill className="text-green-500 text-sm md:text-base mr-2 shrink-0" />
+            <span className="font-semibold text-xs md:text-base">{feature}</span>
+          </li>
+        ))}
+      </ul>
+      <button 
+        onClick={handleSelectPlan}
+        className={`${plan.popular ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 border border-blue-600'} w-full py-3 md:py-4 rounded-xl font-bold text-sm md:text-lg transition-all`}
+      >
+        Start Plan
+      </button>
+    </div>
+  );
+};
 export const PricingPage = () => {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white via-blue-50/30 to-white text-blue-950 font-sans">
-      {/* HEADER SECTION */}
-      <header className="py-6 flex justify-center border-b border-gray-100 bg-white/80 backdrop-blur-md sticky top-0 z-50">
-        <img src={ZingConnectLogo} alt="ZingConnect Logo" className="h-12 md:h-16 w-auto" />
+    <div className="min-h-screen bg-gradient-to-b from-white via-blue-50/20 to-white text-blue-950 font-sans overflow-x-hidden">
+      {/* HEADER - Reduced padding on mobile */}
+      <header className="py-4 md:py-6 flex justify-center border-b border-gray-100 bg-white/80 backdrop-blur-md sticky top-0 z-50">
+        <img src={ZingConnectLogo} alt="ZingConnect Logo" className="h-8 md:h-16 w-auto" />
       </header>
 
-      {/* MAIN CONTENT */}
-      <main className="container mx-auto px-6 pt-16 md:pt-24 max-w-7xl">
+      <main className="container mx-auto px-4 md:px-6 pt-10 md:pt-24 max-w-7xl">
         
-        {/* HERO */}
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <h1 className="text-4xl md:text-6xl font-black mb-6 leading-tight">
-            Ready to Start Your <span className="text-blue-600">Live Journey?</span>
+        {/* HERO - Reduced text size on mobile */}
+        <div className="text-center max-w-3xl mx-auto mb-10 md:mb-16">
+          <h1 className="text-3xl md:text-6xl font-black mb-4 md:mb-6 leading-tight px-2">
+            Start Your <span className="text-blue-600">Live Journey</span>
           </h1>
-          <p className="text-lg md:text-xl text-gray-600 font-medium leading-relaxed">
-            Select a plan that fits your business. Once you subscribe, your unique Agent Live Link will be generated instantly.
+          <p className="text-sm md:text-xl text-gray-500 font-bold leading-relaxed px-4">
+            Select a plan that fits your business. Agent Live Links are generated instantly.
           </p>
         </div>
 
-        {/* PRICING GRID */}
-        <div className="flex flex-col lg:flex-row gap-8 lg:gap-10 items-stretch justify-center w-full mb-32">
+        {/* PRICING GRID - Reduced gap on mobile */}
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-10 items-stretch justify-center w-full mb-16 md:mb-32">
           {plans.map((plan) => (
             <PricingCard key={plan.tier} plan={plan} />
           ))}
         </div>
 
-        {/* STATS BAR */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-8 border-y border-gray-100 py-16 mb-32 text-center">
+        {/* STATS BAR - Reduced font and spacing on mobile */}
+        <section className="grid grid-cols-3 gap-2 border-y border-gray-100 py-8 md:py-16 mb-16 md:mb-32 text-center">
           <div>
-            <p className="text-5xl font-black text-blue-600 mb-2">50k+</p>
-            <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Total Active Users</p>
+            <p className="text-xl md:text-5xl font-black text-blue-600 mb-1">50k+</p>
+            <p className="text-gray-400 font-bold uppercase tracking-tighter text-[8px] md:text-xs">Active Users</p>
           </div>
           <div>
-            <p className="text-5xl font-black text-blue-600 mb-2">99.9%</p>
-            <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Server Uptime</p>
+            <p className="text-xl md:text-5xl font-black text-blue-600 mb-1">99.9%</p>
+            <p className="text-gray-400 font-bold uppercase tracking-tighter text-[8px] md:text-xs">Uptime</p>
           </div>
           <div>
-            <p className="text-5xl font-black text-blue-600 mb-2">24/7</p>
-            <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Instant Support</p>
+            <p className="text-xl md:text-5xl font-black text-blue-600 mb-1">24/7</p>
+            <p className="text-gray-400 font-bold uppercase tracking-tighter text-[8px] md:text-xs">Support</p>
           </div>
         </section>
 
-        {/* MOCKUP SECTION */}
-        <section className="pb-32">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-5xl font-black mb-4 text-blue-950 uppercase">Featuring a powerful widget</h2>
-            <div className="w-24 h-1.5 bg-blue-600 mx-auto rounded-full"></div>
+        {/* MOCKUP SECTION - Scaled down for mobile */}
+        <section className="pb-16 md:pb-32 px-2">
+          <div className="text-center mb-8 md:mb-16">
+            <h2 className="text-xl md:text-5xl font-black mb-2 text-blue-950 uppercase tracking-tight">Powerful Widget</h2>
+            <div className="w-12 h-1 bg-blue-600 mx-auto rounded-full"></div>
           </div>
 
-          <div className="flex flex-col lg:flex-row items-center justify-center gap-12 bg-blue-600 rounded-[3rem] p-8 md:p-16 overflow-hidden relative shadow-2xl">
+          <div className="flex flex-col lg:flex-row items-center justify-center gap-6 md:gap-12 bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-6 md:p-16 overflow-hidden relative shadow-xl">
             {/* Decoration */}
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32"></div>
+            <div className="absolute top-0 right-0 w-32 h-32 md:w-64 md:h-64 bg-white/10 rounded-full -mr-16 -mt-16"></div>
             
-            {/* USER PHONE MOCKUP */}
-            <div className="w-full max-w-[290px] bg-white rounded-[2.5rem] shadow-2xl p-4 border-[8px] border-blue-950 relative z-10">
-              <div className="bg-blue-600 h-10 rounded-t-[1.5rem] -mx-4 -mt-4 mb-4 flex items-center px-4 justify-between">
-                <img src={ZingConnectLogo} className="h-4 brightness-0 invert" alt="logo" />
-                <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+            {/* USER PHONE - Compact height for mobile */}
+            <div className="w-full max-w-[240px] md:max-w-[290px] bg-white rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-blue-950 relative z-10">
+              <div className="bg-blue-600 h-8 rounded-t-[1rem] -mx-3 -mt-3 mb-3 flex items-center px-3 justify-between">
+                <img src={ZingConnectLogo} className="h-3 brightness-0 invert" alt="logo" />
+                <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
               </div>
-              <div className="space-y-4 h-[320px] overflow-hidden">
-                <div className="bg-gray-100 p-3 rounded-2xl rounded-tl-none text-[11px] font-bold w-4/5 text-gray-600">Hello! How can I help you?</div>
-                <div className="bg-blue-600 text-white p-3 rounded-2xl rounded-tr-none text-[11px] font-bold w-4/5 ml-auto">I'd like to start a plan.</div>
-                <div className="bg-gray-100 p-3 rounded-2xl rounded-tl-none text-[11px] font-bold w-4/5 text-gray-600">Great choice! One moment...</div>
+              <div className="space-y-3 h-[200px] md:h-[320px] overflow-hidden">
+                <div className="bg-gray-100 p-2 rounded-xl rounded-tl-none text-[9px] md:text-[11px] font-bold text-gray-600">Hi! How can I help?</div>
+                <div className="bg-blue-600 text-white p-2 rounded-xl rounded-tr-none text-[9px] md:text-[11px] font-bold w-4/5 ml-auto text-right">I'd like to start.</div>
               </div>
             </div>
 
-            {/* LIGHTNING ICON */}
             <div className="hidden lg:block">
               <BsLightningChargeFill className="text-white text-5xl animate-pulse" />
             </div>
 
-            {/* AGENT PHONE MOCKUP */}
-            <div className="w-full max-w-[290px] bg-blue-950 rounded-[2.5rem] shadow-2xl p-4 border-[8px] border-white relative z-10">
-              <div className="flex items-center gap-2 mb-6 border-b border-white/10 pb-3">
-                <div className="w-6 h-6 bg-blue-600 rounded-full"></div>
-                <span className="text-white font-bold text-[10px] uppercase tracking-wider">Agent Console</span>
+            {/* AGENT PHONE - Compact height for mobile */}
+            <div className="w-full max-w-[240px] md:max-w-[290px] bg-blue-950 rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-white relative z-10">
+              <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-2">
+                <div className="w-5 h-5 bg-blue-600 rounded-full"></div>
+                <span className="text-white font-bold text-[8px] uppercase">Console</span>
               </div>
-              <div className="space-y-4">
-                <div className="bg-white/5 p-3 rounded-xl border border-white/10">
-                  <p className="text-[9px] text-blue-400 font-black mb-1">INCOMING REQUEST</p>
-                  <p className="text-white text-[11px] font-bold">New user connected...</p>
+              <div className="space-y-3">
+                <div className="bg-white/5 p-2 rounded-lg border border-white/10">
+                  <p className="text-[10px] text-white font-bold leading-tight text-center">New User Online</p>
                 </div>
-                <div className="bg-blue-600 text-white p-3 rounded-xl text-xs font-black text-center shadow-lg">JOIN CHAT</div>
-                <div className="grid grid-cols-2 gap-2 mt-4">
-                  <div className="h-8 bg-white/5 rounded-lg border border-white/5"></div>
-                  <div className="h-8 bg-white/5 rounded-lg border border-white/5"></div>
-                </div>
+                <div className="bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black text-center shadow-lg uppercase">Join</div>
               </div>
             </div>
           </div>
         </section>
       </main>
 
-      {/* FOOTER */}
-      <footer className="bg-blue-950 text-white py-20 px-6">
-        <div className="container mx-auto max-w-7xl grid grid-cols-1 md:grid-cols-4 gap-12">
-          <div className="col-span-1 md:col-span-2">
-            <img src={ZingConnectLogo} alt="ZingConnect" className="h-10 mb-6 brightness-0 invert" />
-            <p className="text-blue-200/50 max-w-sm font-medium leading-relaxed">
-              Empowering businesses with seamless, real-time communication. Join thousands of users today.
+      {/* FOOTER - Condensed for mobile */}
+      <footer className="bg-blue-950 text-white py-12 md:py-20 px-6">
+        <div className="container mx-auto max-w-7xl grid grid-cols-2 md:grid-cols-4 gap-8">
+          <div className="col-span-2 md:col-span-2">
+            <img src={ZingConnectLogo} alt="ZingConnect" className="h-6 md:h-10 mb-4 brightness-0 invert" />
+            <p className="text-blue-200/50 max-w-sm font-semibold text-xs md:text-sm">
+              Real-time communication for modern teams.
             </p>
           </div>
           <div>
-            <h4 className="font-black text-xs uppercase tracking-[0.2em] text-blue-400 mb-6">Company</h4>
-            <ul className="space-y-3 text-sm text-blue-200/60 font-bold">
-              <li className="hover:text-white cursor-pointer transition">About Us</li>
-              <li className="hover:text-white cursor-pointer transition">Careers</li>
-              <li className="hover:text-white cursor-pointer transition">Privacy</li>
+            <h4 className="font-black text-[10px] uppercase tracking-widest text-blue-400 mb-4">Links</h4>
+            <ul className="space-y-2 text-[10px] md:text-sm text-blue-200/60 font-bold">
+              <li>Features</li>
+              <li>Pricing</li>
             </ul>
           </div>
           <div>
-            <h4 className="font-black text-xs uppercase tracking-[0.2em] text-blue-400 mb-6">Support</h4>
-            <ul className="space-y-3 text-sm text-blue-200/60 font-bold">
-              <li className="hover:text-white cursor-pointer transition">Help Center</li>
-              <li className="hover:text-white cursor-pointer transition">API</li>
-              <li className="hover:text-white cursor-pointer transition">Contact</li>
+            <h4 className="font-black text-[10px] uppercase tracking-widest text-blue-400 mb-4">Help</h4>
+            <ul className="space-y-2 text-[10px] md:text-sm text-blue-200/60 font-bold">
+              <li>Center</li>
+              <li>Contact</li>
             </ul>
           </div>
         </div>
-        <div className="container mx-auto max-w-7xl mt-20 pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center text-xs font-bold text-blue-200/30">
-          <p>© 2026 ZINGCONNECT. ALL RIGHTS RESERVED.</p>
-          <div className="flex gap-6 mt-4 md:mt-0">
-            <span>TERMS</span>
-            <span>PRIVACY</span>
-          </div>
+        <div className="container mx-auto max-w-7xl mt-12 pt-6 border-t border-white/5 flex flex-col md:flex-row justify-between items-center text-[8px] md:text-xs font-bold text-blue-200/30">
+          <p>© 2026 ZINGCONNECT</p>
+          <p className="mt-2 md:mt-0">PRIVACY • TERMS</p>
         </div>
       </footer>
     </div>

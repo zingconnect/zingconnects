@@ -5,29 +5,59 @@ const router = express.Router();
 
 router.post('/register-agent', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { 
+      firstName, 
+      lastName, 
+      email, 
+      password, 
+      address, 
+      occupation, 
+      program, 
+      bio, 
+      dob, 
+      gender,
+      selectedPlan 
+    } = req.body;
 
-    // Generate Slug: "John Doe" -> "john-doe"
-    let slug = name.toLowerCase().split(' ').join('-');
+    const fullName = `${firstName} ${lastName}`;
+
+    // 1. Generate Base Slug: "John Doe" -> "john-doe"
+    let slug = `${firstName}-${lastName}`.toLowerCase().replace(/\s+/g, '-');
     
-    // Check if slug already exists (add random number if it does)
-    const existingSlug = await Agent.findOne({ slug });
-    if (existingSlug) {
-      slug = `${slug}-${Math.floor(Math.random() * 1000)}`;
+    // 2. Collision Check: Ensure slug is unique
+    const existingAgent = await Agent.findOne({ slug });
+    if (existingAgent) {
+      slug = `${slug}-${Math.floor(1000 + Math.random() * 9000)}`;
     }
 
+    // 3. Create New Agent with all information
     const newAgent = new Agent({
-      name,
+      firstName,
+      lastName,
+      name: fullName, // Optional helper field
       email,
-      password, // Note: In production, hash this with bcrypt!
+      password, // REMINDER: Use bcrypt.hash(password, 10) here!
+      address,
+      occupation,
+      program: program || "N/A",
+      bio,
+      dob,
+      gender,
       slug,
-      role
+      plan: selectedPlan?.tier || 'BASIC',
+      role: 'agent'
     });
 
     await newAgent.save();
-    res.status(201).json({ message: "Agent created!", slug: newAgent.slug });
+
+    res.status(201).json({ 
+      success: true,
+      message: "Agent profile created successfully!", 
+      slug: newAgent.slug 
+    });
 
   } catch (error) {
+    console.error("Registration Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
