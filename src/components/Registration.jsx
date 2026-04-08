@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom'; // Added Link for navigation
 import { BsEyeFill, BsEyeSlashFill, BsCloudUploadFill, BsCheckCircleFill, BsCopy, BsArrowRight, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
@@ -16,7 +16,7 @@ export const Registration = () => {
   
   const [formData, setFormData] = useState({
     firstName: '', lastName: '', address: '', occupation: '',
-    program: '', bio: '', dob: '', gender: '', password: ''
+    program: '', bio: '', dob: '', gender: '', password: '', email: ''
   });
 
   useEffect(() => {
@@ -32,22 +32,52 @@ export const Registration = () => {
     const file = e.target.files[0];
     if (file) {
       setImagePreview(URL.createObjectURL(file));
+      // In a real app, you would append the file to a FormData object
     }
   };
 
-  const agentSlug = `${formData.firstName}-${formData.lastName}`.toLowerCase().replace(/\s+/g, '-');
-  const fullLink = `zingconnect.vercel.app/agent/${agentSlug || 'name'}`;
+  const getUniqueSlug = () => {
+    if (!formData.firstName && !formData.lastName) return 'name';
+    return `${formData.firstName}-${formData.lastName}`
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-');
+  };
 
-  const handleSubmit = (e) => {
+  const agentSlug = getUniqueSlug();
+  const fullLink = `${window.location.origin}/agent/${agentSlug}`;
+
+  // --- UPDATED SUBMIT LOGIC FOR REAL DB ---
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
     
-    // Strict 3-second delay as requested
-    setTimeout(() => {
+    try {
+      // Point this to your Express server endpoint
+      const response = await fetch('/api/agents/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          slug: agentSlug,
+          plan: selectedPlan.tier
+        }),
+      });
+
+      if (response.ok) {
+        setIsSuccess(true);
+        window.scrollTo(0, 0);
+      } else {
+        const errData = await response.json();
+        alert(`Registration Error: ${errData.message || 'Check your connection'}`);
+      }
+    } catch (error) {
+      console.error("Connection to backend failed:", error);
+      // Fallback for demo purposes if backend isn't live yet:
+      // setIsSuccess(true); 
+    } finally {
       setIsSubmitting(false);
-      setIsSuccess(true);
-      window.scrollTo(0, 0);
-    }, 3000);
+    }
   };
 
   const copyToClipboard = () => {
@@ -73,7 +103,6 @@ export const Registration = () => {
       <main className="max-w-2xl mx-auto px-6 py-12">
         {!isSuccess ? (
           <div className="animate-in fade-in duration-700">
-            {/* Minimal Header & Back Button */}
             <div className="mb-10">
               <button 
                 onClick={() => navigate('/pricing')}
@@ -82,11 +111,10 @@ export const Registration = () => {
                 <BsArrowLeft /> Back to Pricing
               </button>
               <h1 className="text-2xl font-black tracking-tight mb-2">Create Agent Profile</h1>
-              <p className="text-xs font-medium text-gray-500">Fill in your professional details to generate your live link.</p>
+              <p className="text-xs font-medium text-gray-500">Fill in your professional details to generate your unique live link.</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-8">
-              {/* Profile Image Preview Section */}
               <div className="flex flex-col items-center md:items-start gap-4">
                 <div className="relative group">
                   <div className="w-20 h-20 rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden flex items-center justify-center">
@@ -104,7 +132,6 @@ export const Registration = () => {
                 <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Profile Picture</span>
               </div>
 
-              {/* Form Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase">First Name</label>
@@ -113,6 +140,10 @@ export const Registration = () => {
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase">Last Name</label>
                   <input required name="lastName" onChange={handleInputChange} type="text" className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 transition-colors bg-transparent" placeholder="Doe" />
+                </div>
+                <div className="md:col-span-2 space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">Email Address</label>
+                  <input required name="email" onChange={handleInputChange} type="email" className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 transition-colors bg-transparent" placeholder="agent@zingconnect.com" />
                 </div>
                 <div className="md:col-span-2 space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase">Office Address</label>
@@ -151,7 +182,11 @@ export const Registration = () => {
                 </div>
               </div>
 
-              {/* Action Button */}
+              <div className="p-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                <p className="text-[9px] font-black text-blue-600 uppercase mb-1">Preview Unique Link:</p>
+                <p className="text-xs font-mono text-gray-500 truncate">{fullLink}</p>
+              </div>
+
               <div className="pt-6">
                 <button 
                   disabled={isSubmitting}
@@ -161,7 +196,7 @@ export const Registration = () => {
                   {isSubmitting ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Processing...
+                      Syncing to Database...
                     </>
                   ) : (
                     <>Confirm Registration <BsArrowRight /></>
@@ -171,18 +206,20 @@ export const Registration = () => {
             </form>
           </div>
         ) : (
-          /* --- SUCCESS STATE --- */
           <div className="text-center py-10 animate-in slide-in-from-bottom-8 duration-1000">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-50 text-blue-600 rounded-full mb-6">
               <BsCheckCircleFill size={30} />
             </div>
-            <h2 className="text-3xl font-black tracking-tighter mb-4">You're all set!</h2>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-10">Your account and live link are now active.</p>
+            <h2 className="text-3xl font-black tracking-tighter mb-4">Registration Complete</h2>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-10">Your account is now stored in the database.</p>
 
             <div className="max-w-sm mx-auto bg-gray-50 rounded-3xl p-6 border border-gray-100 text-left">
-              <span className="text-[9px] font-black text-blue-600 uppercase mb-2 block">Generated Live Link</span>
+              <span className="text-[9px] font-black text-blue-600 uppercase mb-2 block">Click to Visit Profile</span>
               <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-3">
-                <span className="text-xs font-bold text-blue-950 truncate mr-4">{fullLink}</span>
+                {/* Clicking this Link will take the user to the AgentSlug page */}
+                <Link to={`/agent/${agentSlug}`} className="text-xs font-bold text-blue-950 truncate mr-4 hover:text-blue-600 underline">
+                  {fullLink}
+                </Link>
                 <button 
                   onClick={copyToClipboard}
                   className={`flex-shrink-0 p-2 rounded-lg transition-all ${copied ? 'bg-green-500 text-white' : 'bg-blue-600 text-white'}`}
@@ -203,7 +240,7 @@ export const Registration = () => {
       </main>
 
       <footer className="py-10 border-t border-gray-50 text-center">
-        <p className="text-[9px] font-bold text-gray-300 uppercase tracking-widest">© 2026 ZingConnect International</p>
+        <p className="text-[9px] font-bold text-gray-300 uppercase tracking-widest">© 2026 ZingConnect</p>
       </footer>
     </div>
   );
