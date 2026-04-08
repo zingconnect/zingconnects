@@ -1,3 +1,4 @@
+console.log("--- ATTEMPTING TO START SERVER ---");
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
@@ -16,13 +17,17 @@ const __dirname = path.dirname(__filename);
 
 // --- MULTI-DATABASE SETUP ---
 const userDb = mongoose.createConnection(process.env.USER_DB_URI);
-userDb.on('connected', () => console.log("✅ User Database Connected"));
+userDb.on('connected', () => console.log("User Database Connected"));
 
 const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI);
-agentDb.on('connected', () => console.log("✅ Agent Database Connected"));
+agentDb.on('connected', () => console.log("Agent Database Connected"));
 
-userDb.on('error', (err) => console.log("❌ User DB Error:", err));
-agentDb.on('error', (err) => console.log("❌ Agent DB Error:", err));
+userDb.on('error', (err) => console.log(" User DB Error:", err));
+agentDb.on('error', (err) => console.log(" Agent DB Error:", err));
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.log('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 export { userDb, agentDb };
 
