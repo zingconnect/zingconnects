@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BsCheckCircleFill } from 'react-icons/bs';
+// Added BsLightningChargeFill to the import list below
+import { BsCheckCircleFill, BsLightningChargeFill } from 'react-icons/bs'; 
 import ZingConnectLogo from '../../public/logo.png';
 
 const plans = [
@@ -34,7 +35,6 @@ const PricingCard = ({ plan }) => {
   const navigate = useNavigate();
 
   const handleSelectPlan = () => {
-    // This sends the plan object to the /registration route via React Router state
     navigate('/registration', { state: { selectedPlan: plan } });
   };
 
@@ -70,17 +70,15 @@ const PricingCard = ({ plan }) => {
     </div>
   );
 };
+
 export const PricingPage = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white via-blue-50/20 to-white text-blue-950 font-sans overflow-x-hidden">
-      {/* HEADER - Reduced padding on mobile */}
       <header className="py-4 md:py-6 flex justify-center border-b border-gray-100 bg-white/80 backdrop-blur-md sticky top-0 z-50">
         <img src={ZingConnectLogo} alt="ZingConnect Logo" className="h-8 md:h-16 w-auto" />
       </header>
 
       <main className="container mx-auto px-4 md:px-6 pt-10 md:pt-24 max-w-7xl">
-        
-        {/* HERO - Reduced text size on mobile */}
         <div className="text-center max-w-3xl mx-auto mb-10 md:mb-16">
           <h1 className="text-3xl md:text-6xl font-black mb-4 md:mb-6 leading-tight px-2">
             Start Your <span className="text-blue-600">Live Journey</span>
@@ -90,14 +88,12 @@ export const PricingPage = () => {
           </p>
         </div>
 
-        {/* PRICING GRID - Reduced gap on mobile */}
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-10 items-stretch justify-center w-full mb-16 md:mb-32">
           {plans.map((plan) => (
             <PricingCard key={plan.tier} plan={plan} />
           ))}
         </div>
 
-        {/* STATS BAR - Reduced font and spacing on mobile */}
         <section className="grid grid-cols-3 gap-2 border-y border-gray-100 py-8 md:py-16 mb-16 md:mb-32 text-center">
           <div>
             <p className="text-xl md:text-5xl font-black text-blue-600 mb-1">50k+</p>
@@ -113,7 +109,6 @@ export const PricingPage = () => {
           </div>
         </section>
 
-        {/* MOCKUP SECTION - Scaled down for mobile */}
         <section className="pb-16 md:pb-32 px-2">
           <div className="text-center mb-8 md:mb-16">
             <h2 className="text-xl md:text-5xl font-black mb-2 text-blue-950 uppercase tracking-tight">Powerful Widget</h2>
@@ -121,10 +116,8 @@ export const PricingPage = () => {
           </div>
 
           <div className="flex flex-col lg:flex-row items-center justify-center gap-6 md:gap-12 bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-6 md:p-16 overflow-hidden relative shadow-xl">
-            {/* Decoration */}
             <div className="absolute top-0 right-0 w-32 h-32 md:w-64 md:h-64 bg-white/10 rounded-full -mr-16 -mt-16"></div>
             
-            {/* USER PHONE - Compact height for mobile */}
             <div className="w-full max-w-[240px] md:max-w-[290px] bg-white rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-blue-950 relative z-10">
               <div className="bg-blue-600 h-8 rounded-t-[1rem] -mx-3 -mt-3 mb-3 flex items-center px-3 justify-between">
                 <img src={ZingConnectLogo} className="h-3 brightness-0 invert" alt="logo" />
@@ -140,7 +133,6 @@ export const PricingPage = () => {
               <BsLightningChargeFill className="text-white text-5xl animate-pulse" />
             </div>
 
-            {/* AGENT PHONE - Compact height for mobile */}
             <div className="w-full max-w-[240px] md:max-w-[290px] bg-blue-950 rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-white relative z-10">
               <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-2">
                 <div className="w-5 h-5 bg-blue-600 rounded-full"></div>
@@ -157,7 +149,6 @@ export const PricingPage = () => {
         </section>
       </main>
 
-      {/* FOOTER - Condensed for mobile */}
       <footer className="bg-blue-950 text-white py-12 md:py-20 px-6">
         <div className="container mx-auto max-w-7xl grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="col-span-2 md:col-span-2">
