@@ -32,7 +32,7 @@ export const Registration = () => {
   // 2. Redirect back to pricing if the user tries to access this page without picking a plan
   useEffect(() => {
     if (!selectedPlan) {
-      navigate('/pricing'); 
+      navigate('/PricingPage'); 
     }
   }, [selectedPlan, navigate]);
 

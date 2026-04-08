@@ -35,7 +35,7 @@ const PricingCard = ({ plan }) => {
   const navigate = useNavigate();
 
   const handleSelectPlan = () => {
-    navigate('/registration', { state: { selectedPlan: plan } });
+    navigate('/Registration', { state: { selectedPlan: plan } });
   };
 
   return (
