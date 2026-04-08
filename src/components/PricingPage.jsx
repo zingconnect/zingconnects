@@ -2,7 +2,7 @@ import React from 'react';
 import { BsCheckCircleFill } from 'react-icons/bs';
 
 // Note: Replace this with your actual logo asset location
-import ZingConnectLogo from '../assets/ZingConnect_logo.svg'; 
+import ZingConnectLogo from '../../public/logo.png';
 
 const plans = [
   {
