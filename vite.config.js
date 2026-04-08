@@ -8,7 +8,5 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  // If your app is not at the root of your domain, 
-  // you would set base: '/your-path/' here.
-  // For Vercel root, keeping it default is fine.
+  
 })
