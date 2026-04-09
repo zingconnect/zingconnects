@@ -41,24 +41,26 @@ export const AgentProfile = () => {
 
   useEffect(() => {
     const fetchProfile = async () => {
-      const token = localStorage.getItem('zingToken');
-      if (!token) return navigate('/');
+  const token = localStorage.getItem('zingToken');
+  if (!token) return navigate('/');
 
-      try {
-        const response = await fetch('/api/agents/profile/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (!response.ok) throw new Error("Failed to load profile");
-        
-        const data = await response.json();
-        setAgentData(data);
-      } catch (err) {
-        console.error("Profile Fetch Error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
+  try {
+    const response = await fetch('/api/agents/profile/me', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error("Failed to load profile");
+    const result = await response.json();
+    if (result.success) {
+      setAgentData(result); 
+    } else {
+      console.error("Backend error:", result.message);
+    }
+  } catch (err) {
+    console.error("Profile Fetch Error:", err);
+  } finally {
+    setLoading(false);
+  }
+};
     fetchProfile();
   }, [navigate]);
 
