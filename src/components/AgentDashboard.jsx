@@ -114,10 +114,10 @@ export const AgentDashboard = () => {
     }
 
     window.FlutterwaveCheckout({
-      public_key: "cbd58eff-cadd-469b-9628-6ae58ca08378",
+      public_key: "FLWPUBK_TEST-480bbaa21db77a566071155d05ff5dc4-X",
       tx_ref: `ZING-${Date.now()}`,
       amount: activePlan.price,
-      currency: "NGN",
+      currency: "USD",
       payment_options: "card, mobilemoney, ussd, account, transfer",
       customer: {
         email: agentData?.email || "user@example.com",
