@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
 
-// Export the schema separately so the connection object can use it
 export const agentSchema = new mongoose.Schema({
   firstName: { type: String, required: true },
   lastName: { type: String, required: true },
@@ -24,7 +23,7 @@ export const agentSchema = new mongoose.Schema({
   },
   isSubscribed: { 
     type: Boolean, 
-    default: false // Accounts are "Unpaid" by default
+    default: false 
   },
   status: { 
     type: String, 
@@ -32,11 +31,12 @@ export const agentSchema = new mongoose.Schema({
     default: 'active' 
   },
   
-  // Optional: Track when the subscription started or ends
   subscriptionId: { type: String, default: '' }, 
   currentPeriodEnd: { type: Date }
-
 }, { timestamps: true });
 
-// Check if the model exists before creating it (prevents Vercel re-compilation errors)
-export const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+// 1. Define the model constant
+const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+
+// 2. Export as default (This fixes the index.js boot error)
+export default Agent;
