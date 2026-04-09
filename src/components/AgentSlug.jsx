@@ -129,11 +129,25 @@ export const AgentSlug = () => {
             </div>
             
             <div className="space-y-3 max-w-sm">
-              <h3 className="text-[11px] font-black text-blue-600 uppercase tracking-[0.25em]">{agentData.occupation || "Certified Professional"}</h3>
-              <p className="text-base md:text-lg font-medium text-slate-500 leading-relaxed italic">
-                "{agentData.bio || "Available for secure professional consultation and strategic inquiry."}"
-              </p>
-            </div>
+  {/* Display Occupation */}
+  <h3 className="text-[11px] font-black text-blue-600 uppercase tracking-[0.25em]">
+    {agentData.occupation || "Certified Professional"}
+  </h3>
+  
+  {/* Display Program Name explicitly if it exists */}
+  {agentData.program && (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Program:</span>
+      <span className="text-[10px] font-black text-slate-600 uppercase tracking-tighter bg-slate-100 px-2 py-0.5 rounded">
+        {agentData.program}
+      </span>
+    </div>
+  )}
+
+  <p className="text-base md:text-lg font-medium text-slate-500 leading-relaxed italic pt-2">
+    "{agentData.bio || "Available for secure professional consultation and strategic inquiry."}"
+  </p>
+</div>
           </div>
 
           <div className="pt-6 border-t border-gray-100 flex items-center gap-6">

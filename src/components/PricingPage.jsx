@@ -1,6 +1,5 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-// Added BsLightningChargeFill to the import list below
 import { BsCheckCircleFill, BsLightningChargeFill } from 'react-icons/bs'; 
 import ZingConnectLogo from '../../public/logo.png';
 
