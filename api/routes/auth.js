@@ -1,65 +1,64 @@
 import express from 'express';
-import { Agent } from '../models/Agent.js';
+import mongoose from 'mongoose';
+import { agentSchema } from '../models/Agent.js';
 
 const router = express.Router();
 
-router.post('/register-agent', async (req, res) => {
-  try {
-    const { 
-      firstName, 
-      lastName, 
-      email, 
-      password, 
-      address, 
-      occupation, 
-      program, 
-      bio, 
-      dob, 
-      gender,
-      selectedPlan 
-    } = req.body;
+const agentDb = mongoose.connection.useDb('zingconnect');
+const Agent = agentDb.models.Agent || agentDb.model('Agent', agentSchema);
 
-    const fullName = `${firstName} ${lastName}`;
+router.post('/register', async (req, res) => {
+try {
+const {
+firstName,
+lastName,
+email,
+password,
+address,
+occupation,
+program,
+bio,
+dob,
+gender,
+plan
+} = req.body;
 
-    // 1. Generate Base Slug: "John Doe" -> "john-doe"
-    let slug = `${firstName}-${lastName}`.toLowerCase().replace(/\s+/g, '-');
-    
-    // 2. Collision Check: Ensure slug is unique
-    const existingAgent = await Agent.findOne({ slug });
-    if (existingAgent) {
-      slug = `${slug}-${Math.floor(1000 + Math.random() * 9000)}`;
-    }
+let slug = `${firstName}-${lastName}`.toLowerCase().trim().replace(/\s+/g, '-');
 
-    // 3. Create New Agent with all information
-    const newAgent = new Agent({
-      firstName,
-      lastName,
-      name: fullName, // Optional helper field
-      email,
-      password, // REMINDER: Use bcrypt.hash(password, 10) here!
-      address,
-      occupation,
-      program: program || "N/A",
-      bio,
-      dob,
-      gender,
-      slug,
-      plan: selectedPlan?.tier || 'BASIC',
-      role: 'agent'
-    });
+const existingAgent = await Agent.findOne({ slug });
+if (existingAgent) {
+  slug = `${slug}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
 
-    await newAgent.save();
+const newAgent = new Agent({
+  firstName,
+  lastName,
+  email,
+  password,
+  address,
+  occupation,
+  program: program || "N/A",
+  bio: bio || "",
+  dob,
+  gender,
+  slug,
+  plan: plan || 'BASIC',
+  role: 'agent'
+});
 
-    res.status(201).json({ 
-      success: true,
-      message: "Agent profile created successfully!", 
-      slug: newAgent.slug 
-    });
+await newAgent.save();
 
-  } catch (error) {
-    console.error("Registration Error:", error);
-    res.status(500).json({ error: error.message });
-  }
+res.status(201).json({ 
+  success: true,
+  message: "Agent profile created successfully!", 
+  slug: newAgent.slug 
+});
+} catch (error) {
+res.status(500).json({
+success: false,
+message: error.code === 11000 ? "Email already exists" : error.message
+});
+}
 });
 
 export default router;
