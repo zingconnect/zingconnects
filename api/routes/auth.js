@@ -7,11 +7,7 @@ import mongoose from 'mongoose';
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Helper to get the model on the CORRECT connection
 const getAgentModel = () => {
-  // If you are using multiple connections (like in index.js), 
-  // ensure this points to the agentDb connection.
-  // Fallback to default if not using separate connection instances.
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 };
 
