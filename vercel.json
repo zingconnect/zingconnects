@@ -13,16 +13,8 @@
   ],
   "rewrites": [
     {
-      "source": "/api/:match*",
+      "source": "/api/:path*",
       "destination": "api/index.js"
-    },
-    {
-      "source": "/agent/:match*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/Registration",
-      "destination": "/index.html"
     },
     {
       "source": "/((?!api/).*)",

@@ -4,12 +4,23 @@ import { agentSchema } from '../models/Agent.js';
 
 const router = express.Router();
 
-// Ensure we are using the correct database instance
-const agentDb = mongoose.connection.useDb('zingconnect'); 
-const Agent = agentDb.models.Agent || agentDb.model('Agent', agentSchema);
+// --- FIXED MODEL INITIALIZATION ---
+// This safely checks if the model exists on the connection or creates it
+const getAgentModel = () => {
+  // Use the connection established in index.js
+  const db = mongoose.connection.useDb('zingconnect');
+  return db.models.Agent || db.model('Agent', agentSchema);
+};
 
 router.post('/register', async (req, res) => {
   try {
+    // Check if we are connected to MongoDB
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ success: false, message: "Database connecting... please try again." });
+    }
+
+    const Agent = getAgentModel();
+
     const {
       firstName,
       lastName,
@@ -22,11 +33,10 @@ router.post('/register', async (req, res) => {
       dob,
       gender,
       plan,
-      photoUrl // This is the static path passed from your upload middleware
+      photoUrl
     } = req.body;
 
     // --- 1. SLUG GENERATION ---
-    // Improved regex to ensure no special characters break the root URL
     const baseSlug = `${firstName}${lastName}`
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '')
@@ -49,7 +59,7 @@ router.post('/register', async (req, res) => {
       firstName,
       lastName,
       email,
-      password, // Note: Ensure you are hashing this if not using a pre-save hook
+      password, 
       address,
       occupation,
       program: program || "N/A",
@@ -60,9 +70,8 @@ router.post('/register', async (req, res) => {
       plan: plan || 'BASIC',
       role: 'agent',
       photoUrl: photoUrl || "",
-      
-      status: 'active',      // Account is created and can log in
-      isSubscribed: false    // Must remain false until dashboard payment is made
+      status: 'active',
+      isSubscribed: false // Explicitly false as per your requirement
     });
 
     await newAgent.save();
