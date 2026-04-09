@@ -34,11 +34,23 @@ const s3Client = new S3Client({
 // Multer in-memory storage for Vercel compatibility
 const upload = multer({ storage: multer.memoryStorage() });
 
-const connectionOptions = {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000, // 5 seconds timeout
-};
+let cachedDb = null;
+
+async function connectToDatabase() {
+  if (cachedDb) return cachedDb;
+
+  // Set options to connect quickly
+  const opts = {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000,
+  };
+
+  // Connect to the specific Agent Database
+  const conn = await mongoose.connect(process.env.AGENT_DB_URI, opts);
+  cachedDb = conn;
+  return conn;
+}
 
 const userDb = mongoose.createConnection(process.env.USER_DB_URI, connectionOptions);
 const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI, connectionOptions);
@@ -47,7 +59,7 @@ const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI, connectionOp
 userDb.on('error', err => console.error("User DB Error:", err));
 agentDb.on('error', err => console.error("Agent DB Error:", err));
 
-const Agent = agentDb.model('Agent', agentSchema);
+const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
 const getAgentModel = () => Agent; // Simplified getter
 
@@ -65,29 +77,31 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+// --- 3. UPDATED REGISTRATION ROUTE ---
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   try {
-    const Agent = getAgentModel();
-    if (agentDb.readyState !== 1) {
-  console.log("Database not ready, current state:", agentDb.readyState);
-  return res.status(503).json({ success: false, message: "Database is initializing. Please try again in a second." });
-}
+    // AWAIT DATABASE CONNECTION
+    await connectToDatabase();
+
     if (!process.env.JWT_SECRET) {
-      console.error("CRITICAL ERROR: JWT_SECRET is missing");
       return res.status(500).json({ success: false, message: "Server configuration error" });
     }
 
-    const { firstName, lastName, email } = req.body;
+    const { firstName, lastName, email, password } = req.body;
 
-    // --- 1. GENERATE UNIQUE SLUG (Hidden "agent" path) ---
+    if (!firstName || !email || !password) {
+      return res.status(400).json({ success: false, message: "Required fields missing" });
+    }
+
+    // --- SLUG GENERATION ---
     const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const cleanLast = lastName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
     
     let finalSlug = baseSlug;
     let counter = 1;
-
     let slugExists = await Agent.findOne({ slug: finalSlug });
+
     while (slugExists) {
       counter++;
       const suffix = counter < 10 ? `-0${counter}` : `-${counter}`;
@@ -95,55 +109,54 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
+    // --- PHOTO UPLOAD ---
     let savedPhotoPath = "";
     if (req.file) {
       try {
         const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
         const fileKey = `profiles/${fileName}`;
         
-        const uploadParams = {
+        await s3Client.send(new PutObjectCommand({
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
           Key: fileKey,
           Body: req.file.buffer,
           ContentType: req.file.mimetype,
-        };
-
-        await s3Client.send(new PutObjectCommand(uploadParams));
+        }));
         
-        // Ensure endpoint exists before replacing
         const endpoint = (process.env.IDRIVE_ENDPOINT || "s3.amazonaws.com").replace('https://', '');
         savedPhotoPath = `https://${endpoint}/${process.env.IDRIVE_BUCKET_NAME}/${fileKey}`;
-
       } catch (uploadErr) {
         console.error("S3 Upload Failed:", uploadErr.message);
-        // Don't crash the whole registration if just the photo fails
         savedPhotoPath = ""; 
       }
     }
 
+    // --- PASSWORD HASHING ---
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(req.body.password, salt);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
+    // --- CREATE DOCUMENT ---
     const newAgent = new Agent({
-  firstName: firstName.trim(),
-  lastName: lastName.trim(),
-  email: req.body.email.toLowerCase().trim(),
-  password: hashedPassword, // Store the hash, not the plaintext
-  dob: req.body.dob,
-  gender: req.body.gender,
-  occupation: req.body.occupation,
-  address: req.body.address,
-  bio: req.body.bio || "",
-  program: req.body.program || "N/A",  
-  slug: finalSlug,
-  photoUrl: savedPhotoPath,
-  role: 'agent',    
-  status: 'active',           
-  isSubscribed: false,        
-  plan: req.body.plan || "BASIC" 
-});
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      dob: req.body.dob,
+      gender: req.body.gender,
+      occupation: req.body.occupation,
+      address: req.body.address,
+      bio: req.body.bio || "",
+      program: req.body.program || "N/A",  
+      slug: finalSlug,
+      photoUrl: savedPhotoPath,
+      role: 'agent',    
+      status: 'active',           
+      isSubscribed: false,        
+      plan: req.body.plan || "BASIC" 
+    });
 
     await newAgent.save();    
+    
     const token = jwt.sign(
       { id: newAgent._id, slug: newAgent.slug }, 
       process.env.JWT_SECRET, 
@@ -154,19 +167,15 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       success: true, 
       token, 
       slug: finalSlug, 
-      message: "Registration successful. Please complete payment." 
+      message: "Registration successful." 
     });
 
   } catch (err) {
-    console.error("Registration Error Detail:", err);
-    let errorMessage = err.message;
-    
-    if (err.code === 11000) {
-      const duplicateField = Object.keys(err.keyValue)[0];
-      errorMessage = `${duplicateField.charAt(0).toUpperCase() + duplicateField.slice(1)} already exists.`;
-    }
-    
-    res.status(400).json({ success: false, message: errorMessage });
+    console.error("Registration Error:", err);
+    res.status(err.code === 11000 ? 400 : 500).json({ 
+      success: false, 
+      message: err.code === 11000 ? "Email already exists" : err.message 
+    });
   }
 });
 

@@ -1,45 +1,34 @@
 import express from 'express';
-import multer from 'multer'; // 1. Import Multer
+import multer from 'multer';
+import bcrypt from 'bcryptjs'; // Add this
 import { agentSchema } from '../models/Agent.js';
 import mongoose from 'mongoose';
 
 const router = express.Router();
-
-// 2. Setup Multer for this router (Memory storage is best for Vercel)
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Helper to get the model on the CORRECT connection
 const getAgentModel = () => {
-  // Use the connection state or a fallback
-  // This ensures we aren't creating a new connection on every click
+  // If you are using multiple connections (like in index.js), 
+  // ensure this points to the agentDb connection.
+  // Fallback to default if not using separate connection instances.
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 };
 
-// 3. Add 'upload.none()' or 'upload.single('photo')' to parse the FormData
 router.post('/register', upload.single('photo'), async (req, res) => {
   try {
     const Agent = getAgentModel();
 
-    // Now req.body will actually contain your firstName, lastName, etc.
     const {
-      firstName,
-      lastName,
-      email,
-      password,
-      address,
-      occupation,
-      program,
-      bio,
-      dob,
-      gender,
-      plan
+      firstName, lastName, email, password, address,
+      occupation, program, bio, dob, gender, plan
     } = req.body;
 
-    // Validation check
-    if (!firstName || !email) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
-    }
+    // 1. SECURITY: Hash the password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-    // --- 1. SLUG GENERATION ---
+    // 2. SLUG GENERATION
     const baseSlug = `${firstName}${lastName}`
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '')
@@ -56,12 +45,16 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // --- 2. CREATE AGENT ---
+    // 3. PHOTO HANDLING (Optional: Move S3 logic here if needed)
+    let savedPhotoPath = ""; 
+    // If you need S3 here, copy the s3Client.send logic from index.js
+
+    // 4. CREATE AGENT
     const newAgent = new Agent({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.toLowerCase().trim(),
-      password, 
+      password: hashedPassword, // Use the hashed version!
       address,
       occupation,
       program: program || "N/A",
@@ -69,15 +62,13 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       dob,
       gender,
       slug: finalSlug,
+      photoUrl: savedPhotoPath, 
       plan: plan || 'BASIC',
       role: 'agent',
       status: 'active',
       isSubscribed: false 
     });
 
-    // NOTE: If you are handling the S3 upload in index.js, 
-    // you need to make sure the photoUrl is passed correctly here.
-    
     await newAgent.save();
 
     res.status(201).json({ 
@@ -88,9 +79,9 @@ router.post('/register', upload.single('photo'), async (req, res) => {
     
   } catch (error) {
     console.error("Registration Error:", error);
-    res.status(500).json({
+    res.status(error.code === 11000 ? 400 : 500).json({
       success: false,
-      message: error.code === 11000 ? "Email or User Link already exists" : error.message
+      message: error.code === 11000 ? "Email already exists" : "Internal Server Error"
     });
   }
 });
