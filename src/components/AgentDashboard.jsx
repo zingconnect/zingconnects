@@ -59,7 +59,6 @@ export const AgentDashboard = () => {
   },
 ];
 
-
   // --- AUTH CHECK & INITIAL FETCH ---
   useEffect(() => {
     const fetchAgentAndUsers = async () => {
@@ -129,61 +128,89 @@ export const AgentDashboard = () => {
   return (
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
       
-      {/* --- 1. SUBSCRIPTION PAYWALL OVERLAY --- */}
+     {/* --- 1. SUBSCRIPTION PAYWALL OVERLAY --- */}
       {!isSubscribed && (
-        <div className="absolute inset-0 z-[10000] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row animate-in fade-in zoom-in duration-300">
+        <div className="absolute inset-0 z-[10000] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col md:row animate-in fade-in zoom-in duration-300 max-h-[95vh] overflow-y-auto">
             
-            {/* Left Column: Context */}
-            <div className="bg-blue-600 p-8 text-white md:w-1/3 flex flex-col justify-between">
+            {/* Top/Left Column: Status */}
+            <div className="bg-blue-600 p-6 md:p-8 text-white md:w-1/3 flex flex-col justify-between">
               <div>
-                <BsShieldLockFill size={40} className="mb-6 opacity-80" />
-                <h2 className="text-2xl font-black uppercase tracking-tight leading-none mb-2">Account Inactive</h2>
-                <p className="text-blue-100 text-sm">Please complete your subscription to access your agent dashboard and connected leads.</p>
+                <BsShieldLockFill size={32} className="mb-4 opacity-80" />
+                <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-tight mb-2">Account Inactive</h2>
+                <p className="text-blue-100 text-[11px] md:text-sm leading-relaxed">
+                  Please complete your subscription to access your agent dashboard and connected leads.
+                </p>
               </div>
-              <div className="mt-8 pt-8 border-t border-blue-500">
-                <p className="text-xs uppercase font-bold tracking-widest opacity-60 leading-none mb-1">Current Selection</p>
-                <p className="text-3xl font-black">{selectedPlan}</p>
+              <div className="mt-6 pt-6 border-t border-blue-500 hidden md:block">
+                <p className="text-[9px] uppercase font-bold tracking-widest opacity-60 mb-1">Current Selection</p>
+                <p className="text-2xl font-black">{selectedPlan}</p>
               </div>
             </div>
 
-            {/* Right Column: Plan Selection */}
-            <div className="p-8 md:w-2/3 bg-gray-50 flex flex-col">
-              <h3 className="text-lg font-bold text-gray-800 mb-6">Choose or Change Your Plan</h3>
+            {/* Bottom/Right Column: Plan Selection */}
+            <div className="p-5 md:p-8 md:w-2/3 bg-gray-50 flex flex-col">
+              <h3 className="text-sm md:text-lg font-bold text-gray-800 mb-4">Choose or Change Your Plan</h3>
               
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+              {/* Responsive Plan Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
                 {plans.map((plan) => (
                   <div 
-                    key={plan.id}
-                    onClick={() => handlePlanChange(plan.id)}
-                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all duration-200 ${
-                      selectedPlan === plan.id 
-                        ? 'border-blue-600 bg-blue-50 shadow-md scale-105' 
+                    key={plan.tier}
+                    onClick={() => handlePlanChange(plan.tier)}
+                    className={`cursor-pointer p-3 md:p-4 rounded-xl border-2 transition-all duration-200 relative ${
+                      selectedPlan === plan.tier 
+                        ? 'border-blue-600 bg-blue-50 shadow-md scale-[1.02]' 
                         : 'border-gray-200 bg-white hover:border-blue-300'
                     }`}
                   >
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">{plan.id}</span>
-                      {selectedPlan === plan.id && <BsCheckCircleFill className="text-blue-600" />}
+                    <div className="flex justify-between items-start mb-1">
+                      <span className={`text-[8px] md:text-[9px] font-black uppercase tracking-widest ${selectedPlan === plan.tier ? 'text-blue-600' : 'text-gray-400'}`}>
+                        {plan.tier}
+                      </span>
+                      {selectedPlan === plan.tier && <BsCheckCircleFill className="text-blue-600" size={14} />}
                     </div>
-                    <div className="text-xl font-black text-gray-800">${plan.price}<span className="text-xs font-normal text-gray-400">/mo</span></div>
+                    
+                    <div className="text-lg md:text-xl font-black text-gray-800">
+                      ${plan.price}
+                      <span className="text-[10px] font-normal text-gray-400 ml-0.5">{plan.frequency}</span>
+                    </div>
+                    
+                    <p className="text-[9px] md:text-[10px] font-bold text-gray-500 uppercase mt-1 tracking-tighter">
+                      {plan.term}
+                    </p>
+
+                    {plan.popular && (
+                      <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[7px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
+                        Best Value
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex-1">
-                <div className="flex items-center gap-3 mb-4 text-gray-700">
-                  <BsCreditCard2BackFill size={20} />
-                  <span className="font-bold">Secure Checkout</span>
+              {/* Checkout Details */}
+              <div className="bg-white p-4 md:p-6 rounded-xl border border-gray-200 shadow-sm flex-1">
+                <div className="flex items-center gap-2 mb-3 text-gray-700">
+                  <BsCreditCard2BackFill size={16} />
+                  <span className="text-xs md:text-sm font-bold">Secure Checkout</span>
                 </div>
-                <p className="text-sm text-gray-500 mb-6">You will be charged <strong>${plans.find(p => p.id === selectedPlan)?.price}</strong> per month. You can cancel this at any time from your profile settings.</p>
+                
+                <p className="text-[11px] md:text-sm text-gray-500 mb-5 leading-relaxed">
+                  You are selecting the <strong>{selectedPlan}</strong> plan for <strong>${plans.find(p => p.tier === selectedPlan)?.price}</strong>. 
+                  Access includes {plans.find(p => p.tier === selectedPlan)?.features.join(', ')}.
+                </p>
                 
                 <button 
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-200 uppercase tracking-widest text-sm"
-                  onClick={() => alert(`Initiating payment for ${selectedPlan} plan...`)}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 md:py-4 rounded-xl transition-all shadow-lg active:scale-[0.98] uppercase tracking-widest text-[10px] md:text-xs"
+                  onClick={() => alert(`Redirecting to payment for ${selectedPlan}...`)}
                 >
-                  Activate {selectedPlan} Plan
+                  Activate {selectedPlan} Access
                 </button>
+                
+                <p className="text-[9px] text-center text-gray-400 mt-3 uppercase tracking-tighter font-medium">
+                  Encrypted Payment Gateway • Cancel Anytime
+                </p>
               </div>
             </div>
           </div>
