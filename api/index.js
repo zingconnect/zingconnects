@@ -72,39 +72,59 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// --- ROUTES ---
-
-// 1. Agent Registration
+// --- UPDATED REGISTRATION ROUTE WITH BETTER DEBUGGING ---
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
-  try {
-    await connectToDatabase();
+  console.log("Registration attempt started...");
 
-    if (!process.env.JWT_SECRET) {
-      return res.status(500).json({ success: false, message: "Server config error" });
+  try {
+    // 1. DATABASE CHECK
+    try {
+      await connectToDatabase();
+    } catch (dbErr) {
+      console.error("DB Connection Failed:", dbErr);
+      return res.status(503).json({ success: false, message: "Database connection failed." });
     }
 
+    // 2. CONFIG CHECK
+    if (!process.env.JWT_SECRET || !process.env.AGENT_DB_URI) {
+      console.error("Missing Env Vars:", { 
+        jwt: !!process.env.JWT_SECRET, 
+        db: !!process.env.AGENT_DB_URI 
+      });
+      return res.status(500).json({ success: false, message: "Server configuration missing." });
+    }
+
+    // 3. DATA CHECK
     const { firstName, lastName, email, password } = req.body;
     if (!firstName || !email || !password) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+      return res.status(400).json({ 
+        success: false, 
+        message: `Missing fields: ${!firstName ? 'firstName ' : ''}${!email ? 'email ' : ''}${!password ? 'password' : ''}` 
+      });
     }
 
-    // SLUG GENERATION
-    const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
-    const cleanLast = lastName.trim().replace(/[^a-zA-Z0-9]/g, '');
-    const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
-    
-    let finalSlug = baseSlug;
-    let counter = 1;
-    let slugExists = await Agent.findOne({ slug: finalSlug });
+    // 4. SLUG GENERATION
+    let finalSlug = "";
+    try {
+      const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
+      const cleanLast = (lastName || "").trim().replace(/[^a-zA-Z0-9]/g, '');
+      const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase() || "user";
+      
+      finalSlug = baseSlug;
+      let counter = 1;
+      let slugExists = await Agent.findOne({ slug: finalSlug });
 
-    while (slugExists) {
-      counter++;
-      const suffix = counter < 10 ? `-0${counter}` : `-${counter}`;
-      finalSlug = `${baseSlug}${suffix}`;
-      slugExists = await Agent.findOne({ slug: finalSlug });
+      while (slugExists) {
+        counter++;
+        finalSlug = `${baseSlug}-${counter}`;
+        slugExists = await Agent.findOne({ slug: finalSlug });
+      }
+    } catch (slugErr) {
+      console.error("Slug generation failed:", slugErr);
+      return res.status(500).json({ success: false, message: "Error generating user profile link." });
     }
 
-    // PHOTO UPLOAD
+    // 5. PHOTO UPLOAD (Optional block)
     let savedPhotoPath = "";
     if (req.file) {
       try {
@@ -112,26 +132,26 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
         const fileKey = `profiles/${fileName}`;
         
         await s3Client.send(new PutObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Bucket: process.env.IDRIVE_BUCKET_NAME,
           Key: fileKey,
           Body: req.file.buffer,
           ContentType: req.file.mimetype,
         }));
         
-        const endpoint = (process.env.IDRIVE_ENDPOINT || "s3.amazonaws.com").replace('https://', '');
+        const endpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
         savedPhotoPath = `https://${endpoint}/${process.env.IDRIVE_BUCKET_NAME}/${fileKey}`;
       } catch (uploadErr) {
-        console.error("S3 Upload Failed:", uploadErr.message);
+        console.error("S3 Upload Error (Non-Fatal):", uploadErr.message);
       }
     }
 
-    // PASSWORD HASHING
+    // 6. PASSWORD & SAVE
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const newAgent = new Agent({
       firstName: firstName.trim(),
-      lastName: lastName.trim(),
+      lastName: (lastName || "").trim(),
       email: email.toLowerCase().trim(),
       password: hashedPassword,
       dob: req.body.dob,
@@ -156,13 +176,19 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       { expiresIn: '24h' }
     );
     
-    res.status(201).json({ success: true, token, slug: finalSlug, message: "Registration successful." });
+    console.log("Registration successful for:", email);
+    return res.status(201).json({ 
+      success: true, 
+      token, 
+      slug: finalSlug, 
+      message: "Registration successful." 
+    });
 
   } catch (err) {
-    console.error("Registration Error:", err);
-    res.status(err.code === 11000 ? 400 : 500).json({ 
+    console.error("FINAL CATCH - Registration Error:", err);
+    return res.status(500).json({ 
       success: false, 
-      message: err.code === 11000 ? "Email already exists" : "Internal Server Error" 
+      message: err.code === 11000 ? "Email already registered." : "A server error occurred during registration." 
     });
   }
 });

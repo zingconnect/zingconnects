@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom'; // Added Link for navigation
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { BsEyeFill, BsEyeSlashFill, BsCloudUploadFill, BsCheckCircleFill, BsCopy, BsArrowRight, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
@@ -14,6 +14,9 @@ export const Registration = () => {
   const [copied, setCopied] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  
+  // We will store the actual slug returned by the server here
+  const [serverSlug, setServerSlug] = useState('');
   
   const [formData, setFormData] = useState({
     firstName: '', lastName: '', address: '', occupation: '',
@@ -37,20 +40,9 @@ export const Registration = () => {
     }
   };
 
- const getUniqueSlug = () => {
-  if (!formData.firstName && !formData.lastName) return 'name';
-  
-  // Combine first and last name without a space first
-  const combinedName = `${formData.firstName}${formData.lastName}`;
-  
-  return combinedName
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ''); // Removes any accidental internal spaces
-};
+  // The final link used in the Success screen
+  const fullLink = `${window.location.origin}/${serverSlug}`;
 
-  const agentSlug = getUniqueSlug();
-const fullLink = `${window.location.origin}/${agentSlug}`;
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -58,11 +50,12 @@ const fullLink = `${window.location.origin}/${agentSlug}`;
     try {
       const data = new FormData();
       
+      // Append all text fields
       Object.keys(formData).forEach(key => {
         data.append(key, formData[key]);
       });
       
-      data.append('slug', agentSlug);
+      // Append required metadata
       data.append('plan', selectedPlan.tier);
       
       if (selectedFile) {
@@ -74,30 +67,24 @@ const fullLink = `${window.location.origin}/${agentSlug}`;
         body: data, 
       });
 
-      const contentType = response.headers.get("content-type");
-      
-      if (contentType && contentType.includes("application/json")) {
-        const result = await response.json();
+      const result = await response.json();
 
-        if (response.ok) {
-          if (result.token) {
-            localStorage.setItem('zingToken', result.token);
-            localStorage.setItem('agentSlug', result.slug);
-          }
-          
-          setIsSuccess(true);
-          window.scrollTo(0, 0);
-        } else {
-          alert(`Registration Error: ${result.message || 'Validation failed'}`);
+      if (response.ok) {
+        // CRITICAL: Save the data returned by your NEW backend logic
+        if (result.token) {
+          localStorage.setItem('zingToken', result.token);
+          localStorage.setItem('agentSlug', result.slug);
+          setServerSlug(result.slug); // Save this for the Success UI
         }
+        
+        setIsSuccess(true);
+        window.scrollTo(0, 0);
       } else {
-        const textError = await response.text();
-        console.error("Server returned non-JSON response:", textError);
-        alert("The server encountered an internal error. Please check backend logs.");
+        alert(`Registration Error: ${result.message || 'Validation failed'}`);
       }
 
     } catch (error) {
-      console.error("Connection to backend failed:", error);
+      console.error("Connection failed:", error);
       alert("Could not connect to the server. Please check your internet connection.");
     } finally {
       setIsSubmitting(false);
@@ -206,11 +193,6 @@ const fullLink = `${window.location.origin}/${agentSlug}`;
                 </div>
               </div>
 
-              <div className="p-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                <p className="text-[9px] font-black text-blue-600 uppercase mb-1">Preview Unique Link:</p>
-                <p className="text-xs font-mono text-gray-500 truncate">{fullLink}</p>
-              </div>
-
               <div className="pt-6">
                 <button 
                   disabled={isSubmitting}
@@ -240,7 +222,7 @@ const fullLink = `${window.location.origin}/${agentSlug}`;
             <div className="max-w-sm mx-auto bg-gray-50 rounded-3xl p-6 border border-gray-100 text-left">
               <span className="text-[9px] font-black text-blue-600 uppercase mb-2 block">Click to Visit Profile</span>
               <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-3">
-               <Link to={`/${agentSlug}`} className="text-xs font-bold text-blue-950 truncate mr-4 hover:text-blue-600 underline">
+               <Link to={`/${serverSlug}`} className="text-xs font-bold text-blue-950 truncate mr-4 hover:text-blue-600 underline">
                 {fullLink}
                 </Link>
                 <button 
