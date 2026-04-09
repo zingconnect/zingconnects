@@ -348,46 +348,61 @@ app.get('/api/users/my-session', async (req, res) => {
 
 app.get('/api/agents/:slug', async (req, res) => {
   try {
-    console.log("Fetching profile for slug:", req.params.slug);
-    await connectToDatabase();
+    console.log("--- Profile Request Start ---");
+    console.log("Slug requested:", req.params.slug);
     
+    await connectToDatabase();
+
+    // 1. Check if the Agent model is available
+    if (!Agent) {
+      throw new Error("Agent model is not initialized");
+    }
+
     const agent = await Agent.findOne({ slug: req.params.slug }).select('-password');
     
     if (!agent) {
-      console.log("Result: Agent not found in DB");
+      console.log("Profile not found in MongoDB for slug:", req.params.slug);
       return res.status(404).json({ message: "Agent not found" });
     }
 
+    // Convert to plain object so we can modify photoUrl
     const agentObj = agent.toObject();
 
-    // Check if photoUrl exists AND is a valid string before processing
-    if (agentObj.photoUrl && typeof agentObj.photoUrl === 'string' && agentObj.photoUrl.includes('/')) {
+    // 2. STRENGTHENED PHOTO LOGIC
+    // Only attempt S3 signing if photoUrl exists and looks like an IDrive path
+    if (agentObj.photoUrl && typeof agentObj.photoUrl === 'string' && agentObj.photoUrl.includes('profiles/')) {
       try {
-        const urlParts = agentObj.photoUrl.split('/');
+        // Extract just the filename. 
+        // Example: https://.../profiles/17123456-pic.jpg -> profiles/17123456-pic.jpg
+        const urlParts = agentObj.photoUrl.split('profiles/');
         const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
         const fileKey = `profiles/${fileName}`;
 
-        console.log("Generating Signed URL for Key:", fileKey);
+        console.log("Generating signed URL for:", fileKey);
 
         const getCommand = new GetObjectCommand({
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
           Key: fileKey,
         });
 
-        // If this fails, the catch(s3Err) handles it without crashing the route
+        // Use a 1-hour expiry
         agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
       } catch (s3Err) {
-        console.error("S3/IDrive Signing Error (Non-Fatal):", s3Err.message);
-        // We keep the original photoUrl so the profile still loads
+        console.error("S3 Signing Error (Handled):", s3Err.message);
+        // Do not crash the app; the frontend will use the fallback avatar
       }
     }
 
+    console.log("--- Profile Request Success ---");
     res.json(agentObj);
+
   } catch (err) {
-    console.error("CRITICAL ROUTE ERROR:", err.stack); // This will show exactly which line failed
+    // THIS IS THE CRITICAL LOG: Check your Vercel logs for this exact line
+    console.error("CRITICAL 500 ERROR IN /api/agents/:slug :", err);
     res.status(500).json({ 
-      message: "Error processing profile", 
-      error: err.message // Temporary: helps you see the error in the browser network tab
+      success: false, 
+      message: "Internal Server Error", 
+      details: err.message 
     });
   }
 });
