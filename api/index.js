@@ -37,18 +37,18 @@ async function connectToDatabase() {
     return cachedDb;
   }
 
-  // 2. Critical connection options for Serverless/Vercel
+  // FIXED: Removed useNewUrlParser and useUnifiedTopology
   const opts = {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    serverSelectionTimeoutMS: 10000, // Wait 10s before giving up
-    socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
-    family: 4 // Force IPv4 (sometimes helps with Vercel/Atlas resolution)
+    serverSelectionTimeoutMS: 10000, 
+    socketTimeoutMS: 45000, 
+    family: 4 
   };
 
   try {
-    console.log("Connecting to:", process.env.AGENT_DB_URI.split('@')[1]); // Log host only for safety
+    // Log host only for safety
+    console.log("Connecting to:", process.env.AGENT_DB_URI.split('@')[1]); 
     cachedDb = await mongoose.connect(process.env.AGENT_DB_URI, opts);
+    console.log("MongoDB Connected Successfully");
     return cachedDb;
   } catch (err) {
     console.error("CRITICAL MONGODB ERROR:", err.message);
