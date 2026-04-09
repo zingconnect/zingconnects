@@ -17,20 +17,18 @@ function App() {
         <Route path="/" element={<PricingPage />} />
         <Route path="/Registration" element={<Registration />} />
 
-        {/* 2. Professional Portals (WhatsApp-style CRM) */}
-        {/* These must stay above the dynamic :slug route */}
+        {/* 2. Professional Portals */}
         <Route path="/agent/dashboard" element={<AgentDashboard />} />
+        {/* FIX: Move this above the :slug route */}
+        <Route path="/agent/profile" element={<AgentProfile />} />
+        
         <Route path="/user/dashboard" element={<UserDashboard />} />
 
         {/* 3. Dynamic Public Profiles */}
-        {/* Captured via :slug (e.g., zingconnect.com/john-doe). 
-            This is where users perform the "handshake".
-        */}
+        {/* This must be LAST in this section because it matches anything */}
         <Route path="/:slug" element={<AgentSlug />} />
-
-        <Route path="/agent/profile" element={<AgentProfile />} />
         
-        {/* 4. Catch-all / 404 Redirect */}
+        {/* 4. Catch-all */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </Router>

@@ -73,20 +73,21 @@ export const AgentDashboard = () => {
       
       {/* SIDEBAR: User List */}
       <div className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
-<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200">
+{/* Sidebar Header */}
+<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0">
   
-  {/* WRAPPED BUTTON FOR BETTER CLICKABILITY */}
   <button 
+    type="button"
     onClick={() => {
-      console.log("Navigating to profile..."); // Debug log
+      console.log("Profile button clicked!");
       navigate('/agent/profile');
     }}
-    className="relative p-1 rounded-full hover:bg-gray-200 transition-all flex items-center justify-center z-30 pointer-events-auto"
-    title="View Profile"
+    className="z-50 p-1 rounded-full hover:bg-gray-200 transition-all flex items-center justify-center cursor-pointer pointer-events-auto border-none bg-transparent"
+    aria-label="Agent Profile"
   >
     <BsPersonCircle 
       size={32} 
-      className="text-gray-400 hover:text-blue-600 transition-colors" 
+      className="text-gray-400 hover:text-blue-600 transition-colors pointer-events-none" 
     />
   </button>
   
@@ -94,6 +95,7 @@ export const AgentDashboard = () => {
     <BsThreeDotsVertical className="cursor-pointer" size={18} />
   </div>
 </header>
+
         {/* Search Bar */}
         <div className="p-2 bg-white">
           <div className="bg-[#f0f2f5] flex items-center px-3 py-1.5 rounded-lg">
