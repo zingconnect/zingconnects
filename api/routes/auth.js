@@ -162,6 +162,63 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
+// --- 3. GET AGENT PROFILE (PRIVATE SIGNING LOGIC) ---
+router.get('/profile/me', authenticateToken, async (req, res) => {
+  try {
+    const Agent = getAgentModel();
+    // Use req.user.id (from your authenticateToken middleware)
+    let agent = await Agent.findById(req.user.id).select('-password');
+    
+    if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
+
+    // --- START SIGNING LOGIC ---
+    let finalPhotoUrl = agent.photoUrl;
+
+    if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
+      try {
+        // 1. Extract the key (e.g. "profiles/1775740964828-AGENT.png")
+        // We split by '.com/' and take the second part
+        const fileKey = agent.photoUrl.split('.com/')[1];
+
+        if (fileKey) {
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: fileKey,
+          });
+
+          // 2. Generate the temporary signed URL (valid for 3600 seconds / 1 hour)
+          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        }
+      } catch (signErr) {
+        console.error("Signing Error:", signErr);
+        // Fallback to static URL if signing fails
+      }
+    }
+    // --- END SIGNING LOGIC ---
+
+    res.json({
+      success: true,
+      firstName: agent.firstName,
+      lastName: agent.lastName,
+      occupation: agent.occupation,
+      program: agent.program,
+      bio: agent.bio,
+      address: agent.address,
+      photoUrl: finalPhotoUrl, // NOW INCLUDES THE SIGNATURE!
+      slug: agent.slug,
+      plan: agent.plan,
+      isSubscribed: agent.isSubscribed,
+      subscriptionAmount: agent.subscriptionAmount || 0,
+      subscriptionDate: agent.subscriptionDate,
+      expiryDate: agent.expiryDate
+    });
+
+  } catch (err) {
+    console.error("Profile Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Profile fetch error" });
+  }
+});
+
 // --- 4. UPDATE AGENT PLAN ---
 router.post('/update-plan', authenticateToken, async (req, res) => {
   try {

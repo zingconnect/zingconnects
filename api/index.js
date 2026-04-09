@@ -247,8 +247,8 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 1. Find the agent (the 'authenticateToken' middleware should provide req.agent.id)
-    let agent = await Agent.findById(req.agent.id).select('-password'); 
+    // 1. Find the agent (matching req.user.id from your authenticateToken middleware)
+    let agent = await Agent.findById(req.user.id).select('-password'); 
     
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -259,12 +259,33 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       console.log(`[SUBSCRIPTION] Locking account: ${agent.email}`);
       agent.isSubscribed = false;
-      // We don't necessarily clear the expiryDate so the user can see when it ended
       await agent.save(); 
     }
 
-    // 3. Return the data
-    // Ensure these fields exist in your Schema, or they will return undefined
+    // 3. GENERATE SIGNED URL FOR PRIVATE IDRIVE STORAGE
+    let signedPhotoUrl = agent.photoUrl;
+
+    if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
+      try {
+        // Extract the key from the stored URL (everything after the .com/)
+        const fileKey = agent.photoUrl.split('.com/')[1];
+
+        if (fileKey) {
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: fileKey,
+          });
+
+          // Generate a signed URL valid for 1 hour (3600 seconds)
+          signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        }
+      } catch (s3Err) {
+        console.error("IDrive Signing Error:", s3Err);
+        // Fallback to the original URL if signing fails
+      }
+    }
+
+    // 4. Return the data with the signed photoUrl
     res.json({
       success: true,
       firstName: agent.firstName,
@@ -273,7 +294,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       program: agent.program,
       bio: agent.bio,
       address: agent.address,
-      photoUrl: agent.photoUrl,
+      photoUrl: signedPhotoUrl, // This now contains the temporary access signature
       slug: agent.slug,
       plan: agent.plan,
       isSubscribed: agent.isSubscribed,
