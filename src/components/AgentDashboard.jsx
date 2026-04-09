@@ -74,25 +74,27 @@ export const AgentDashboard = () => {
       {/* SIDEBAR: User List */}
       <div className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
 {/* Sidebar Header */}
-<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0">
+<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0 relative z-50">
   
-  <button 
-    type="button"
-    onClick={() => {
-      console.log("Profile button clicked!");
-      navigate('/agent/profile');
-    }}
-    className="z-50 p-1 rounded-full hover:bg-gray-200 transition-all flex items-center justify-center cursor-pointer pointer-events-auto border-none bg-transparent"
-    aria-label="Agent Profile"
-  >
-    <BsPersonCircle 
-      size={32} 
-      className="text-gray-400 hover:text-blue-600 transition-colors pointer-events-none" 
-    />
-  </button>
+  <div className="flex items-center">
+    <button 
+      type="button"
+      onClick={() => {
+        console.log("Navigating to Profile...");
+        navigate('/agent/profile');
+      }}
+      /* The 'group' class allows you to animate the icon when the button is hovered */
+      className="group p-2 -ml-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center"
+    >
+      <BsPersonCircle 
+        size={32} 
+        className="text-gray-400 group-hover:text-blue-600 transition-colors" 
+      />
+    </button>
+  </div>
   
   <div className="flex gap-4 md:gap-6 text-gray-500">
-    <BsThreeDotsVertical className="cursor-pointer" size={18} />
+    <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
   </div>
 </header>
 
@@ -137,7 +139,7 @@ export const AgentDashboard = () => {
       {/* MAIN CHAT AREA */}
       <div className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative h-full`}>
         {/* WhatsApp Background Overlay */}
-        <div className="absolute inset-0 opacity-[0.05] pointer-events-none" style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} />
+      <div className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col relative z-50`}/> 
 
         {selectedUser ? (
           <>
