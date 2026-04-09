@@ -1,24 +1,33 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+
+// Component Imports
 import { PricingPage } from './components/PricingPage';
 import { Registration } from './components/Registration';
-import { AgentSlug } from './components/AgentSlug'; // Import the Profile Component
+import { AgentSlug } from './components/AgentSlug';
+import { AgentDashboard } from './components/AgentDashboard'; 
+import { UserDashboard } from './components/UserDashboard'; 
 
 function App() {
   return (
     <Router>
       <Routes>
-        {/* Step 1: Landing/Pricing */}
+        {/* 1. Public Marketing & Signup */}
         <Route path="/" element={<PricingPage />} />
-        
-        {/* Step 2: Registration Form */}
         <Route path="/Registration" element={<Registration />} />
 
-        {/* Step 3: Dynamic Agent Profile Page */}
-        {/* The ':slug' acts as a variable to capture the unique name from the URL */}
+        {/* 2. Professional Portals (WhatsApp-style CRM) */}
+        {/* These must stay above the dynamic :slug route */}
+        <Route path="/agent/dashboard" element={<AgentDashboard />} />
+        <Route path="/user/dashboard" element={<UserDashboard />} />
+
+        {/* 3. Dynamic Public Profiles */}
+        {/* Captured via :slug (e.g., zingconnect.com/john-doe). 
+            This is where users perform the "handshake".
+        */}
         <Route path="/:slug" element={<AgentSlug />} />
         
-        {/* Catch-all: Redirect any random URL back to pricing */}
+        {/* 4. Catch-all / 404 Redirect */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </Router>

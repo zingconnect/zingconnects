@@ -11,6 +11,8 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
 import { agentSchema } from './models/Agent.js'; 
+import User from './models/User.js'; // Ensure the path is correct
+import authRoutes from './routes/auth.js'; 
 
 dotenv.config();
 
@@ -175,31 +177,175 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   }
 });
 
-// 2. Agent Login (FIXED: Now uses bcrypt.compare)
+// 1. Agent Login (Enhanced with selection for security)
 app.post('/api/agents/login', async (req, res) => {
   try {
     await connectToDatabase();
     const { email, password } = req.body;
+
+    // Explicitly select password since it might be hidden in the schema
+    const agent = await Agent.findOne({ email: email.toLowerCase().trim() }).select('+password');
     
-    const agent = await Agent.findOne({ email: email.toLowerCase().trim() });
     if (!agent) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
     const isMatch = await bcrypt.compare(password, agent.password);
     if (!isMatch) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
+    // Include role in token to prevent users from accessing agent routes
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug }, 
+      { id: agent._id, slug: agent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
-    res.json({ success: true, token, slug: agent.slug });
+    res.json({ 
+      success: true, 
+      token, 
+      slug: agent.slug,
+      message: "Agent Verified" 
+    });
   } catch (err) {
-    res.status(500).json({ message: "Login error" });
+    console.error("Agent Login Error:", err);
+    res.status(500).json({ success: false, message: "Server login error" });
+  }
+});
+
+app.get('/api/agents/my-users', async (req, res) => {
+  try {
+    await connectToDatabase();
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: "Unauthorized access" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    let decoded;
+
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      if (decoded.role !== 'agent') {
+        return res.status(403).json({ message: "Forbidden: Agent access only" });
+      }
+    } catch (err) {
+      return res.status(401).json({ message: "Session expired" });
+    }
+    const myUsers = await User.find({ 
+      connectedAgents: decoded.id 
+    })
+    .select('email lastLogin createdAt') // Only fetch what we need for the sidebar
+    .sort({ lastLogin: -1 }); // Show most recently active users at the top
+    res.json(myUsers);
+
+  } catch (err) {
+    console.error("Fetch My Users Error:", err);
+    res.status(500).json({ message: "Error retrieving connected users" });
+  }
+});
+
+// 2. User Handshake (Email-only access)
+app.post('/api/users/handshake', async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { email, agentId, agentSlug } = req.body;
+
+    if (!email) return res.status(400).json({ message: "Email required" });
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if user already exists
+    let user = await User.findOne({ email: normalizedEmail });
+    let isNewUser = false;
+
+    if (!user) {
+      // Create new user if first time
+      user = new User({
+        email: normalizedEmail,
+        connectedAgents: [agentId], // Track which agent they are talking to
+        lastLogin: new Date()
+      });
+      await user.save();
+      isNewUser = true;
+
+      // --- TODO: TRIGGER EMAIL NOTIFICATION HERE ---
+      // console.log(`Notification: New user ${normalizedEmail} joined via agent ${agentSlug}`);
+    } else {
+      // If user exists, ensure agentId is in their connected list
+      if (!user.connectedAgents.includes(agentId)) {
+        user.connectedAgents.push(agentId);
+      }
+      user.lastLogin = new Date();
+      await user.save();
+    }
+
+    // Generate User-specific token
+    const token = jwt.sign(
+      { id: user._id, role: 'user' },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' } // Users get longer sessions for convenience
+    );
+
+    res.json({ 
+      success: true, 
+      token, 
+      isNewUser,
+      message: isNewUser ? "Welcome! Profile created." : "Welcome back."
+    });
+
+  } catch (err) {
+    console.error("Handshake Error:", err);
+    res.status(500).json({ success: false, message: "Handshake failed" });
+  }
+});
+
+app.get('/api/users/my-session', async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    // 1. Extract and Verify Token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: "No authorization token provided" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Session expired or invalid" });
+    }
+    const user = await User.findById(decoded.id).populate({
+      path: 'connectedAgents',
+      select: 'firstName lastName photoUrl occupation program bio slug' // Only select public info
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // 3. Return the Session Data
+    // For this implementation, we take the most recent/first agent they connected with
+    const activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        email: user.email,
+      },
+      agent: activeAgent || null,
+      message: "Session established successfully"
+    });
+
+  } catch (err) {
+    console.error("Session API Error:", err);
+    res.status(500).json({ message: "Internal server error during session fetch" });
   }
 });
 

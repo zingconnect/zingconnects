@@ -2,13 +2,18 @@ import express from 'express';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"; // Added
+import jwt from 'jsonwebtoken'; // Added
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { agentSchema } from '../models/Agent.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- IDRIVE E2 CONFIG (Must match your index.js) ---
+const getAgentModel = () => {
+  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+};
+
+// --- IDRIVE E2 CONFIG ---
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
   endpoint: process.env.IDRIVE_ENDPOINT,
@@ -18,66 +23,42 @@ const s3Client = new S3Client({
   },
 });
 
-const getAgentModel = () => {
-  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
-};
-
+// --- 1. AGENT REGISTRATION ---
 router.post('/register', upload.single('photo'), async (req, res) => {
   try {
     const Agent = getAgentModel();
+    const { firstName, lastName, email, password, address, occupation, program, bio, dob, gender, plan } = req.body;
 
-    const {
-      firstName, lastName, email, password, address,
-      occupation, program, bio, dob, gender, plan
-    } = req.body;
-
-    // 1. SECURITY: Hash the password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 2. SLUG GENERATION
-    const baseSlug = `${firstName}${lastName}`
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .trim();
-
+    // Slug generation logic...
+    const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
     let finalSlug = baseSlug;
     let counter = 1;
-    let slugExists = await Agent.findOne({ slug: finalSlug });
-
-    while (slugExists) {
+    while (await Agent.findOne({ slug: finalSlug })) {
       counter++;
-      const suffix = counter < 10 ? `-0${counter}` : `-${counter}`;
-      finalSlug = `${baseSlug}${suffix}`;
-      slugExists = await Agent.findOne({ slug: finalSlug });
+      finalSlug = `${baseSlug}-${counter.toString().padStart(2, '0')}`;
     }
 
-    // 3. PHOTO HANDLING (FIXED: IDrive Upload Logic)
+    // Photo logic...
     let savedPhotoPath = ""; 
     if (req.file) {
-      try {
-        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
-        const fileKey = `profiles/${fileName}`;
-        const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-        
-        await s3Client.send(new PutObjectCommand({
-          Bucket: bucketName,
-          Key: fileKey,
-          Body: req.file.buffer,
-          ContentType: req.file.mimetype,
-        }));
-        
-        // Construct the IDrive URL
-        const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
-        savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
-        console.log("Image Uploaded to IDrive:", savedPhotoPath);
-      } catch (s3Error) {
-        console.error("S3 Upload Failed in auth.js:", s3Error.message);
-        // We don't crash the whole request, but the user won't have a photoUrl
-      }
+      const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
+      const fileKey = `profiles/${fileName}`;
+      const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
+      
+      await s3Client.send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      }));
+      
+      const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+      savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
     }
 
-    // 4. CREATE AGENT
     const newAgent = new Agent({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -90,28 +71,59 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       dob,
       gender,
       slug: finalSlug,
-      photoUrl: savedPhotoPath, // Now contains the IDrive link
+      photoUrl: savedPhotoPath,
       plan: plan || 'BASIC',
-      role: 'agent',
-      status: 'active',
-      isSubscribed: false 
+      role: 'agent'
     });
 
     await newAgent.save();
-
-    res.status(201).json({ 
-      success: true,
-      message: "Agent profile created successfully!", 
-      slug: finalSlug,
-      photoUrl: savedPhotoPath
-    });
+    res.status(201).json({ success: true, slug: finalSlug });
     
   } catch (error) {
     console.error("Registration Error:", error);
     res.status(error.code === 11000 ? 400 : 500).json({
       success: false,
-      message: error.code === 11000 ? "Email already exists" : "Internal Server Error"
+      message: error.code === 11000 ? "Email already exists" : "Registration failed"
     });
+  }
+});
+
+// --- 2. AGENT LOGIN (UPDATED) ---
+router.post('/login', async (req, res) => {
+  try {
+    const Agent = getAgentModel();
+    const { email, password } = req.body;
+
+    // 1. Find agent and explicitly select password if hidden in schema
+    const agent = await Agent.findOne({ email: email.toLowerCase().trim() });
+    
+    if (!agent) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+
+    // 2. Compare Password
+    const isMatch = await bcrypt.compare(password, agent.password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+
+    // 3. Generate JWT with Role Security
+    const token = jwt.sign(
+      { id: agent._id, slug: agent.slug, role: 'agent' }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '24h' }
+    );
+
+    res.json({ 
+      success: true, 
+      token, 
+      slug: agent.slug,
+      role: 'agent' 
+    });
+
+  } catch (err) {
+    console.error("Login API Error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
