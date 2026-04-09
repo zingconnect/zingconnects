@@ -236,7 +236,7 @@ export const Registration = () => {
               <BsCheckCircleFill size={30} />
             </div>
             <h2 className="text-3xl font-black tracking-tighter mb-4">Registration Complete</h2>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-10">Your account is now stored in the database.</p>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-10">Your account is now created successfully.</p>
 
             <div className="max-w-sm mx-auto bg-gray-50 rounded-3xl p-6 border border-gray-100 text-left">
               <span className="text-[9px] font-black text-blue-600 uppercase mb-2 block">Click to Visit Profile</span>

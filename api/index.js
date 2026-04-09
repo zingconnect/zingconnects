@@ -176,33 +176,35 @@ app.get('/api/agents/:slug', async (req, res) => {
 
     const agentObj = agent.toObject();
 
-    if (agentObj.photoUrl) {
-      try {
-        // This regex extracts JUST the filename from a full URL or a path
-        // It looks for everything after the last '/' and before any '?'
-        const parts = agentObj.photoUrl.split('/');
-        const fileName = parts[parts.length - 1].split('?')[0];
-        
-        // RE-CONSTRUCT THE KEY MANUALLY
-        const fileKey = `profiles/${fileName}`;
+    // If there is no photo, just send the data immediately
+    if (!agentObj.photoUrl) {
+      return res.json(agentObj);
+    }
 
-        const getCommand = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-          Key: fileKey,
-        });
+    try {
+      const urlParts = agentObj.photoUrl.split('/');
+      const lastPart = urlParts[urlParts.length - 1];
+      const fileName = lastPart.split('?')[0]; 
+      
+      const fileKey = `profiles/${fileName}`;
 
-        // Generate the fresh signature
-        agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
-      } catch (s3Err) {
-        console.error("Signing failed, using original or empty:", s3Err.message);
-        // If signing fails, don't crash; just keep going
-      }
+      const getCommand = new GetObjectCommand({
+        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+        Key: fileKey,
+      });
+      agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
+      
+    } catch (s3Err) {
+      console.error("Non-Critical S3 Error:", s3Err.message);
+      agentObj.photoUrl = ""; 
     }
 
     res.json(agentObj);
+
   } catch (err) {
-    console.error("Fetch Error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
+    // This is the "Safety Net" that prevents the 500 error
+    console.error("CRITICAL SERVER ERROR:", err);
+    res.status(500).json({ message: "Server encountered an error processing this profile" });
   }
 });
 
