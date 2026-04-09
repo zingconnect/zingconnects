@@ -11,7 +11,7 @@ import { agentSchema } from '../models/Agent.js';
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
+const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
 
 const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);

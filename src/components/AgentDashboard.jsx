@@ -129,7 +129,7 @@ export const AgentDashboard = () => {
 
       // 2. Launch Flutterwave with NGN to enable Bank/Transfer options
       window.FlutterwaveCheckout({
-        public_key: "FLWPUBK_TEST-480bbaa21db77a566071155d05ff5dc4-X",
+      public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
         tx_ref: `ZING-${Date.now()}`,
         amount: finalNairaAmount,
         currency: "NGN",
