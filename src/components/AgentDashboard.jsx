@@ -22,7 +22,7 @@ export const AgentDashboard = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
-  const [showSidebar, setShowSidebar] = useState(true); // For Mobile Toggle
+  const [showSidebar, setShowSidebar] = useState(true);
 
   // --- AUTH CHECK & INITIAL FETCH ---
   useEffect(() => {
@@ -66,37 +66,37 @@ export const AgentDashboard = () => {
     setNewMessage('');
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-xs font-bold uppercase tracking-widest text-gray-400">Initializing Secure Portal...</div>;
+  if (loading) return (
+    <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-xs font-bold uppercase tracking-widest text-gray-400">
+      Initializing Secure Portal...
+    </div>
+  );
 
   return (
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900">
       
       {/* SIDEBAR: User List */}
-      <div className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
-{/* Sidebar Header */}
-<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0 relative z-50">
-  
-  <div className="flex items-center">
-    <button 
-      type="button"
-      onClick={() => {
-        console.log("Navigating to Profile...");
-        navigate('/agent/profile');
-      }}
-      /* The 'group' class allows you to animate the icon when the button is hovered */
-      className="group p-2 -ml-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center"
-    >
-      <BsPersonCircle 
-        size={32} 
-        className="text-gray-400 group-hover:text-blue-600 transition-colors" 
-      />
-    </button>
-  </div>
-  
-  <div className="flex gap-4 md:gap-6 text-gray-500">
-    <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
-  </div>
-</header>
+      <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
+        
+        {/* Sidebar Header */}
+        <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0">
+          <div className="flex items-center">
+            <button 
+              type="button"
+              onClick={() => navigate('/agent/profile')}
+              className="group p-2 -ml-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center relative z-30"
+            >
+              <BsPersonCircle 
+                size={32} 
+                className="text-gray-400 group-hover:text-blue-600 transition-colors" 
+              />
+            </button>
+          </div>
+          
+          <div className="flex gap-4 md:gap-6 text-gray-500">
+            <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
+          </div>
+        </header>
 
         {/* Search Bar */}
         <div className="p-2 bg-white">
@@ -134,12 +134,16 @@ export const AgentDashboard = () => {
             </div>
           )}
         </div>
-      </div>
+      </aside>
 
       {/* MAIN CHAT AREA */}
-      <div className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative h-full`}>
+      <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative h-full overflow-hidden`}>
+        
         {/* WhatsApp Background Overlay */}
-      <div className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col relative z-50`}/> 
+        <div 
+          className="absolute inset-0 opacity-[0.05] pointer-events-none z-0" 
+          style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
+        />
 
         {selectedUser ? (
           <>
@@ -164,7 +168,7 @@ export const AgentDashboard = () => {
             </header>
 
             {/* Messages Container */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 md:px-20 space-y-2 z-10 flex flex-col scrollbar-hide">
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 md:px-20 space-y-2 z-10 flex flex-col">
               {messages.map((m) => (
                 <div 
                   key={m.id} 
@@ -221,7 +225,7 @@ export const AgentDashboard = () => {
             <p className="text-[10px] md:text-xs font-bold text-gray-500 max-w-xs uppercase tracking-widest">Select a verified connection to initialize end-to-end encrypted messaging.</p>
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 };

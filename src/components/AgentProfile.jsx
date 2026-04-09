@@ -22,29 +22,43 @@ export const AgentProfile = () => {
     photoUrl: ''
   });
 
-  // 1. Fetch Profile Data
-  useEffect(() => {
-    const fetchProfile = async () => {
-      const token = localStorage.getItem('zingToken');
-      const slug = localStorage.getItem('agentSlug');
+ // 1. Fetch Profile Data
+useEffect(() => {
+  const fetchProfile = async () => {
+    const token = localStorage.getItem('zingToken');
+    // Ensure this key exists! Check your Login.jsx code.
+    const slug = localStorage.getItem('agentSlug'); 
 
-      if (!token || !slug) return navigate('/');
+    if (!token) {
+      console.error("No token found, redirecting...");
+      return navigate('/');
+    }
 
-      try {
-        const response = await fetch(`/api/agents/${slug}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!response.ok) throw new Error("Failed to load");
-        const data = await response.json();
-        setAgentData(data);
-      } catch (err) {
-        console.error("Profile Fetch Error:", err);
-      } finally {
-        setLoading(false);
+    try {
+      // If slug is missing, you might need a /api/agents/me endpoint instead
+      const url = slug ? `/api/agents/${slug}` : '/api/agents/profile/me';
+      
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.status === 401) {
+        localStorage.clear();
+        return navigate('/');
       }
-    };
-    fetchProfile();
-  }, [navigate]);
+
+      if (!response.ok) throw new Error("Failed to load profile");
+      
+      const data = await response.json();
+      setAgentData(data);
+    } catch (err) {
+      console.error("Profile Fetch Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  fetchProfile();
+}, [navigate]);
 
   // 2. Handle Update
   const handleUpdate = async (e) => {
