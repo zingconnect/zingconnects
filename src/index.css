@@ -4,10 +4,8 @@
 @import "tailwindcss";
 
 @theme {
-  /* 2. Overwrite the default sans font stack to ONLY use Inter */
   --font-sans: "Inter", "sans-serif";
 
-  /* Your existing brand colors */
   --color-zing-blue: #266cee;
   --color-zing-dark: #0f172a;
 }
