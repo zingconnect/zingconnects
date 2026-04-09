@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
-import jwt from 'jsonwebtoken'; // Added
+import jwt from 'jsonwebtoken';
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { agentSchema } from '../models/Agent.js';
 
@@ -11,6 +11,19 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+};
+
+// --- AUTH MIDDLEWARE ---
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ message: "Access Denied: No Token Provided" });
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: "Session Expired" });
+    req.user = user;
+    next();
+  });
 };
 
 // --- IDRIVE E2 CONFIG ---
@@ -32,7 +45,6 @@ router.post('/register', upload.single('photo'), async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Slug generation logic...
     const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
     let finalSlug = baseSlug;
     let counter = 1;
@@ -41,7 +53,6 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       finalSlug = `${baseSlug}-${counter.toString().padStart(2, '0')}`;
     }
 
-    // Photo logic...
     let savedPhotoPath = ""; 
     if (req.file) {
       const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
@@ -73,6 +84,7 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       slug: finalSlug,
       photoUrl: savedPhotoPath,
       plan: plan || 'BASIC',
+      isSubscribed: false, // Default to false for new registrations
       role: 'agent'
     });
 
@@ -88,26 +100,23 @@ router.post('/register', upload.single('photo'), async (req, res) => {
   }
 });
 
-// --- 2. AGENT LOGIN (UPDATED) ---
+// --- 2. AGENT LOGIN (UPDATED WITH SUBSCRIPTION STATUS) ---
 router.post('/login', async (req, res) => {
   try {
     const Agent = getAgentModel();
     const { email, password } = req.body;
 
-    // 1. Find agent and explicitly select password if hidden in schema
     const agent = await Agent.findOne({ email: email.toLowerCase().trim() });
     
     if (!agent) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 2. Compare Password
     const isMatch = await bcrypt.compare(password, agent.password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 3. Generate JWT with Role Security
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 
@@ -118,12 +127,46 @@ router.post('/login', async (req, res) => {
       success: true, 
       token, 
       slug: agent.slug,
-      role: 'agent' 
+      role: 'agent',
+      isSubscribed: agent.isSubscribed || false, // CRITICAL FOR PAYWALL
+      plan: agent.plan || 'BASIC'               // CRITICAL FOR PAYWALL
     });
 
   } catch (err) {
     console.error("Login API Error:", err);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// --- 3. GET AGENT PROFILE ---
+router.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    const Agent = getAgentModel();
+    const agent = await Agent.findById(req.user.id).select('-password');
+    if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
+
+    res.json(agent);
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Profile fetch error" });
+  }
+});
+
+// --- 4. UPDATE AGENT PLAN (FOR PAYWALL SELECTION) ---
+router.post('/update-plan', authenticateToken, async (req, res) => {
+  try {
+    const Agent = getAgentModel();
+    const { plan } = req.body;
+
+    const updatedAgent = await Agent.findByIdAndUpdate(
+      req.user.id,
+      { plan: plan },
+      { new: true }
+    ).select('-password');
+
+    res.json({ success: true, plan: updatedAgent.plan });
+  } catch (err) {
+    console.error("Update Plan Error:", err);
+    res.status(500).json({ success: false, message: "Plan update failed" });
   }
 });
 

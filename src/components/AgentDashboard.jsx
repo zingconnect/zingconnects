@@ -10,40 +10,72 @@ import {
   BsCheckAll,
   BsPersonCircle,
   BsChevronLeft,
-  BsShieldLockFill
+  BsShieldLockFill,
+  BsCreditCard2BackFill,
+  BsCheckCircleFill
 } from 'react-icons/bs';
 
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   
   // --- STATE ---
+  const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
   const [selectedUser, setSelectedUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showSidebar, setShowSidebar] = useState(true);
+  
+  // Subscription States
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState("");
+
+  // --- PLANS CONFIGURATION ---
+  const plans = [
+    { id: "BASIC", price: 29, features: ["5 Active Leads", "Standard Support"] },
+    { id: "PRO", price: 79, features: ["Unlimited Leads", "Priority Support"] },
+    { id: "ENTERPRISE", price: 149, features: ["Custom Branding", "Dedicated Manager"] }
+  ];
 
   // --- AUTH CHECK & INITIAL FETCH ---
   useEffect(() => {
-    const fetchConnectedUsers = async () => {
+    const fetchAgentAndUsers = async () => {
       const token = localStorage.getItem('zingToken');
       if (!token) return navigate('/');
 
       try {
-        const response = await fetch('/api/agents/my-users', {
+        // 1. Fetch Agent Profile first to check subscription status
+        const profileRes = await fetch('/api/agents/profile', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        const data = await response.json();
-        setUsers(data || []);
+        const profileData = await profileRes.json();
+        
+        setAgentData(profileData);
+        setIsSubscribed(profileData.isSubscribed); // This is 'false' based on your database
+        setSelectedPlan(profileData.plan || "BASIC");
+
+        // 2. Only fetch users if they are actually subscribed
+        if (profileData.isSubscribed) {
+          const response = await fetch('/api/agents/my-users', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await response.json();
+          setUsers(data || []);
+        }
       } catch (err) {
-        console.error("Fetch error:", err);
+        console.error("Initialization error:", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchConnectedUsers();
+    fetchAgentAndUsers();
   }, [navigate]);
+
+  const handlePlanChange = (planId) => {
+    setSelectedPlan(planId);
+    // Optional: Add a fetch call here to update the user's preferred plan in the DB
+  };
 
   const handleSelectUser = (user) => {
     setSelectedUser(user);
@@ -73,9 +105,70 @@ export const AgentDashboard = () => {
   );
 
   return (
-    <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900">
+    <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
       
-      {/* SIDEBAR */}
+      {/* --- 1. SUBSCRIPTION PAYWALL OVERLAY --- */}
+      {!isSubscribed && (
+        <div className="absolute inset-0 z-[10000] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row animate-in fade-in zoom-in duration-300">
+            
+            {/* Left Column: Context */}
+            <div className="bg-blue-600 p-8 text-white md:w-1/3 flex flex-col justify-between">
+              <div>
+                <BsShieldLockFill size={40} className="mb-6 opacity-80" />
+                <h2 className="text-2xl font-black uppercase tracking-tight leading-none mb-2">Account Inactive</h2>
+                <p className="text-blue-100 text-sm">Please complete your subscription to access your agent dashboard and connected leads.</p>
+              </div>
+              <div className="mt-8 pt-8 border-t border-blue-500">
+                <p className="text-xs uppercase font-bold tracking-widest opacity-60 leading-none mb-1">Current Selection</p>
+                <p className="text-3xl font-black">{selectedPlan}</p>
+              </div>
+            </div>
+
+            {/* Right Column: Plan Selection */}
+            <div className="p-8 md:w-2/3 bg-gray-50 flex flex-col">
+              <h3 className="text-lg font-bold text-gray-800 mb-6">Choose or Change Your Plan</h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+                {plans.map((plan) => (
+                  <div 
+                    key={plan.id}
+                    onClick={() => handlePlanChange(plan.id)}
+                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all duration-200 ${
+                      selectedPlan === plan.id 
+                        ? 'border-blue-600 bg-blue-50 shadow-md scale-105' 
+                        : 'border-gray-200 bg-white hover:border-blue-300'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">{plan.id}</span>
+                      {selectedPlan === plan.id && <BsCheckCircleFill className="text-blue-600" />}
+                    </div>
+                    <div className="text-xl font-black text-gray-800">${plan.price}<span className="text-xs font-normal text-gray-400">/mo</span></div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex-1">
+                <div className="flex items-center gap-3 mb-4 text-gray-700">
+                  <BsCreditCard2BackFill size={20} />
+                  <span className="font-bold">Secure Checkout</span>
+                </div>
+                <p className="text-sm text-gray-500 mb-6">You will be charged <strong>${plans.find(p => p.id === selectedPlan)?.price}</strong> per month. You can cancel this at any time from your profile settings.</p>
+                
+                <button 
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-200 uppercase tracking-widest text-sm"
+                  onClick={() => alert(`Initiating payment for ${selectedPlan} plan...`)}
+                >
+                  Activate {selectedPlan} Plan
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- 2. SIDEBAR --- */}
       <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-[100]`}>
         
         {/* Sidebar Header */}
@@ -83,23 +176,10 @@ export const AgentDashboard = () => {
           <div className="flex items-center relative z-[120]">
             <button 
               type="button"
-              /* NUCLEAR NAVIGATION TEST */
-              onClick={() => {
-                console.log("FORCE REDIRECT TRIGGERED");
-                alert("If you see this, the button IS clickable!");
-                window.location.href = "/agent/profile"; 
-              }}
-              /* Added bg-red-500 temporarily so you can see the target area */
-              className="h-12 w-12 rounded-full bg-red-500/10 hover:bg-red-500/20 cursor-pointer flex items-center justify-center relative z-[9999] border-2 border-red-500"
-              style={{ 
-                pointerEvents: 'auto',
-                isolation: 'isolate'
-              }}
+              onClick={() => navigate('/agent/profile')}
+              className="h-10 w-10 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center relative z-[9999]"
             >
-              <BsPersonCircle 
-                size={34} 
-                className="text-gray-600 pointer-events-none" 
-              />
+              <BsPersonCircle size={32} className="text-gray-400" />
             </button>
           </div>
           
@@ -146,7 +226,7 @@ export const AgentDashboard = () => {
         </div>
       </aside>
 
-      {/* MAIN CHAT AREA */}
+      {/* --- 3. MAIN CHAT AREA --- */}
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative h-full overflow-hidden z-0`}>
         <div 
           className="absolute inset-0 opacity-[0.05] pointer-events-none z-0" 
@@ -164,7 +244,7 @@ export const AgentDashboard = () => {
                   {selectedUser.email[0].toUpperCase()}
                 </div>
                 <div>
-                  <h2 className="text-[12px] md:text-[14px] font-bold text-gray-800 leading-tight truncate max-w-[150px] md:max-w-none">{selectedUser.email}</h2>
+                  <h2 className="text-[12px] md:text-[14px] font-bold text-gray-800 leading-tight truncate">{selectedUser.email}</h2>
                   <p className="text-[9px] md:text-[10px] text-green-600 font-bold uppercase tracking-tighter">Online</p>
                 </div>
               </div>
@@ -197,7 +277,7 @@ export const AgentDashboard = () => {
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   placeholder="Type a message"
-                  className="w-full bg-white px-3 md:px-4 py-2 md:py-2.5 rounded-full text-[12px] md:text-[14px] outline-none"
+                  className="w-full bg-white px-3 md:px-4 py-2 md:py-2.5 rounded-full text-[12px] md:text-[14px] outline-none border border-gray-200"
                 />
               </form>
             </footer>
@@ -206,6 +286,7 @@ export const AgentDashboard = () => {
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6 opacity-40 z-10">
             <BsShieldLockFill size={40} className="text-gray-400 mb-4" />
             <h1 className="text-lg md:text-2xl font-black text-blue-950 uppercase tracking-[0.2em] mb-2">ZingConnect</h1>
+            <p className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-widest">Secure Agent Terminal</p>
           </div>
         )}
       </main>

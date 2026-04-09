@@ -177,13 +177,12 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   }
 });
 
-// 1. Agent Login (Enhanced with selection for security)
+// 1. Agent Login (Updated to include subscription status)
 app.post('/api/agents/login', async (req, res) => {
   try {
     await connectToDatabase();
     const { email, password } = req.body;
 
-    // Explicitly select password since it might be hidden in the schema
     const agent = await Agent.findOne({ email: email.toLowerCase().trim() }).select('+password');
     
     if (!agent) {
@@ -195,22 +194,61 @@ app.post('/api/agents/login', async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // Include role in token to prevent users from accessing agent routes
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
+    // RETURN SUBSCRIPTION DATA HERE
     res.json({ 
       success: true, 
       token, 
       slug: agent.slug,
+      isSubscribed: agent.isSubscribed, // Added
+      plan: agent.plan,                 // Added
       message: "Agent Verified" 
     });
   } catch (err) {
     console.error("Agent Login Error:", err);
     res.status(500).json({ success: false, message: "Server login error" });
+  }
+});
+
+// 2. Get Agent Profile (Used by Dashboard to verify subscription status)
+app.get('/api/agents/profile', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    // req.user.id comes from your JWT middleware
+    const agent = await Agent.findById(req.user.id).select('-password'); 
+    
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+
+    res.json(agent); 
+    // This returns the whole object: { email, isSubscribed, plan, etc. }
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching profile" });
+  }
+});
+
+// 3. Update Agent Plan Selection
+app.post('/api/agents/update-plan', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { plan } = req.body; // e.g., "PRO"
+
+    const updatedAgent = await Agent.findByIdAndUpdate(
+      req.user.id,
+      { plan: plan },
+      { new: true }
+    );
+
+    res.json({ success: true, plan: updatedAgent.plan });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to update plan" });
   }
 });
 
