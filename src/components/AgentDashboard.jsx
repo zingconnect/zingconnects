@@ -76,10 +76,9 @@ export const AgentDashboard = () => {
         });
         const profileData = await profileRes.json();
         
-        // Update states based on backend check (which now handles expiry)
         setAgentData(profileData);
         setIsSubscribed(profileData.isSubscribed); 
-        setSelectedPlan(profileData.plan || "BASIC");
+        if (profileData.plan) setSelectedPlan(profileData.plan);
 
         if (profileData.isSubscribed) {
           const response = await fetch('/api/agents/my-users', {
@@ -103,81 +102,89 @@ export const AgentDashboard = () => {
     };
   }, [navigate]);
 
+  // --- UPDATED PAYMENT HANDLER ---
   const handlePayment = async () => {
-  // 1. Start processing state
-  setPaymentProcessing(true);
-  const token = localStorage.getItem('zingToken');
+    setPaymentProcessing(true);
+    const token = localStorage.getItem('zingToken');
 
-  try {
-    // 2. FETCH THE NAIRA EQUIVALENT FIRST
-    // This calls your backend route: app.get('/api/subscriptions/rate/:planPrice')
-    const rateRes = await fetch(`/api/subscriptions/rate/${activePlan.price}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    if (!rateRes.ok) throw new Error("Could not fetch current exchange rate");
-    
-    const rateData = await rateRes.json();
-    const finalNairaAmount = rateData.ngn; // This is the converted price (e.g. 22500)
+    // Find the plan object based on what the user has selected in the UI
+    const activePlan = plans.find(p => p.tier === selectedPlan);
 
-    // 3. LAUNCH FLUTTERWAVE WITH NGN
-    window.FlutterwaveCheckout({
-      public_key: process.env.FLW_PUBLIC_KEY,
-      tx_ref: `ZING-${Date.now()}`,
-      amount: finalNairaAmount, // <--- Use calculated Naira amount
-      currency: "NGN",         // <--- Change to NGN to unlock Bank Transfer
-      payment_options: "card, account, transfer, ussd", // Order matters for UI
-      customer: {
-        email: agentData?.email,
-        name: `${agentData?.firstName} ${agentData?.lastName}`,
-      },
-      customizations: {
-        title: "ZingConnect",
-        description: `Activation for ${selectedPlan} Plan ($${activePlan.price})`,
-        logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
-      },
-      callback: async (response) => {
-        try {
-          // 4. VERIFY ON BACKEND
-          const verifyRes = await fetch('/api/subscriptions/verify', {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              transaction_id: response.transaction_id,
-              plan: selectedPlan,
-              usdAmount: activePlan.price // Used by backend to verify against current rate
-            })
-          });
+    if (!activePlan) {
+      alert("Invalid plan selected");
+      setPaymentProcessing(false);
+      return;
+    }
 
-          if (verifyRes.ok) {
-            setShowSuccessOverlay(true);
-            setTimeout(() => {
-              window.location.reload(); 
-            }, 4000);
-          } else {
-            const errData = await verifyRes.json();
-            alert(errData.message || "Verification failed");
+    try {
+      // 1. Fetch the converted Naira amount from your backend
+      const rateRes = await fetch(`/api/subscriptions/rate/${activePlan.price}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!rateRes.ok) throw new Error("Could not fetch current exchange rate");
+      
+      const rateData = await rateRes.json();
+      const finalNairaAmount = rateData.ngn; 
+
+      // 2. Launch Flutterwave with NGN to enable Bank/Transfer options
+      window.FlutterwaveCheckout({
+        public_key: "FLWPUBK_TEST-480bbaa21db77a566071155d05ff5dc4-X",
+        tx_ref: `ZING-${Date.now()}`,
+        amount: finalNairaAmount,
+        currency: "NGN",
+        payment_options: "card, account, transfer, ussd",
+        customer: {
+          email: agentData?.email,
+          name: `${agentData?.firstName} ${agentData?.lastName}`,
+        },
+        customizations: {
+          title: "ZingConnect",
+          description: `Activation for ${activePlan.tier} Plan ($${activePlan.price})`,
+          logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
+        },
+        callback: async (response) => {
+          try {
+            // 3. Verify on backend using original USD amount for validation logic
+            const verifyRes = await fetch('/api/subscriptions/verify', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                transaction_id: response.transaction_id,
+                plan: activePlan.tier,
+                usdAmount: activePlan.price 
+              })
+            });
+
+            if (verifyRes.ok) {
+              setShowSuccessOverlay(true);
+              setTimeout(() => {
+                window.location.reload(); 
+              }, 4000);
+            } else {
+              const errData = await verifyRes.json();
+              alert(errData.message || "Verification failed");
+            }
+          } catch (err) {
+            console.error("Verification error:", err);
+            alert("Connection error during verification.");
+          } finally {
+            setPaymentProcessing(false);
           }
-        } catch (err) {
-          console.error("Verification error:", err);
-          alert("Connection error during verification.");
-        } finally {
+        },
+        onclose: () => {
           setPaymentProcessing(false);
         }
-      },
-      onclose: () => {
-        setPaymentProcessing(false);
-      }
-    });
-  } catch (err) {
-    console.error("Payment Initialization Error:", err);
-    alert("Failed to initialize payment. Please check your connection.");
-    setPaymentProcessing(false);
-  }
-};
+      });
+    } catch (err) {
+      console.error("Payment Initialization Error:", err);
+      alert("Failed to initialize payment. Please check your connection.");
+      setPaymentProcessing(false);
+    }
+  };
 
 
   const handleSelectUser = (user) => {
@@ -207,7 +214,6 @@ export const AgentDashboard = () => {
   return (
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
       
-      {/* --- SUCCESS OVERLAY --- */}
       {showSuccessOverlay && (
         <div className="absolute inset-0 z-[20000] bg-blue-600 flex flex-col items-center justify-center text-white p-6 animate-in fade-in duration-500">
           <BsCheckCircleFill size={80} className="mb-6 animate-bounce" />
@@ -222,7 +228,6 @@ export const AgentDashboard = () => {
         </div>
       )}
 
-      {/* --- 1. SUBSCRIPTION PAYWALL OVERLAY --- */}
       {!isSubscribed && !showSuccessOverlay && (
         <div className="absolute inset-0 z-[10000] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-4 sm:p-6">
           <div className="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row animate-in fade-in zoom-in duration-300 max-h-[90vh] md:max-h-none overflow-y-auto">
@@ -304,7 +309,6 @@ export const AgentDashboard = () => {
         </div>
       )}
 
-      {/* --- 2. SIDEBAR --- */}
       <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-[100]`}>
         <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0">
           <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-gray-200 flex items-center justify-center">
@@ -343,7 +347,6 @@ export const AgentDashboard = () => {
         </div>
       </aside>
 
-      {/* --- 3. MAIN CHAT AREA --- */}
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative overflow-hidden`}>
         {selectedUser ? (
           <>
