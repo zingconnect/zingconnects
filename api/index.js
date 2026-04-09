@@ -37,7 +37,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 const userDb = mongoose.createConnection(process.env.USER_DB_URI);
 const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI);
 
-const Agent = agentDb.model('Agent', agentSchema);
+// We define a getter to ensure the model is always attached to the live connection
+const getAgentModel = () => {
+  return agentDb.models.Agent || agentDb.model('Agent', agentSchema);
+};
 
 // --- AUTHENTICATION MIDDLEWARE ---
 const authenticateToken = (req, res, next) => {
@@ -53,9 +56,9 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   try {
+    const Agent = getAgentModel();
     // --- 0. PRE-FLIGHT CONFIG CHECK ---
     if (!process.env.JWT_SECRET) {
       console.error("CRITICAL ERROR: JWT_SECRET is missing");
