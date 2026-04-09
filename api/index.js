@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import jwt from 'jsonwebtoken'; 
+import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -33,9 +34,18 @@ const s3Client = new S3Client({
 // Multer in-memory storage for Vercel compatibility
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- MULTI-DATABASE SETUP ---
-const userDb = mongoose.createConnection(process.env.USER_DB_URI);
-const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI);
+const connectionOptions = {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 5000, // 5 seconds timeout
+};
+
+const userDb = mongoose.createConnection(process.env.USER_DB_URI, connectionOptions);
+const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI, connectionOptions);
+
+// Add error listeners to see the actual error in Vercel Logs
+userDb.on('error', err => console.error("User DB Error:", err));
+agentDb.on('error', err => console.error("Agent DB Error:", err));
 
 const Agent = agentDb.model('Agent', agentSchema);
 
@@ -58,7 +68,10 @@ const authenticateToken = (req, res, next) => {
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   try {
     const Agent = getAgentModel();
-    // --- 0. PRE-FLIGHT CONFIG CHECK ---
+    if (agentDb.readyState !== 1) {
+  console.log("Database not ready, current state:", agentDb.readyState);
+  return res.status(503).json({ success: false, message: "Database is initializing. Please try again in a second." });
+}
     if (!process.env.JWT_SECRET) {
       console.error("CRITICAL ERROR: JWT_SECRET is missing");
       return res.status(500).json({ success: false, message: "Server configuration error" });
@@ -108,24 +121,29 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       }
     }
 
-    // --- 3. CREATE AGENT DOCUMENT with SUBSCRIPTION LOCK ---
-    const newAgent = new Agent({
-      ...req.body,
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      slug: finalSlug,
-      photoUrl: savedPhotoPath,
-      role: 'agent',    
-      status: 'active',           
-      isSubscribed: false,        
-      program: req.body.program || "N/A",
-      bio: req.body.bio || "",
-      plan: req.body.plan || "BASIC" 
-    });
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(req.body.password, salt);
 
-    await newAgent.save();
-    
-    // --- 4. GENERATE AUTH TOKEN ---
+    const newAgent = new Agent({
+  firstName: firstName.trim(),
+  lastName: lastName.trim(),
+  email: req.body.email.toLowerCase().trim(),
+  password: hashedPassword, // Store the hash, not the plaintext
+  dob: req.body.dob,
+  gender: req.body.gender,
+  occupation: req.body.occupation,
+  address: req.body.address,
+  bio: req.body.bio || "",
+  program: req.body.program || "N/A",  
+  slug: finalSlug,
+  photoUrl: savedPhotoPath,
+  role: 'agent',    
+  status: 'active',           
+  isSubscribed: false,        
+  plan: req.body.plan || "BASIC" 
+});
+
+    await newAgent.save();    
     const token = jwt.sign(
       { id: newAgent._id, slug: newAgent.slug }, 
       process.env.JWT_SECRET, 
@@ -229,28 +247,7 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
 app.get('/health', (req, res) => res.status(200).send('OK'));
 // At the bottom of api/index.js
 
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(process.cwd(), 'dist');
-  app.use(express.static(distPath));
 
-  app.get('*', (req, res) => {
-    if (req.path.startsWith('/api')) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "API endpoint not found" 
-      });
-    }
-
-    const indexPath = path.join(distPath, 'index.html');
-    res.sendFile(indexPath, (err) => {
-      if (err) {
-        console.error("Error sending index.html:", err);
-        // If the file is missing, Vercel might not have finished the build
-        res.status(500).send("Frontend build not found.");
-      }
-    });
-  });
-}
 
 // CRITICAL: Export for Vercel
 export default app;

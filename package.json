@@ -7,13 +7,14 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "nodemon api/index.js",
     "client": "vite",
-    "build": "chmod +x node_modules/.bin/vite && vite build",
+    "build": "vite build",
     "start": "cross-env PORT=5000 node api/index.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1027.0",
     "@aws-sdk/s3-request-presigner": "^3.1027.0",
     "@tailwindcss/vite": "^4.2.2",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
