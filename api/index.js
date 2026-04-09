@@ -407,6 +407,67 @@ app.get('/api/agents/:slug', async (req, res) => {
   }
 });
 
+// --- Update Agent Profile (Protected) ---
+app.put('/api/agents/update-profile', async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    // 1. Extract Token from Headers
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: "Unauthorized: No token provided" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    // 2. Verify Token (using your secret)
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(403).json({ message: "Session expired. Please log in again." });
+    }
+
+    // 3. Find and Update the Agent
+    // We only allow specific fields to be updated for security
+    const { firstName, lastName, occupation, program, bio, address } = req.body;
+
+    const updatedAgent = await Agent.findByIdAndUpdate(
+      decoded.id, 
+      { 
+        $set: { 
+          firstName, 
+          lastName, 
+          occupation, 
+          program, 
+          bio, 
+          address 
+        } 
+      },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!updatedAgent) {
+      return res.status(404).json({ message: "Agent account not found" });
+    }
+
+    console.log(`Profile updated successfully for: ${updatedAgent.email}`);
+    
+    res.json({
+      success: true,
+      message: "Identity synchronized across all secure nodes.",
+      agent: updatedAgent
+    });
+
+  } catch (err) {
+    console.error("Update Error:", err);
+    res.status(500).json({ 
+      message: "Internal server error during profile sync",
+      error: err.message 
+    });
+  }
+});
+
 // 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {

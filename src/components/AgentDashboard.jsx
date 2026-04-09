@@ -74,11 +74,17 @@ export const AgentDashboard = () => {
       {/* SIDEBAR: User List */}
       <div className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
         {/* Sidebar Header */}
-        <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200">
-          <BsPersonCircle size={32} className="text-gray-400 cursor-pointer" />
-          <div className="flex gap-4 md:gap-6 text-gray-500">
-            <BsThreeDotsVertical className="cursor-pointer" size={18} />
-          </div>
+      <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200">
+  {/* UPDATE THIS LINE */}
+  <BsPersonCircle 
+    size={32} 
+    className="text-gray-400 cursor-pointer hover:text-blue-600 transition-colors" 
+    onClick={() => navigate('/agent/profile')} 
+  />
+  
+  <div className="flex gap-4 md:gap-6 text-gray-500">
+    <BsThreeDotsVertical className="cursor-pointer" size={18} />
+  </div>
         </header>
 
         {/* Search Bar */}

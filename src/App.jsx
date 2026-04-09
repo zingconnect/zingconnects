@@ -7,6 +7,7 @@ import { Registration } from './components/Registration';
 import { AgentSlug } from './components/AgentSlug';
 import { AgentDashboard } from './components/AgentDashboard'; 
 import { UserDashboard } from './components/UserDashboard'; 
+import { AgentProfile } from './pages/agent/AgentProfile'; // or your correct path
 
 function App() {
   return (
@@ -26,6 +27,8 @@ function App() {
             This is where users perform the "handshake".
         */}
         <Route path="/:slug" element={<AgentSlug />} />
+
+        <Route path="/agent/profile" element={<AgentProfile />} />
         
         {/* 4. Catch-all / 404 Redirect */}
         <Route path="*" element={<Navigate to="/" />} />
