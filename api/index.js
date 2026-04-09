@@ -107,12 +107,11 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       lastName: lastName.trim(),
       slug: finalSlug,           // Use our newly generated unique slug
       photoUrl: photoUrl || "",
-      role: 'agent'     
-
+      role: 'agent',    
       program: req.body.program || "N/A",
-  bio: req.body.bio || "",
-  plan: req.body.plan || "BASIC"
-    });
+    bio: req.body.bio || "",
+    plan: req.body.plan || "BASIC"
+  });
 
     await newAgent.save();
     
