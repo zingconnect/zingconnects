@@ -50,8 +50,7 @@ export const Registration = () => {
 };
 
   const agentSlug = getUniqueSlug();
-  const fullLink = `${window.location.origin}/agent/${agentSlug}`;
-
+const fullLink = `${window.location.origin}/${agentSlug}`;
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -241,8 +240,8 @@ export const Registration = () => {
             <div className="max-w-sm mx-auto bg-gray-50 rounded-3xl p-6 border border-gray-100 text-left">
               <span className="text-[9px] font-black text-blue-600 uppercase mb-2 block">Click to Visit Profile</span>
               <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-3">
-                <Link to={`/agent/${agentSlug}`} className="text-xs font-bold text-blue-950 truncate mr-4 hover:text-blue-600 underline">
-                  {fullLink}
+               <Link to={`/${agentSlug}`} className="text-xs font-bold text-blue-950 truncate mr-4 hover:text-blue-600 underline">
+                {fullLink}
                 </Link>
                 <button 
                   onClick={copyToClipboard}

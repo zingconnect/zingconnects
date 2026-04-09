@@ -13,11 +13,30 @@ export const agentSchema = new mongoose.Schema({
   bio: String,
   dob: Date,
   gender: String,
-  plan: { type: String, default: 'BASIC' },
   role: { type: String, default: 'agent' },
-  photoUrl: { type: String, default: '' }
+  photoUrl: { type: String, default: '' },
+
+  // --- SUBSCRIPTION & PAYMENT FIELDS ---
+  plan: { 
+    type: String, 
+    enum: ['BASIC', 'PRO', 'ENTERPRISE'], 
+    default: 'BASIC' 
+  },
+  isSubscribed: { 
+    type: Boolean, 
+    default: false // Accounts are "Unpaid" by default
+  },
+  status: { 
+    type: String, 
+    enum: ['active', 'suspended', 'pending'], 
+    default: 'active' 
+  },
+  
+  // Optional: Track when the subscription started or ends
+  subscriptionId: { type: String, default: '' }, 
+  currentPeriodEnd: { type: Date }
+
 }, { timestamps: true });
 
-// This default export is still fine for global use, 
-// but server.js will now use agentSchema specifically.
-export const Agent = mongoose.model('Agent', agentSchema);
+// Check if the model exists before creating it (prevents Vercel re-compilation errors)
+export const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);

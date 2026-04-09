@@ -55,9 +55,9 @@ const authenticateToken = (req, res, next) => {
 
 // --- API ROUTES ---
 
-// 1. Agent Registration with Image Upload & Unique Slug Logic
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   try {
+    // --- 0. PRE-FLIGHT CONFIG CHECK ---
     if (!process.env.JWT_SECRET) {
       console.error("CRITICAL ERROR: JWT_SECRET is missing");
       return res.status(500).json({ success: false, message: "Server configuration error" });
@@ -65,7 +65,8 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
 
     const { firstName, lastName, email } = req.body;
 
-    // --- 1. GENERATE UNIQUE SLUG ---
+    // --- 1. GENERATE UNIQUE SLUG (Hidden "agent" path) ---
+    // This ensures justicefrederick is clean and safe for URLs
     const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const cleanLast = lastName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
@@ -81,66 +82,82 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // --- 2. HANDLE IMAGE UPLOAD & SIGNED URL ---
-    let photoUrl = "";
+    // --- 2. HANDLE PRIVATE IMAGE UPLOAD ---
+    let savedPhotoPath = "";
     if (req.file) {
-      const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
-      const fileKey = `profiles/${fileName}`;
-      
-      const uploadParams = {
-        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-        Key: fileKey,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-        // No ACL added here as per your Private Key requirement
-      };
+      try {
+        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
+        const fileKey = `profiles/${fileName}`;
+        
+        if (!s3Client) throw new Error("S3 Client not initialized");
 
-      await s3Client.send(new PutObjectCommand(uploadParams));
-      
-      // Create a Signed URL for private access (valid for 7 days)
-      const getCommand = new GetObjectCommand({
-        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-        Key: fileKey,
-      });
+        const uploadParams = {
+          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Key: fileKey,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+          // Note: No ACL makes the file private by default in IDrive E2
+        };
 
-      photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 604800 });
+        await s3Client.send(new PutObjectCommand(uploadParams));
+        
+        /**
+         * STRATEGY: We save the STATIC path in the DB.
+         * We do NOT generate the Signed URL here because it will expire.
+         * We generate it fresh in the GET /api/agents/:slug route.
+         */
+        const endpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+        savedPhotoPath = `https://${endpoint}/${process.env.IDRIVE_BUCKET_NAME}/${fileKey}`;
+
+      } catch (uploadErr) {
+        console.error("S3 Upload Failed:", uploadErr.message);
+        // We continue registration even if photo fails to prevent 500 errors
+        savedPhotoPath = ""; 
+      }
     }
 
-    // --- 3. CREATE AGENT DOCUMENT ---
+    // --- 3. CREATE AGENT DOCUMENT with SUBSCRIPTION LOCK ---
     const newAgent = new Agent({
       ...req.body,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       slug: finalSlug,
-      photoUrl: photoUrl || "",
+      photoUrl: savedPhotoPath, // Save the static path
       role: 'agent',    
+      status: 'active',           // Account is active for login
+      isSubscribed: false,        // MANDATORY: Payment is not yet verified
       program: req.body.program || "N/A",
       bio: req.body.bio || "",
-      plan: req.body.plan || "BASIC"
+      plan: req.body.plan || "BASIC" // This is their "intended" plan
     });
 
     await newAgent.save();
     
+    // --- 4. GENERATE AUTH TOKEN ---
     const token = jwt.sign(
       { id: newAgent._id, slug: newAgent.slug }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
     
+    // Return success with the clean slug
     res.status(201).json({ 
       success: true, 
       token, 
-      slug: finalSlug,
-      message: "Registration successful" 
+      slug: finalSlug, // Frontend will use this to navigate to /justicefrederick
+      message: "Registration successful. Please complete payment." 
     });
 
   } catch (err) {
     console.error("Registration Error Detail:", err);
     let errorMessage = err.message;
+    
+    // Handle Mongoose Duplicate Key Errors (Email/Slug)
     if (err.code === 11000) {
       const duplicateField = Object.keys(err.keyValue)[0];
       errorMessage = `${duplicateField.charAt(0).toUpperCase() + duplicateField.slice(1)} already exists.`;
     }
+    
     res.status(400).json({ success: false, message: errorMessage });
   }
 });
