@@ -242,11 +242,14 @@ if (process.env.NODE_ENV === 'production') {
   const distPath = path.resolve(__dirname, '../dist');
   app.use(express.static(distPath));
 
-  app.get('*', (req, res) => {
+  // Use (.*) instead of * to prevent the 'Missing parameter name' crash
+  app.get('(.*)', (req, res) => {
     if (req.path.startsWith('/api')) {
-      return res.status(404).json({ message: "API endpoint not found" });
-    }
-    
+      return res.status(404).json({ 
+        success: false, 
+        message: "API endpoint not found" 
+      });
+    }    
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
