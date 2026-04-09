@@ -37,10 +37,9 @@ const upload = multer({ storage: multer.memoryStorage() });
 const userDb = mongoose.createConnection(process.env.USER_DB_URI);
 const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI);
 
-// We define a getter to ensure the model is always attached to the live connection
-const getAgentModel = () => {
-  return agentDb.models.Agent || agentDb.model('Agent', agentSchema);
-};
+const Agent = agentDb.model('Agent', agentSchema);
+
+const getAgentModel = () => Agent; // Simplified getter
 
 // --- AUTHENTICATION MIDDLEWARE ---
 const authenticateToken = (req, res, next) => {
@@ -83,15 +82,12 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // --- 2. HANDLE PRIVATE IMAGE UPLOAD ---
     let savedPhotoPath = "";
     if (req.file) {
       try {
         const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
         const fileKey = `profiles/${fileName}`;
         
-        if (!s3Client) throw new Error("S3 Client not initialized");
-
         const uploadParams = {
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
           Key: fileKey,
@@ -101,11 +97,13 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
 
         await s3Client.send(new PutObjectCommand(uploadParams));
         
-        const endpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+        // Ensure endpoint exists before replacing
+        const endpoint = (process.env.IDRIVE_ENDPOINT || "s3.amazonaws.com").replace('https://', '');
         savedPhotoPath = `https://${endpoint}/${process.env.IDRIVE_BUCKET_NAME}/${fileKey}`;
 
       } catch (uploadErr) {
         console.error("S3 Upload Failed:", uploadErr.message);
+        // Don't crash the whole registration if just the photo fails
         savedPhotoPath = ""; 
       }
     }

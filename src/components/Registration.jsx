@@ -220,7 +220,7 @@ const fullLink = `${window.location.origin}/${agentSlug}`;
                   {isSubmitting ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Syncing to Database...
+                      Creating Account...
                     </>
                   ) : (
                     <>Confirm Registration <BsArrowRight /></>

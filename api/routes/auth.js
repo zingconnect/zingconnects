@@ -1,26 +1,25 @@
 import express from 'express';
-import mongoose from 'mongoose';
+import multer from 'multer'; // 1. Import Multer
 import { agentSchema } from '../models/Agent.js';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 
-// --- FIXED MODEL INITIALIZATION ---
-// This safely checks if the model exists on the connection or creates it
+// 2. Setup Multer for this router (Memory storage is best for Vercel)
+const upload = multer({ storage: multer.memoryStorage() });
+
 const getAgentModel = () => {
-  // Use the connection established in index.js
-  const db = mongoose.connection.useDb('zingconnect');
-  return db.models.Agent || db.model('Agent', agentSchema);
+  // Use the connection state or a fallback
+  // This ensures we aren't creating a new connection on every click
+  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 };
 
-router.post('/register', async (req, res) => {
+// 3. Add 'upload.none()' or 'upload.single('photo')' to parse the FormData
+router.post('/register', upload.single('photo'), async (req, res) => {
   try {
-    // Check if we are connected to MongoDB
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ success: false, message: "Database connecting... please try again." });
-    }
-
     const Agent = getAgentModel();
 
+    // Now req.body will actually contain your firstName, lastName, etc.
     const {
       firstName,
       lastName,
@@ -32,9 +31,13 @@ router.post('/register', async (req, res) => {
       bio,
       dob,
       gender,
-      plan,
-      photoUrl
+      plan
     } = req.body;
+
+    // Validation check
+    if (!firstName || !email) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
 
     // --- 1. SLUG GENERATION ---
     const baseSlug = `${firstName}${lastName}`
@@ -44,7 +47,6 @@ router.post('/register', async (req, res) => {
 
     let finalSlug = baseSlug;
     let counter = 1;
-
     let slugExists = await Agent.findOne({ slug: finalSlug });
 
     while (slugExists) {
@@ -54,11 +56,11 @@ router.post('/register', async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // --- 2. CREATE AGENT WITH SUBSCRIPTION LOCK ---
+    // --- 2. CREATE AGENT ---
     const newAgent = new Agent({
-      firstName,
-      lastName,
-      email,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.toLowerCase().trim(),
       password, 
       address,
       occupation,
@@ -69,18 +71,19 @@ router.post('/register', async (req, res) => {
       slug: finalSlug,
       plan: plan || 'BASIC',
       role: 'agent',
-      photoUrl: photoUrl || "",
       status: 'active',
-      isSubscribed: false // Explicitly false as per your requirement
+      isSubscribed: false 
     });
 
+    // NOTE: If you are handling the S3 upload in index.js, 
+    // you need to make sure the photoUrl is passed correctly here.
+    
     await newAgent.save();
 
     res.status(201).json({ 
       success: true,
       message: "Agent profile created successfully!", 
-      slug: finalSlug,
-      isSubscribed: false 
+      slug: finalSlug
     });
     
   } catch (error) {
