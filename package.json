@@ -7,7 +7,7 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "nodemon api/index.js",
     "client": "vite",
-    "build": "vite build",
+    "build": "node node_modules/vite/bin/vite.js build",
     "start": "cross-env PORT=5000 node api/index.js"
   },
   "dependencies": {
