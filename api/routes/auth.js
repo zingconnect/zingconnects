@@ -1,11 +1,22 @@
 import express from 'express';
 import multer from 'multer';
-import bcrypt from 'bcryptjs'; // Add this
-import { agentSchema } from '../models/Agent.js';
+import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"; // Added
+import { agentSchema } from '../models/Agent.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+// --- IDRIVE E2 CONFIG (Must match your index.js) ---
+const s3Client = new S3Client({
+  region: process.env.IDRIVE_REGION,
+  endpoint: process.env.IDRIVE_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.IDRIVE_ACCESS_KEY_ID,
+    secretAccessKey: process.env.IDRIVE_SECRET_ACCESS_KEY,
+  },
+});
 
 const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
@@ -41,16 +52,37 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // 3. PHOTO HANDLING (Optional: Move S3 logic here if needed)
+    // 3. PHOTO HANDLING (FIXED: IDrive Upload Logic)
     let savedPhotoPath = ""; 
-    // If you need S3 here, copy the s3Client.send logic from index.js
+    if (req.file) {
+      try {
+        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
+        const fileKey = `profiles/${fileName}`;
+        const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
+        
+        await s3Client.send(new PutObjectCommand({
+          Bucket: bucketName,
+          Key: fileKey,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+        }));
+        
+        // Construct the IDrive URL
+        const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+        savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
+        console.log("Image Uploaded to IDrive:", savedPhotoPath);
+      } catch (s3Error) {
+        console.error("S3 Upload Failed in auth.js:", s3Error.message);
+        // We don't crash the whole request, but the user won't have a photoUrl
+      }
+    }
 
     // 4. CREATE AGENT
     const newAgent = new Agent({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.toLowerCase().trim(),
-      password: hashedPassword, // Use the hashed version!
+      password: hashedPassword,
       address,
       occupation,
       program: program || "N/A",
@@ -58,7 +90,7 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       dob,
       gender,
       slug: finalSlug,
-      photoUrl: savedPhotoPath, 
+      photoUrl: savedPhotoPath, // Now contains the IDrive link
       plan: plan || 'BASIC',
       role: 'agent',
       status: 'active',
@@ -70,7 +102,8 @@ router.post('/register', upload.single('photo'), async (req, res) => {
     res.status(201).json({ 
       success: true,
       message: "Agent profile created successfully!", 
-      slug: finalSlug
+      slug: finalSlug,
+      photoUrl: savedPhotoPath
     });
     
   } catch (error) {
