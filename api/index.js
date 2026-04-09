@@ -54,7 +54,7 @@ const authenticateToken = (req, res, next) => {
 
 // --- API ROUTES ---
 
-// 1. Agent Registration with Image Upload
+// 1. Agent Registration with Image Upload & Unique Slug Logic
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   try {
     if (!process.env.JWT_SECRET) {
@@ -62,9 +62,28 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       return res.status(500).json({ success: false, message: "Server configuration error" });
     }
 
-    let photoUrl = "";
+    const { firstName, lastName, email } = req.body;
 
-    // If a file was uploaded, push to IDrive E2
+    // --- 1. GENERATE UNIQUE SLUG (lawrencecole format) ---
+    // Clean names: remove special characters and extra spaces
+    const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
+    const cleanLast = lastName.trim().replace(/[^a-zA-Z0-9]/g, '');
+    const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
+    
+    let finalSlug = baseSlug;
+    let counter = 1;
+
+    // Check database for existing slug and increment if necessary
+    let slugExists = await Agent.findOne({ slug: finalSlug });
+    while (slugExists) {
+      counter++;
+      const suffix = counter < 10 ? `-0${counter}` : `-${counter}`;
+      finalSlug = `${baseSlug}${suffix}`;
+      slugExists = await Agent.findOne({ slug: finalSlug });
+    }
+
+    // --- 2. HANDLE IMAGE UPLOAD TO IDRIVE E2 ---
+    let photoUrl = "";
     if (req.file) {
       const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
       
@@ -73,7 +92,6 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
         Key: `profiles/${fileName}`,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
-        // ACL: 'public-read' // Note: Ensure your bucket policy allows public reading
       };
 
       await s3Client.send(new PutObjectCommand(uploadParams));
@@ -82,15 +100,23 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       photoUrl = `${process.env.IDRIVE_ENDPOINT}/${process.env.IDRIVE_BUCKET_NAME}/profiles/${fileName}`;
     }
 
-    // Create the agent document
+    // --- 3. CREATE AGENT DOCUMENT ---
     const newAgent = new Agent({
       ...req.body,
+      firstName: firstName.trim(), // Keep original clean string for display
+      lastName: lastName.trim(),
+      slug: finalSlug,           // Use our newly generated unique slug
       photoUrl: photoUrl || "",
+      role: 'agent'     
+
+      program: req.body.program || "N/A",
+  bio: req.body.bio || "",
+  plan: req.body.plan || "BASIC"
     });
 
     await newAgent.save();
     
-    // Generate JWT Token
+    // --- 4. GENERATE JWT TOKEN ---
     const token = jwt.sign(
       { id: newAgent._id, slug: newAgent.slug }, 
       process.env.JWT_SECRET, 
@@ -100,15 +126,23 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
     res.status(201).json({ 
       success: true, 
       token, 
-      slug: newAgent.slug,
+      slug: finalSlug,
       message: "Registration successful" 
     });
 
   } catch (err) {
     console.error("Registration Error Detail:", err);
+    
+    // Improved error messaging for the user
+    let errorMessage = err.message;
+    if (err.code === 11000) {
+      const duplicateField = Object.keys(err.keyValue)[0];
+      errorMessage = `${duplicateField.charAt(0).toUpperCase() + duplicateField.slice(1)} already exists. Please use a different one.`;
+    }
+
     res.status(400).json({ 
       success: false, 
-      message: err.code === 11000 ? "Email or Slug already exists" : err.message 
+      message: errorMessage 
     });
   }
 });
