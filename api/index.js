@@ -166,52 +166,43 @@ app.post('/api/agents/login', async (req, res) => {
   }
 });
 
-// 3. Fetch Agent Profile (Public)
 app.get('/api/agents/:slug', async (req, res) => {
   try {
-    const { slug } = req.params;
-    console.log(`--- FETCHING AGENT: ${slug} ---`);
-
-    const agent = await Agent.findOne({ slug }).select('-password');
+    const agent = await Agent.findOne({ slug: req.params.slug }).select('-password');
     
     if (!agent) {
-      console.log(`AGENT NOT FOUND IN DB: ${slug}`);
       return res.status(404).json({ message: "Agent not found" });
     }
 
     const agentObj = agent.toObject();
 
-    // Safety check for photoUrl
-    if (agentObj.photoUrl && agentObj.photoUrl.includes('/')) {
+    if (agentObj.photoUrl) {
       try {
-        const urlParts = agentObj.photoUrl.split('/');
-        // Extract filename and strip any existing query params
-        const fileNameWithParams = urlParts[urlParts.length - 1];
-        const fileName = fileNameWithParams.split('?')[0]; 
+        // This regex extracts JUST the filename from a full URL or a path
+        // It looks for everything after the last '/' and before any '?'
+        const parts = agentObj.photoUrl.split('/');
+        const fileName = parts[parts.length - 1].split('?')[0];
         
-        console.log(`Generating signed URL for: profiles/${fileName}`);
+        // RE-CONSTRUCT THE KEY MANUALLY
+        const fileKey = `profiles/${fileName}`;
 
         const getCommand = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME,
-          Key: `profiles/${fileName}`,
+          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Key: fileKey,
         });
 
+        // Generate the fresh signature
         agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
       } catch (s3Err) {
-        console.error("S3 SIGNING ERROR:", s3Err.message);
-        // Don't crash the whole request if S3 fails; just send the profile without the photo
-        agentObj.photoUrl = ""; 
+        console.error("Signing failed, using original or empty:", s3Err.message);
+        // If signing fails, don't crash; just keep going
       }
     }
 
     res.json(agentObj);
   } catch (err) {
-    console.error("CRITICAL FETCH ERROR:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined 
-    });
+    console.error("Fetch Error:", err);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 });
 
