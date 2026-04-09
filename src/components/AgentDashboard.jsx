@@ -103,36 +103,43 @@ export const AgentDashboard = () => {
     };
   }, [navigate]);
 
-  // --- PAYMENT HANDLER ---
-  const handlePayment = () => {
-    const activePlan = plans.find(p => p.tier === selectedPlan);
-    const token = localStorage.getItem('zingToken');
+  const handlePayment = async () => {
+  // 1. Start processing state
+  setPaymentProcessing(true);
+  const token = localStorage.getItem('zingToken');
 
-    if (!window.FlutterwaveCheckout) {
-        alert("Payment system loading... please wait a moment.");
-        return;
-    }
+  try {
+    // 2. FETCH THE NAIRA EQUIVALENT FIRST
+    // This calls your backend route: app.get('/api/subscriptions/rate/:planPrice')
+    const rateRes = await fetch(`/api/subscriptions/rate/${activePlan.price}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (!rateRes.ok) throw new Error("Could not fetch current exchange rate");
+    
+    const rateData = await rateRes.json();
+    const finalNairaAmount = rateData.ngn; // This is the converted price (e.g. 22500)
 
+    // 3. LAUNCH FLUTTERWAVE WITH NGN
     window.FlutterwaveCheckout({
-      public_key: "FLWPUBK_TEST-480bbaa21db77a566071155d05ff5dc4-X",
+      public_key: process.env.FLW_PUBLIC_KEY,
       tx_ref: `ZING-${Date.now()}`,
-      amount: activePlan.price,
-      currency: "USD",
-      payment_options: "card, mobilemoney, ussd, account, transfer",
+      amount: finalNairaAmount, // <--- Use calculated Naira amount
+      currency: "NGN",         // <--- Change to NGN to unlock Bank Transfer
+      payment_options: "card, account, transfer, ussd", // Order matters for UI
       customer: {
-        email: agentData?.email || "user@example.com",
-        name: `${agentData?.firstName} ${agentData?.lastName}` || "Zing Agent",
+        email: agentData?.email,
+        name: `${agentData?.firstName} ${agentData?.lastName}`,
       },
       customizations: {
         title: "ZingConnect",
-        description: `Activation for ${selectedPlan} Plan`,
+        description: `Activation for ${selectedPlan} Plan ($${activePlan.price})`,
         logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
       },
       callback: async (response) => {
-        setPaymentProcessing(true);
         try {
-          // Verify with your backend - Sending usdAmount to verify correct Naira conversion
-          const verifyRes = await fetch('/api/agents/verify', {
+          // 4. VERIFY ON BACKEND
+          const verifyRes = await fetch('/api/subscriptions/verify', {
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
@@ -141,24 +148,22 @@ export const AgentDashboard = () => {
             body: JSON.stringify({
               transaction_id: response.transaction_id,
               plan: selectedPlan,
-              usdAmount: activePlan.price // CRITICAL: Backend uses this to verify NGN amount
+              usdAmount: activePlan.price // Used by backend to verify against current rate
             })
           });
 
           if (verifyRes.ok) {
             setShowSuccessOverlay(true);
             setTimeout(() => {
-              setIsSubscribed(true);
-              setShowSuccessOverlay(false);
               window.location.reload(); 
             }, 4000);
           } else {
-              const errData = await verifyRes.json();
-              alert(errData.message || "Verification failed");
+            const errData = await verifyRes.json();
+            alert(errData.message || "Verification failed");
           }
         } catch (err) {
           console.error("Verification error:", err);
-          alert("Payment verified on Gateway, but failed to update dashboard. Please contact support.");
+          alert("Connection error during verification.");
         } finally {
           setPaymentProcessing(false);
         }
@@ -167,7 +172,13 @@ export const AgentDashboard = () => {
         setPaymentProcessing(false);
       }
     });
-  };
+  } catch (err) {
+    console.error("Payment Initialization Error:", err);
+    alert("Failed to initialize payment. Please check your connection.");
+    setPaymentProcessing(false);
+  }
+};
+
 
   const handleSelectUser = (user) => {
     setSelectedUser(user);

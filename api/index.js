@@ -243,6 +243,51 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    // 1. Find the agent (the 'authenticateToken' middleware should provide req.agent.id)
+    let agent = await Agent.findById(req.agent.id).select('-password'); 
+    
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+
+    // 2. Expiry Logic (The Lazy Check)
+    const now = new Date();
+    if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
+      console.log(`[SUBSCRIPTION] Locking account: ${agent.email}`);
+      agent.isSubscribed = false;
+      // We don't necessarily clear the expiryDate so the user can see when it ended
+      await agent.save(); 
+    }
+
+    // 3. Return the data
+    // Ensure these fields exist in your Schema, or they will return undefined
+    res.json({
+      success: true,
+      firstName: agent.firstName,
+      lastName: agent.lastName,
+      occupation: agent.occupation,
+      program: agent.program,
+      bio: agent.bio,
+      address: agent.address,
+      photoUrl: agent.photoUrl,
+      slug: agent.slug,
+      plan: agent.plan,
+      isSubscribed: agent.isSubscribed,
+      subscriptionAmount: agent.subscriptionAmount || 0,
+      subscriptionDate: agent.subscriptionDate,
+      expiryDate: agent.expiryDate
+    }); 
+
+  } catch (err) {
+    console.error("Profile Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Server error fetching profile" });
+  }
+});
+
 // 3. Update Agent Plan Selection
 app.post('/api/agents/update-plan', authenticateToken, async (req, res) => {
   try {
@@ -576,7 +621,8 @@ app.post('/api/subscriptions/verify', async (req, res) => {
             isSubscribed: true,
             plan: plan,
             subscriptionDate: now,
-            expiryDate: expiry, // Set the future lockout date
+            subscriptionAmount: usdAmount,
+            expiryDate: expiry, 
             expiryNotificationSent: false, // Reset warning flag for new cycle
             lastTransactionId: transaction_id,
             paymentDetails: {

@@ -31,13 +31,10 @@ export const agentSchema = new mongoose.Schema({
     default: 'active' 
   },
   
-  // Track when the payment happened
   subscriptionDate: { type: Date },
-  
-  // CRITICAL: When the dashboard should lock
+  subscriptionAmount: { type: Number, default: 0 },
   expiryDate: { type: Date }, 
   
-  // CRITICAL: Track if we've already warned them 3 days before expiry
   expiryNotificationSent: { 
     type: Boolean, 
     default: false 
