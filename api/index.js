@@ -328,9 +328,6 @@ app.get('/api/users/my-session', async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-
-    // 3. Return the Session Data
-    // For this implementation, we take the most recent/first agent they connected with
     const activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
 
     res.json({
@@ -349,35 +346,49 @@ app.get('/api/users/my-session', async (req, res) => {
   }
 });
 
-// 3. Get Public Profile
 app.get('/api/agents/:slug', async (req, res) => {
   try {
+    console.log("Fetching profile for slug:", req.params.slug);
     await connectToDatabase();
+    
     const agent = await Agent.findOne({ slug: req.params.slug }).select('-password');
     
-    if (!agent) return res.status(404).json({ message: "Agent not found" });
+    if (!agent) {
+      console.log("Result: Agent not found in DB");
+      return res.status(404).json({ message: "Agent not found" });
+    }
 
     const agentObj = agent.toObject();
 
-    if (agentObj.photoUrl) {
+    // Check if photoUrl exists AND is a valid string before processing
+    if (agentObj.photoUrl && typeof agentObj.photoUrl === 'string' && agentObj.photoUrl.includes('/')) {
       try {
         const urlParts = agentObj.photoUrl.split('/');
         const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
         const fileKey = `profiles/${fileName}`;
 
+        console.log("Generating Signed URL for Key:", fileKey);
+
         const getCommand = new GetObjectCommand({
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
           Key: fileKey,
         });
+
+        // If this fails, the catch(s3Err) handles it without crashing the route
         agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
       } catch (s3Err) {
-        console.error("S3 Get Error:", s3Err.message);
+        console.error("S3/IDrive Signing Error (Non-Fatal):", s3Err.message);
+        // We keep the original photoUrl so the profile still loads
       }
     }
 
     res.json(agentObj);
   } catch (err) {
-    res.status(500).json({ message: "Error processing profile" });
+    console.error("CRITICAL ROUTE ERROR:", err.stack); // This will show exactly which line failed
+    res.status(500).json({ 
+      message: "Error processing profile", 
+      error: err.message // Temporary: helps you see the error in the browser network tab
+    });
   }
 });
 
