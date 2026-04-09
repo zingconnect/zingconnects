@@ -6,7 +6,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import jwt from 'jsonwebtoken'; 
 import multer from 'multer';
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
 import { agentSchema } from './models/Agent.js'; 
 
@@ -64,8 +65,7 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
 
     const { firstName, lastName, email } = req.body;
 
-    // --- 1. GENERATE UNIQUE SLUG (lawrencecole format) ---
-    // Clean names: remove special characters and extra spaces
+    // --- 1. GENERATE UNIQUE SLUG ---
     const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const cleanLast = lastName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
@@ -73,7 +73,6 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
     let finalSlug = baseSlug;
     let counter = 1;
 
-    // Check database for existing slug and increment if necessary
     let slugExists = await Agent.findOne({ slug: finalSlug });
     while (slugExists) {
       counter++;
@@ -82,40 +81,46 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // --- 2. HANDLE IMAGE UPLOAD TO IDRIVE E2 ---
+    // --- 2. HANDLE IMAGE UPLOAD & SIGNED URL ---
     let photoUrl = "";
     if (req.file) {
       const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
+      const fileKey = `profiles/${fileName}`;
       
       const uploadParams = {
         Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-        Key: `profiles/${fileName}`,
+        Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
+        // No ACL added here as per your Private Key requirement
       };
 
       await s3Client.send(new PutObjectCommand(uploadParams));
       
-      // Construct the public URL
-      photoUrl = `${process.env.IDRIVE_ENDPOINT}/${process.env.IDRIVE_BUCKET_NAME}/profiles/${fileName}`;
+      // Create a Signed URL for private access (valid for 7 days)
+      const getCommand = new GetObjectCommand({
+        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+        Key: fileKey,
+      });
+
+      photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 604800 });
     }
 
     // --- 3. CREATE AGENT DOCUMENT ---
     const newAgent = new Agent({
       ...req.body,
-      firstName: firstName.trim(), // Keep original clean string for display
+      firstName: firstName.trim(),
       lastName: lastName.trim(),
-      slug: finalSlug,           // Use our newly generated unique slug
+      slug: finalSlug,
       photoUrl: photoUrl || "",
       role: 'agent',    
       program: req.body.program || "N/A",
-    bio: req.body.bio || "",
-    plan: req.body.plan || "BASIC"
-  });
+      bio: req.body.bio || "",
+      plan: req.body.plan || "BASIC"
+    });
 
     await newAgent.save();
     
-    // --- 4. GENERATE JWT TOKEN ---
     const token = jwt.sign(
       { id: newAgent._id, slug: newAgent.slug }, 
       process.env.JWT_SECRET, 
@@ -131,18 +136,12 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
 
   } catch (err) {
     console.error("Registration Error Detail:", err);
-    
-    // Improved error messaging for the user
     let errorMessage = err.message;
     if (err.code === 11000) {
       const duplicateField = Object.keys(err.keyValue)[0];
-      errorMessage = `${duplicateField.charAt(0).toUpperCase() + duplicateField.slice(1)} already exists. Please use a different one.`;
+      errorMessage = `${duplicateField.charAt(0).toUpperCase() + duplicateField.slice(1)} already exists.`;
     }
-
-    res.status(400).json({ 
-      success: false, 
-      message: errorMessage 
-    });
+    res.status(400).json({ success: false, message: errorMessage });
   }
 });
 
@@ -195,7 +194,9 @@ if (process.env.NODE_ENV === 'production') {
   const distPath = path.resolve(__dirname, '../dist');
   app.use(express.static(distPath));
 
-  app.get(/^(?!\/api).+/, (req, res) => {
+  // Corrected wildcard for Vercel/Express Compatibility
+  app.get('*', (req, res) => {
+    if (req.path.startsWith('/api')) return; 
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }

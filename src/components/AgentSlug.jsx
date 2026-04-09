@@ -113,20 +113,33 @@ export const AgentSlug = () => {
 
           <div className="flex flex-col md:flex-row items-start md:items-center gap-8">
             {/* Soft Squircle Profile Image */}
-            <div className="relative">
-              <div className="w-32 h-32 md:w-44 md:h-44 rounded-[3rem] bg-white border-[6px] border-white shadow-[0_20px_50px_rgba(0,0,0,0.1)] overflow-hidden flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
-                {agentData.photoUrl ? (
-                  <img src={agentData.photoUrl} alt={fullName} className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-4xl font-black text-blue-100">
-                    {agentData.firstName[0]}{agentData.lastName[0]}
-                  </span>
-                )}
-              </div>
-              <div className="absolute -bottom-2 -right-2 bg-blue-600 text-white p-2 rounded-full border-4 border-[#FDFDFD]">
-                 <BsCheckCircleFill size={16} />
-              </div>
-            </div>
+          {/* Soft Squircle Profile Image */}
+<div className="relative">
+  <div className="w-32 h-32 md:w-44 md:h-44 rounded-[3rem] bg-white border-[6px] border-white shadow-[0_20px_50px_rgba(0,0,0,0.1)] overflow-hidden flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+    {agentData.photoUrl ? (
+      <img 
+        src={agentData.photoUrl} 
+        alt={fullName} 
+        className="w-full h-full object-cover"
+        // ADD THESE TWO LINES BELOW
+        crossOrigin="anonymous"
+        referrerPolicy="no-referrer-when-downgrade"
+        // Add an error fallback in case the signed URL expires
+        onError={(e) => {
+          e.target.onerror = null;
+          e.target.src = `https://ui-avatars.com/api/?name=${fullName}&background=0e3791&color=fff`;
+        }}
+      />
+    ) : (
+      <span className="text-4xl font-black text-blue-100">
+        {agentData.firstName?.[0]}{agentData.lastName?.[0]}
+      </span>
+    )}
+  </div>
+  <div className="absolute -bottom-2 -right-2 bg-blue-600 text-white p-2 rounded-full border-4 border-[#FDFDFD]">
+    <BsCheckCircleFill size={16} />
+  </div>
+</div>
             
             <div className="space-y-3 max-w-sm">
   {/* Display Occupation */}
