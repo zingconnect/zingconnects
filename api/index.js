@@ -30,7 +30,6 @@ const s3Client = new S3Client({
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- DATABASE SINGLETON (Vercel Optimized) ---
 let cachedDb = null;
 
 async function connectToDatabase() {
@@ -38,19 +37,21 @@ async function connectToDatabase() {
     return cachedDb;
   }
 
-  // FIXED: Defined connection options to prevent ReferenceError
+  // 2. Critical connection options for Serverless/Vercel
   const opts = {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-    serverSelectionTimeoutMS: 5000,
+    serverSelectionTimeoutMS: 10000, // Wait 10s before giving up
+    socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
+    family: 4 // Force IPv4 (sometimes helps with Vercel/Atlas resolution)
   };
 
   try {
+    console.log("Connecting to:", process.env.AGENT_DB_URI.split('@')[1]); // Log host only for safety
     cachedDb = await mongoose.connect(process.env.AGENT_DB_URI, opts);
-    console.log("MongoDB Connected Successfully");
     return cachedDb;
   } catch (err) {
-    console.error("MongoDB Connection Error:", err);
+    console.error("CRITICAL MONGODB ERROR:", err.message);
     throw err;
   }
 }
