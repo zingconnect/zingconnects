@@ -7,7 +7,7 @@ import { Registration } from './components/Registration';
 import { AgentSlug } from './components/AgentSlug';
 import { AgentDashboard } from './components/AgentDashboard'; 
 import { UserDashboard } from './components/UserDashboard'; 
-import { AgentProfile } from './pages/agent/AgentProfile';
+import { AgentProfile } from './components/AgentProfile'; 
 
 function App() {
   return (
@@ -18,20 +18,13 @@ function App() {
         <Route path="/Registration" element={<Registration />} />
 
         {/* --- 2. PROTECTED AGENT ROUTES --- */}
-        {/* We place these at the very top of the stack to ensure they match first */}
         <Route path="/agent/dashboard" element={<AgentDashboard />} />
-        
-        {/* Use both versions (with and without trailing slash) to be safe */}
         <Route path="/agent/profile" element={<AgentProfile />} />
-        <Route path="/agent/profile/" element={<AgentProfile />} />
 
         {/* --- 3. PROTECTED USER ROUTES --- */}
         <Route path="/user/dashboard" element={<UserDashboard />} />
 
         {/* --- 4. DYNAMIC PUBLIC PROFILES --- */}
-        {/* CRITICAL: This MUST stay below all /agent and /user routes. 
-            If you visit /agent/profile, React Router checks the routes above first.
-        */}
         <Route path="/:slug" element={<AgentSlug />} />
         
         {/* --- 5. GLOBAL FALLBACK --- */}
