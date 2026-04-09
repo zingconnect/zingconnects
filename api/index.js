@@ -177,13 +177,17 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   }
 });
 
-// 1. Agent Login (Updated to include subscription status)
 app.post('/api/agents/login', async (req, res) => {
   try {
     await connectToDatabase();
+    
     const { email, password } = req.body;
-
-    const agent = await Agent.findOne({ email: email.toLowerCase().trim() }).select('+password');
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email and password required" });
+    }
+    const agent = await Agent.findOne({ 
+      email: email.toLowerCase().trim() 
+    }).select('+password');
     
     if (!agent) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
@@ -193,22 +197,22 @@ app.post('/api/agents/login', async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
-
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
-    // RETURN SUBSCRIPTION DATA HERE
+    // Final Payload
     res.json({ 
       success: true, 
       token, 
       slug: agent.slug,
-      isSubscribed: agent.isSubscribed, // Added
-      plan: agent.plan,                 // Added
+      isSubscribed: !!agent.isSubscribed, 
+      plan: agent.plan || "BASIC",        
       message: "Agent Verified" 
     });
+
   } catch (err) {
     console.error("Agent Login Error:", err);
     res.status(500).json({ success: false, message: "Server login error" });

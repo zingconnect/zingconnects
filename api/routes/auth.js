@@ -100,36 +100,36 @@ router.post('/register', upload.single('photo'), async (req, res) => {
   }
 });
 
-// --- 2. AGENT LOGIN (UPDATED WITH SUBSCRIPTION STATUS) ---
+// --- 2. AGENT LOGIN ---
 router.post('/login', async (req, res) => {
   try {
     const Agent = getAgentModel();
     const { email, password } = req.body;
-
-    const agent = await Agent.findOne({ email: email.toLowerCase().trim() });
+    const agent = await Agent.findOne({ 
+      email: email.toLowerCase().trim() 
+    }).select('+password'); // <--- CRITICAL ADDITION
     
     if (!agent) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
-
     const isMatch = await bcrypt.compare(password, agent.password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
+    // 3. Generate JWT
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
-
     res.json({ 
       success: true, 
       token, 
       slug: agent.slug,
       role: 'agent',
-      isSubscribed: agent.isSubscribed || false, // CRITICAL FOR PAYWALL
-      plan: agent.plan || 'BASIC'               // CRITICAL FOR PAYWALL
+      isSubscribed: !!agent.isSubscribed, 
+      plan: agent.plan || 'BASIC'
     });
 
   } catch (err) {
@@ -137,7 +137,6 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
 // --- 3. GET AGENT PROFILE ---
 router.get('/profile', authenticateToken, async (req, res) => {
   try {

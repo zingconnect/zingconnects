@@ -4,7 +4,8 @@ export const agentSchema = new mongoose.Schema({
   firstName: { type: String, required: true },
   lastName: { type: String, required: true },
   email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
+  // ADDED select: false for better security
+  password: { type: String, required: true, select: false }, 
   slug: { type: String, required: true, unique: true },
   address: String,
   occupation: String,
@@ -35,8 +36,6 @@ export const agentSchema = new mongoose.Schema({
   currentPeriodEnd: { type: Date }
 }, { timestamps: true });
 
-// 1. Define the model constant
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
-// 2. Export as default (This fixes the index.js boot error)
 export default Agent;

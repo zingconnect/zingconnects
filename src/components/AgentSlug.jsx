@@ -72,8 +72,7 @@ export const AgentSlug = () => {
       setIsProcessing(false);
     }
   };
-
-  // --- HANDLER 2: AGENT PORTAL LOGIN (Email + Password) ---
+  // --- HANDLER 2: AGENT PORTAL LOGIN (Updated to store subscription status) ---
   const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
@@ -87,8 +86,14 @@ export const AgentSlug = () => {
       const data = await response.json();
       
       if (response.ok && data.token) {
+        // --- UPDATED STORAGE LOGIC ---
         localStorage.setItem('zingToken', data.token);
         localStorage.setItem('agentSlug', data.slug);
+        
+        // Store subscription data so the Dashboard can access it immediately
+        localStorage.setItem('isSubscribed', data.isSubscribed); 
+        localStorage.setItem('agentPlan', data.plan);
+
         alert("Agent Verified. Entering Portal...");
         setIsLoginOpen(false);
         navigate('/agent/dashboard');
