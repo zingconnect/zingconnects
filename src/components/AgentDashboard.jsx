@@ -32,11 +32,33 @@ export const AgentDashboard = () => {
   const [selectedPlan, setSelectedPlan] = useState("");
 
   // --- PLANS CONFIGURATION ---
-  const plans = [
-    { id: "BASIC", price: 29, features: ["5 Active Leads", "Standard Support"] },
-    { id: "PRO", price: 79, features: ["Unlimited Leads", "Priority Support"] },
-    { id: "ENTERPRISE", price: 149, features: ["Custom Branding", "Dedicated Manager"] }
-  ];
+ const plans = [
+  {
+    tier: 'BASIC',
+    term: '1 Month',
+    price: '15',
+    frequency: '/mo',
+    popular: false,
+    features: ['Instant Link', 'Unlimited Chats', 'Dashboard'],
+  },
+  {
+    tier: 'GROWTH',
+    term: '6 Months',
+    price: '45',
+    frequency: '',
+    popular: true,
+    features: ['All Basic', 'Priority Routing', '24/7 Support'],
+  },
+  {
+    tier: 'PROFESSIONAL',
+    term: '1 Year',
+    price: '110',
+    frequency: '',
+    popular: false,
+    features: ['All Growth', 'Voice Changer', 'Analytics'],
+  },
+];
+
 
   // --- AUTH CHECK & INITIAL FETCH ---
   useEffect(() => {
