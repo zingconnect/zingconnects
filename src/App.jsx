@@ -22,8 +22,8 @@ function App() {
             Otherwise, React Router thinks "agent" is a slug name. 
         */}
         <Route path="/agent/dashboard" element={<AgentDashboard />} />
-        <Route path="/agent/profile" element={<AgentProfile />} />
-        
+      <Route exact path="/agent/profile" element={<AgentProfile />} />
+
         {/* --- 3. PROTECTED USER ROUTES --- */}
         <Route path="/user/dashboard" element={<UserDashboard />} />
 

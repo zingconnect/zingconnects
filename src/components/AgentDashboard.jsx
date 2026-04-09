@@ -78,30 +78,36 @@ export const AgentDashboard = () => {
       {/* SIDEBAR: User List */}
       <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
         
-        {/* Sidebar Header */}
-      <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0 relative z-[100]">
+      {/* Sidebar Header */}
+<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0 relative">
+  
   <div className="flex items-center">
+    {/* FORCE CLICK: We use 'fixed' to take it out of the sidebar flow 
+      and 'z-[9999]' to put it above every other element in the app.
+    */}
     <button 
       type="button"
-      /* Explicitly use e.stopPropagation to ensure the click isn't swallowed by parents */
       onClick={(e) => {
+        e.preventDefault();
         e.stopPropagation();
-        console.log("Profile button clicked!");
+        console.log("NAVIGATING NOW");
+        // Try React Router first
         navigate('/agent/profile');
+        // Fallback if Router is being blocked by a layout issue
+        if (window.location.pathname !== '/agent/profile') {
+          window.location.href = '/agent/profile';
+        }
       }}
-      /* relative z-[110] ensures it is above the header's z-100 */
-      className="group p-2 -ml-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center relative z-[110]"
-      style={{ isolation: 'isolate' }}
+      className="fixed top-[9px] left-[12px] md:top-[14px] group p-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center z-[9999] bg-[#f0f2f5]"
     >
       <BsPersonCircle 
         size={32} 
-        /* pointer-events-none ensures the click passes THROUGH the icon to the button */
         className="text-gray-400 group-hover:text-blue-600 transition-colors pointer-events-none" 
       />
     </button>
   </div>
   
-  <div className="flex gap-4 md:gap-6 text-gray-500 relative z-[110]">
+  <div className="flex gap-4 md:gap-6 text-gray-500 ml-auto">
     <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
   </div>
 </header>
