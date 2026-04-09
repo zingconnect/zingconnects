@@ -167,44 +167,51 @@ app.post('/api/agents/login', async (req, res) => {
 });
 
 // 3. Fetch Agent Profile (Public)
-// 3. Fetch Agent Profile (Public)
 app.get('/api/agents/:slug', async (req, res) => {
   try {
-    const agent = await Agent.findOne({ slug: req.params.slug }).select('-password');
+    const { slug } = req.params;
+    console.log(`--- FETCHING AGENT: ${slug} ---`);
+
+    const agent = await Agent.findOne({ slug }).select('-password');
     
     if (!agent) {
+      console.log(`AGENT NOT FOUND IN DB: ${slug}`);
       return res.status(404).json({ message: "Agent not found" });
     }
 
-    // Convert Mongoose document to plain JS object so we can edit photoUrl
     const agentObj = agent.toObject();
 
-    // If a photo exists, generate a fresh signature
-    if (agentObj.photoUrl) {
+    // Safety check for photoUrl
+    if (agentObj.photoUrl && agentObj.photoUrl.includes('/')) {
       try {
-        // Extract the filename from the stored URL
-        // Works whether it's a full URL or just a path
         const urlParts = agentObj.photoUrl.split('/');
-        const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
+        // Extract filename and strip any existing query params
+        const fileNameWithParams = urlParts[urlParts.length - 1];
+        const fileName = fileNameWithParams.split('?')[0]; 
         
+        console.log(`Generating signed URL for: profiles/${fileName}`);
+
         const getCommand = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Bucket: process.env.IDRIVE_BUCKET_NAME,
           Key: `profiles/${fileName}`,
         });
 
-        // Generate a fresh signed URL valid for 1 hour
         agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
       } catch (s3Err) {
-        console.error("S3 Signing Error:", s3Err);
-        // Fallback to empty if signing fails so initials show
-        agentObj.photoUrl = "";
+        console.error("S3 SIGNING ERROR:", s3Err.message);
+        // Don't crash the whole request if S3 fails; just send the profile without the photo
+        agentObj.photoUrl = ""; 
       }
     }
 
     res.json(agentObj);
   } catch (err) {
-    console.error("Fetch Error:", err);
-    res.status(500).json({ message: "Server error occurred while fetching agent" });
+    console.error("CRITICAL FETCH ERROR:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal Server Error",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    });
   }
 });
 
