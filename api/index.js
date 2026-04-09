@@ -229,22 +229,30 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
 
 // --- SYSTEM & PRODUCTION ---
 app.get('/health', (req, res) => res.status(200).send('OK'));
+// At the bottom of api/index.js
 
 if (process.env.NODE_ENV === 'production') {
-  const distPath = path.resolve(__dirname, '../dist');
+  const distPath = path.join(process.cwd(), 'dist');
+  
   app.use(express.static(distPath));
 
-  // Change '(.*)' to '/:path*' to fix the PathError crash
   app.get('/:path*', (req, res) => {
-    // Safety check for non-existent API routes
     if (req.path.startsWith('/api')) {
       return res.status(404).json({ 
         success: false, 
         message: "API endpoint not found" 
       });
-    }    
-    res.sendFile(path.join(distPath, 'index.html'));
+    }
+
+    const indexPath = path.join(distPath, 'index.html');
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error("Error sending index.html:", err);
+        res.status(500).send("Frontend build not found. Ensure 'npm run build' is working.");
+      }
+    });
   });
 }
- 
+
+// CRITICAL: Export for Vercel
 export default app;
