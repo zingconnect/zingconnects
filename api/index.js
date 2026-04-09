@@ -18,9 +18,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // --- IDRIVE E2 / S3 CONFIGURATION ---
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
@@ -31,37 +28,35 @@ const s3Client = new S3Client({
   },
 });
 
-// Multer in-memory storage for Vercel compatibility
 const upload = multer({ storage: multer.memoryStorage() });
 
+// --- DATABASE SINGLETON (Vercel Optimized) ---
 let cachedDb = null;
 
 async function connectToDatabase() {
-  if (cachedDb) return cachedDb;
+  if (cachedDb && mongoose.connection.readyState === 1) {
+    return cachedDb;
+  }
 
-  // Set options to connect quickly
+  // FIXED: Defined connection options to prevent ReferenceError
   const opts = {
     useNewUrlParser: true,
     useUnifiedTopology: true,
     serverSelectionTimeoutMS: 5000,
   };
 
-  // Connect to the specific Agent Database
-  const conn = await mongoose.connect(process.env.AGENT_DB_URI, opts);
-  cachedDb = conn;
-  return conn;
+  try {
+    cachedDb = await mongoose.connect(process.env.AGENT_DB_URI, opts);
+    console.log("MongoDB Connected Successfully");
+    return cachedDb;
+  } catch (err) {
+    console.error("MongoDB Connection Error:", err);
+    throw err;
+  }
 }
 
-const userDb = mongoose.createConnection(process.env.USER_DB_URI, connectionOptions);
-const agentDb = mongoose.createConnection(process.env.AGENT_DB_URI, connectionOptions);
-
-// Add error listeners to see the actual error in Vercel Logs
-userDb.on('error', err => console.error("User DB Error:", err));
-agentDb.on('error', err => console.error("Agent DB Error:", err));
-
+// Initialize Model on the default connection
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
-
-const getAgentModel = () => Agent; // Simplified getter
 
 // --- AUTHENTICATION MIDDLEWARE ---
 const authenticateToken = (req, res, next) => {
@@ -77,23 +72,23 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// --- 3. UPDATED REGISTRATION ROUTE ---
+// --- ROUTES ---
+
+// 1. Agent Registration
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   try {
-    // AWAIT DATABASE CONNECTION
     await connectToDatabase();
 
     if (!process.env.JWT_SECRET) {
-      return res.status(500).json({ success: false, message: "Server configuration error" });
+      return res.status(500).json({ success: false, message: "Server config error" });
     }
 
     const { firstName, lastName, email, password } = req.body;
-
     if (!firstName || !email || !password) {
-      return res.status(400).json({ success: false, message: "Required fields missing" });
+      return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    // --- SLUG GENERATION ---
+    // SLUG GENERATION
     const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const cleanLast = lastName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
@@ -109,7 +104,7 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // --- PHOTO UPLOAD ---
+    // PHOTO UPLOAD
     let savedPhotoPath = "";
     if (req.file) {
       try {
@@ -127,15 +122,13 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
         savedPhotoPath = `https://${endpoint}/${process.env.IDRIVE_BUCKET_NAME}/${fileKey}`;
       } catch (uploadErr) {
         console.error("S3 Upload Failed:", uploadErr.message);
-        savedPhotoPath = ""; 
       }
     }
 
-    // --- PASSWORD HASHING ---
+    // PASSWORD HASHING
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // --- CREATE DOCUMENT ---
     const newAgent = new Agent({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -163,28 +156,30 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       { expiresIn: '24h' }
     );
     
-    res.status(201).json({ 
-      success: true, 
-      token, 
-      slug: finalSlug, 
-      message: "Registration successful." 
-    });
+    res.status(201).json({ success: true, token, slug: finalSlug, message: "Registration successful." });
 
   } catch (err) {
     console.error("Registration Error:", err);
     res.status(err.code === 11000 ? 400 : 500).json({ 
       success: false, 
-      message: err.code === 11000 ? "Email already exists" : err.message 
+      message: err.code === 11000 ? "Email already exists" : "Internal Server Error" 
     });
   }
 });
 
-// 2. Agent Login
+// 2. Agent Login (FIXED: Now uses bcrypt.compare)
 app.post('/api/agents/login', async (req, res) => {
-  const { email, password } = req.body;
   try {
-    const agent = await Agent.findOne({ email });
-    if (!agent || agent.password !== password) {
+    await connectToDatabase();
+    const { email, password } = req.body;
+    
+    const agent = await Agent.findOne({ email: email.toLowerCase().trim() });
+    if (!agent) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const isMatch = await bcrypt.compare(password, agent.password);
+    if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -200,63 +195,49 @@ app.post('/api/agents/login', async (req, res) => {
   }
 });
 
+// 3. Get Public Profile
 app.get('/api/agents/:slug', async (req, res) => {
   try {
+    await connectToDatabase();
     const agent = await Agent.findOne({ slug: req.params.slug }).select('-password');
     
-    if (!agent) {
-      return res.status(404).json({ message: "Agent not found" });
-    }
+    if (!agent) return res.status(404).json({ message: "Agent not found" });
 
     const agentObj = agent.toObject();
 
-    // If there is no photo, just send the data immediately
-    if (!agentObj.photoUrl) {
-      return res.json(agentObj);
-    }
+    if (agentObj.photoUrl) {
+      try {
+        const urlParts = agentObj.photoUrl.split('/');
+        const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
+        const fileKey = `profiles/${fileName}`;
 
-    try {
-      const urlParts = agentObj.photoUrl.split('/');
-      const lastPart = urlParts[urlParts.length - 1];
-      const fileName = lastPart.split('?')[0]; 
-      
-      const fileKey = `profiles/${fileName}`;
-
-      const getCommand = new GetObjectCommand({
-        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-        Key: fileKey,
-      });
-      agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
-      
-    } catch (s3Err) {
-      console.error("Non-Critical S3 Error:", s3Err.message);
-      agentObj.photoUrl = ""; 
+        const getCommand = new GetObjectCommand({
+          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Key: fileKey,
+        });
+        agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
+      } catch (s3Err) {
+        console.error("S3 Get Error:", s3Err.message);
+      }
     }
 
     res.json(agentObj);
-
   } catch (err) {
-    // This is the "Safety Net" that prevents the 500 error
-    console.error("CRITICAL SERVER ERROR:", err);
-    res.status(500).json({ message: "Server encountered an error processing this profile" });
+    res.status(500).json({ message: "Error processing profile" });
   }
 });
 
-// 4. Protected Route: Agent Dashboard Data
+// 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
+    await connectToDatabase();
     const agent = await Agent.findById(req.agent.id).select('-password');
-    res.json({ message: "Welcome to your secure portal", agent });
+    res.json({ agent });
   } catch (err) {
     res.status(500).json({ message: "Error fetching dashboard" });
   }
 });
 
-// --- SYSTEM & PRODUCTION ---
 app.get('/health', (req, res) => res.status(200).send('OK'));
-// At the bottom of api/index.js
 
-
-
-// CRITICAL: Export for Vercel
 export default app;
