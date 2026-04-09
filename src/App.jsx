@@ -18,24 +18,24 @@ function App() {
         <Route path="/Registration" element={<Registration />} />
 
         {/* --- 2. PROTECTED AGENT ROUTES --- */}
-        {/* CRITICAL: These static paths MUST come before /:slug. 
-            Otherwise, React Router thinks "agent" is a slug name. 
-        */}
+        {/* We place these at the very top of the stack to ensure they match first */}
         <Route path="/agent/dashboard" element={<AgentDashboard />} />
-      <Route exact path="/agent/profile" element={<AgentProfile />} />
+        
+        {/* Use both versions (with and without trailing slash) to be safe */}
+        <Route path="/agent/profile" element={<AgentProfile />} />
+        <Route path="/agent/profile/" element={<AgentProfile />} />
 
         {/* --- 3. PROTECTED USER ROUTES --- */}
         <Route path="/user/dashboard" element={<UserDashboard />} />
 
         {/* --- 4. DYNAMIC PUBLIC PROFILES --- */}
-        {/* This is a "Catch-specific" route. It matches anything that 
-            wasn't caught by the static routes above it.
+        {/* CRITICAL: This MUST stay below all /agent and /user routes. 
+            If you visit /agent/profile, React Router checks the routes above first.
         */}
         <Route path="/:slug" element={<AgentSlug />} />
         
         {/* --- 5. GLOBAL FALLBACK --- */}
-        {/* Redirects any completely unknown URL back to home */}
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );

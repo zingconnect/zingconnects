@@ -78,32 +78,34 @@ export const AgentDashboard = () => {
       {/* SIDEBAR: User List */}
       <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
         
-<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0 relative z-[50]">
-  <div className="flex items-center">
-    <button 
-      type="button"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log("Profile clicked!");
-        navigate('/agent/profile');
-      }}
-      /* Added h-10 w-10 and relative z-[60] to give the button a real physical area */
-      className="group h-10 w-10 -ml-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center relative z-[60]"
-    >
-      <BsPersonCircle 
-        size={32} 
-        /* CRITICAL: pointer-events-none makes the SVG 'invisible' to clicks 
-           so the click hits the button behind it instead. */
-        className="text-gray-400 group-hover:text-blue-600 transition-colors pointer-events-none" 
-      />
-    </button>
-  </div>
-  
-  <div className="flex gap-4 md:gap-6 text-gray-500 relative z-[60]">
-    <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
-  </div>
-</header>
+       <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0 relative z-[100]">
+          <div className="flex items-center relative z-[110]">
+            <button 
+              type="button"
+              /* DIAGNOSTIC CLICK HANDLER */
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("DIAGNOSTIC: Profile Clicked");
+                alert("CLICK DETECTED! Redirecting...");
+                window.location.href = "/agent/profile"; 
+              }}
+              /* Explicit high z-index and dimensions */
+              className="group h-12 w-12 -ml-2 rounded-full hover:bg-gray-300 transition-all cursor-pointer flex items-center justify-center relative z-[9999]"
+              style={{ pointerEvents: 'auto' }}
+            >
+              <BsPersonCircle 
+                size={32} 
+                /* Ensures the icon doesn't block the button's event area */
+                className="text-gray-400 group-hover:text-blue-600 transition-colors pointer-events-none" 
+              />
+            </button>
+          </div>
+          
+          <div className="flex gap-4 md:gap-6 text-gray-500 relative z-[110]">
+            <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
+          </div>
+        </header>
 
         {/* Search Bar */}
         <div className="p-2 bg-white">
@@ -146,7 +148,7 @@ export const AgentDashboard = () => {
       {/* MAIN CHAT AREA */}
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative h-full overflow-hidden`}>
         
-        {/* WhatsApp Background Overlay */}
+        {/* Background Overlay - pointer-events-none ensures no invisible click blocking */}
         <div 
           className="absolute inset-0 opacity-[0.05] pointer-events-none z-0" 
           style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
