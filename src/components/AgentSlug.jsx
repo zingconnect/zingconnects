@@ -132,7 +132,7 @@ export const AgentSlug = () => {
       />
     ) : (
       <span className="text-4xl font-black text-blue-100">
-        {agentData.firstName?.[0]}{agentData.lastName?.[0]}
+{agentData?.firstName?.[0]}{agentData?.lastName?.[0]}
       </span>
     )}
   </div>

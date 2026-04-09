@@ -167,13 +167,44 @@ app.post('/api/agents/login', async (req, res) => {
 });
 
 // 3. Fetch Agent Profile (Public)
+// 3. Fetch Agent Profile (Public)
 app.get('/api/agents/:slug', async (req, res) => {
   try {
     const agent = await Agent.findOne({ slug: req.params.slug }).select('-password');
-    if (!agent) return res.status(404).json({ message: "Agent not found" });
-    res.json(agent);
+    
+    if (!agent) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    // Convert Mongoose document to plain JS object so we can edit photoUrl
+    const agentObj = agent.toObject();
+
+    // If a photo exists, generate a fresh signature
+    if (agentObj.photoUrl) {
+      try {
+        // Extract the filename from the stored URL
+        // Works whether it's a full URL or just a path
+        const urlParts = agentObj.photoUrl.split('/');
+        const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
+        
+        const getCommand = new GetObjectCommand({
+          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Key: `profiles/${fileName}`,
+        });
+
+        // Generate a fresh signed URL valid for 1 hour
+        agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
+      } catch (s3Err) {
+        console.error("S3 Signing Error:", s3Err);
+        // Fallback to empty if signing fails so initials show
+        agentObj.photoUrl = "";
+      }
+    }
+
+    res.json(agentObj);
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    console.error("Fetch Error:", err);
+    res.status(500).json({ message: "Server error occurred while fetching agent" });
   }
 });
 
