@@ -39,6 +39,11 @@ export const agentSchema = new mongoose.Schema({
     type: Boolean, 
     default: false 
   },
+  paymentDetails: {
+    amountNgn: { type: Number },
+    rateUsed: { type: Number },
+    currency: { type: String, default: 'NGN' }
+  },
 
   lastTransactionId: { type: String, default: '' }
 }, { timestamps: true });

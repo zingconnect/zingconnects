@@ -177,22 +177,16 @@ router.post('/update-plan', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Plan update failed" });
   }
 });
-
-// --- 5. VERIFY SUBSCRIPTION (USD to NGN Logic + Expiry Calculation) ---
+// --- 5. VERIFY SUBSCRIPTION (FIXED RATE LOGIC + Expiry Calculation) ---
 router.post('/verify', authenticateToken, async (req, res) => {
   const { transaction_id, plan, usdAmount } = req.body;
   const agentId = req.user.id;
   const Agent = getAgentModel();
 
   try {
-    // 1. Fetch Live Exchange Rate
-    let currentRate = 1500; 
-    try {
-      const rateRes = await axios.get(`https://v6.exchangerate-api.com/v6/${process.env.EXCHANGE_RATE_API_KEY}/pair/USD/NGN`);
-      currentRate = rateRes.data.conversion_rate;
-    } catch (e) {
-      console.error("Exchange API Error, using fallback.");
-    }
+    // 1. USE FIXED RATE FROM .ENV
+    // We use Number() to ensure it's a digit and 1550 as a hard fallback
+    const currentRate = Number(process.env.USD_TO_NGN_RATE) || 1550;
 
     // 2. Verify with Flutterwave
     const response = await flw.Transaction.verify({ id: transaction_id });
@@ -201,7 +195,7 @@ router.post('/verify', authenticateToken, async (req, res) => {
       const amountPaid = response.data.amount;
       const expectedNaira = usdAmount * currentRate;
 
-      // Allow 2% fluctuation margin
+      // Allow 2% fluctuation margin (Safety buffer)
       if (amountPaid >= (expectedNaira * 0.98)) {
         
         // 3. CALCULATE EXPIRY DATE
@@ -223,17 +217,22 @@ router.post('/verify', authenticateToken, async (req, res) => {
               isSubscribed: true,
               plan: plan,
               subscriptionDate: now,
+              subscriptionAmount: usdAmount, // Store the USD cost
               expiryDate: expiry,
               expiryNotificationSent: false, // Reset warning tracker for new sub
               lastTransactionId: transaction_id,
-              paymentMeta: {
-                nairaPaid: amountPaid,
-                rateUsed: currentRate
+              // Updated to match your schema's paymentDetails field
+              paymentDetails: {
+                amountNgn: amountPaid,
+                rateUsed: currentRate,
+                currency: "NGN"
               }
             }
           }, 
           { new: true }
-        );
+        ).select('-password');
+
+        console.log(`[FIXED RATE: ${currentRate}] Subscription ACTIVATED for: ${updatedAgent.email}`);
 
         return res.status(200).json({ 
           success: true, 
@@ -241,7 +240,10 @@ router.post('/verify', authenticateToken, async (req, res) => {
           agent: updatedAgent 
         });
       } else {
-        return res.status(400).json({ success: false, message: "Insufficient amount paid." });
+        return res.status(400).json({ 
+          success: false, 
+          message: `Insufficient amount. Expected approx ₦${expectedNaira.toLocaleString()}` 
+        });
       }
     } else {
       return res.status(400).json({ success: false, message: "Transaction failed at gateway." });

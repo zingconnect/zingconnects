@@ -560,6 +560,30 @@ app.put('/api/agents/update-profile', async (req, res) => {
   }
 });
 
+// --- Utility Function to calculate Fixed Naira Amount ---
+const getNairaAmount = (usdAmount) => {
+  // Pull the rate from .env, or use 1550 as a hard fallback if .env fails to load
+  const FIXED_RATE = Number(process.env.USD_TO_NGN_RATE);
+  
+  // Multiply and round up to the nearest whole Naira for Flutterwave
+  return Math.ceil(usdAmount * FIXED_RATE);
+};
+
+// --- Route to get the "Price Tag" in Naira for the frontend ---
+app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
+  const { planPrice } = req.params;
+  const FIXED_RATE = Number(process.env.USD_TO_NGN_RATE);
+  
+  const nairaEquivalent = getNairaAmount(Number(planPrice));
+  
+  res.json({
+    usd: planPrice,
+    ngn: nairaEquivalent,
+    rate: FIXED_RATE // Returning the static rate used
+  });
+});
+
+// --- Payment Verification Route ---
 app.post('/api/subscriptions/verify', async (req, res) => {
   try {
     await connectToDatabase();
@@ -583,18 +607,15 @@ app.post('/api/subscriptions/verify', async (req, res) => {
       return res.status(400).json({ message: "Transaction ID is required" });
     }
 
-    let currentRate = 1500;
-    try {
-      const rateRes = await axios.get(`https://v6.exchangerate-api.com/v6/${process.env.EXCHANGE_RATE_API_KEY}/pair/USD/NGN`);
-      currentRate = rateRes.data.conversion_rate;
-    } catch (rateErr) {
-      console.error("Exchange Rate API failed, using fallback:", rateErr.message);
-    }
+    // --- USE FIXED RATE FROM ENV ---
+    const currentRate = Number(process.env.USD_TO_NGN_RATE) || 1550;
 
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
+    
+    // Calculate expected amount based on your fixed rate
     const expectedNaira = usdAmount * currentRate;
-    const margin = 0.98; 
+    const margin = 0.98; // Allows for 2% variance just in case
 
     if (
       data.status === "successful" &&
@@ -602,16 +623,15 @@ app.post('/api/subscriptions/verify', async (req, res) => {
       data.amount >= (expectedNaira * margin)
     ) {
       
-      // --- CALCULATION OF EXPIRY DATE ---
       const now = new Date();
       let expiry = new Date();
 
       if (plan === 'BASIC') {
-        expiry.setMonth(now.getMonth() + 1); // 1 Month
+        expiry.setMonth(now.getMonth() + 1);
       } else if (plan === 'GROWTH') {
-        expiry.setMonth(now.getMonth() + 6); // 6 Months
+        expiry.setMonth(now.getMonth() + 6);
       } else if (plan === 'PROFESSIONAL') {
-        expiry.setFullYear(now.getFullYear() + 1); // 1 Year
+        expiry.setFullYear(now.getFullYear() + 1);
       }
 
       const updatedAgent = await Agent.findByIdAndUpdate(
@@ -623,11 +643,11 @@ app.post('/api/subscriptions/verify', async (req, res) => {
             subscriptionDate: now,
             subscriptionAmount: usdAmount,
             expiryDate: expiry, 
-            expiryNotificationSent: false, // Reset warning flag for new cycle
+            expiryNotificationSent: false,
             lastTransactionId: transaction_id,
             paymentDetails: {
               amountNgn: data.amount,
-              rateUsed: currentRate,
+              rateUsed: currentRate, // Log the fixed rate used at time of purchase
               currency: "NGN"
             }
           }
@@ -635,17 +655,17 @@ app.post('/api/subscriptions/verify', async (req, res) => {
         { new: true }
       ).select('-password');
 
-      console.log(`Subscription ACTIVATED until ${expiry} for: ${updatedAgent.email}`);
+      console.log(`Subscription ACTIVATED at FIXED RATE (${currentRate}) for: ${updatedAgent.email}`);
 
       return res.json({
         success: true,
-        message: "Naira payment verified. Secure node activated.",
+        message: "Payment verified at platform rate. Secure node activated.",
         agent: updatedAgent
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: "Payment verification failed."
+        message: "Payment verification failed. Amount does not match platform rate."
       });
     }
 
@@ -654,39 +674,6 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-const getNairaAmount = async (usdAmount) => {
-  try {
-    // Replace 'YOUR_API_KEY' with a free key from https://www.exchangerate-api.com/
-    const API_KEY = process.env.EXCHANGE_RATE_API_KEY; 
-    const url = `https://v6.exchangerate-api.com/v6/${API_KEY}/pair/USD/NGN/${usdAmount}`;
-    
-    const response = await axios.get(url);
-    
-    if (response.data && response.data.conversion_result) {
-      // Flutterwave works best with rounded integers for Naira
-      return Math.ceil(response.data.conversion_result);
-    }
-    throw new Error("Could not fetch exchange rate");
-  } catch (error) {
-    console.error("Exchange Rate Error:", error.message);
-    // Fallback rate in case the API is down (Emergency only!)
-    return usdAmount * 1500; 
-  }
-};
-
-// --- Route to get the "Price Tag" in Naira for the frontend ---
-app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
-  const { planPrice } = req.params; // e.g. 15
-  const nairaEquivalent = await getNairaAmount(planPrice);
-  
-  res.json({
-    usd: planPrice,
-    ngn: nairaEquivalent,
-    rate: nairaEquivalent / planPrice
-  });
-});
-
 // 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
