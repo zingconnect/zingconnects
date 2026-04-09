@@ -225,9 +225,11 @@ if (process.env.NODE_ENV === 'production') {
   const distPath = path.resolve(__dirname, '../dist');
   app.use(express.static(distPath));
 
-  // Corrected wildcard for Vercel/Express Compatibility
   app.get('*', (req, res) => {
-    if (req.path.startsWith('/api')) return; 
+    if (req.path.startsWith('/api')) {
+      return res.status(404).json({ message: "API endpoint not found" });
+    }
+    
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }

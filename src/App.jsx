@@ -16,8 +16,8 @@ function App() {
 
         {/* Step 3: Dynamic Agent Profile Page */}
         {/* The ':slug' acts as a variable to capture the unique name from the URL */}
-        <Route path="/agent/:slug" element={<AgentSlug />} />
-
+        <Route path="/:slug" element={<AgentSlug />} />
+        
         {/* Catch-all: Redirect any random URL back to pricing */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

@@ -4,7 +4,7 @@ import { agentSchema } from '../models/Agent.js';
 
 const router = express.Router();
 
-const agentDb = mongoose.connection.useDb('zingconnect');
+const agentDb = mongoose.connection.useDb('zingconnect'); 
 const Agent = agentDb.models.Agent || agentDb.model('Agent', agentSchema);
 
 router.post('/register', async (req, res) => {
@@ -24,10 +24,8 @@ router.post('/register', async (req, res) => {
       photoUrl // Received from the upload logic in index.js or passed in body
     } = req.body;
 
-    // --- CUSTOM SLUG LOGIC ---
-    // 1. Create base: lawrenceyoung (no hyphen between names)
-    const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/\s+/g, '').trim();
-    
+    const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+
     let finalSlug = baseSlug;
     let counter = 1;
 
