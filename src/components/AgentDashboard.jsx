@@ -79,24 +79,32 @@ export const AgentDashboard = () => {
       <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
         
         {/* Sidebar Header */}
-        <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0">
-          <div className="flex items-center">
-            <button 
-              type="button"
-              onClick={() => navigate('/agent/profile')}
-              className="group p-2 -ml-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center relative z-30"
-            >
-              <BsPersonCircle 
-                size={32} 
-                className="text-gray-400 group-hover:text-blue-600 transition-colors" 
-              />
-            </button>
-          </div>
-          
-          <div className="flex gap-4 md:gap-6 text-gray-500">
-            <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
-          </div>
-        </header>
+      <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200 shrink-0 relative z-[100]">
+  <div className="flex items-center">
+    <button 
+      type="button"
+      /* Explicitly use e.stopPropagation to ensure the click isn't swallowed by parents */
+      onClick={(e) => {
+        e.stopPropagation();
+        console.log("Profile button clicked!");
+        navigate('/agent/profile');
+      }}
+      /* relative z-[110] ensures it is above the header's z-100 */
+      className="group p-2 -ml-2 rounded-full hover:bg-gray-200 transition-all cursor-pointer flex items-center justify-center relative z-[110]"
+      style={{ isolation: 'isolate' }}
+    >
+      <BsPersonCircle 
+        size={32} 
+        /* pointer-events-none ensures the click passes THROUGH the icon to the button */
+        className="text-gray-400 group-hover:text-blue-600 transition-colors pointer-events-none" 
+      />
+    </button>
+  </div>
+  
+  <div className="flex gap-4 md:gap-6 text-gray-500 relative z-[110]">
+    <BsThreeDotsVertical className="cursor-pointer hover:text-gray-800" size={18} />
+  </div>
+</header>
 
         {/* Search Bar */}
         <div className="p-2 bg-white">
