@@ -7,6 +7,8 @@ import path from 'path';
 import jwt from 'jsonwebtoken'; 
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import Flutterwave from 'flutterwave-node-v3';
+import axios from 'axios';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
@@ -20,7 +22,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- IDRIVE E2 / S3 CONFIGURATION ---
+const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
+
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
   endpoint: process.env.IDRIVE_ENDPOINT,
@@ -219,20 +222,22 @@ app.post('/api/agents/login', async (req, res) => {
   }
 });
 
-// 2. Get Agent Profile (Used by Dashboard to verify subscription status)
 app.get('/api/agents/profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // req.user.id comes from your JWT middleware
-    const agent = await Agent.findById(req.user.id).select('-password'); 
+    let agent = await Agent.findById(req.agent.id).select('-password'); 
     
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
+    if (agent.isSubscribed && agent.expiryDate && new Date() > new Date(agent.expiryDate)) {
+      console.log(`Locking account for ${agent.email} - Subscription Expired.`);
+      agent.isSubscribed = false;
+      await agent.save(); // Persist the lockout
+    }
 
     res.json(agent); 
-    // This returns the whole object: { email, isSubscribed, plan, etc. }
   } catch (err) {
     res.status(500).json({ success: false, message: "Error fetching profile" });
   }
@@ -508,6 +513,132 @@ app.put('/api/agents/update-profile', async (req, res) => {
       error: err.message 
     });
   }
+});
+
+app.post('/api/subscriptions/verify', async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(403).json({ message: "Session expired" });
+    }
+
+    const { transaction_id, plan, usdAmount } = req.body;
+
+    if (!transaction_id) {
+      return res.status(400).json({ message: "Transaction ID is required" });
+    }
+
+    let currentRate = 1500;
+    try {
+      const rateRes = await axios.get(`https://v6.exchangerate-api.com/v6/${process.env.EXCHANGE_RATE_API_KEY}/pair/USD/NGN`);
+      currentRate = rateRes.data.conversion_rate;
+    } catch (rateErr) {
+      console.error("Exchange Rate API failed, using fallback:", rateErr.message);
+    }
+
+    const response = await flw.Transaction.verify({ id: transaction_id });
+    const data = response.data;
+    const expectedNaira = usdAmount * currentRate;
+    const margin = 0.98; 
+
+    if (
+      data.status === "successful" &&
+      data.currency === "NGN" &&
+      data.amount >= (expectedNaira * margin)
+    ) {
+      
+      // --- CALCULATION OF EXPIRY DATE ---
+      const now = new Date();
+      let expiry = new Date();
+
+      if (plan === 'BASIC') {
+        expiry.setMonth(now.getMonth() + 1); // 1 Month
+      } else if (plan === 'GROWTH') {
+        expiry.setMonth(now.getMonth() + 6); // 6 Months
+      } else if (plan === 'PROFESSIONAL') {
+        expiry.setFullYear(now.getFullYear() + 1); // 1 Year
+      }
+
+      const updatedAgent = await Agent.findByIdAndUpdate(
+        decoded.id,
+        {
+          $set: {
+            isSubscribed: true,
+            plan: plan,
+            subscriptionDate: now,
+            expiryDate: expiry, // Set the future lockout date
+            expiryNotificationSent: false, // Reset warning flag for new cycle
+            lastTransactionId: transaction_id,
+            paymentDetails: {
+              amountNgn: data.amount,
+              rateUsed: currentRate,
+              currency: "NGN"
+            }
+          }
+        },
+        { new: true }
+      ).select('-password');
+
+      console.log(`Subscription ACTIVATED until ${expiry} for: ${updatedAgent.email}`);
+
+      return res.json({
+        success: true,
+        message: "Naira payment verified. Secure node activated.",
+        agent: updatedAgent
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Payment verification failed."
+      });
+    }
+
+  } catch (err) {
+    console.error("FLW VERIFICATION ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+const getNairaAmount = async (usdAmount) => {
+  try {
+    // Replace 'YOUR_API_KEY' with a free key from https://www.exchangerate-api.com/
+    const API_KEY = process.env.EXCHANGE_RATE_API_KEY; 
+    const url = `https://v6.exchangerate-api.com/v6/${API_KEY}/pair/USD/NGN/${usdAmount}`;
+    
+    const response = await axios.get(url);
+    
+    if (response.data && response.data.conversion_result) {
+      // Flutterwave works best with rounded integers for Naira
+      return Math.ceil(response.data.conversion_result);
+    }
+    throw new Error("Could not fetch exchange rate");
+  } catch (error) {
+    console.error("Exchange Rate Error:", error.message);
+    // Fallback rate in case the API is down (Emergency only!)
+    return usdAmount * 1500; 
+  }
+};
+
+// --- Route to get the "Price Tag" in Naira for the frontend ---
+app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
+  const { planPrice } = req.params; // e.g. 15
+  const nairaEquivalent = await getNairaAmount(planPrice);
+  
+  res.json({
+    usd: planPrice,
+    ngn: nairaEquivalent,
+    rate: nairaEquivalent / planPrice
+  });
 });
 
 // 4. Protected Dashboard

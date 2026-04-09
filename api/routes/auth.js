@@ -3,11 +3,15 @@ import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
+import Flutterwave from 'flutterwave-node-v3';
+import axios from 'axios';
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { agentSchema } from '../models/Agent.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
 
 const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
@@ -21,7 +25,7 @@ const authenticateToken = (req, res, next) => {
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ message: "Session Expired" });
-    req.user = user;
+    req.user = user; // Contains id and slug
     next();
   });
 };
@@ -84,7 +88,7 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       slug: finalSlug,
       photoUrl: savedPhotoPath,
       plan: plan || 'BASIC',
-      isSubscribed: false, // Default to false for new registrations
+      isSubscribed: false,
       role: 'agent'
     });
 
@@ -107,7 +111,7 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
     const agent = await Agent.findOne({ 
       email: email.toLowerCase().trim() 
-    }).select('+password'); // <--- CRITICAL ADDITION
+    }).select('+password');
     
     if (!agent) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
@@ -117,7 +121,6 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 3. Generate JWT
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 
@@ -137,12 +140,21 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
-// --- 3. GET AGENT PROFILE ---
+
+// --- 3. GET AGENT PROFILE (WITH AUTO-LOCK LOGIC) ---
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const Agent = getAgentModel();
-    const agent = await Agent.findById(req.user.id).select('-password');
+    let agent = await Agent.findById(req.user.id).select('-password');
     if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
+
+    // SUBSCRIPTION EXPIRY CHECK
+    // If current date > expiryDate, set isSubscribed to false immediately
+    if (agent.isSubscribed && agent.expiryDate && new Date() > new Date(agent.expiryDate)) {
+      console.log(`Auto-locking dashboard for ${agent.email}: Plan Expired.`);
+      agent.isSubscribed = false;
+      await agent.save();
+    }
 
     res.json(agent);
   } catch (err) {
@@ -150,22 +162,93 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 4. UPDATE AGENT PLAN (FOR PAYWALL SELECTION) ---
+// --- 4. UPDATE AGENT PLAN ---
 router.post('/update-plan', authenticateToken, async (req, res) => {
   try {
     const Agent = getAgentModel();
     const { plan } = req.body;
-
     const updatedAgent = await Agent.findByIdAndUpdate(
       req.user.id,
       { plan: plan },
       { new: true }
     ).select('-password');
-
     res.json({ success: true, plan: updatedAgent.plan });
   } catch (err) {
-    console.error("Update Plan Error:", err);
     res.status(500).json({ success: false, message: "Plan update failed" });
+  }
+});
+
+// --- 5. VERIFY SUBSCRIPTION (USD to NGN Logic + Expiry Calculation) ---
+router.post('/verify', authenticateToken, async (req, res) => {
+  const { transaction_id, plan, usdAmount } = req.body;
+  const agentId = req.user.id;
+  const Agent = getAgentModel();
+
+  try {
+    // 1. Fetch Live Exchange Rate
+    let currentRate = 1500; 
+    try {
+      const rateRes = await axios.get(`https://v6.exchangerate-api.com/v6/${process.env.EXCHANGE_RATE_API_KEY}/pair/USD/NGN`);
+      currentRate = rateRes.data.conversion_rate;
+    } catch (e) {
+      console.error("Exchange API Error, using fallback.");
+    }
+
+    // 2. Verify with Flutterwave
+    const response = await flw.Transaction.verify({ id: transaction_id });
+
+    if (response.data.status === "successful") {
+      const amountPaid = response.data.amount;
+      const expectedNaira = usdAmount * currentRate;
+
+      // Allow 2% fluctuation margin
+      if (amountPaid >= (expectedNaira * 0.98)) {
+        
+        // 3. CALCULATE EXPIRY DATE
+        const now = new Date();
+        let expiry = new Date();
+
+        if (plan === 'BASIC') {
+          expiry.setMonth(now.getMonth() + 1); // 1 Month
+        } else if (plan === 'GROWTH') {
+          expiry.setMonth(now.getMonth() + 6); // 6 Months
+        } else if (plan === 'PROFESSIONAL') {
+          expiry.setFullYear(now.getFullYear() + 1); // 1 Year
+        }
+
+        const updatedAgent = await Agent.findByIdAndUpdate(
+          agentId, 
+          {
+            $set: {
+              isSubscribed: true,
+              plan: plan,
+              subscriptionDate: now,
+              expiryDate: expiry,
+              expiryNotificationSent: false, // Reset warning tracker for new sub
+              lastTransactionId: transaction_id,
+              paymentMeta: {
+                nairaPaid: amountPaid,
+                rateUsed: currentRate
+              }
+            }
+          }, 
+          { new: true }
+        );
+
+        return res.status(200).json({ 
+          success: true, 
+          message: "Subscription activated. Secure node online.", 
+          agent: updatedAgent 
+        });
+      } else {
+        return res.status(400).json({ success: false, message: "Insufficient amount paid." });
+      }
+    } else {
+      return res.status(400).json({ success: false, message: "Transaction failed at gateway." });
+    }
+  } catch (error) {
+    console.error("Verification Error:", error);
+    res.status(500).json({ success: false, error: "System verification failed" });
   }
 });
 

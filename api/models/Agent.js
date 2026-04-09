@@ -4,7 +4,6 @@ export const agentSchema = new mongoose.Schema({
   firstName: { type: String, required: true },
   lastName: { type: String, required: true },
   email: { type: String, required: true, unique: true },
-  // ADDED select: false for better security
   password: { type: String, required: true, select: false }, 
   slug: { type: String, required: true, unique: true },
   address: String,
@@ -19,7 +18,7 @@ export const agentSchema = new mongoose.Schema({
   // --- SUBSCRIPTION & PAYMENT FIELDS ---
   plan: { 
     type: String, 
-    enum: ['BASIC', 'PRO', 'ENTERPRISE'], 
+    enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], // Updated to match your Dashboard
     default: 'BASIC' 
   },
   isSubscribed: { 
@@ -32,10 +31,22 @@ export const agentSchema = new mongoose.Schema({
     default: 'active' 
   },
   
-  subscriptionId: { type: String, default: '' }, 
-  currentPeriodEnd: { type: Date }
+  // Track when the payment happened
+  subscriptionDate: { type: Date },
+  
+  // CRITICAL: When the dashboard should lock
+  expiryDate: { type: Date }, 
+  
+  // CRITICAL: Track if we've already warned them 3 days before expiry
+  expiryNotificationSent: { 
+    type: Boolean, 
+    default: false 
+  },
+
+  lastTransactionId: { type: String, default: '' }
 }, { timestamps: true });
 
+// Prevent model overwrite error in development/hot-reloading
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
 export default Agent;
