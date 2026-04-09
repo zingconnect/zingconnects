@@ -53,7 +53,6 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// --- API ROUTES ---
 
 app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
   try {
@@ -66,7 +65,6 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
     const { firstName, lastName, email } = req.body;
 
     // --- 1. GENERATE UNIQUE SLUG (Hidden "agent" path) ---
-    // This ensures justicefrederick is clean and safe for URLs
     const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const cleanLast = lastName.trim().replace(/[^a-zA-Z0-9]/g, '');
     const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
@@ -96,22 +94,15 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
           Key: fileKey,
           Body: req.file.buffer,
           ContentType: req.file.mimetype,
-          // Note: No ACL makes the file private by default in IDrive E2
         };
 
         await s3Client.send(new PutObjectCommand(uploadParams));
         
-        /**
-         * STRATEGY: We save the STATIC path in the DB.
-         * We do NOT generate the Signed URL here because it will expire.
-         * We generate it fresh in the GET /api/agents/:slug route.
-         */
         const endpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
         savedPhotoPath = `https://${endpoint}/${process.env.IDRIVE_BUCKET_NAME}/${fileKey}`;
 
       } catch (uploadErr) {
         console.error("S3 Upload Failed:", uploadErr.message);
-        // We continue registration even if photo fails to prevent 500 errors
         savedPhotoPath = ""; 
       }
     }
@@ -122,13 +113,13 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       slug: finalSlug,
-      photoUrl: savedPhotoPath, // Save the static path
+      photoUrl: savedPhotoPath,
       role: 'agent',    
-      status: 'active',           // Account is active for login
-      isSubscribed: false,        // MANDATORY: Payment is not yet verified
+      status: 'active',           
+      isSubscribed: false,        
       program: req.body.program || "N/A",
       bio: req.body.bio || "",
-      plan: req.body.plan || "BASIC" // This is their "intended" plan
+      plan: req.body.plan || "BASIC" 
     });
 
     await newAgent.save();
@@ -140,11 +131,10 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
       { expiresIn: '24h' }
     );
     
-    // Return success with the clean slug
     res.status(201).json({ 
       success: true, 
       token, 
-      slug: finalSlug, // Frontend will use this to navigate to /justicefrederick
+      slug: finalSlug, 
       message: "Registration successful. Please complete payment." 
     });
 
@@ -152,7 +142,6 @@ app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
     console.error("Registration Error Detail:", err);
     let errorMessage = err.message;
     
-    // Handle Mongoose Duplicate Key Errors (Email/Slug)
     if (err.code === 11000) {
       const duplicateField = Object.keys(err.keyValue)[0];
       errorMessage = `${duplicateField.charAt(0).toUpperCase() + duplicateField.slice(1)} already exists.`;
@@ -242,8 +231,9 @@ if (process.env.NODE_ENV === 'production') {
   const distPath = path.resolve(__dirname, '../dist');
   app.use(express.static(distPath));
 
-  // Use (.*) instead of * to prevent the 'Missing parameter name' crash
-  app.get('(.*)', (req, res) => {
+  // Change '(.*)' to '/:path*' to fix the PathError crash
+  app.get('/:path*', (req, res) => {
+    // Safety check for non-existent API routes
     if (req.path.startsWith('/api')) {
       return res.status(404).json({ 
         success: false, 
