@@ -13,6 +13,7 @@ export const Registration = () => {
   const [isSuccess, setIsSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
   
   const [formData, setFormData] = useState({
     firstName: '', lastName: '', address: '', occupation: '',
@@ -31,53 +32,64 @@ export const Registration = () => {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      setSelectedFile(file);
       setImagePreview(URL.createObjectURL(file));
-      // In a real app, you would append the file to a FormData object
     }
   };
 
-  const getUniqueSlug = () => {
-    if (!formData.firstName && !formData.lastName) return 'name';
-    return `${formData.firstName}-${formData.lastName}`
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, '-');
-  };
+ const getUniqueSlug = () => {
+  if (!formData.firstName && !formData.lastName) return 'name';
+  
+  // Combine first and last name without a space first
+  const combinedName = `${formData.firstName}${formData.lastName}`;
+  
+  return combinedName
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ''); // Removes any accidental internal spaces
+};
 
   const agentSlug = getUniqueSlug();
   const fullLink = `${window.location.origin}/agent/${agentSlug}`;
 
-// --- UPDATED SUBMIT LOGIC FOR REAL DB ---
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
     
     try {
+      const data = new FormData();
+      
+      Object.keys(formData).forEach(key => {
+        data.append(key, formData[key]);
+      });
+      
+      data.append('slug', agentSlug);
+      data.append('plan', selectedPlan.tier);
+      
+      if (selectedFile) {
+        data.append('photo', selectedFile);
+      }
+
       const response = await fetch('/api/agents/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          slug: agentSlug,
-          plan: selectedPlan.tier
-        }),
+        body: data, 
       });
 
       const contentType = response.headers.get("content-type");
       
       if (contentType && contentType.includes("application/json")) {
-        const data = await response.json();
+        const result = await response.json();
 
         if (response.ok) {
-          if (data.token) {
-            localStorage.setItem('zingToken', data.token);
-            localStorage.setItem('agentSlug', data.slug);
+          if (result.token) {
+            localStorage.setItem('zingToken', result.token);
+            localStorage.setItem('agentSlug', result.slug);
           }
           
           setIsSuccess(true);
           window.scrollTo(0, 0);
         } else {
-          alert(`Registration Error: ${data.message || 'Validation failed'}`);
+          alert(`Registration Error: ${result.message || 'Validation failed'}`);
         }
       } else {
         const textError = await response.text();
@@ -229,7 +241,6 @@ export const Registration = () => {
             <div className="max-w-sm mx-auto bg-gray-50 rounded-3xl p-6 border border-gray-100 text-left">
               <span className="text-[9px] font-black text-blue-600 uppercase mb-2 block">Click to Visit Profile</span>
               <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-3">
-                {/* Clicking this Link will take the user to the AgentSlug page */}
                 <Link to={`/agent/${agentSlug}`} className="text-xs font-bold text-blue-950 truncate mr-4 hover:text-blue-600 underline">
                   {fullLink}
                 </Link>

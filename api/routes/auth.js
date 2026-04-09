@@ -8,57 +8,71 @@ const agentDb = mongoose.connection.useDb('zingconnect');
 const Agent = agentDb.models.Agent || agentDb.model('Agent', agentSchema);
 
 router.post('/register', async (req, res) => {
-try {
-const {
-firstName,
-lastName,
-email,
-password,
-address,
-occupation,
-program,
-bio,
-dob,
-gender,
-plan
-} = req.body;
+  try {
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+      address,
+      occupation,
+      program,
+      bio,
+      dob,
+      gender,
+      plan,
+      photoUrl // Received from the upload logic in index.js or passed in body
+    } = req.body;
 
-let slug = `${firstName}-${lastName}`.toLowerCase().trim().replace(/\s+/g, '-');
+    // --- CUSTOM SLUG LOGIC ---
+    // 1. Create base: lawrenceyoung (no hyphen between names)
+    const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/\s+/g, '').trim();
+    
+    let finalSlug = baseSlug;
+    let counter = 1;
 
-const existingAgent = await Agent.findOne({ slug });
-if (existingAgent) {
-  slug = `${slug}-${Math.floor(1000 + Math.random() * 9000)}`;
-}
+    // 2. Recursive Check for Uniqueness
+    let slugExists = await Agent.findOne({ slug: finalSlug });
 
-const newAgent = new Agent({
-  firstName,
-  lastName,
-  email,
-  password,
-  address,
-  occupation,
-  program: program || "N/A",
-  bio: bio || "",
-  dob,
-  gender,
-  slug,
-  plan: plan || 'BASIC',
-  role: 'agent'
-});
+    while (slugExists) {
+      counter++;
+      // Format as -02, -03, etc.
+      const suffix = counter < 10 ? `-0${counter}` : `-${counter}`;
+      finalSlug = `${baseSlug}${suffix}`;
+      slugExists = await Agent.findOne({ slug: finalSlug });
+    }
 
-await newAgent.save();
+    const newAgent = new Agent({
+      firstName,
+      lastName,
+      email,
+      password,
+      address,
+      occupation,
+      program: program || "N/A",
+      bio: bio || "",
+      dob,
+      gender,
+      slug: finalSlug,
+      plan: plan || 'BASIC',
+      role: 'agent',
+      photoUrl: photoUrl || ""
+    });
 
-res.status(201).json({ 
-  success: true,
-  message: "Agent profile created successfully!", 
-  slug: newAgent.slug 
-});
-} catch (error) {
-res.status(500).json({
-success: false,
-message: error.code === 11000 ? "Email already exists" : error.message
-});
-}
+    await newAgent.save();
+
+    res.status(201).json({ 
+      success: true,
+      message: "Agent profile created successfully!", 
+      slug: newAgent.slug 
+    });
+  } catch (error) {
+    console.error("Registration Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.code === 11000 ? "Email or Slug already exists" : error.message
+    });
+  }
 });
 
 export default router;
