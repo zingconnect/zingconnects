@@ -1,8 +1,18 @@
 import mongoose from 'mongoose';
 
 export const agentSchema = new mongoose.Schema({
-  firstName: { type: String, required: true },
-  lastName: { type: String, required: true },
+firstName: { 
+  type: String, 
+  required: true, 
+  trim: true, // Automatically removes extra spaces
+  set: v => v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() // Forces "Alexander" format
+},
+lastName: { 
+  type: String, 
+  required: true, 
+  trim: true, 
+  set: v => v.charAt(0).toUpperCase() + v.slice(1).toLowerCase()
+},
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true, select: false }, 
   slug: { type: String, required: true, unique: true },

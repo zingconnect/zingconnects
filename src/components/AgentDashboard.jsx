@@ -186,6 +186,13 @@ export const AgentDashboard = () => {
     }
   };
 
+const handleLogout = () => {
+  // 1. Clear the secure token
+  localStorage.removeItem('zingToken');
+  
+  navigate('/');
+  window.location.reload();
+};
 
   const handleSelectUser = (user) => {
     setSelectedUser(user);
@@ -214,19 +221,35 @@ export const AgentDashboard = () => {
   return (
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
       
-      {showSuccessOverlay && (
-        <div className="absolute inset-0 z-[20000] bg-blue-600 flex flex-col items-center justify-center text-white p-6 animate-in fade-in duration-500">
-          <BsCheckCircleFill size={80} className="mb-6 animate-bounce" />
-          <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tighter mb-4 text-center">Congratulations!</h1>
-          <p className="text-lg md:text-xl font-medium opacity-90 text-center max-w-md">
-            Your <strong>{selectedPlan}</strong> subscription has been paid and is ready to use.
-          </p>
-          <div className="mt-8 flex items-center gap-2">
-            <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-            <p className="text-[10px] uppercase font-bold tracking-[0.2em]">Unlocking Dashboard</p>
-          </div>
-        </div>
-      )}
+    {showSuccessOverlay && (
+  <div className="fixed inset-0 z-[20000] bg-blue-600 flex flex-col items-center justify-center text-white p-6">
+    {/* Success Icon */}
+    <div className="bg-white/10 p-6 rounded-full mb-6">
+       <BsCheckCircleFill size={60} className="text-white animate-bounce" />
+    </div>
+    
+    <h1 className="text-2xl md:text-4xl font-black uppercase tracking-tighter mb-2 text-center">
+      Activation Successful!
+    </h1>
+    
+    <p className="text-sm md:text-lg font-medium opacity-90 text-center max-w-xs mb-8">
+      Your <strong>{selectedPlan}</strong> plan ($ {plans.find(p => p.tier === selectedPlan)?.price}) has been activated. Your users can now connect to your secure node.
+    </p>
+
+    <div className="flex flex-col items-center gap-4 w-full max-w-xs">
+      <button 
+        onClick={() => window.location.reload()}
+        className="w-full bg-white text-blue-600 font-black py-4 rounded-xl shadow-xl active:scale-95 uppercase tracking-widest text-[11px]"
+      >
+        Return to Dashboard
+      </button>
+
+      <p className="text-[10px] uppercase font-bold tracking-[0.2em] opacity-60">
+        Redirecting in 4 seconds...
+      </p>
+    </div>
+  </div>
+)}
 
       {!isSubscribed && !showSuccessOverlay && (
         <div className="absolute inset-0 z-[10000] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-4 sm:p-6">
@@ -345,6 +368,22 @@ export const AgentDashboard = () => {
             </div>
           )}
         </div>
+        <div className="p-4 border-t border-gray-100 bg-gray-50/50">
+    <button 
+      onClick={handleLogout}
+      className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 hover:text-red-600 transition-all duration-200 group shadow-sm active:scale-95"
+    >
+      <div className="bg-red-50 group-hover:bg-red-100 p-2 rounded-lg transition-colors">
+        {/* Using a logout-style icon */}
+        <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+          <polyline points="16 17 21 12 16 7"></polyline>
+          <line x1="21" y1="12" x2="9" y2="12"></line>
+        </svg>
+      </div>
+      <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
+    </button>
+  </div>
       </aside>
 
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative overflow-hidden`}>

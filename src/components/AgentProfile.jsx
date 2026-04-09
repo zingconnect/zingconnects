@@ -5,9 +5,10 @@ import {
   BsCameraFill, 
   BsCloudUpload, 
   BsShieldCheck,
-  BsCalendarCheck, // New Icon
-  BsCashStack,    // New Icon
-  BsHourglassSplit // New Icon
+  BsCalendarCheck,
+  BsCashStack,
+  BsHourglassSplit,
+  BsKeyFill
 } from 'react-icons/bs';
 
 export const AgentProfile = () => {
@@ -15,7 +16,6 @@ export const AgentProfile = () => {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   
-  // Updated state to include subscription details
   const [agentData, setAgentData] = useState({
     firstName: '',
     lastName: '',
@@ -24,11 +24,19 @@ export const AgentProfile = () => {
     bio: '',
     address: '',
     photoUrl: '',
+    slug: '',
     plan: 'BASIC',
     isSubscribed: false,
     subscriptionAmount: 0,
     subscriptionDate: null,
     expiryDate: null
+  });
+
+  // Password State
+  const [passwordData, setPasswordData] = useState({
+    oldPassword: '',
+    newPassword: '',
+    confirmPassword: ''
   });
 
   useEffect(() => {
@@ -37,13 +45,10 @@ export const AgentProfile = () => {
       if (!token) return navigate('/');
 
       try {
-        // Fetch from the "me" endpoint which now returns subscription data
         const response = await fetch('/api/agents/profile/me', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-
         if (!response.ok) throw new Error("Failed to load profile");
-        
         const data = await response.json();
         setAgentData(data);
       } catch (err) {
@@ -57,6 +62,10 @@ export const AgentProfile = () => {
 
   const handleUpdate = async (e) => {
     e.preventDefault();
+    if (passwordData.newPassword && passwordData.newPassword !== passwordData.confirmPassword) {
+      return alert("New passwords do not match!");
+    }
+
     setIsSaving(true);
     const token = localStorage.getItem('zingToken');
 
@@ -67,11 +76,18 @@ export const AgentProfile = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify(agentData)
+        body: JSON.stringify({
+          ...agentData,
+          ...passwordData
+        })
       });
 
       if (response.ok) {
-        alert("Profile Sync Successful");
+        alert("Identity & Security Sync Successful");
+        setPasswordData({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      } else {
+        const error = await response.json();
+        alert(error.message || "Update failed");
       }
     } catch (err) {
       alert("Error updating profile");
@@ -80,12 +96,11 @@ export const AgentProfile = () => {
     }
   };
 
-  // Helper to format dates nicely
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
-      month: 'long',
+      month: 'short',
       day: 'numeric'
     });
   };
@@ -97,34 +112,48 @@ export const AgentProfile = () => {
   );
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-blue-950 pb-20 font-sans">
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-4 md:px-12 flex justify-between items-center">
+    <div className="min-h-screen bg-[#FDFDFD] text-blue-950 pb-10 font-sans antialiased overflow-x-hidden">
+      {/* HEADER */}
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-gray-100 px-4 py-3 md:py-4 md:px-12 flex justify-between items-center">
         <button 
           onClick={() => navigate('/agent/dashboard')}
-          className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-blue-600 transition-all"
+          className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-blue-600 transition-all"
         >
-          <BsChevronLeft size={14} /> Back to Portal
+          <BsChevronLeft size={12} /> BACK
         </button>
         <div className="flex items-center gap-2">
-          <BsShieldCheck className="text-blue-600" size={16} />
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">Secure Profile Editor</span>
+          <BsShieldCheck className="text-blue-600" size={14} />
+          <span className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">Secure Profile</span>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto mt-8 md:mt-16 px-4">
+      <main className="max-w-4xl mx-auto mt-6 md:mt-12 px-4">
         
-        {/* --- SUBSCRIPTION STATUS CARD --- */}
-        <section className="mb-12 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-blue-900 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-between relative overflow-hidden">
-            <BsCashStack className="absolute -right-4 -bottom-4 text-white/10" size={100} />
+        {/* --- SUBSCRIPTION STATUS CARDS (Optimized for Mobile) --- */}
+        <section className="mb-8 grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="bg-blue-950 text-white p-4 md:p-6 rounded-2xl shadow-lg flex flex-col justify-between relative overflow-hidden">
+            <BsCashStack className="absolute -right-2 -bottom-2 text-white/10" size={60} />
             <div>
-              <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-1">Active Plan</p>
-              <h2 className="text-2xl font-black">{agentData.plan}</h2>
+              <p className="text-[7px] md:text-[9px] font-black uppercase tracking-widest opacity-60 mb-0.5">Active Plan</p>
+              <h2 className="text-sm md:text-2xl font-black uppercase">{agentData.plan}</h2>
             </div>
-            <p className="text-xl font-bold mt-4">${agentData.subscriptionAmount || 0}</p>
+            <p className="text-xs md:text-xl font-bold mt-2">${agentData.subscriptionAmount || 0}</p>
           </div>
 
-          <div className="bg-white border border-gray-100 p-6 rounded-[2rem] shadow-sm flex flex-col justify-between">
+          <div className="bg-white border border-gray-100 p-4 md:p-6 rounded-2xl shadow-sm flex flex-col justify-between">
+            <div>
+              <p className="text-[7px] md:text-[9px] font-black uppercase tracking-widest text-gray-400 mb-0.5">Expiration</p>
+              <div className="flex items-center gap-1.5 text-red-500">
+                <BsHourglassSplit size={12} />
+                <span className="text-[10px] md:text-sm font-bold">{formatDate(agentData.expiryDate)}</span>
+              </div>
+            </div>
+            <span className={`text-[7px] font-black uppercase tracking-widest mt-2 ${agentData.isSubscribed ? 'text-green-500' : 'text-red-500'}`}>
+              ● {agentData.isSubscribed ? 'Active' : 'Inactive'}
+            </span>
+          </div>
+
+          <div className="hidden md:flex bg-white border border-gray-100 p-6 rounded-2xl shadow-sm flex-col justify-between">
             <div>
               <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-1">Activation Date</p>
               <div className="flex items-center gap-2 text-blue-900">
@@ -133,101 +162,111 @@ export const AgentProfile = () => {
               </div>
             </div>
           </div>
-
-          <div className="bg-white border border-gray-100 p-6 rounded-[2rem] shadow-sm flex flex-col justify-between">
-            <div>
-              <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-1">Expiry Date</p>
-              <div className="flex items-center gap-2 text-red-500">
-                <BsHourglassSplit size={14} />
-                <span className="text-sm font-bold">{formatDate(agentData.expiryDate)}</span>
-              </div>
-            </div>
-            {agentData.isSubscribed ? (
-                <span className="mt-2 text-[8px] font-black uppercase text-green-500 tracking-widest">● Status: Active</span>
-            ) : (
-                <span className="mt-2 text-[8px] font-black uppercase text-red-500 tracking-widest">● Status: Expired</span>
-            )}
-          </div>
         </section>
 
-        <form onSubmit={handleUpdate} className="space-y-8">
+        <form onSubmit={handleUpdate} className="space-y-6 md:space-y-8">
           {/* PROFILE PHOTO SECTION */}
-          <section className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
-            <div className="relative group">
-              <div className="w-32 h-32 md:w-40 md:h-40 rounded-[2.5rem] bg-gray-100 border-4 border-white shadow-2xl overflow-hidden">
+          <section className="flex flex-col md:flex-row items-center gap-4 md:gap-10">
+            <div className="relative">
+              <div className="w-24 h-24 md:w-36 md:h-36 rounded-3xl md:rounded-[2.5rem] bg-gray-100 border-2 border-white shadow-xl overflow-hidden">
                 <img 
                   src={agentData.photoUrl || `https://ui-avatars.com/api/?name=${agentData.firstName}+${agentData.lastName}&background=0e3791&color=fff`} 
-                  alt="Profile" 
+                  alt="Agent" 
                   className="w-full h-full object-cover"
                 />
               </div>
-              <label className="absolute bottom-1 right-1 p-2.5 bg-blue-600 text-white rounded-xl shadow-lg cursor-pointer hover:scale-110 transition-transform">
-                <BsCameraFill size={16} />
+              <label className="absolute -bottom-1 -right-1 p-2 bg-blue-600 text-white rounded-xl shadow-lg cursor-pointer hover:scale-110 transition-transform">
+                <BsCameraFill size={14} />
                 <input type="file" className="hidden" />
               </label>
             </div>
             
             <div className="text-center md:text-left">
-              <h1 className="text-3xl md:text-4xl font-black tracking-tighter">
+              <h1 className="text-2xl md:text-4xl font-black tracking-tighter">
                 {agentData.firstName} <span className="text-slate-400 font-normal">{agentData.lastName}</span>
               </h1>
-              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">Agent ID: {agentData.slug || '---'}</p>
+              <p className="text-[8px] md:text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">ID: {agentData.slug || '---'}</p>
             </div>
           </section>
 
-          {/* DATA FIELDS */}
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Professional Title</label>
+          {/* IDENTITY DATA FIELDS */}
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            <div className="space-y-1.5">
+              <label className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-gray-400 ml-2">Professional Title</label>
               <input 
                 value={agentData.occupation}
                 onChange={(e) => setAgentData({...agentData, occupation: e.target.value})}
-                className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-sm focus:border-blue-600 outline-none transition-all"
+                className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 md:py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all shadow-sm"
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Current Program</label>
+            <div className="space-y-1.5">
+              <label className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-gray-400 ml-2">Program</label>
               <input 
                 value={agentData.program}
                 onChange={(e) => setAgentData({...agentData, program: e.target.value})}
-                className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-sm focus:border-blue-600 outline-none transition-all"
+                className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 md:py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all shadow-sm"
               />
             </div>
 
-            <div className="md:col-span-2 space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Office Address</label>
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-gray-400 ml-2">Office Address</label>
               <input 
                 value={agentData.address}
                 onChange={(e) => setAgentData({...agentData, address: e.target.value})}
-                className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-sm focus:border-blue-600 outline-none transition-all"
-              />
-            </div>
-
-            <div className="md:col-span-2 space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Public Bio</label>
-              <textarea 
-                rows="3"
-                value={agentData.bio}
-                onChange={(e) => setAgentData({...agentData, bio: e.target.value})}
-                className="w-full bg-white border border-gray-100 rounded-[1.5rem] px-6 py-4 text-sm focus:border-blue-600 outline-none transition-all resize-none"
+                className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 md:py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all shadow-sm"
               />
             </div>
           </section>
 
-          <footer className="pt-6 border-t border-gray-100 flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="text-center md:text-left">
-              <p className="text-[10px] font-black text-blue-950 uppercase tracking-tighter">Biometric Security Sync</p>
-              <p className="text-[8px] text-gray-400 font-bold uppercase tracking-tighter">Identity Verified • {new Date().toLocaleDateString()}</p>
+          {/* SECURITY / PASSWORD SECTION */}
+          <section className="bg-gray-50/50 p-4 md:p-8 rounded-3xl border border-dashed border-gray-200">
+            <div className="flex items-center gap-2 mb-4 md:mb-6">
+              <BsKeyFill className="text-blue-600" />
+              <h3 className="text-[9px] md:text-[11px] font-black uppercase tracking-[0.2em]">Security Credentials</h3>
             </div>
             
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+              <div className="space-y-1">
+                <input 
+                  type="password" 
+                  placeholder="Old Password"
+                  value={passwordData.oldPassword}
+                  onChange={(e) => setPasswordData({...passwordData, oldPassword: e.target.value})}
+                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-base md:text-sm outline-none focus:border-blue-600"
+                />
+              </div>
+              <div className="space-y-1">
+                <input 
+                  type="password" 
+                  placeholder="New Password"
+                  value={passwordData.newPassword}
+                  onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
+                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-base md:text-sm outline-none focus:border-blue-600"
+                />
+              </div>
+              <div className="space-y-1">
+                <input 
+                  type="password" 
+                  placeholder="Confirm New"
+                  value={passwordData.confirmPassword}
+                  onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
+                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-base md:text-sm outline-none focus:border-blue-600"
+                />
+              </div>
+            </div>
+            <p className="text-[8px] text-gray-400 mt-3 uppercase font-bold tracking-tighter">Leave blank to keep current password</p>
+          </section>
+
+          <footer className="pt-4 flex flex-col items-center">
             <button 
               disabled={isSaving}
               type="submit"
-              className="w-full md:w-auto px-10 py-4 bg-blue-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-blue-800 transition-all active:scale-[0.98] disabled:opacity-50"
+              className="w-full md:w-auto md:px-20 py-4 bg-blue-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] flex items-center justify-center gap-3 hover:bg-blue-900 transition-all active:scale-[0.98] disabled:opacity-50 shadow-xl"
             >
-              {isSaving ? "Syncing..." : "Update Identity"} <BsCloudUpload />
+              {isSaving ? "SYNCING..." : "UPDATE IDENTITY"} <BsCloudUpload size={16} />
             </button>
+            <p className="text-[8px] text-gray-400 mt-4 uppercase font-bold tracking-widest italic">Identity Verification Secured by ZingConnect</p>
           </footer>
         </form>
       </main>

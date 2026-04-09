@@ -254,4 +254,84 @@ router.post('/verify', authenticateToken, async (req, res) => {
   }
 });
 
+// --- 6. UPDATE AGENT PROFILE & SECURITY (FIXED) ---
+router.put('/update-profile', authenticateToken, async (req, res) => {
+  try {
+    const Agent = getAgentModel();
+    
+    // 1. Find the Agent Document
+    const agent = await Agent.findById(req.user.id).select('+password');
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent account not found" });
+    }
+
+    // 2. Extract Data from Body
+    const { 
+      firstName, 
+      lastName, 
+      occupation, 
+      program, 
+      bio, 
+      address, 
+      oldPassword, 
+      newPassword 
+    } = req.body;
+
+    // 3. Handle Password Security Update (Only if newPassword is provided)
+    if (newPassword && newPassword.trim() !== "") {
+      // If updating password, old password must be provided for verification
+      if (!oldPassword) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Current password is required to authorize security changes." 
+        });
+      }
+
+      // Verify the old password matches the database
+      const isMatch = await bcrypt.compare(oldPassword, agent.password);
+      if (!isMatch) {
+        return res.status(401).json({ 
+          success: false, 
+          message: "Current password incorrect. Security sync blocked." 
+        });
+      }
+
+      // Hash the new password before saving
+      const salt = await bcrypt.genSalt(10);
+      agent.password = await bcrypt.hash(newPassword, salt);
+    }
+
+    // 4. Update Profile Information
+    agent.firstName = firstName || agent.firstName;
+    agent.lastName = lastName || agent.lastName;
+    agent.occupation = occupation || agent.occupation;
+    agent.program = program || agent.program;
+    agent.bio = bio || agent.bio;
+    agent.address = address || agent.address;
+
+    // 5. Save the Document (triggers validation and updates timestamp)
+    await agent.save();
+
+    console.log(`[SECURITY] Identity & Credentials updated for: ${agent.email}`);
+    
+    // Create a clean object for the response (no password)
+    const updatedAgent = agent.toObject();
+    delete updatedAgent.password;
+
+    res.json({
+      success: true,
+      message: "Identity and Security synchronized successfully across nodes.",
+      agent: updatedAgent
+    });
+
+  } catch (err) {
+    console.error("Update Profile Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error during profile sync",
+      error: err.message 
+    });
+  }
+});
+
 export default router;

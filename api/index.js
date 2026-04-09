@@ -499,20 +499,17 @@ app.get('/api/agents/:slug', async (req, res) => {
   }
 });
 
-// --- Update Agent Profile (Protected) ---
 app.put('/api/agents/update-profile', async (req, res) => {
   try {
     await connectToDatabase();
 
-    // 1. Extract Token from Headers
+    // 1. Extract and Verify Token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ message: "Unauthorized: No token provided" });
     }
 
     const token = authHeader.split(' ')[1];
-    
-    // 2. Verify Token (using your secret)
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -520,35 +517,63 @@ app.put('/api/agents/update-profile', async (req, res) => {
       return res.status(403).json({ message: "Session expired. Please log in again." });
     }
 
-    // 3. Find and Update the Agent
-    // We only allow specific fields to be updated for security
-    const { firstName, lastName, occupation, program, bio, address } = req.body;
-
-    const updatedAgent = await Agent.findByIdAndUpdate(
-      decoded.id, 
-      { 
-        $set: { 
-          firstName, 
-          lastName, 
-          occupation, 
-          program, 
-          bio, 
-          address 
-        } 
-      },
-      { new: true, runValidators: true }
-    ).select('-password');
-
-    if (!updatedAgent) {
+    // 2. Find the Agent Document
+    const agent = await Agent.findById(decoded.id);
+    if (!agent) {
       return res.status(404).json({ message: "Agent account not found" });
     }
 
-    console.log(`Profile updated successfully for: ${updatedAgent.email}`);
+    // 3. Extract Data from Body
+    const { 
+      firstName, 
+      lastName, 
+      occupation, 
+      program, 
+      bio, 
+      address, 
+      oldPassword, 
+      newPassword 
+    } = req.body;
+
+    // 4. Handle Password Security Update
+    if (newPassword && newPassword.trim() !== "") {
+      // If updating password, old password must be provided
+      if (!oldPassword) {
+        return res.status(400).json({ message: "Current password is required to set a new one" });
+      }
+
+      // Verify the old password matches the database
+      const isMatch = await bcrypt.compare(oldPassword, agent.password);
+      if (!isMatch) {
+        return res.status(401).json({ message: "Current password incorrect. Security check failed." });
+      }
+
+      // Hash the new password before saving
+      const salt = await bcrypt.genSalt(10);
+      agent.password = await bcrypt.hash(newPassword, salt);
+    }
+
+    // 5. Update Profile Information
+    agent.firstName = firstName || agent.firstName;
+    agent.lastName = lastName || agent.lastName;
+    agent.occupation = occupation || agent.occupation;
+    agent.program = program || agent.program;
+    agent.bio = bio || agent.bio;
+    agent.address = address || agent.address;
+
+    // 6. Save the Document
+    await agent.save();
+
+    console.log(`Identity & Security updated for: ${agent.email}`);
     
+    // Hide password in response
+    const updatedData = agent.toObject();
+    delete updatedData.password;
+
     res.json({
       success: true,
-      message: "Identity synchronized across all secure nodes.",
-      agent: updatedAgent
+      message: "Identity and Security synchronized successfully.",
+      agent: updatedData
     });
 
   } catch (err) {
