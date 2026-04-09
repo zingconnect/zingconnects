@@ -1,6 +1,23 @@
+/* 1. Import the Inter font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
 @import "tailwindcss";
 
+@theme {
+  /* 2. Overwrite the default sans font stack to ONLY use Inter */
+  --font-sans: "Inter", "sans-serif";
+
+  /* Your existing brand colors */
+  --color-zing-blue: #266cee;
+  --color-zing-dark: #0f172a;
+}
+
 :root {
-  --zing-blue: #0e3791;
+  --zing-blue: #266cee;
   --zing-dark: #0f172a;
+}
+
+/* 3. Apply it to the body to ensure it catches everything */
+body {
+  font-family: "Inter", sans-serif;
 }
