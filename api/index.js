@@ -233,10 +233,9 @@ app.get('/health', (req, res) => res.status(200).send('OK'));
 
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(process.cwd(), 'dist');
-  
   app.use(express.static(distPath));
 
-  app.get('/:path*', (req, res) => {
+  app.get('*', (req, res) => {
     if (req.path.startsWith('/api')) {
       return res.status(404).json({ 
         success: false, 
@@ -248,7 +247,8 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(indexPath, (err) => {
       if (err) {
         console.error("Error sending index.html:", err);
-        res.status(500).send("Frontend build not found. Ensure 'npm run build' is working.");
+        // If the file is missing, Vercel might not have finished the build
+        res.status(500).send("Frontend build not found.");
       }
     });
   });
