@@ -73,20 +73,27 @@ export const AgentDashboard = () => {
       
       {/* SIDEBAR: User List */}
       <div className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-white border-r border-gray-300 flex-col z-20`}>
-        {/* Sidebar Header */}
-      <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200">
-  {/* UPDATE THIS LINE */}
-  <BsPersonCircle 
-    size={32} 
-    className="text-gray-400 cursor-pointer hover:text-blue-600 transition-colors" 
-    onClick={() => navigate('/agent/profile')} 
-  />
+<header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center border-b border-gray-200">
+  
+  {/* WRAPPED BUTTON FOR BETTER CLICKABILITY */}
+  <button 
+    onClick={() => {
+      console.log("Navigating to profile..."); // Debug log
+      navigate('/agent/profile');
+    }}
+    className="relative p-1 rounded-full hover:bg-gray-200 transition-all flex items-center justify-center z-30 pointer-events-auto"
+    title="View Profile"
+  >
+    <BsPersonCircle 
+      size={32} 
+      className="text-gray-400 hover:text-blue-600 transition-colors" 
+    />
+  </button>
   
   <div className="flex gap-4 md:gap-6 text-gray-500">
     <BsThreeDotsVertical className="cursor-pointer" size={18} />
   </div>
-        </header>
-
+</header>
         {/* Search Bar */}
         <div className="p-2 bg-white">
           <div className="bg-[#f0f2f5] flex items-center px-3 py-1.5 rounded-lg">
