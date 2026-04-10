@@ -78,10 +78,9 @@ export const AgentDashboard = () => {
             console.error("Profile Error:", errorMsg);
             return;
         }
-
-        const profileData = await profileRes.json();
+      const profileData = await profileRes.json();
         setAgentData(profileData);
-    setIsSubscribed(profileData.isSubscribed && !profileData.isExpired);
+        setIsSubscribed(profileData.isSubscribed && !profileData.isExpired);
         if (profileData.plan) setSelectedPlan(profileData.plan);
 
         if (profileData.isSubscribed) {
@@ -90,9 +89,15 @@ export const AgentDashboard = () => {
           });
           const userData = await response.json();
           
-          // CORRECTED: Handle the object structure { success: true, users: [...] }
           if (userData.success && Array.isArray(userData.users)) {
             setUsers(userData.users);
+
+            // SYNC SELECTED USER: Update the currently viewed user with fresh data (signed URLs)
+            setSelectedUser(prev => {
+              if (!prev) return null;
+              return userData.users.find(u => u._id === prev._id) || prev;
+            });
+            
           } else {
             setUsers([]);
           }
@@ -427,11 +432,14 @@ export const AgentDashboard = () => {
   
   <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
     <img 
-      src={selectedUser.photoUrl} 
-      alt="Profile" 
-      className="w-full h-full object-cover" 
-      onError={(e) => console.error("Header Image Load Error:", selectedUser.photoUrl)}
-    />
+  src={selectedUser.photoUrl} 
+  alt="Profile" 
+  className="w-full h-full object-cover" 
+  onError={(e) => {
+    e.target.onerror = null; 
+    e.target.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}+${selectedUser.lastName}&background=random&color=fff`;
+  }}
+/>
   </div>
 
   <div className="overflow-hidden flex flex-col justify-center">

@@ -473,8 +473,6 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
 });
 
 router.get('/my-users', authenticateToken, async (req, res) => {
-  // --- CACHE CONTROL ---
-  // Prevents browsers from caching expired signed URLs
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -482,7 +480,6 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Support both token formats
     const agentId = req.user.id || req.user._id;
 
     if (!agentId) {
@@ -492,46 +489,40 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       });
     }
 
-    // 1. Fetch users connected to this agent
     const users = await User.find({ connectedAgents: agentId })
       .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
 
-    // 2. Process users in parallel to handle S3 signing
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // --- ROBUST PHOTO SIGNING LOGIC ---
-      if (user.photoUrl && typeof user.photoUrl === 'string' && user.photoUrl.includes('users/')) {
+      if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
-          // Extract the key regardless of the stored domain (fixes the "Misty" database error)
-          const urlParts = user.photoUrl.split('users/');
-          const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
-          
-          // Decode in case the DB stored it with %20 instead of spaces
-          const fileKey = `users/${decodeURIComponent(rawFileName)}`;
+          let fileKey = user.photoUrl;
+
+          if (user.photoUrl.includes('users/')) {
+            const urlParts = user.photoUrl.split('users/');
+            const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
+            fileKey = `users/${decodeURIComponent(rawFileName)}`;
+          }
 
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: fileKey,
           });
 
-          // Generate a fresh signature valid for 1 hour
           finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         } catch (s3Err) {
           console.error(`[S3 Error] ${user.email}:`, s3Err.message);
         }
       }
 
-      // --- FALLBACK LOGIC ---
-      // If photo is missing or S3 failed, provide a clean letter-based avatar
       if (!finalPhotoUrl) {
         const fullName = `${user.firstName}+${user.lastName}`;
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${fullName}&background=random&color=fff&size=128`;
       }
 
-      // --- ONLINE STATUS (5 Minute Heartbeat) ---
       const lastSeen = user.lastActive || user.lastLogin;
       const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
 

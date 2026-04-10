@@ -763,8 +763,6 @@ app.post('/api/subscriptions/verify', async (req, res) => {
 });
 
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
-  // --- CACHE CONTROL ---
-  // Forces the browser to fetch a fresh signed URL every time the dashboard loads
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -772,7 +770,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Support for different token payload structures
     const agentId = req.user.id || req.user._id;
 
     if (!agentId) {
@@ -782,46 +779,39 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
       });
     }
 
-    // 1. Fetch Users
     const users = await User.find({ connectedAgents: agentId })
       .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
 
-    // 2. Process Users (Parallel Image Signing)
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // --- ROBUST S3 SIGNING LOGIC ---
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
-          // Identify the key: split by 'users/' to ignore legacy/broken domains in the DB
-          const urlParts = user.photoUrl.split('users/');
-          if (urlParts.length > 1) {
-            // Take the part after 'users/' and strip existing query params/signatures
+          let fileKey = user.photoUrl;
+
+          if (user.photoUrl.includes('users/')) {
+            const urlParts = user.photoUrl.split('users/');
             const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
-            const fileKey = `users/${decodeURIComponent(rawFileName)}`;
-
-            const command = new GetObjectCommand({
-              Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-              Key: fileKey,
-            });
-
-            // Sign URL with 1-hour expiration
-            finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+            fileKey = `users/${decodeURIComponent(rawFileName)}`;
           }
+
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: fileKey,
+          });
+
+          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         } catch (s3Err) {
-          console.error(`[S3 Error] Signing failed for ${user.email}:`, s3Err.message);
+          console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
         }
       }
 
-      // --- FALLBACK: UI AVATAR ---
-      // If no photoUrl exists OR S3 signing failed, return a clean letter avatar
       if (!finalPhotoUrl) {
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}&background=random&color=fff&size=128`;
       }
 
-      // --- ONLINE STATUS (5-minute window) ---
       const lastSeen = user.lastActive || user.lastLogin;
       const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
 
