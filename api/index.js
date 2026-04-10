@@ -423,7 +423,7 @@ app.get('/api/users/my-session', async (req, res) => {
 });
 
 // 3. Update User Profile (Onboarding)
-app.put('/api/users/update-profile', async (req, res) => {
+app.put('/api/users/update-user-onboarding', async (req, res) => {
   try {
     await connectToDatabase();
     const authHeader = req.headers.authorization;

@@ -393,25 +393,32 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
 });
 
 // --- USER ONBOARDING (DASHBOARD) ---
-router.put('/update-user-onboarding', authenticateToken, async (req, res) => {
-  try {
+router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
+    try {
     const { firstName, lastName, dob, city, state } = req.body;
     
-    // req.user.id comes from the authenticateToken middleware
+    // 1. Prepare the update object
+    const updateData = {
+      firstName,
+      lastName,
+      dob,
+      city,
+      state,
+      isProfileComplete: true
+    };
+    if (req.file) {
+      console.log("File received:", req.file.originalname);
+    }
+    // 3. Update the Database
     const updatedUser = await User.findByIdAndUpdate(
-      req.user.id,
-      { 
-        firstName, 
-        lastName, 
-        dob, 
-        city, 
-        state, 
-        isProfileComplete: true 
-      },
+      req.user.id, // Provided by your authenticateToken middleware
+      updateData,
       { new: true }
     );
 
-    if (!updatedUser) return res.status(404).json({ success: false, message: "User not found" });
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
 
     res.json({ success: true, user: updatedUser });
   } catch (err) {

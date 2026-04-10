@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   BsTelephoneFill, 
@@ -15,6 +15,7 @@ import {
 
 export const UserDashboard = () => {
   const navigate = useNavigate();
+  const fileInputRef = useRef(null); // Ref for the hidden file input
   
   // --- STATE ---
   const [agent, setAgent] = useState(null);
@@ -24,8 +25,10 @@ export const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   
-  // Onboarding State
+  // Onboarding & Photo State
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -72,18 +75,40 @@ export const UserDashboard = () => {
     fetchUserSession();
   }, [navigate]);
 
+  // --- PHOTO HANDLERS ---
+  const handlePhotoClick = () => {
+    fileInputRef.current.click();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file)); // Generate local preview
+    }
+  };
+
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem('userToken');
     
+    // Use FormData for file upload support
+    const data = new FormData();
+    if (selectedFile) data.append('photo', selectedFile);
+    data.append('firstName', formData.firstName);
+    data.append('lastName', formData.lastName);
+    data.append('dob', formData.dob);
+    data.append('city', formData.city);
+    data.append('state', formData.state);
+
     try {
-      const res = await fetch('/api/users/update-profile', {
+      const res = await fetch('/api/users/update-user-onboarding', {
         method: 'PUT',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}` 
+          // Note: Content-Type is handled automatically by browser for FormData
         },
-        body: JSON.stringify(formData)
+        body: data
       });
 
       if (res.ok) {
@@ -168,9 +193,27 @@ export const UserDashboard = () => {
 
             <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
               <div className="flex flex-col items-center mb-4">
-                <div className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative">
-                   <BsCameraFill size={20} />
-                   <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>
+                {/* Hidden File Input */}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileChange} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+                
+                <div 
+                  onClick={handlePhotoClick}
+                  className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden"
+                >
+                   {previewUrl ? (
+                     <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+                   ) : (
+                     <BsCameraFill size={20} />
+                   )}
+                   {!previewUrl && (
+                    <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>
+                   )}
                 </div>
               </div>
 
