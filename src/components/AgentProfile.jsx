@@ -237,31 +237,51 @@ export const AgentProfile = () => {
                 className="w-full bg-white border border-gray-100 rounded-[1.5rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all resize-none"
               />
             </div>
-            {/* NEW: Gender Field */}
-  <div className="space-y-2">
-    <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Gender</label>
+  {/* NEW: Gender Field */}
+<div className="space-y-2">
+  <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Gender</label>
+  <div className="relative">
     <select 
-      value={agentData.gender}
+      /* Force lowercase to match the DB "male" or "female" */
+      value={agentData.gender ? agentData.gender.toLowerCase() : ""} 
       onChange={(e) => setAgentData({...agentData, gender: e.target.value})}
-      className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all appearance-none"
+      className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all appearance-none capitalize"
     >
       <option value="">Select Gender</option>
-      <option value="Male">Male</option>
-      <option value="Female">Female</option>
-      <option value="Other">Other</option>
+      <option value="male">Male</option>
+      <option value="female">Female</option>
+      <option value="other">Other</option>
     </select>
+    
+    {/* Optional: Add a small dropdown arrow icon since appearance-none removes it */}
+    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-6 text-gray-400">
+      <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+        <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+      </svg>
+    </div>
   </div>
+</div>
 
   {/* NEW: Date of Birth Field */}
-  <div className="space-y-2">
-    <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Date of Birth</label>
-    <input 
-      type="date"
-      value={agentData.dob ? new Date(agentData.dob).toISOString().split('T')[0] : ''}
-      onChange={(e) => setAgentData({...agentData, dob: e.target.value})}
-      className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all"
-    />
-  </div>
+<div className="space-y-2">
+  <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Date of Birth</label>
+  <input 
+    type="date"
+    /* The value MUST be YYYY-MM-DD. 
+       Using .slice(0, 10) is a safer way to get the date part of an ISO string.
+    */
+    value={
+      agentData.dob 
+        ? new Date(agentData.dob).toISOString().slice(0, 10) 
+        : ''
+    }
+    onChange={(e) => {
+      const selectedDate = e.target.value;
+      setAgentData({ ...agentData, dob: selectedDate });
+    }}
+    className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all"
+  />
+</div>
           </section>
 
           {/* SECURITY CREDENTIALS SECTION */}
