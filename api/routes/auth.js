@@ -7,6 +7,7 @@ import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { connectToDatabase } from '../index.js';
 import { agentSchema } from '../models/Agent.js';
 import User from '../models/User.js';
 

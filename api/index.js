@@ -38,8 +38,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 let cachedDb = null;
 
-async function connectToDatabase() {
-  if (cachedDb && mongoose.connection.readyState === 1) {
+export async function connectToDatabase() {
+    if (cachedDb && mongoose.connection.readyState === 1) {
     return cachedDb;
   }
 
