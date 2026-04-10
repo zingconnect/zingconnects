@@ -497,35 +497,34 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
     .sort({ lastActive: -1 })
     .lean();
-
-   const processedUsers = await Promise.all(users.map(async (user) => {
+const processedUsers = await Promise.all(users.map(async (user) => {
   let finalPhotoUrl = user.photoUrl;
 
-  // Check for the specific problematic domain or any idrive string
   if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
     try {
-      // Extract the key correctly even if the domain is weird
-      // Example: https://livechat.idrivee2.com/users/69d922... -> users/69d922...
+      // 1. Extract the key correctly
       const urlParts = user.photoUrl.split('/');
       const userIndex = urlParts.indexOf('users');
       
       if (userIndex !== -1) {
+        // This gives us: "users/69d922f362e59dbf99638760-177583797..."
         const rawKey = urlParts.slice(userIndex).join('/');
         const fileKey = decodeURIComponent(rawKey);
 
+        // 2. Generate the signed URL using your VALID s3Client
+        // The s3Client already knows the REAL endpoint (e.g., s3.us-west-1...)
         const command = new GetObjectCommand({
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
           Key: fileKey,
         });
 
-        // This replaces the broken 'livechat.idrivee2.com' with the 
-        // correct signed endpoint from your s3Client config
+        // This will generate a URL that points to the CORRECT IDrive domain
         finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       }
     } catch (s3Err) {
       console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
-      // Don't set to null here, or the frontend won't even try to render
-      // Let it fall through so we can see the 'finalPhotoUrl' in the console
+      // Fallback to a default UI avatar if signing fails
+      finalPhotoUrl = null; 
     }
   }
 
