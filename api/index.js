@@ -781,30 +781,28 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 const processedUsers = await Promise.all(users.map(async (user) => {
   let finalPhotoUrl = user.photoUrl;
 
+  // If the URL contains idrive, we treat it as a private asset that needs signing
   if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
     try {
-      // 1. Extract the key correctly
+      // 1. Extract the file key (e.g., users/69d922.../image.jpg)
       const urlParts = user.photoUrl.split('/');
       const userIndex = urlParts.indexOf('users');
       
       if (userIndex !== -1) {
-        // This gives us: "users/69d922f362e59dbf99638760-177583797..."
         const rawKey = urlParts.slice(userIndex).join('/');
         const fileKey = decodeURIComponent(rawKey);
 
-        // 2. Generate the signed URL using your VALID s3Client
-        // The s3Client already knows the REAL endpoint (e.g., s3.us-west-1...)
+        // 2. Force the use of the correct S3 endpoint by generating a new signed URL
         const command = new GetObjectCommand({
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
           Key: fileKey,
         });
 
-        // This will generate a URL that points to the CORRECT IDrive domain
+        // The s3Client uses the valid endpoint from your .env (e.g., s3.us-west-1.idrivee2-2.com)
         finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       }
     } catch (s3Err) {
       console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
-      // Fallback to a default UI avatar if signing fails
       finalPhotoUrl = null; 
     }
   }
