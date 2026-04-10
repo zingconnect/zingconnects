@@ -498,42 +498,47 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     .sort({ lastActive: -1 })
     .lean();
 
-    const processedUsers = await Promise.all(users.map(async (user) => {
-      let finalPhotoUrl = user.photoUrl;
+   const processedUsers = await Promise.all(users.map(async (user) => {
+  let finalPhotoUrl = user.photoUrl;
 
-      if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
-        try {
-          const urlParts = user.photoUrl.split('/');
-          const userIndex = urlParts.indexOf('users');
-          
-          if (userIndex !== -1) {
-            const rawKey = urlParts.slice(userIndex).join('/');
-            const fileKey = decodeURIComponent(rawKey);
+  // Check for the specific problematic domain or any idrive string
+  if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
+    try {
+      // Extract the key correctly even if the domain is weird
+      // Example: https://livechat.idrivee2.com/users/69d922... -> users/69d922...
+      const urlParts = user.photoUrl.split('/');
+      const userIndex = urlParts.indexOf('users');
+      
+      if (userIndex !== -1) {
+        const rawKey = urlParts.slice(userIndex).join('/');
+        const fileKey = decodeURIComponent(rawKey);
 
-            const command = new GetObjectCommand({
-              Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-              Key: fileKey,
-            });
+        const command = new GetObjectCommand({
+          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Key: fileKey,
+        });
 
-            finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-          }
-        } catch (s3Err) {
-          console.error(`Error signing URL for user ${user._id}:`, s3Err.message);
-          finalPhotoUrl = null; 
-        }
+        // This replaces the broken 'livechat.idrivee2.com' with the 
+        // correct signed endpoint from your s3Client config
+        finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       }
+    } catch (s3Err) {
+      console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
+      // Don't set to null here, or the frontend won't even try to render
+      // Let it fall through so we can see the 'finalPhotoUrl' in the console
+    }
+  }
 
-      const lastActiveDate = user.lastActive || user.lastLogin;
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      const isOnline = lastActiveDate && new Date(lastActiveDate) > fiveMinutesAgo;
+  const lastSeen = user.lastActive || user.lastLogin;
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
 
-      return {
-        ...user,
-        photoUrl: finalPhotoUrl,
-        status: isOnline ? 'online' : 'offline'
-      };
-    }));
-
+  return {
+    ...user,
+    photoUrl: finalPhotoUrl,
+    status: isOnline ? 'online' : 'offline'
+  };
+}));
     res.json({
       success: true,
       count: processedUsers.length,
