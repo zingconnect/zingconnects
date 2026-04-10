@@ -143,27 +143,41 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// --- 3. GET AGENT PROFILE (WITH AUTO-LOCK LOGIC) ---
+// --- 3. GET AGENT PROFILE ---
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
+    await connectToDatabase();
+    
+    // 2. Get the model safely
     const Agent = getAgentModel();
-    let agent = await Agent.findById(req.user.id).select('-password');
-    if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
 
-    // SUBSCRIPTION EXPIRY CHECK
-    // If current date > expiryDate, set isSubscribed to false immediately
-    if (agent.isSubscribed && agent.expiryDate && new Date() > new Date(agent.expiryDate)) {
-      console.log(`Auto-locking dashboard for ${agent.email}: Plan Expired.`);
+    let agent = await Agent.findById(req.user.id).select('-password');
+    
+    if (!agent) {
+      console.error(`Agent ID ${req.user.id} not found.`);
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+
+    const now = new Date();
+    if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
+      console.log(`Auto-locking: Plan expired for ${agent.email}`);
       agent.isSubscribed = false;
       await agent.save();
     }
-
+    agent.lastActive = now;
+    await agent.save();
     res.json(agent);
+
   } catch (err) {
-    res.status(500).json({ success: false, message: "Profile fetch error" });
+    // This catches the error that was causing your 500
+    console.error("DETAILED PROFILE ERROR:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Profile fetch error", 
+      error: err.message 
+    });
   }
 });
-
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
     const Agent = getAgentModel();
