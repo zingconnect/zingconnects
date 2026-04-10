@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   BsTelephoneFill, 
-  BsEmojiSmile, 
   BsPlusLg, 
   BsSendFill, 
   BsCheckAll,
@@ -15,7 +14,7 @@ import {
 
 export const UserDashboard = () => {
   const navigate = useNavigate();
-  const fileInputRef = useRef(null); // Ref for the hidden file input
+  const fileInputRef = useRef(null);
   
   // --- STATE ---
   const [agent, setAgent] = useState(null);
@@ -36,6 +35,29 @@ export const UserDashboard = () => {
     city: '',
     state: ''
   });
+
+  // --- HELPER: FORMAT LAST SEEN & STATUS ---
+  const getStatusInfo = (lastActive) => {
+    if (!lastActive) return { isOnline: false, label: "Offline" };
+    
+    const lastActiveDate = new Date(lastActive);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - lastActiveDate) / 1000);
+    
+    // Consider online if active in the last 2 minutes
+    if (diffInSeconds < 120) {
+      return { isOnline: true, label: "Online" };
+    }
+    
+    // Format "Last seen" for offline users
+    if (diffInSeconds < 3600) {
+      return { isOnline: false, label: `Last seen ${Math.floor(diffInSeconds / 60)}m ago` };
+    } else if (diffInSeconds < 86400) {
+      return { isOnline: false, label: `Last seen today at ${lastActiveDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` };
+    } else {
+      return { isOnline: false, label: `Last seen ${lastActiveDate.toLocaleDateString()}` };
+    }
+  };
 
   // --- INITIAL DATA FETCH ---
   useEffect(() => {
@@ -75,24 +97,22 @@ export const UserDashboard = () => {
     fetchUserSession();
   }, [navigate]);
 
+  const agentStatus = getStatusInfo(agent?.lastActive);
+
   // --- PHOTO HANDLERS ---
-  const handlePhotoClick = () => {
-    fileInputRef.current.click();
-  };
+  const handlePhotoClick = () => fileInputRef.current.click();
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       setSelectedFile(file);
-      setPreviewUrl(URL.createObjectURL(file)); // Generate local preview
+      setPreviewUrl(URL.createObjectURL(file));
     }
   };
 
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem('userToken');
-    
-    // Use FormData for file upload support
     const data = new FormData();
     if (selectedFile) data.append('photo', selectedFile);
     data.append('firstName', formData.firstName);
@@ -104,16 +124,10 @@ export const UserDashboard = () => {
     try {
       const res = await fetch('/api/users/update-user-onboarding', {
         method: 'PUT',
-        headers: { 
-          'Authorization': `Bearer ${token}` 
-          // Note: Content-Type is handled automatically by browser for FormData
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         body: data
       });
-
-      if (res.ok) {
-        setShowOnboarding(false);
-      }
+      if (res.ok) setShowOnboarding(false);
     } catch (err) {
       console.error("Update failed", err);
     }
@@ -143,72 +157,70 @@ export const UserDashboard = () => {
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
       
       {/* --- AGENT PROFILE SIDEBAR --- */}
-<aside className={`absolute top-0 right-0 h-full w-[280px] md:w-[350px] bg-white border-l border-gray-100 shadow-2xl z-[100] transform transition-transform duration-300 ease-in-out flex flex-col ${
-  showProfilePanel ? 'translate-x-0' : 'translate-x-full'
-}`}>
-    <header className="p-4 flex items-center justify-between border-b border-gray-100">
-        <p className="text-[10px] font-black uppercase tracking-widest text-blue-900">Verified Identity</p>
-        <button onClick={() => setShowProfilePanel(false)} className="text-gray-400 hover:text-blue-600 transition-colors p-1">
-            <BsArrowRight size={18} />
-        </button>
-    </header>
-    
-    <main className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide pb-10">
-        <div className="w-24 h-24 rounded-[2rem] bg-gray-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center">
-            {agent?.photoUrl ? (
-                <img src={agent.photoUrl} alt="Agent" className="w-full h-full object-cover" />
-            ) : (
-                <span className="text-2xl font-black text-blue-600">{agent?.firstName?.[0]}</span>
-            )}
-        </div>
+      <aside className={`absolute top-0 right-0 h-full w-[280px] md:w-[350px] bg-white border-l border-gray-100 shadow-2xl z-[100] transform transition-transform duration-300 ease-in-out flex flex-col ${
+        showProfilePanel ? 'translate-x-0' : 'translate-x-full'
+      }`}>
+        <header className="p-4 flex items-center justify-between border-b border-gray-100">
+            <p className="text-[10px] font-black uppercase tracking-widest text-blue-900">Verified Identity</p>
+            <button onClick={() => setShowProfilePanel(false)} className="text-gray-400 hover:text-blue-600 transition-colors p-1">
+                <BsArrowRight size={18} />
+            </button>
+        </header>
         
-        <div className="space-y-1">
-            <h3 className="text-lg font-black text-blue-950">
-                {agent?.firstName} {agent?.lastName}
-            </h3>
-            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-                Node ID: {agent?.slug || '---'}
-            </p>
-        </div>
-
-        {/* --- PROFESSIONAL DETAILS SECTION --- */}
-        <div className="w-full text-left space-y-4 pt-4 border-t border-gray-100">
-            {/* Occupation & Program */}
-            <div className="grid grid-cols-1 gap-3">
-              <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                <p className="text-[8px] font-black uppercase tracking-widest text-blue-600">Official Designation</p>
-                <p className="text-xs font-bold text-blue-950 mt-0.5">{agent?.occupation || 'Authorized Agent'}</p>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Program Authority</p>
-                <p className="text-xs font-bold text-slate-700 mt-0.5">{agent?.program || 'Verified Program'}</p>
-              </div>
+        <main className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide pb-10">
+            <div className="w-24 h-24 rounded-[2rem] bg-gray-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center relative">
+                {agent?.photoUrl ? (
+                    <img src={agent.photoUrl} alt="Agent" className="w-full h-full object-cover" />
+                ) : (
+                    <span className="text-2xl font-black text-blue-600">{agent?.firstName?.[0]}</span>
+                )}
+                {/* Status Dot in Sidebar */}
+                <div className={`absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-white ${agentStatus.isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
             </div>
-
-            {/* Personal Details */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-1">
-                <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Gender</p>
-                <p className="text-xs font-bold text-gray-700 capitalize">{agent?.gender || 'N/A'}</p>
-              </div>
-              <div className="p-1">
-                <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Date of Birth</p>
-                <p className="text-xs font-bold text-gray-700">
-                   {agent?.dob ? new Date(agent.dob).toLocaleDateString() : 'N/A'}
-                </p>
-              </div>
-            </div>
-
-            {/* Bio */}
+            
             <div className="space-y-1">
-                <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Professional Bio</p>
-                <p className="text-sm text-slate-600 leading-relaxed bg-gray-50 p-4 rounded-xl italic">
-                    "{agent?.bio}"
+                <h3 className="text-lg font-black text-blue-950">
+                    {agent?.firstName} {agent?.lastName}
+                </h3>
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                    Node ID: {agent?.slug || '---'}
                 </p>
             </div>
-        </div>
-    </main>
-</aside>
+
+            <div className="w-full text-left space-y-4 pt-4 border-t border-gray-100">
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-blue-600">Official Designation</p>
+                    <p className="text-xs font-bold text-blue-950 mt-0.5">{agent?.occupation || 'Authorized Agent'}</p>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Program Authority</p>
+                    <p className="text-xs font-bold text-slate-700 mt-0.5">{agent?.program || 'Verified Program'}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-1">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Gender</p>
+                    <p className="text-xs font-bold text-gray-700 capitalize">{agent?.gender || 'N/A'}</p>
+                  </div>
+                  <div className="p-1">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Date of Birth</p>
+                    <p className="text-xs font-bold text-gray-700">
+                       {agent?.dob ? new Date(agent.dob).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Professional Bio</p>
+                    <p className="text-sm text-slate-600 leading-relaxed bg-gray-50 p-4 rounded-xl italic">
+                       "{agent?.bio || "Secured communications specialist."}"
+                    </p>
+                </div>
+            </div>
+        </main>
+      </aside>
 
       {/* --- ONBOARDING OVERLAY --- */}
       {showOnboarding && (
@@ -221,38 +233,21 @@ export const UserDashboard = () => {
 
             <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
               <div className="flex flex-col items-center mb-4">
-                {/* Hidden File Input */}
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  onChange={handleFileChange} 
-                  accept="image/*" 
-                  className="hidden" 
-                />
-                
-                <div 
-                  onClick={handlePhotoClick}
-                  className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden"
-                >
-                   {previewUrl ? (
-                     <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
-                   ) : (
-                     <BsCameraFill size={20} />
-                   )}
-                   {!previewUrl && (
-                    <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>
-                   )}
+                <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+                <div onClick={handlePhotoClick} className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden">
+                   {previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <BsCameraFill size={20} />}
+                   {!previewUrl && <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 md:gap-4">
                 <div className="space-y-1">
                   <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">First Name</label>
-                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="First Name" onChange={e => setFormData({...formData, firstName: e.target.value})} />
+                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="First" onChange={e => setFormData({...formData, firstName: e.target.value})} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Last Name</label>
-                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="Last Name" onChange={e => setFormData({...formData, lastName: e.target.value})} />
+                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="Last" onChange={e => setFormData({...formData, lastName: e.target.value})} />
                 </div>
               </div>
 
@@ -296,15 +291,15 @@ export const UserDashboard = () => {
                   <span className="text-xs font-black text-blue-600">{agent?.firstName?.[0]}</span>
                 )}
               </div>
-              <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-[#f0f2f5] rounded-full" />
+              <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 border-2 border-[#f0f2f5] rounded-full ${agentStatus.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
             </div>
 
-            <div onClick={() => setShowProfilePanel(true)} className="flex flex-col cursor-pointer hover:bg-black/5 p-1 rounded transition-colors">
-              <h1 className="text-[13px] md:text-[15px] font-bold text-gray-800 leading-tight">
+            <div onClick={() => setShowProfilePanel(true)} className="flex flex-col cursor-pointer hover:bg-black/5 p-1 rounded transition-colors overflow-hidden">
+              <h1 className="text-[13px] md:text-[15px] font-bold text-gray-800 leading-tight truncate">
                 {agent ? `${agent.firstName} ${agent.lastName}` : 'Verified Agent'}
               </h1>
-              <p className="text-[10px] md:text-[11px] text-green-600 font-bold uppercase tracking-tighter">
-                Secure Channel
+              <p className={`text-[9px] md:text-[10px] font-bold uppercase tracking-tighter ${agentStatus.isOnline ? 'text-green-600' : 'text-gray-500'}`}>
+                {agentStatus.label}
               </p>
             </div>
           </div>
@@ -339,33 +334,32 @@ export const UserDashboard = () => {
           ))}
         </main>
 
-       {/* FOOTER - Added pb-safe for mobile devices to prevent hiding under navigation bars */}
-  <footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-4 z-20 border-t border-gray-200 pb-safe">
-    <div className="flex gap-3 md:gap-5 text-gray-500">
-      <BsPlusLg className="cursor-pointer hover:text-gray-700" size={20} />
-    </div>
-    
-    <form onSubmit={handleSendMessage} className="flex-1">
-      <input 
-        value={newMessage} 
-        onChange={(e) => setNewMessage(e.target.value)} 
-        placeholder="Type your secure message" 
-        className="w-full bg-white px-4 py-2.5 md:py-3 rounded-full text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20" 
-      />
-    </form>
+        <footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-4 z-20 border-t border-gray-200 pb-safe">
+          <div className="flex gap-3 md:gap-5 text-gray-500">
+            <BsPlusLg className="cursor-pointer hover:text-gray-700" size={20} />
+          </div>
+          
+          <form onSubmit={handleSendMessage} className="flex-1">
+            <input 
+              value={newMessage} 
+              onChange={(e) => setNewMessage(e.target.value)} 
+              placeholder="Type your secure message" 
+              className="w-full bg-white px-4 py-2.5 md:py-3 rounded-full text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20" 
+            />
+          </form>
 
-    <div className="w-10 md:w-12 flex justify-center items-center">
-      <button 
-        type="submit" 
-        onClick={handleSendMessage} 
-        className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all ${
-          newMessage.trim() ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-500 border border-gray-100'
-        }`}
-      >
-        <BsSendFill size={16} className={newMessage.trim() ? "ml-0.5" : ""} />
-      </button>
-    </div>
-  </footer>
+          <div className="w-10 md:w-12 flex justify-center items-center">
+            <button 
+              type="submit" 
+              onClick={handleSendMessage} 
+              className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all ${
+                newMessage.trim() ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-500 border border-gray-100'
+              }`}
+            >
+              <BsSendFill size={16} className={newMessage.trim() ? "ml-0.5" : ""} />
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );

@@ -65,35 +65,41 @@ export const AgentDashboard = () => {
     script.async = true;
     document.body.appendChild(script);
 
-    // 2. Fetch Profile Data
-    const fetchInitialData = async () => {
-      const token = localStorage.getItem('zingToken');
-      if (!token) return navigate('/');
+   // --- Updated fetchInitialData function ---
+const fetchInitialData = async () => {
+  const token = localStorage.getItem('zingToken'); // Ensure this matches your login storage key
+  if (!token) return navigate('/');
 
-      try {
-        const profileRes = await fetch('/api/agents/profile', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const profileData = await profileRes.json();
-        
-        setAgentData(profileData);
-        setIsSubscribed(profileData.isSubscribed); 
-        if (profileData.plan) setSelectedPlan(profileData.plan);
+  try {
+    const profileRes = await fetch('/api/agents/profile', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const profileData = await profileRes.json();
+    
+    setAgentData(profileData);
+    setIsSubscribed(profileData.isSubscribed); 
+    if (profileData.plan) setSelectedPlan(profileData.plan);
 
-        if (profileData.isSubscribed) {
-          const response = await fetch('/api/agents/my-users', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          const data = await response.json();
-          setUsers(data || []);
-        }
-      } catch (err) {
-        console.error("Initialization error:", err);
-      } finally {
-        setLoading(false);
+    if (profileData.isSubscribed) {
+      const response = await fetch('/api/agents/my-users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      
+      // FIX: Access the .users property from the backend object
+      if (data.success) {
+        setUsers(data.users || []);
+      } else {
+        console.warn("Users fetch failed:", data.message);
+        setUsers([]); // Fallback to empty array
       }
-    };
-
+    }
+  } catch (err) {
+    console.error("Initialization error:", err);
+  } finally {
+    setLoading(false);
+  }
+};
     fetchInitialData();
     return () => {
         if (document.body.contains(script)) {

@@ -64,19 +64,23 @@ async function connectToDatabase() {
 // Initialize Model on the default connection
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
-// --- AUTHENTICATION MIDDLEWARE ---
-// Change this in index.js
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
     if (err) return res.status(403).json({ message: "Invalid Token" });
     
-    // Use 'user' so all routes below can find the ID
     req.user = decoded; 
+
+    // Update activity timestamp if the user is an agent
+    // We don't 'await' this so we don't slow down the response
+    if (decoded.role === 'agent') {
+      Agent.findByIdAndUpdate(decoded.id, { lastActive: new Date() }).exec();
+    }
+
     next();
   });
 };
@@ -440,20 +444,13 @@ app.get('/api/users/my-session', async (req, res) => {
   }
 });
 
-// --- USER ONBOARDING (DASHBOARD) ---
-// Note: We use upload.single('photo') to enable req.body and req.file
-app.put('/api/users/update-user-onboarding', upload.single('photo'), async (req, res) => {
+// index.js or server.js
+
+app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
+    // Ensure DB connection
     await connectToDatabase();
-
-    // 1. Verify the User (Handshake)
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: "No token" });
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
     const { firstName, lastName, dob, city, state } = req.body;
-
     const updateData = {
       firstName,
       lastName,
@@ -464,9 +461,10 @@ app.put('/api/users/update-user-onboarding', upload.single('photo'), async (req,
       isVerified: true
     };
 
-    // 2. Upload to IDrive e2 if a photo was provided
     if (req.file) {
-      const fileKey = `users/${decoded.id}-${Date.now()}-${req.file.originalname}`;
+      // Sanitize filename to prevent URL issues
+      const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
+      const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
       
       const uploadParams = {
         Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
@@ -474,29 +472,39 @@ app.put('/api/users/update-user-onboarding', upload.single('photo'), async (req,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
-
       await s3Client.send(new PutObjectCommand(uploadParams));
+    updateData.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.idrivee2.com/${fileKey}`;
       
-      // Store the Key in the database (You will sign this later in my-session)
-      updateData.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.idrivee2.com/${fileKey}`;
+      console.log(`[Storage] Photo uploaded for user: ${req.user.id}`);
     }
-
-    // 3. Save to MongoDB
     const updatedUser = await User.findByIdAndUpdate(
-      decoded.id,
+      req.user.id, 
       updateData,
       { new: true }
     );
 
-    if (!updatedUser) return res.status(404).json({ success: false, message: "User not found" });
+    if (!updatedUser) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "User account not found" 
+      });
+    }
 
-    res.json({ success: true, user: updatedUser });
+    // 5. Final Response
+    res.json({ 
+      success: true, 
+      message: "Onboarding complete", 
+      user: updatedUser 
+    });
+
   } catch (err) {
-    console.error("USER ONBOARDING ERROR:", err);
-    res.status(500).json({ success: false, message: "Server error during update" });
+    console.error("CRITICAL ONBOARDING ERROR:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error during profile update" 
+    });
   }
 });
-
 app.get('/api/agents/:slug', async (req, res) => {
   try {
     console.log("--- Profile Request Start ---");
@@ -749,25 +757,37 @@ app.post('/api/subscriptions/verify', async (req, res) => {
   }
 });
 
+// GET /api/agents/my-users
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Identify agent from the corrected middleware property
-    const agentId = req.user.id;
+    // 1. Extract the Agent ID from the token (verify it exists)
+    const agentId = req.user.id || req.user._id;
 
+    if (!agentId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid Agent session. Missing ID." 
+      });
+    }
     const users = await User.find({ 
       connectedAgents: agentId 
     })
-    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin')
+    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin createdAt')
     .sort({ lastLogin: -1 });
+    res.json({
+      success: true,
+      count: users.length,
+      users: users || []
+    });
 
-    res.json(users || []);
   } catch (err) {
-    console.error("Error fetching agent users:", err);
+    console.error("CRITICAL ERROR FETCHING AGENT USERS:", err);
     res.status(500).json({ 
+      success: false,
       message: "Internal server error while retrieving user list",
-      error: err.message 
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });

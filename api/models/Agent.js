@@ -25,6 +25,11 @@ lastName: {
   role: { type: String, default: 'agent' },
   photoUrl: { type: String, default: '' },
 
+  lastActive: { 
+    type: Date, 
+    default: Date.now 
+  },
+  
   // --- SUBSCRIPTION & PAYMENT FIELDS ---
   plan: { 
     type: String, 

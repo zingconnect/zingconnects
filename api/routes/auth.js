@@ -397,11 +397,12 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/users/update-user-onboarding
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     const { firstName, lastName, dob, city, state } = req.body;
     
-    // 1. Prepare the base update object
+    // 1. Prepare base update object
     const updateData = {
       firstName,
       lastName,
@@ -412,10 +413,10 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       isVerified: true
     };
 
-    // 2. Handle IDrive e2 Upload if a file exists
+    // 2. Handle IDrive e2 Image Upload
     if (req.file) {
-      // Create a unique key for the user's photo
-      const fileKey = `users/${req.user.id}-${Date.now()}-${req.file.originalname}`;
+      // Create unique key: users/USERID-TIMESTAMP-FILENAME.png
+      const fileKey = `users/${req.user.id}-${Date.now()}-${req.file.originalname.replace(/\s+/g, '_')}`;
       
       const uploadParams = {
         Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
@@ -424,17 +425,15 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
         ContentType: req.file.mimetype,
       };
 
-      // Send the file to IDrive
+      // Execute upload to IDrive
       await s3Client.send(new PutObjectCommand(uploadParams));
       
-      // Save the URL/Key in the database
-      // You will use GetObjectCommand in my-session to sign this later
+      // Save the public URL to the database
       updateData.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.idrivee2.com/${fileKey}`;
-      
-      console.log("User photo uploaded to IDrive:", fileKey);
+      console.log("Profile photo uploaded to IDrive e2:", fileKey);
     }
 
-    // 3. Update the Database using the ID from the Token
+    // 3. Update MongoDB
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
       updateData,
@@ -445,36 +444,36 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    res.json({ success: true, user: updatedUser });
+    res.json({ 
+      success: true, 
+      message: "Profile initialized successfully",
+      user: updatedUser 
+    });
+
   } catch (err) {
-    console.error("User Onboarding Error:", err);
-    res.status(500).json({ success: false, message: "Failed to save profile" });
+    console.error("ONBOARDING ERROR:", err);
+    res.status(500).json({ success: false, message: "Server error during profile update" });
   }
 });
-
-// --- NEW: FETCH AGENT'S CONNECTED USERS ---
+// This route lives inside your auth.js router file
 router.get('/my-users', authenticateToken, async (req, res) => {
   try {
-    const Agent = getAgentModel();
-    
     // 1. Identify the agent from the token (req.user.id)
     const agentId = req.user.id;
 
-    // 2. Find users where this Agent's ID is in their 'connectedAgents' array
-    // We select all the professional fields needed for the dashboard
+    if (!agentId) {
+      return res.status(401).json({ message: "Unauthorized: Missing Agent ID" });
+    }
+    await Agent.findByIdAndUpdate(agentId, { lastActive: new Date() });
     const users = await User.find({ 
       connectedAgents: agentId 
     })
     .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin')
     .sort({ lastLogin: -1 });
-
-    if (!users) {
-      return res.status(200).json([]);
-    }
-
     res.json(users);
+
   } catch (err) {
-    console.error("Error fetching agent users:", err);
+    console.error("AGENT USERS FETCH ERROR:", err);
     res.status(500).json({ 
       success: false,
       message: "Internal server error while retrieving user list",
