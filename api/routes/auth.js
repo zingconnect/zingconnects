@@ -417,12 +417,10 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/users/update-user-onboarding
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     const { firstName, lastName, dob, city, state } = req.body;
     
-    // 1. Prepare base update object
     const updateData = {
       firstName,
       lastName,
@@ -433,10 +431,10 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       isVerified: true
     };
 
-    // 2. Handle IDrive e2 Image Upload
     if (req.file) {
-      // Create unique key: users/USERID-TIMESTAMP-FILENAME.png
-      const fileKey = `users/${req.user.id}-${Date.now()}-${req.file.originalname.replace(/\s+/g, '_')}`;
+      // 1. Sanitize the filename
+      const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
+      const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
       
       const uploadParams = {
         Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
@@ -445,15 +443,13 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
         ContentType: req.file.mimetype,
       };
 
-      // Execute upload to IDrive
-      await s3Client.send(new PutObjectCommand(uploadParams));
+      // 2. Execute upload to IDrive
+      await s3Client.send(new PutObjectCommand(uploadParams));      
+      updateData.photoUrl = fileKey; 
       
-      // Save the public URL to the database
-      updateData.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.idrivee2.com/${fileKey}`;
-      console.log("Profile photo uploaded to IDrive e2:", fileKey);
+      console.log(`[Storage] Photo stored as key: ${fileKey}`);
     }
 
-    // 3. Update MongoDB
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
       updateData,
@@ -477,7 +473,8 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
 });
 
 router.get('/my-users', authenticateToken, async (req, res) => {
-  // NEW UPDATE: Prevent the browser from caching old, expired signed URLs
+  // --- CACHE CONTROL ---
+  // Prevents browsers from caching expired signed URLs
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -485,56 +482,58 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
+    // Support both token formats
     const agentId = req.user.id || req.user._id;
-    const Agent = getAgentModel();
-    const agentExists = await Agent.findById(agentId);
-    
-    if (!agentExists) {
-      return res.status(404).json({ 
+
+    if (!agentId) {
+      return res.status(400).json({ 
         success: false, 
-        message: "Agent not found" 
+        message: "Invalid session metadata." 
       });
     }
 
-    const users = await User.find({ 
-      connectedAgents: agentId 
-    })
-    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
-    .sort({ lastActive: -1 })
-    .lean();
-    
-    const processedUsers = await Promise.all(users.map(async (user) => {
-      let finalPhotoUrl = user.photoUrl;
+    // 1. Fetch users connected to this agent
+    const users = await User.find({ connectedAgents: agentId })
+      .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
+      .sort({ lastActive: -1 })
+      .lean();
 
-      // STRENGTHENED PHOTO LOGIC: Ignore broken domain and reconstruct key
+    // 2. Process users in parallel to handle S3 signing
+    const processedUsers = await Promise.all(users.map(async (user) => {
+      let finalPhotoUrl = null;
+
+      // --- ROBUST PHOTO SIGNING LOGIC ---
       if (user.photoUrl && typeof user.photoUrl === 'string' && user.photoUrl.includes('users/')) {
         try {
-          // 1. Extract only the filename, discarding the broken base domain
+          // Extract the key regardless of the stored domain (fixes the "Misty" database error)
           const urlParts = user.photoUrl.split('users/');
-          const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
-          const fileKey = `users/${fileName}`;
+          const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
+          
+          // Decode in case the DB stored it with %20 instead of spaces
+          const fileKey = `users/${decodeURIComponent(rawFileName)}`;
 
-          console.log("Generating fresh signed URL for user key:", fileKey);
-
-          // 2. Reconstruct command with the clean key
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: fileKey,
           });
 
-          // 3. Generate signed URL using the valid endpoint from your s3Client config
-          // Link is valid for 1 hour (3600 seconds)
+          // Generate a fresh signature valid for 1 hour
           finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         } catch (s3Err) {
-          console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
-          finalPhotoUrl = null; 
+          console.error(`[S3 Error] ${user.email}:`, s3Err.message);
         }
       }
 
-      // Online Status Logic
+      // --- FALLBACK LOGIC ---
+      // If photo is missing or S3 failed, provide a clean letter-based avatar
+      if (!finalPhotoUrl) {
+        const fullName = `${user.firstName}+${user.lastName}`;
+        finalPhotoUrl = `https://ui-avatars.com/api/?name=${fullName}&background=random&color=fff&size=128`;
+      }
+
+      // --- ONLINE STATUS (5 Minute Heartbeat) ---
       const lastSeen = user.lastActive || user.lastLogin;
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
+      const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
 
       return {
         ...user,
@@ -550,12 +549,13 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("CRITICAL ERROR FETCHING AGENT USERS:", err);
+    console.error("CRITICAL USER FETCH ERROR:", err);
     res.status(500).json({ 
       success: false, 
-      message: "Internal server error",
-      error: err.message 
+      message: "System failed to sync user list",
+      error: err.message
     });
   }
 });
+
 export default router;
