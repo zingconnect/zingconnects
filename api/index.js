@@ -264,8 +264,8 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
     await connectToDatabase();
     
     // FIX: Use req.user.id to match your middleware logic
-    if (!req.agent || !req.user.id) {
-      return res.status(401).json({ success: false, message: "Invalid session credentials" });
+    if (!req.user || !req.user.id) {
+        return res.status(401).json({ success: false, message: "Invalid session credentials" });
     }
 
     // Agent is already defined at the top of your server file
