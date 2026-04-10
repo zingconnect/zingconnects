@@ -179,52 +179,54 @@ router.get('/profile', authenticateToken, async (req, res) => {
     });
   }
 });
+
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
+    // 1. Ensure Database is connected
+    await connectToDatabase();
+    
     const Agent = getAgentModel();
-    // Use req.user.id (from your authenticateToken middleware)
-    let agent = await Agent.findById(req.user.id).select('-password');
+    const agent = await Agent.findById(req.user.id).select('-password');
     
     if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
 
-    // --- START SIGNING LOGIC ---
+    // 2. Handle Profile Image Signing
     let finalPhotoUrl = agent.photoUrl;
 
+    // Check if the URL belongs to IDrive e2
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
-        // 1. Extract the key (e.g. "profiles/1775740964828-AGENT.png")
-        // We split by '.com/' and take the second part
+        // Extract the key (removes the domain part)
         const fileKey = agent.photoUrl.split('.com/')[1];
 
-        if (fileKey) {
+        if (fileKey && s3Client) {
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: fileKey,
           });
 
-          // 2. Generate the temporary signed URL (valid for 3600 seconds / 1 hour)
+          // Generate a signed URL valid for 1 hour
           finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         }
       } catch (signErr) {
-        console.error("Signing Error:", signErr);
-        // Fallback to static URL if signing fails
+        console.error("Image Signing Failed:", signErr.message);
+        // If signing fails, the frontend will try to use the original (un-signed) URL
       }
     }
-
     res.json({
       success: true,
-      firstName: agent.firstName,
-      lastName: agent.lastName,
-      occupation: agent.occupation,
-      program: agent.program,
-      bio: agent.bio,
-      gender: agent.gender,
-      dob: agent.dob,
-      address: agent.address,
-      photoUrl: finalPhotoUrl, // NOW INCLUDES THE SIGNATURE!
-      slug: agent.slug,
-      plan: agent.plan,
-      isSubscribed: agent.isSubscribed,
+      firstName: agent.firstName || "",
+      lastName: agent.lastName || "",
+      occupation: agent.occupation || "",
+      program: agent.program || "",
+      bio: agent.bio || "",
+      gender: agent.gender || "",
+      dob: agent.dob || "",
+      address: agent.address || "",
+      photoUrl: finalPhotoUrl || "",
+      slug: agent.slug || "",
+      plan: agent.plan || "BASIC",
+      isSubscribed: !!agent.isSubscribed,
       subscriptionAmount: agent.subscriptionAmount || 0,
       subscriptionDate: agent.subscriptionDate,
       expiryDate: agent.expiryDate
@@ -232,10 +234,9 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
 
   } catch (err) {
     console.error("Profile Fetch Error:", err);
-    res.status(500).json({ success: false, message: "Profile fetch error" });
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 // --- 4. UPDATE AGENT PLAN ---
 router.post('/update-plan', authenticateToken, async (req, res) => {
   try {
@@ -470,9 +471,9 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: "Server error during profile update" });
   }
 });
+
 router.get('/my-users', authenticateToken, async (req, res) => {
   try {
-    // Ensure DB connection is active
     await connectToDatabase();
     const agentId = req.user.id;
     const Agent = getAgentModel();
@@ -484,15 +485,29 @@ router.get('/my-users', authenticateToken, async (req, res) => {
         message: "Agent not found" 
       });
     }
+
     const users = await User.find({ 
       connectedAgents: agentId 
     })
-    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin createdAt')
-    .sort({ lastLogin: -1 });
+    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
+    .sort({ lastActive: -1 });
+
+    const usersWithStatus = users.map(user => {
+      const lastActiveDate = user.lastActive || user.lastLogin;
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      
+      const isOnline = lastActiveDate && new Date(lastActiveDate) > fiveMinutesAgo;
+
+      return {
+        ...user._doc,
+        status: isOnline ? 'online' : 'offline'
+      };
+    });
+
     res.json({
       success: true,
-      count: users.length,
-      users: users || []
+      count: usersWithStatus.length,
+      users: usersWithStatus
     });
 
   } catch (err) {
@@ -504,7 +519,6 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     });
   }
 });
-
 
 
 export default router;

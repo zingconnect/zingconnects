@@ -758,12 +758,10 @@ app.post('/api/subscriptions/verify', async (req, res) => {
   }
 });
 
-// GET /api/agents/my-users
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 1. Extract the Agent ID from the token (verify it exists)
     const agentId = req.user.id || req.user._id;
 
     if (!agentId) {
@@ -772,15 +770,31 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
         message: "Invalid Agent session. Missing ID." 
       });
     }
+
+    // Include lastActive in the selection to calculate status
     const users = await User.find({ 
       connectedAgents: agentId 
     })
-    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin createdAt')
-    .sort({ lastLogin: -1 });
+    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
+    .sort({ lastActive: -1 });
+
+    // Calculate status: Online if active within the last 5 minutes
+    const usersWithStatus = users.map(user => {
+      const lastSeen = user.lastActive || user.lastLogin;
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      
+      const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
+
+      return {
+        ...user._doc,
+        status: isOnline ? 'online' : 'offline'
+      };
+    });
+
     res.json({
       success: true,
-      count: users.length,
-      users: users || []
+      count: usersWithStatus.length,
+      users: usersWithStatus
     });
 
   } catch (err) {
@@ -788,7 +802,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: "Internal server error while retrieving user list",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: err.message
     });
   }
 });
