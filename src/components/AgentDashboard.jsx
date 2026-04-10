@@ -349,25 +349,49 @@ const handleLogout = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {users.length > 0 ? users.map((user) => (
-            <div 
-              key={user._id}
-              onClick={() => handleSelectUser(user)}
-              className={`flex items-center px-3 py-3 cursor-pointer hover:bg-[#f5f6f6] border-b border-gray-50 ${selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''}`}
-            >
-              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">
-                {user.email[0].toUpperCase()}
-              </div>
-              <div className="ml-3 flex-1 overflow-hidden">
-                <h3 className="text-[13px] font-bold text-gray-800 truncate">{user.email}</h3>
-                <p className="text-[11px] text-gray-500 truncate">Connected</p>
-              </div>
-            </div>
-          )) : (
-            <div className="p-10 text-center opacity-30">
-                <p className="text-[10px] uppercase font-black tracking-widest">No Connections</p>
-            </div>
-          )}
+        {users.length > 0 ? users.map((user) => (
+  <div 
+    key={user._id}
+    onClick={() => handleSelectUser(user)}
+    className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] border-b border-gray-50 transition-colors ${
+      selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''
+    }`}
+  >
+    {/* User Avatar - Shows Photo if exists, else Initial */}
+    <div className="relative shrink-0">
+      <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
+        {user.photoUrl ? (
+          <img src={user.photoUrl} alt="User" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full bg-blue-900 flex items-center justify-center text-white text-xs font-black">
+            {user.firstName ? user.firstName[0].toUpperCase() : user.email[0].toUpperCase()}
+          </div>
+        )}
+      </div>
+      {/* Verification Badge */}
+      {user.isVerified && (
+        <div className="absolute -bottom-0.5 -right-0.5 bg-green-500 border-2 border-white w-4 h-4 rounded-full flex items-center justify-center">
+          <BsCheckAll className="text-white" size={12} />
+        </div>
+      )}
+    </div>
+
+    <div className="ml-3 flex-1 overflow-hidden">
+      <div className="flex justify-between items-start">
+        <h3 className="text-[13px] font-bold text-gray-800 truncate">
+          {user.firstName ? `${user.firstName} ${user.lastName}` : user.email}
+        </h3>
+      </div>
+      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter truncate">
+        {user.city}, {user.state}
+      </p>
+    </div>
+  </div>
+)) : (
+  <div className="p-10 text-center opacity-30">
+      <p className="text-[10px] uppercase font-black tracking-widest">No Connections</p>
+  </div>
+)}
         </div>
         <div className="p-4 border-t border-gray-100 bg-gray-50/50">
     <button 
@@ -390,38 +414,58 @@ const handleLogout = () => {
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative overflow-hidden`}>
         {selectedUser ? (
           <>
-           <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center z-10 border-l border-gray-200 shadow-sm">
+        <header className="h-[55px] md:h-[65px] bg-[#f0f2f5] px-3 flex justify-between items-center z-10 border-l border-gray-200 shadow-sm">
   <div className="flex items-center gap-3">
-    <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600">
+    {/* Mobile Back Button */}
+    <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
       <BsChevronLeft size={18} />
     </button>
-    <div className="w-9 h-9 bg-blue-900 rounded-full flex items-center justify-center text-white text-xs font-black">
-      {selectedUser.email[0].toUpperCase()}
+    
+    {/* User Avatar - Photo or Initial */}
+    <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
+      {selectedUser.photoUrl ? (
+        <img 
+          src={selectedUser.photoUrl} 
+          alt="Profile" 
+          className="w-full h-full object-cover" 
+        />
+      ) : (
+        <div className="w-full h-full bg-blue-900 flex items-center justify-center text-white text-xs font-black">
+          {selectedUser.firstName?.[0] || selectedUser.email[0].toUpperCase()}
+        </div>
+      )}
     </div>
+
+    {/* Identity & Status */}
     <div className="overflow-hidden">
-      <h2 className="text-sm font-bold text-gray-800 truncate max-w-[120px] md:max-w-none">
-        {selectedUser.email}
+      <h2 className="text-sm font-bold text-gray-800 truncate max-w-[140px] md:max-w-none">
+        {selectedUser.firstName ? `${selectedUser.firstName} ${selectedUser.lastName}` : selectedUser.email}
       </h2>
-      <p className="text-[9px] text-green-600 font-bold uppercase">Online</p>
+      <div className="flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+        <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">
+          {selectedUser.city ? `${selectedUser.city}, ${selectedUser.state}` : 'Verified Node'}
+        </p>
+      </div>
     </div>
   </div>
 
   {/* WhatsApp Style Call Actions */}
   <div className="flex items-center gap-4 md:gap-6 text-gray-500 mr-2">
-    <button className="hover:text-blue-600 transition-colors">
+    <button className="hover:text-blue-600 transition-colors active:scale-90" title="Video Call">
       <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
         <path d="M0 12V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm6.79-4.493c0 .407.303.74.686.74.384 0 .687-.333.687-.74 0-.406-.303-.74-.687-.74-.383 0-.686.334-.686.74zM3.733 4.493c0 .407.303.74.687.74.383 0 .686-.333.686-.74 0-.406-.303-.74-.686-.74-.384 0-.687.334-.687.74zM14 1h-3l1 2h2V1zM5 1H2L1 3h2V1zM15 4h-4l1 2h3V4zM4 4H0l1 2h3V4zm1 10h4l-1-2H2v2zm10 0h-3l-1-2h4v2z"/>
       </svg>
     </button>
-    <button className="hover:text-blue-600 transition-colors">
+    <button className="hover:text-blue-600 transition-colors active:scale-90" title="Voice Call">
       <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
         <path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/>
       </svg>
     </button>
-    <BsThreeDotsVertical className="cursor-pointer" size={18} />
+    <div className="h-6 w-[1px] bg-gray-300 mx-1 hidden md:block"></div>
+    <BsThreeDotsVertical className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
   </div>
 </header>
-
             <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
               {messages.map((m) => (
                 <div key={m.id} className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative ${m.sender === 'agent' ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'}`}>

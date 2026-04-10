@@ -143,44 +143,72 @@ export const UserDashboard = () => {
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
       
       {/* --- AGENT PROFILE SIDEBAR --- */}
-      <aside className={`absolute top-0 right-0 h-full w-[280px] md:w-[350px] bg-white border-l border-gray-100 shadow-2xl z-[100] transform transition-transform duration-300 ease-in-out flex flex-col ${
-        showProfilePanel ? 'translate-x-0' : 'translate-x-full'
-      }`}>
-          <header className="p-4 flex items-center justify-between border-b border-gray-100">
-              <p className="text-[10px] font-black uppercase tracking-widest text-blue-900">Verified Identity</p>
-              <button onClick={() => setShowProfilePanel(false)} className="text-gray-400 hover:text-blue-600 transition-colors p-1">
-                  <BsArrowRight size={18} />
-              </button>
-          </header>
-          
-          <main className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide">
-              <div className="w-24 h-24 rounded-[2rem] bg-gray-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center">
-                  {agent?.photoUrl ? (
-                      <img src={agent.photoUrl} alt="Agent" className="w-full h-full object-cover" />
-                  ) : (
-                      <span className="text-2xl font-black text-blue-600">{agent?.firstName?.[0]}</span>
-                  )}
-              </div>
-              
-              <div className="space-y-1">
-                  <h3 className="text-lg font-black text-blue-950">
-                      {agent?.firstName} {agent?.lastName}
-                  </h3>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-                      Node ID: {agent?.slug || '---'}
-                  </p>
-              </div>
+<aside className={`absolute top-0 right-0 h-full w-[280px] md:w-[350px] bg-white border-l border-gray-100 shadow-2xl z-[100] transform transition-transform duration-300 ease-in-out flex flex-col ${
+  showProfilePanel ? 'translate-x-0' : 'translate-x-full'
+}`}>
+    <header className="p-4 flex items-center justify-between border-b border-gray-100">
+        <p className="text-[10px] font-black uppercase tracking-widest text-blue-900">Verified Identity</p>
+        <button onClick={() => setShowProfilePanel(false)} className="text-gray-400 hover:text-blue-600 transition-colors p-1">
+            <BsArrowRight size={18} />
+        </button>
+    </header>
+    
+    <main className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide pb-10">
+        <div className="w-24 h-24 rounded-[2rem] bg-gray-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center">
+            {agent?.photoUrl ? (
+                <img src={agent.photoUrl} alt="Agent" className="w-full h-full object-cover" />
+            ) : (
+                <span className="text-2xl font-black text-blue-600">{agent?.firstName?.[0]}</span>
+            )}
+        </div>
+        
+        <div className="space-y-1">
+            <h3 className="text-lg font-black text-blue-950">
+                {agent?.firstName} {agent?.lastName}
+            </h3>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                Node ID: {agent?.slug || '---'}
+            </p>
+        </div>
 
-              <div className="w-full text-left space-y-4 pt-4 border-t border-gray-100">
-                  <div className="space-y-1">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Professional Bio</p>
-                      <p className="text-sm text-slate-600 leading-relaxed bg-gray-50 p-4 rounded-xl">
-                          {agent?.bio || "A verified node specializing in secure digital communications."}
-                      </p>
-                  </div>
+        {/* --- PROFESSIONAL DETAILS SECTION --- */}
+        <div className="w-full text-left space-y-4 pt-4 border-t border-gray-100">
+            {/* Occupation & Program */}
+            <div className="grid grid-cols-1 gap-3">
+              <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                <p className="text-[8px] font-black uppercase tracking-widest text-blue-600">Official Designation</p>
+                <p className="text-xs font-bold text-blue-950 mt-0.5">{agent?.occupation || 'Authorized Agent'}</p>
               </div>
-          </main>
-      </aside>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Program Authority</p>
+                <p className="text-xs font-bold text-slate-700 mt-0.5">{agent?.program || 'Verified Program'}</p>
+              </div>
+            </div>
+
+            {/* Personal Details */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-1">
+                <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Gender</p>
+                <p className="text-xs font-bold text-gray-700 capitalize">{agent?.gender || 'N/A'}</p>
+              </div>
+              <div className="p-1">
+                <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Date of Birth</p>
+                <p className="text-xs font-bold text-gray-700">
+                   {agent?.dob ? new Date(agent.dob).toLocaleDateString() : 'N/A'}
+                </p>
+              </div>
+            </div>
+
+            {/* Bio */}
+            <div className="space-y-1">
+                <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Professional Bio</p>
+                <p className="text-sm text-slate-600 leading-relaxed bg-gray-50 p-4 rounded-xl italic">
+                    "{agent?.bio}"
+                </p>
+            </div>
+        </div>
+    </main>
+</aside>
 
       {/* --- ONBOARDING OVERLAY --- */}
       {showOnboarding && (
@@ -311,24 +339,33 @@ export const UserDashboard = () => {
           ))}
         </main>
 
-        <footer className="min-h-[60px] md:min-h-[70px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-4 z-20 border-t border-gray-200">
-          <div className="flex gap-3 md:gap-5 text-gray-500">
-            <BsEmojiSmile className="cursor-pointer hover:text-gray-700 hidden sm:block" size={22} />
-            <BsPlusLg className="cursor-pointer hover:text-gray-700" size={20} />
-          </div>
-          
-          <form onSubmit={handleSendMessage} className="flex-1">
-            <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type your secure message" className="w-full bg-white px-4 py-2.5 md:py-3 rounded-full text-[12px] md:text-[14px] outline-none shadow-sm border border-gray-100" />
-          </form>
+       {/* FOOTER - Added pb-safe for mobile devices to prevent hiding under navigation bars */}
+  <footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-4 z-20 border-t border-gray-200 pb-safe">
+    <div className="flex gap-3 md:gap-5 text-gray-500">
+      <BsPlusLg className="cursor-pointer hover:text-gray-700" size={20} />
+    </div>
+    
+    <form onSubmit={handleSendMessage} className="flex-1">
+      <input 
+        value={newMessage} 
+        onChange={(e) => setNewMessage(e.target.value)} 
+        placeholder="Type your secure message" 
+        className="w-full bg-white px-4 py-2.5 md:py-3 rounded-full text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20" 
+      />
+    </form>
 
-          <div className="w-10 md:w-12 flex justify-center items-center">
-            <button type="submit" onClick={handleSendMessage} className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all ${
-                newMessage.trim() ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-500 border border-gray-100'
-              }`}>
-              <BsSendFill size={16} className={newMessage.trim() ? "ml-0.5" : ""} />
-            </button>
-          </div>
-        </footer>
+    <div className="w-10 md:w-12 flex justify-center items-center">
+      <button 
+        type="submit" 
+        onClick={handleSendMessage} 
+        className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all ${
+          newMessage.trim() ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-500 border border-gray-100'
+        }`}
+      >
+        <BsSendFill size={16} className={newMessage.trim() ? "ml-0.5" : ""} />
+      </button>
+    </div>
+  </footer>
       </div>
     </div>
   );

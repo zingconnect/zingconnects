@@ -442,7 +442,8 @@ app.put('/api/users/update-user-onboarding', upload.single('photo'), async (req,
       dob,
       city,
       state,
-      isProfileComplete: true
+      isProfileComplete: true,
+      isVerified: true
     };
 
     // 2. Upload to IDrive e2 if a photo was provided
@@ -739,6 +740,37 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// --- FETCH AGENT'S CONNECTED USERS ---
+app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    // Ensure we are identifying the agent correctly from the token
+    const agentId = req.agent.id;
+
+    // 1. Find users where this Agent's ID exists in their 'connectedAgents' array
+    // 2. .select() ensures we pull the new profile fields (firstName, lastName, photoUrl, etc.)
+    const users = await User.find({ 
+      connectedAgents: agentId 
+    })
+    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin')
+    .sort({ lastLogin: -1 }); // Show recently active users at the top
+
+    if (!users) {
+      return res.status(200).json([]);
+    }
+
+    res.json(users);
+  } catch (err) {
+    console.error("Error fetching agent users:", err);
+    res.status(500).json({ 
+      message: "Internal server error while retrieving user list",
+      error: err.message 
+    });
+  }
+});
+
 // 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {

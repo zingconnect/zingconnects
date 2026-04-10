@@ -33,3 +33,9 @@ body {
 button {
   touch-action: manipulation;
 }
+
+/* Ensure the dashboard always fits the visible window */
+.h-screen {
+  height: 100vh; /* Fallback */
+  height: 100dvh; /* Dynamic viewport height for mobile */
+}

@@ -403,7 +403,8 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       dob,
       city,
       state,
-      isProfileComplete: true
+      isProfileComplete: true,
+      isVerified: true
     };
 
     // 2. Handle IDrive e2 Upload if a file exists
