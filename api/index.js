@@ -757,6 +757,7 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
