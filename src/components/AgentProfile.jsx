@@ -41,28 +41,38 @@ export const AgentProfile = () => {
   });
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      const token = localStorage.getItem('zingToken');
-      if (!token) return navigate('/');
+  const fetchProfile = async () => {
+    const token = localStorage.getItem('zingToken');
+    if (!token) return navigate('/');
 
-      try {
-        const response = await fetch('/api/agents/profile/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!response.ok) throw new Error("Failed to load profile");
-        const result = await response.json();
-        
-        if (result.success) {
-          setAgentData(result); 
-        }
-      } catch (err) {
-        console.error("Profile Fetch Error:", err);
-      } finally {
-        setLoading(false);
+    try {
+      const response = await fetch('/api/agents/profile/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!response.ok) throw new Error("Failed to load profile");
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setAgentData(prevData => ({
+          ...prevData,
+          ...result
+        })); 
       }
-    };
-    fetchProfile();
-  }, [navigate]);
+    } catch (err) {
+      console.error("Profile Fetch Error:", err);
+      if (err.message === "Failed to load profile") {
+         localStorage.removeItem('zingToken');
+         navigate('/');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchProfile();
+}, [navigate]);
 
   const handleUpdate = async (e) => {
     e.preventDefault();

@@ -186,31 +186,35 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
     await connectToDatabase();
     
     const Agent = getAgentModel();
-    const agent = await Agent.findById(req.user.id).select('-password');
+    // Use .lean() to get a plain JS object, making it easier to modify properties
+    const agent = await Agent.findById(req.user.id).select('-password').lean();
     
-    if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
-
-    // 2. Handle Profile Image Signing
+    if (!agent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Agent not found" 
+      });
+    }
     let finalPhotoUrl = agent.photoUrl;
 
-    // Check if the URL belongs to IDrive e2
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
-        // Extract the key (removes the domain part)
-        const fileKey = agent.photoUrl.split('.com/')[1];
+        const urlParts = agent.photoUrl.split('/');
+        const profileIndex = urlParts.indexOf('profiles');
+        
+        if (profileIndex !== -1) {
+          const fileKey = urlParts.slice(profileIndex).join('/');
 
-        if (fileKey && s3Client) {
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: fileKey,
-          });
-
-          // Generate a signed URL valid for 1 hour
-          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          if (s3Client) {
+            const command = new GetObjectCommand({
+              Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+              Key: decodeURIComponent(fileKey), // Decode in case the DB stored it encoded
+            });
+            finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          }
         }
       } catch (signErr) {
         console.error("Image Signing Failed:", signErr.message);
-        // If signing fails, the frontend will try to use the original (un-signed) URL
       }
     }
     res.json({
