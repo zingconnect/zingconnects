@@ -346,59 +346,54 @@ export const AgentDashboard = () => {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-        {users.length > 0 ? users.map((user) => (
-          <div 
-            key={user._id}
-            onClick={() => handleSelectUser(user)}
-            className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] border-b border-gray-50 transition-colors ${
-              selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''
-            }`}
-          >
-            <div className="relative shrink-0">
-              <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
-                {user.photoUrl ? (
-                  <img src={user.photoUrl} alt="User" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full bg-blue-900 flex items-center justify-center text-white text-xs font-black">
-                    {user.firstName ? user.firstName[0].toUpperCase() : user.email[0].toUpperCase()}
-                  </div>
-                )}
-              </div>
-              
-              {/* CORRECTED: Dynamic Status Indicator Dot (Online/Offline) */}
-              <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full flex items-center justify-center ${user.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`}>
-                {user.isVerified && <BsCheckAll className="text-white" size={12} />}
-              </div>
-            </div>
-
-            <div className="ml-3 flex-1 overflow-hidden">
-  <div className="flex flex-col justify-center">
-    {/* Name Row */}
-    <h3 className="text-[13px] font-bold text-gray-800 truncate leading-tight">
-      {user.firstName ? `${user.firstName} ${user.lastName}` : 'Unknown User'}
-    </h3>
-    
-    {/* Email Row - Now below the name */}
-    <p className="text-[11px] font-medium text-gray-500 lowercase truncate leading-tight mb-0.5">
-      {user.email}
-    </p>
-  </div>
-
-  {/* Location and Status Row */}
-  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter truncate">
-    {user.city}, {user.state} • <span className={user.status === 'online' ? 'text-green-600' : 'text-gray-400'}>
-      {user.status === 'online' ? 'Online' : 'Offline'}
-    </span>
-  </p>
-</div>
-          </div>
-        )) : (
-          <div className="p-10 text-center opacity-30">
-              <p className="text-[10px] uppercase font-black tracking-widest">No Connections</p>
-          </div>
-        )}
+        {/* User list in sidebar */}
+<div className="flex-1 overflow-y-auto">
+  {users.length > 0 ? users.map((user) => (
+    <div 
+      key={user._id}
+      onClick={() => handleSelectUser(user)}
+      className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] border-b border-gray-50 transition-colors ${
+        selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''
+      }`}
+    >
+      <div className="relative shrink-0">
+        <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
+          {/* Fallback removed: forcing image render */}
+          <img 
+            src={user.photoUrl} 
+            alt="User" 
+            className="w-full h-full object-cover"
+            onError={(e) => console.error(`Image failed to load for ${user.email}:`, user.photoUrl)} 
+          />
         </div>
+        
+        <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full flex items-center justify-center ${user.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`}>
+          {user.isVerified && <BsCheckAll className="text-white" size={12} />}
+        </div>
+      </div>
+
+      <div className="ml-3 flex-1 overflow-hidden">
+        <div className="flex flex-col justify-center">
+          <h3 className="text-[13px] font-bold text-gray-800 truncate leading-tight">
+            {user.firstName ? `${user.firstName} ${user.lastName}` : 'Unknown User'}
+          </h3>
+          <p className="text-[11px] font-medium text-gray-500 lowercase truncate leading-tight mb-0.5">
+            {user.email}
+          </p>
+        </div>
+        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter truncate">
+          {user.city}, {user.state} • <span className={user.status === 'online' ? 'text-green-600' : 'text-gray-400'}>
+            {user.status === 'online' ? 'Online' : 'Offline'}
+          </span>
+        </p>
+      </div>
+    </div>
+  )) : (
+    <div className="p-10 text-center opacity-30">
+        <p className="text-[10px] uppercase font-black tracking-widest">No Connections</p>
+    </div>
+  )}
+</div>
         <div className="p-4 border-t border-gray-100 bg-gray-50/50">
           <button 
             onClick={handleLogout}
@@ -420,32 +415,30 @@ export const AgentDashboard = () => {
         {selectedUser ? (
           <>
         <header className="h-[55px] md:h-[65px] bg-[#f0f2f5] px-3 flex justify-between items-center z-10 border-l border-gray-200 shadow-sm">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
-              <BsChevronLeft size={18} />
-            </button>
-            <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
-              {selectedUser.photoUrl ? (
-                <img src={selectedUser.photoUrl} alt="Profile" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full bg-blue-900 flex items-center justify-center text-white text-xs font-black">
-                  {selectedUser.firstName?.[0] || selectedUser.email[0].toUpperCase()}
-                </div>
-              )}
-            </div>
-            <div className="overflow-hidden">
-              <h2 className="text-sm font-bold text-gray-800 truncate max-w-[140px] md:max-w-none">
-                {selectedUser.firstName ? `${selectedUser.firstName} ${selectedUser.lastName}` : selectedUser.email}
-              </h2>
-              <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${selectedUser.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></span>
-                <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">
-                  {selectedUser.city ? `${selectedUser.city}, ${selectedUser.state}` : 'Verified Node'}
-                </p>
-              </div>
-            </div>
-          </div>
-
+         <div className="flex items-center gap-3">
+    <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
+      <BsChevronLeft size={18} />
+    </button>
+    <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
+      {/* Fallback removed: forcing image render */}
+      <img 
+        src={selectedUser.photoUrl} 
+        alt="Profile" 
+        className="w-full h-full object-cover" 
+      />
+    </div>
+    <div className="overflow-hidden">
+      <h2 className="text-sm font-bold text-gray-800 truncate max-w-[140px] md:max-w-none">
+        {selectedUser.firstName ? `${selectedUser.firstName} ${selectedUser.lastName}` : selectedUser.email}
+      </h2>
+      <div className="flex items-center gap-1.5">
+        <span className={`w-1.5 h-1.5 rounded-full ${selectedUser.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></span>
+        <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">
+          {selectedUser.city ? `${selectedUser.city}, ${selectedUser.state}` : 'Verified Node'}
+        </p>
+      </div>
+    </div>
+  </div>
           <div className="flex items-center gap-4 md:gap-6 text-gray-500 mr-2">
             <button className="hover:text-blue-600 transition-colors active:scale-90" title="Video Call">
               <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
