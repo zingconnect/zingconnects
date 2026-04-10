@@ -65,34 +65,36 @@ export const AgentDashboard = () => {
     script.async = true;
     document.body.appendChild(script);
 
-   // --- Updated fetchInitialData function ---
-const fetchInitialData = async () => {
-  const token = localStorage.getItem('zingToken'); // Ensure this matches your login storage key
+ const fetchInitialData = async () => {
+  const token = localStorage.getItem('zingToken');
   if (!token) return navigate('/');
 
   try {
+    // Fetch Agent Profile
     const profileRes = await fetch('/api/agents/profile', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    const profileData = await profileRes.json();
     
+    if (!profileRes.ok) {
+        const errorMsg = await profileRes.json();
+        console.error("Profile Error:", errorMsg);
+        return;
+    }
+
+    const profileData = await profileRes.json();
     setAgentData(profileData);
     setIsSubscribed(profileData.isSubscribed); 
     if (profileData.plan) setSelectedPlan(profileData.plan);
 
+    // Fetch Connected Users if subscribed
     if (profileData.isSubscribed) {
       const response = await fetch('/api/agents/my-users', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await response.json();
+      const userData = await response.json();
       
-      // FIX: Access the .users property from the backend object
-      if (data.success) {
-        setUsers(data.users || []);
-      } else {
-        console.warn("Users fetch failed:", data.message);
-        setUsers([]); // Fallback to empty array
-      }
+      // Since we updated backend to return direct array:
+      setUsers(Array.isArray(userData) ? userData : []);
     }
   } catch (err) {
     console.error("Initialization error:", err);
