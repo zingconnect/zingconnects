@@ -293,6 +293,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
         const fileKey = agent.photoUrl.split('.com/')[1];
+        console.log("Generating URL for Key:", fileKey);
 
         if (fileKey && s3Client) {
           const command = new GetObjectCommand({
