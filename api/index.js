@@ -191,6 +191,8 @@ app.post('/api/agents/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password required" });
     }
+
+    // Find agent and explicitly include password for comparison
     const agent = await Agent.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('+password');
@@ -203,8 +205,14 @@ app.post('/api/agents/login', async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
+
+    // JWT Generation - This matches your new middleware 'req.user' logic
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug, role: 'agent' }, 
+      { 
+        id: agent._id, 
+        slug: agent.slug, 
+        role: 'agent' 
+      }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
@@ -214,8 +222,9 @@ app.post('/api/agents/login', async (req, res) => {
       success: true, 
       token, 
       slug: agent.slug,
-      isSubscribed: !!agent.isSubscribed, 
-      plan: agent.plan || "BASIC",        
+      // Boolean forced to ensure frontend handles it correctly
+      isSubscribed: Boolean(agent.isSubscribed), 
+      plan: agent.plan || "BASIC",         
       message: "Agent Verified" 
     });
 

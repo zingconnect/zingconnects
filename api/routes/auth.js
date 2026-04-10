@@ -195,7 +195,6 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
         // Fallback to static URL if signing fails
       }
     }
-    // --- END SIGNING LOGIC ---
 
     res.json({
       success: true,
@@ -204,6 +203,8 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
       occupation: agent.occupation,
       program: agent.program,
       bio: agent.bio,
+      gender: agent.gender,
+      dob: agent.dob,
       address: agent.address,
       photoUrl: finalPhotoUrl, // NOW INCLUDES THE SIGNATURE!
       slug: agent.slug,
@@ -330,6 +331,8 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
       occupation, 
       program, 
       bio, 
+      gender,
+      dob,
       address, 
       oldPassword, 
       newPassword 
@@ -365,6 +368,8 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
     agent.occupation = occupation || agent.occupation;
     agent.program = program || agent.program;
     agent.bio = bio || agent.bio;
+    agent.gender= gender || agent.gender;
+    agent.dateOfBirth = dob || agent.dateOfBirth;
     agent.address = address || agent.address;
 
     // 5. Save the Document (triggers validation and updates timestamp)
@@ -444,6 +449,37 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
   } catch (err) {
     console.error("User Onboarding Error:", err);
     res.status(500).json({ success: false, message: "Failed to save profile" });
+  }
+});
+
+// --- NEW: FETCH AGENT'S CONNECTED USERS ---
+router.get('/my-users', authenticateToken, async (req, res) => {
+  try {
+    const Agent = getAgentModel();
+    
+    // 1. Identify the agent from the token (req.user.id)
+    const agentId = req.user.id;
+
+    // 2. Find users where this Agent's ID is in their 'connectedAgents' array
+    // We select all the professional fields needed for the dashboard
+    const users = await User.find({ 
+      connectedAgents: agentId 
+    })
+    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin')
+    .sort({ lastLogin: -1 });
+
+    if (!users) {
+      return res.status(200).json([]);
+    }
+
+    res.json(users);
+  } catch (err) {
+    console.error("Error fetching agent users:", err);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error while retrieving user list",
+      error: err.message 
+    });
   }
 });
 
