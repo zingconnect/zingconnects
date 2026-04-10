@@ -466,21 +466,39 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: "Server error during profile update" });
   }
 });
-// --- 4. FETCH AGENT'S CONNECTED USERS ---
+// --- FETCH AGENT'S CONNECTED USERS ---
 router.get('/my-users', authenticateToken, async (req, res) => {
   try {
-    // Look for all users where this agent's ID is in their connectedAgents array
+    // Ensure DB connection is active
+    await connectToDatabase();
+    const agentId = req.user.id;
+    const Agent = getAgentModel();
+    const agentExists = await Agent.findById(agentId);
+    
+    if (!agentExists) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Agent not found" 
+      });
+    }
     const users = await User.find({ 
-      connectedAgents: req.user.id 
+      connectedAgents: agentId 
     })
-    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin')
+    .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin createdAt')
     .sort({ lastLogin: -1 });
+    res.json({
+      success: true,
+      count: users.length,
+      users: users || []
+    });
 
-    // Send back a direct array so the frontend map() works instantly
-    res.json(users || []);
   } catch (err) {
-    console.error("Agent Users List Error:", err);
-    res.status(500).json({ success: false, message: "Could not load users" });
+    console.error("CRITICAL ERROR FETCHING AGENT USERS:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error",
+      error: err.message 
+    });
   }
 });
 
