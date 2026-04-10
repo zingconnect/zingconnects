@@ -6,7 +6,9 @@ import jwt from 'jsonwebtoken';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { agentSchema } from '../models/Agent.js';
+import User from '../models/User.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -162,7 +164,6 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 3. GET AGENT PROFILE (PRIVATE SIGNING LOGIC) ---
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
     const Agent = getAgentModel();
@@ -388,6 +389,34 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
       message: "Internal server error during profile sync",
       error: err.message 
     });
+  }
+});
+
+// --- USER ONBOARDING (DASHBOARD) ---
+router.put('/update-user-onboarding', authenticateToken, async (req, res) => {
+  try {
+    const { firstName, lastName, dob, city, state } = req.body;
+    
+    // req.user.id comes from the authenticateToken middleware
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.id,
+      { 
+        firstName, 
+        lastName, 
+        dob, 
+        city, 
+        state, 
+        isProfileComplete: true 
+      },
+      { new: true }
+    );
+
+    if (!updatedUser) return res.status(404).json({ success: false, message: "User not found" });
+
+    res.json({ success: true, user: updatedUser });
+  } catch (err) {
+    console.error("User Onboarding Error:", err);
+    res.status(500).json({ success: false, message: "Failed to save profile" });
   }
 });
 

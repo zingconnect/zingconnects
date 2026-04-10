@@ -187,13 +187,14 @@ export const AgentDashboard = () => {
   };
 
 const handleLogout = () => {
-  // 1. Clear the secure token
+  const currentSlug = agentData.slug;
   localStorage.removeItem('zingToken');
-  
-  navigate('/');
-  window.location.reload();
+  if (currentSlug) {
+    window.location.href = `/${currentSlug}`;
+  } else {
+    window.location.href = '/';
+  }
 };
-
   const handleSelectUser = (user) => {
     setSelectedUser(user);
     if (window.innerWidth < 1024) setShowSidebar(false);
@@ -389,20 +390,37 @@ const handleLogout = () => {
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative overflow-hidden`}>
         {selectedUser ? (
           <>
-            <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center z-10 border-l border-gray-200 shadow-sm">
-              <div className="flex items-center gap-3">
-                <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600">
-                  <BsChevronLeft size={18} />
-                </button>
-                <div className="w-9 h-9 bg-blue-900 rounded-full flex items-center justify-center text-white text-xs font-black">
-                  {selectedUser.email[0].toUpperCase()}
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-gray-800 truncate">{selectedUser.email}</h2>
-                  <p className="text-[9px] text-green-600 font-bold uppercase">Online</p>
-                </div>
-              </div>
-            </header>
+           <header className="h-[50px] md:h-[60px] bg-[#f0f2f5] px-3 flex justify-between items-center z-10 border-l border-gray-200 shadow-sm">
+  <div className="flex items-center gap-3">
+    <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600">
+      <BsChevronLeft size={18} />
+    </button>
+    <div className="w-9 h-9 bg-blue-900 rounded-full flex items-center justify-center text-white text-xs font-black">
+      {selectedUser.email[0].toUpperCase()}
+    </div>
+    <div className="overflow-hidden">
+      <h2 className="text-sm font-bold text-gray-800 truncate max-w-[120px] md:max-w-none">
+        {selectedUser.email}
+      </h2>
+      <p className="text-[9px] text-green-600 font-bold uppercase">Online</p>
+    </div>
+  </div>
+
+  {/* WhatsApp Style Call Actions */}
+  <div className="flex items-center gap-4 md:gap-6 text-gray-500 mr-2">
+    <button className="hover:text-blue-600 transition-colors">
+      <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
+        <path d="M0 12V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm6.79-4.493c0 .407.303.74.686.74.384 0 .687-.333.687-.74 0-.406-.303-.74-.687-.74-.383 0-.686.334-.686.74zM3.733 4.493c0 .407.303.74.687.74.383 0 .686-.333.686-.74 0-.406-.303-.74-.686-.74-.384 0-.687.334-.687.74zM14 1h-3l1 2h2V1zM5 1H2L1 3h2V1zM15 4h-4l1 2h3V4zM4 4H0l1 2h3V4zm1 10h4l-1-2H2v2zm10 0h-3l-1-2h4v2z"/>
+      </svg>
+    </button>
+    <button className="hover:text-blue-600 transition-colors">
+      <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/>
+      </svg>
+    </button>
+    <BsThreeDotsVertical className="cursor-pointer" size={18} />
+  </div>
+</header>
 
             <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
               {messages.map((m) => (
@@ -416,16 +434,52 @@ const handleLogout = () => {
               ))}
             </div>
 
-            <footer className="min-h-[55px] bg-[#f0f2f5] px-3 py-2 flex items-center z-10 border-t border-gray-200">
-              <form onSubmit={handleSendMessage} className="flex-1">
-                <input 
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Type a message"
-                  className="w-full bg-white px-4 py-2.5 rounded-full text-sm outline-none border border-gray-200"
-                />
-              </form>
-            </footer>
+            <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
+  {/* ATTACHMENT BUTTONS */}
+  <div className="flex items-center gap-1 md:gap-3 text-gray-500">
+    <button className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90" title="Attach Document">
+      <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" height="20" width="20" xmlns="http://www.w3.org/2000/svg">
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+      </svg>
+    </button>
+    
+    <button className="p-2 hover:bg-gray-200 rounded-full transition-all hidden md:block active:scale-90" title="Camera">
+      <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20" xmlns="http://www.w3.org/2000/svg">
+        <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 7.07 3h1.858a1 1 0 0 1 .707.293l.83.828a3 3 0 0 0 2.12.879H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/>
+        <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
+      </svg>
+    </button>
+  </div>
+
+  {/* MESSAGE INPUT */}
+  <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+    <input 
+      value={newMessage}
+      onChange={(e) => setNewMessage(e.target.value)}
+      placeholder="Type a message"
+      className="flex-1 bg-white px-4 py-2.5 rounded-full text-sm outline-none border border-gray-200 focus:border-blue-300 transition-all"
+    />
+
+    {/* SEND BUTTON - Switches from Mic to Send icon based on text */}
+    <button 
+      type="submit"
+      className={`p-3 rounded-full transition-all active:scale-90 shadow-md ${
+        newMessage.trim() ? 'bg-blue-600 text-white' : 'bg-gray-400 text-white'
+      }`}
+    >
+      {newMessage.trim() ? (
+        <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
+        </svg>
+      ) : (
+        <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h2.5a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1H7v-2.025A5 5 0 0 1 2.5 8V7a.5.5 0 0 1 .5-.5z"/>
+          <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3z"/>
+        </svg>
+      )}
+    </button>
+  </form>
+</footer>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30">

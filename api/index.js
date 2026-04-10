@@ -327,67 +327,27 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/agents/my-users', async (req, res) => {
-  try {
-    await connectToDatabase();
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: "Unauthorized access" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    let decoded;
-
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-      
-      if (decoded.role !== 'agent') {
-        return res.status(403).json({ message: "Forbidden: Agent access only" });
-      }
-    } catch (err) {
-      return res.status(401).json({ message: "Session expired" });
-    }
-    const myUsers = await User.find({ 
-      connectedAgents: decoded.id 
-    })
-    .select('email lastLogin createdAt') // Only fetch what we need for the sidebar
-    .sort({ lastLogin: -1 }); // Show most recently active users at the top
-    res.json(myUsers);
-
-  } catch (err) {
-    console.error("Fetch My Users Error:", err);
-    res.status(500).json({ message: "Error retrieving connected users" });
-  }
-});
-
-// 2. User Handshake (Email-only access)
+// 1. User Handshake (Email-only access) - [STAYS THE SAME]
 app.post('/api/users/handshake', async (req, res) => {
   try {
     await connectToDatabase();
     const { email, agentId, agentSlug } = req.body;
-
     if (!email) return res.status(400).json({ message: "Email required" });
 
     const normalizedEmail = email.toLowerCase().trim();
-
-    // Check if user already exists
     let user = await User.findOne({ email: normalizedEmail });
     let isNewUser = false;
 
     if (!user) {
-      // Create new user if first time
       user = new User({
         email: normalizedEmail,
-        connectedAgents: [agentId], // Track which agent they are talking to
-        lastLogin: new Date()
+        connectedAgents: [agentId],
+        lastLogin: new Date(),
+        isProfileComplete: false // Ensure this starts as false
       });
       await user.save();
       isNewUser = true;
-
-      // --- TODO: TRIGGER EMAIL NOTIFICATION HERE ---
-      // console.log(`Notification: New user ${normalizedEmail} joined via agent ${agentSlug}`);
     } else {
-      // If user exists, ensure agentId is in their connected list
       if (!user.connectedAgents.includes(agentId)) {
         user.connectedAgents.push(agentId);
       }
@@ -395,67 +355,99 @@ app.post('/api/users/handshake', async (req, res) => {
       await user.save();
     }
 
-    // Generate User-specific token
     const token = jwt.sign(
       { id: user._id, role: 'user' },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' } // Users get longer sessions for convenience
+      { expiresIn: '7d' }
     );
 
-    res.json({ 
-      success: true, 
-      token, 
-      isNewUser,
-      message: isNewUser ? "Welcome! Profile created." : "Welcome back."
-    });
-
+    res.json({ success: true, token, isNewUser, isProfileComplete: user.isProfileComplete });
   } catch (err) {
-    console.error("Handshake Error:", err);
     res.status(500).json({ success: false, message: "Handshake failed" });
   }
 });
 
+// 2. Updated My-Session with Private Image Signing
 app.get('/api/users/my-session', async (req, res) => {
   try {
     await connectToDatabase();
-
-    // 1. Extract and Verify Token
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: "No authorization token provided" });
-    }
+    if (!authHeader) return res.status(401).json({ message: "No token" });
 
     const token = authHeader.split(' ')[1];
-    let decoded;
-    
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({ message: "Session expired or invalid" });
-    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
     const user = await User.findById(decoded.id).populate({
       path: 'connectedAgents',
-      select: 'firstName lastName photoUrl occupation program bio slug' // Only select public info
+      select: 'firstName lastName photoUrl occupation program bio slug'
     });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Get the last connected agent
+    let activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
+    
+    // --- START SIGNING LOGIC FOR AGENT IMAGE ---
+    let signedPhotoUrl = activeAgent?.photoUrl;
+
+    if (activeAgent?.photoUrl && activeAgent.photoUrl.includes('idrivee2.com')) {
+      try {
+        const fileKey = activeAgent.photoUrl.split('.com/')[1];
+        const command = new GetObjectCommand({
+          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Key: fileKey,
+        });
+        // Generate a 1-hour signed URL
+        signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+      } catch (err) {
+        console.error("Signing failed", err);
+      }
     }
-    const activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
+    // --- END SIGNING LOGIC ---
 
     res.json({
       success: true,
       user: {
         id: user._id,
         email: user.email,
+        isProfileComplete: user.isProfileComplete // Crucial for Frontend overlay
       },
-      agent: activeAgent || null,
-      message: "Session established successfully"
+      agent: activeAgent ? {
+        ...activeAgent._doc,
+        photoUrl: signedPhotoUrl // Send the signed version instead of raw
+      } : null
     });
-
   } catch (err) {
-    console.error("Session API Error:", err);
-    res.status(500).json({ message: "Internal server error during session fetch" });
+    res.status(500).json({ message: "Session Error" });
+  }
+});
+
+// 3. Update User Profile (Onboarding)
+app.put('/api/users/update-profile', async (req, res) => {
+  try {
+    await connectToDatabase();
+    const authHeader = req.headers.authorization;
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const { firstName, lastName, dob, city, state } = req.body;
+
+    const updatedUser = await User.findByIdAndUpdate(
+      decoded.id,
+      { 
+        firstName, 
+        lastName, 
+        dob, 
+        city, 
+        state, 
+        isProfileComplete: true 
+      },
+      { new: true }
+    );
+
+    res.json({ success: true, user: updatedUser });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Profile update failed" });
   }
 });
 

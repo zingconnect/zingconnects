@@ -1,4 +1,3 @@
-// 1. CHANGE THIS
 import mongoose from 'mongoose'; 
 
 const userSchema = new mongoose.Schema({
@@ -9,6 +8,44 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     trim: true
   },
+  // --- NEW PROFILE FIELDS ---
+  firstName: {
+    type: String,
+    trim: true,
+    default: ""
+  },
+  lastName: {
+    type: String,
+    trim: true,
+    default: ""
+  },
+  dob: {
+    type: String, // Storing as string from date input
+    default: ""
+  },
+  city: {
+    type: String,
+    trim: true,
+    default: ""
+  },
+  state: {
+    type: String,
+    trim: true,
+    default: ""
+  },
+  photoUrl: {
+    type: String,
+    default: ""
+  },
+  // --- STATUS FLAGS ---
+  isProfileComplete: {
+    type: Boolean,
+    default: false // This triggers the onboarding overlay on the frontend
+  },
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
   connectedAgents: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Agent'
@@ -16,10 +53,6 @@ const userSchema = new mongoose.Schema({
   lastLogin: {
     type: Date,
     default: Date.now
-  },
-  isVerified: {
-    type: Boolean,
-    default: false
   }
 }, { 
   timestamps: true 
@@ -27,6 +60,6 @@ const userSchema = new mongoose.Schema({
 
 userSchema.index({ email: 1 });
 
-// 2. CHECK IF MODEL EXISTS AND CHANGE THE EXPORT
+// Ensure we don't re-compile the model if it already exists (Vercel/Hot Reloading safety)
 const User = mongoose.models.User || mongoose.model('User', userSchema);
-export default User; 
+export default User;
