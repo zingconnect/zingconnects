@@ -238,19 +238,23 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    let agent = await Agent.findById(req.agent.id).select('-password'); 
+    // FIX: Changed req.user.id to req.user.id
+    let agent = await Agent.findById(req.user.id).select('-password'); 
     
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
+
+    // Logic for expiry check
     if (agent.isSubscribed && agent.expiryDate && new Date() > new Date(agent.expiryDate)) {
       console.log(`Locking account for ${agent.email} - Subscription Expired.`);
       agent.isSubscribed = false;
-      await agent.save(); // Persist the lockout
+      await agent.save();
     }
 
     res.json(agent); 
   } catch (err) {
+    console.error("Profile Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error fetching profile" });
   }
 });
@@ -259,13 +263,13 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // FIX: Use req.agent.id to match your middleware logic
-    if (!req.agent || !req.agent.id) {
+    // FIX: Use req.user.id to match your middleware logic
+    if (!req.agent || !req.user.id) {
       return res.status(401).json({ success: false, message: "Invalid session credentials" });
     }
 
     // Agent is already defined at the top of your server file
-    let agent = await Agent.findById(req.agent.id).select('-password'); 
+    let agent = await Agent.findById(req.user.id).select('-password'); 
     
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -772,7 +776,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const agent = await Agent.findById(req.agent.id).select('-password');
+    const agent = await Agent.findById(req.user.id).select('-password');
     res.json({ agent });
   } catch (err) {
     res.status(500).json({ message: "Error fetching dashboard" });

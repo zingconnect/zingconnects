@@ -104,6 +104,10 @@ export const AgentDashboard = () => {
 
   // --- UPDATED PAYMENT HANDLER ---
   const handlePayment = async () => {
+    if (!agentData || !agentData.email) {
+      alert("Profile data is still loading. Please wait a moment or refresh.");
+      return;
+    }
     setPaymentProcessing(true);
     const token = localStorage.getItem('zingToken');
 
