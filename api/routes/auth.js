@@ -476,7 +476,6 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
   }
 });
 
-// GET /api/agents/my-users (or defined within your agent router)
 router.get('/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -492,38 +491,38 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       });
     }
 
-    // 1. Fetch connected users
     const users = await User.find({ 
       connectedAgents: agentId 
     })
     .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
     .sort({ lastActive: -1 })
-    .lean(); // Use .lean() for faster processing of plain JS objects
+    .lean();
 
-    // 2. Map through users to handle Signed URLs and Online Status
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = user.photoUrl;
 
-      // Handle IDrive Signed URL generation
       if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
         try {
-          // Extract the file key from the existing URL
           const urlParts = user.photoUrl.split('/');
-          const fileKey = urlParts.slice(urlParts.indexOf('users')).join('/');
+          const userIndex = urlParts.indexOf('users');
+          
+          if (userIndex !== -1) {
+            const rawKey = urlParts.slice(userIndex).join('/');
+            const fileKey = decodeURIComponent(rawKey);
 
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME,
-            Key: fileKey,
-          });
+            const command = new GetObjectCommand({
+              Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+              Key: fileKey,
+            });
 
-          // Generate a signed URL valid for 1 hour
-          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+            finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          }
         } catch (s3Err) {
-          console.error(`Error signing URL for user ${user._id}:`, s3Err);
+          console.error(`Error signing URL for user ${user._id}:`, s3Err.message);
+          finalPhotoUrl = null; 
         }
       }
 
-      // 3. Calculate status (Online if active within 5 mins)
       const lastActiveDate = user.lastActive || user.lastLogin;
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
       const isOnline = lastActiveDate && new Date(lastActiveDate) > fiveMinutesAgo;
@@ -550,6 +549,5 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     });
   }
 });
-
 
 export default router;
