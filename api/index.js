@@ -65,15 +65,18 @@ async function connectToDatabase() {
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
 // --- AUTHENTICATION MIDDLEWARE ---
+// Change this in index.js
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, agent) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return res.status(403).json({ message: "Invalid Token" });
-    req.agent = agent;
+    
+    // Use 'user' so all routes below can find the ID
+    req.user = decoded; 
     next();
   });
 };
@@ -293,6 +296,8 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       occupation: agent.occupation || "",
       program: agent.program || "",
       bio: agent.bio || "",
+      gender: agent.gender,
+      dateOfBirth: agent.dob,
       address: agent.address || "",
       photoUrl: signedPhotoUrl, 
       slug: agent.slug || "",
@@ -540,31 +545,18 @@ app.get('/api/agents/:slug', async (req, res) => {
   }
 });
 
-app.put('/api/agents/update-profile', async (req, res) => {
+app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
 
-    // 1. Extract and Verify Token
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: "Unauthorized: No token provided" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return res.status(403).json({ message: "Session expired. Please log in again." });
-    }
-
-    // 2. Find the Agent Document
-    const agent = await Agent.findById(decoded.id);
+    // 1. Find the Agent Document
+    // Using req.user.id provided by your authenticateToken middleware
+    const agent = await Agent.findById(req.user.id).select('+password');
     if (!agent) {
-      return res.status(404).json({ message: "Agent account not found" });
+      return res.status(404).json({ success: false, message: "Agent account not found" });
     }
 
-    // 3. Extract Data from Body
+    // 2. Extract Data from Body (Including Gender and DOB)
     const { 
       firstName, 
       lastName, 
@@ -572,54 +564,57 @@ app.put('/api/agents/update-profile', async (req, res) => {
       program, 
       bio, 
       address, 
+      gender,      // Added
+      dob,         // Added (Date of Birth)
       oldPassword, 
       newPassword 
     } = req.body;
 
-    // 4. Handle Password Security Update
+    // 3. Handle Password Security Update
     if (newPassword && newPassword.trim() !== "") {
-      // If updating password, old password must be provided
       if (!oldPassword) {
         return res.status(400).json({ message: "Current password is required to set a new one" });
       }
 
-      // Verify the old password matches the database
       const isMatch = await bcrypt.compare(oldPassword, agent.password);
       if (!isMatch) {
         return res.status(401).json({ message: "Current password incorrect. Security check failed." });
       }
 
-      // Hash the new password before saving
       const salt = await bcrypt.genSalt(10);
       agent.password = await bcrypt.hash(newPassword, salt);
     }
 
-    // 5. Update Profile Information
+    // 4. Update Profile Information
+    // We use the "nullish coalescing" or logical OR to keep old data if the field is missing in req.body
     agent.firstName = firstName || agent.firstName;
     agent.lastName = lastName || agent.lastName;
     agent.occupation = occupation || agent.occupation;
     agent.program = program || agent.program;
     agent.bio = bio || agent.bio;
     agent.address = address || agent.address;
+    agent.gender = gender || agent.gender; // Added
+    agent.dob = dob || agent.dob;           // Added
 
-    // 6. Save the Document
+    // 5. Save the Document
     await agent.save();
 
-    console.log(`Identity & Security updated for: ${agent.email}`);
+    console.log(`[SECURITY SYNC] Identity updated for: ${agent.email}`);
     
-    // Hide password in response
+    // Create response object without the password
     const updatedData = agent.toObject();
     delete updatedData.password;
 
     res.json({
       success: true,
-      message: "Identity and Security synchronized successfully.",
+      message: "Identity, Gender, and Security synchronized successfully.",
       agent: updatedData
     });
 
   } catch (err) {
     console.error("Update Error:", err);
     res.status(500).json({ 
+      success: false,
       message: "Internal server error during profile sync",
       error: err.message 
     });
@@ -741,27 +736,20 @@ app.post('/api/subscriptions/verify', async (req, res) => {
   }
 });
 
-// --- FETCH AGENT'S CONNECTED USERS ---
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Ensure we are identifying the agent correctly from the token
-    const agentId = req.agent.id;
+    // Identify agent from the corrected middleware property
+    const agentId = req.user.id;
 
-    // 1. Find users where this Agent's ID exists in their 'connectedAgents' array
-    // 2. .select() ensures we pull the new profile fields (firstName, lastName, photoUrl, etc.)
     const users = await User.find({ 
       connectedAgents: agentId 
     })
     .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin')
-    .sort({ lastLogin: -1 }); // Show recently active users at the top
+    .sort({ lastLogin: -1 });
 
-    if (!users) {
-      return res.status(200).json([]);
-    }
-
-    res.json(users);
+    res.json(users || []);
   } catch (err) {
     console.error("Error fetching agent users:", err);
     res.status(500).json({ 

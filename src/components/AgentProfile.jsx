@@ -22,6 +22,8 @@ export const AgentProfile = () => {
     occupation: '',
     program: '',
     bio: '',
+    gender: '', 
+    dob: '',
     address: '',
     photoUrl: '',
     slug: '',
@@ -235,6 +237,31 @@ export const AgentProfile = () => {
                 className="w-full bg-white border border-gray-100 rounded-[1.5rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all resize-none"
               />
             </div>
+            {/* NEW: Gender Field */}
+  <div className="space-y-2">
+    <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Gender</label>
+    <select 
+      value={agentData.gender}
+      onChange={(e) => setAgentData({...agentData, gender: e.target.value})}
+      className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all appearance-none"
+    >
+      <option value="">Select Gender</option>
+      <option value="Male">Male</option>
+      <option value="Female">Female</option>
+      <option value="Other">Other</option>
+    </select>
+  </div>
+
+  {/* NEW: Date of Birth Field */}
+  <div className="space-y-2">
+    <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 ml-4">Date of Birth</label>
+    <input 
+      type="date"
+      value={agentData.dob ? new Date(agentData.dob).toISOString().split('T')[0] : ''}
+      onChange={(e) => setAgentData({...agentData, dob: e.target.value})}
+      className="w-full bg-white border border-gray-100 rounded-[1.2rem] px-6 py-4 text-base md:text-sm focus:border-blue-600 outline-none transition-all"
+    />
+  </div>
           </section>
 
           {/* SECURITY CREDENTIALS SECTION */}
