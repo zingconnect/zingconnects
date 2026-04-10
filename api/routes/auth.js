@@ -147,33 +147,22 @@ router.post('/login', async (req, res) => {
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const Agent = getAgentModel();
-    // Use req.user.id (from middleware)
     let agent = await Agent.findById(req.user.id).select('-password');
-    
-    if (!agent) {
-      console.error(`Profile Fetch: Agent ID ${req.user.id} not found in DB.`);
-      return res.status(404).json({ success: false, message: "Agent not found" });
-    }
+    if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
 
     // SUBSCRIPTION EXPIRY CHECK
+    // If current date > expiryDate, set isSubscribed to false immediately
     if (agent.isSubscribed && agent.expiryDate && new Date() > new Date(agent.expiryDate)) {
       console.log(`Auto-locking dashboard for ${agent.email}: Plan Expired.`);
       agent.isSubscribed = false;
       await agent.save();
     }
 
-    // Update lastActive timestamp
-    agent.lastActive = new Date();
-    await agent.save();
-
     res.json(agent);
   } catch (err) {
-    console.error("Profile Error:", err);
     res.status(500).json({ success: false, message: "Profile fetch error" });
   }
 });
-
-
 
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
@@ -466,7 +455,6 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: "Server error during profile update" });
   }
 });
-// --- FETCH AGENT'S CONNECTED USERS ---
 router.get('/my-users', authenticateToken, async (req, res) => {
   try {
     // Ensure DB connection is active
@@ -501,6 +489,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     });
   }
 });
+
 
 
 export default router;
