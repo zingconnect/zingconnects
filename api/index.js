@@ -247,65 +247,65 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 1. Find the agent (matching req.user.id from your authenticateToken middleware)
-    let agent = await Agent.findById(req.user.id).select('-password'); 
+    // FIX: Use req.agent.id to match your middleware logic
+    if (!req.agent || !req.agent.id) {
+      return res.status(401).json({ success: false, message: "Invalid session credentials" });
+    }
+
+    // Agent is already defined at the top of your server file
+    let agent = await Agent.findById(req.agent.id).select('-password'); 
     
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // 2. Expiry Logic (The Lazy Check)
+    // Expiry Logic
     const now = new Date();
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
-      console.log(`[SUBSCRIPTION] Locking account: ${agent.email}`);
       agent.isSubscribed = false;
       await agent.save(); 
     }
 
-    // 3. GENERATE SIGNED URL FOR PRIVATE IDRIVE STORAGE
+    // SIGNING LOGIC
     let signedPhotoUrl = agent.photoUrl;
 
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
-        // Extract the key from the stored URL (everything after the .com/)
         const fileKey = agent.photoUrl.split('.com/')[1];
 
-        if (fileKey) {
+        if (fileKey && s3Client) {
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: fileKey,
           });
 
-          // Generate a signed URL valid for 1 hour (3600 seconds)
           signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         }
       } catch (s3Err) {
-        console.error("IDrive Signing Error:", s3Err);
-        // Fallback to the original URL if signing fails
+        console.error("IDrive Signing Error:", s3Err.message);
       }
     }
 
-    // 4. Return the data with the signed photoUrl
     res.json({
       success: true,
-      firstName: agent.firstName,
-      lastName: agent.lastName,
-      occupation: agent.occupation,
-      program: agent.program,
-      bio: agent.bio,
-      address: agent.address,
-      photoUrl: signedPhotoUrl, // This now contains the temporary access signature
-      slug: agent.slug,
-      plan: agent.plan,
-      isSubscribed: agent.isSubscribed,
+      firstName: agent.firstName || "",
+      lastName: agent.lastName || "",
+      occupation: agent.occupation || "",
+      program: agent.program || "",
+      bio: agent.bio || "",
+      address: agent.address || "",
+      photoUrl: signedPhotoUrl, 
+      slug: agent.slug || "",
+      plan: agent.plan || "BASIC",
+      isSubscribed: !!agent.isSubscribed,
       subscriptionAmount: agent.subscriptionAmount || 0,
       subscriptionDate: agent.subscriptionDate,
       expiryDate: agent.expiryDate
     }); 
 
   } catch (err) {
-    console.error("Profile Fetch Error:", err);
-    res.status(500).json({ success: false, message: "Server error fetching profile" });
+    console.error("FULL DEBUG ERROR:", err.stack);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
