@@ -757,11 +757,12 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
+// GET /api/agents/my-users
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
+    // Extract Agent ID from token
     const agentId = req.user.id || req.user._id;
 
     if (!agentId) {
@@ -771,30 +772,54 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
       });
     }
 
-    // Include lastActive in the selection to calculate status
+    // 1. Fetch users connected to this agent
     const users = await User.find({ 
       connectedAgents: agentId 
     })
     .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
-    .sort({ lastActive: -1 });
+    .sort({ lastActive: -1 })
+    .lean(); // Use .lean() for easier manipulation of the object
 
-    // Calculate status: Online if active within the last 5 minutes
-    const usersWithStatus = users.map(user => {
+    // 2. Process users to calculate online status and generate Signed URLs
+    const processedUsers = await Promise.all(users.map(async (user) => {
+      let finalPhotoUrl = user.photoUrl;
+
+      // Check if photoUrl exists and needs signing (S3/IDrive logic)
+      if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
+        try {
+          // Extract the key from the stored URL (everything after the bucket part)
+          const urlParts = user.photoUrl.split('/');
+          const fileKey = urlParts.slice(urlParts.indexOf('users')).join('/');
+
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME,
+            Key: fileKey,
+          });
+
+          // Generate a temporary signed URL that expires in 1 hour
+          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        } catch (s3Err) {
+          console.error(`Failed to sign URL for user ${user._id}:`, s3Err);
+          // If signing fails, keep the original or set to a placeholder
+        }
+      }
+
+      // 3. Calculate Online/Offline Status
       const lastSeen = user.lastActive || user.lastLogin;
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      
       const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
 
       return {
-        ...user._doc,
+        ...user,
+        photoUrl: finalPhotoUrl,
         status: isOnline ? 'online' : 'offline'
       };
-    });
+    }));
 
     res.json({
       success: true,
-      count: usersWithStatus.length,
-      users: usersWithStatus
+      count: processedUsers.length,
+      users: processedUsers
     });
 
   } catch (err) {
@@ -802,7 +827,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: "Internal server error while retrieving user list",
-      error: err.message
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });

@@ -373,15 +373,21 @@ export const AgentDashboard = () => {
             </div>
 
             <div className="ml-3 flex-1 overflow-hidden">
-              <div className="flex justify-between items-start">
-                <h3 className="text-[13px] font-bold text-gray-800 truncate">
-                  {user.firstName ? `${user.firstName} ${user.lastName}` : user.email}
-                </h3>
-              </div>
-              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter truncate">
-                {user.city}, {user.state} • <span className={user.status === 'online' ? 'text-green-600' : 'text-gray-400'}>{user.status === 'online' ? 'Online' : 'Offline'}</span>
-              </p>
-            </div>
+  <div className="flex justify-between items-start">
+    {/* Updated h3 to include Name and Email */}
+    <h3 className="text-[13px] font-bold text-gray-800 truncate">
+      {user.firstName ? `${user.firstName} ${user.lastName}` : 'Unknown User'} 
+      <span className="ml-2 font-normal text-gray-500 lowercase text-[11px]">
+        ({user.email})
+      </span>
+    </h3>
+  </div>
+  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter truncate">
+    {user.city}, {user.state} • <span className={user.status === 'online' ? 'text-green-600' : 'text-gray-400'}>
+      {user.status === 'online' ? 'Online' : 'Offline'}
+    </span>
+  </p>
+</div>
           </div>
         )) : (
           <div className="p-10 text-center opacity-30">
