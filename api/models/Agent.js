@@ -1,26 +1,41 @@
 import mongoose from 'mongoose';
 
 export const agentSchema = new mongoose.Schema({
-firstName: { 
-  type: String, 
-  required: true, 
-  trim: true, // Automatically removes extra spaces
-  set: v => v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() // Forces "Alexander" format
-},
-lastName: { 
-  type: String, 
-  required: true, 
-  trim: true, 
-  set: v => v.charAt(0).toUpperCase() + v.slice(1).toLowerCase()
-},
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true, select: false }, 
-  slug: { type: String, required: true, unique: true },
+  firstName: { 
+    type: String, 
+    required: true, 
+    trim: true, 
+    set: v => v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : v
+  },
+  lastName: { 
+    type: String, 
+    required: true, 
+    trim: true, 
+    set: v => v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : v
+  },
+  email: { 
+    type: String, 
+    required: true, 
+    unique: true, 
+    lowercase: true, 
+    trim: true 
+  },
+  password: { 
+    type: String, 
+    required: true, 
+    select: false 
+  }, 
+  slug: { 
+    type: String, 
+    required: true, 
+    unique: true,
+    index: true // Optimization for profile lookups
+  },
   address: String,
   occupation: String,
   program: String,
   bio: String,
-  dob: Date,
+  dob: { type: Date }, // Consistent with registration/auth logic
   gender: String,
   role: { type: String, default: 'agent' },
   photoUrl: { type: String, default: '' },
@@ -33,7 +48,7 @@ lastName: {
   // --- SUBSCRIPTION & PAYMENT FIELDS ---
   plan: { 
     type: String, 
-    enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], // Updated to match your Dashboard
+    enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], 
     default: 'BASIC' 
   },
   isSubscribed: { 
@@ -47,7 +62,7 @@ lastName: {
   },
   
   subscriptionDate: { type: Date },
-  subscriptionAmount: { type: Number, default: 0 },
+  subscriptionAmount: { type: Number, default: 0 }, // USD Amount
   expiryDate: { type: Date }, 
   
   expiryNotificationSent: { 
@@ -61,7 +76,18 @@ lastName: {
   },
 
   lastTransactionId: { type: String, default: '' }
-}, { timestamps: true });
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true }, // Required for the dashboard to see isExpired
+  toObject: { virtuals: true } 
+});
+
+// --- VIRTUALS ---
+// This allows the frontend to check agent.isExpired without extra logic
+agentSchema.virtual('isExpired').get(function() {
+  if (!this.expiryDate) return false;
+  return new Date() > this.expiryDate;
+});
 
 // Prevent model overwrite error in development/hot-reloading
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);

@@ -81,7 +81,7 @@ export const AgentDashboard = () => {
 
         const profileData = await profileRes.json();
         setAgentData(profileData);
-        setIsSubscribed(profileData.isSubscribed); 
+    setIsSubscribed(profileData.isSubscribed && !profileData.isExpired);
         if (profileData.plan) setSelectedPlan(profileData.plan);
 
         if (profileData.isSubscribed) {
@@ -347,6 +347,7 @@ export const AgentDashboard = () => {
         </div>
 
         {/* User list in sidebar */}
+{/* User list in sidebar */}
 <div className="flex-1 overflow-y-auto">
   {users.length > 0 ? users.map((user) => (
     <div 
@@ -358,15 +359,20 @@ export const AgentDashboard = () => {
     >
       <div className="relative shrink-0">
         <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
-          {/* Fallback removed: forcing image render */}
           <img 
             src={user.photoUrl} 
             alt="User" 
             className="w-full h-full object-cover"
-            onError={(e) => console.error(`Image failed to load for ${user.email}:`, user.photoUrl)} 
+            onError={(e) => {
+              // If the S3 URL fails, this replaces it with a clean UI-Avatar
+              console.warn(`S3 Load failed for ${user.email}, switching to fallback.`);
+              e.target.onerror = null; // Prevents infinite loops
+              e.target.src = `https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}&background=random&color=fff`;
+            }} 
           />
         </div>
         
+        {/* Status indicator */}
         <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full flex items-center justify-center ${user.status === 'online' ? 'bg-green-500' : 'bg-gray-400'}`}>
           {user.isVerified && <BsCheckAll className="text-white" size={12} />}
         </div>
@@ -377,6 +383,7 @@ export const AgentDashboard = () => {
           <h3 className="text-[13px] font-bold text-gray-800 truncate leading-tight">
             {user.firstName ? `${user.firstName} ${user.lastName}` : 'Unknown User'}
           </h3>
+          {/* Email displays below name */}
           <p className="text-[11px] font-medium text-gray-500 lowercase truncate leading-tight mb-0.5">
             {user.email}
           </p>
@@ -389,9 +396,7 @@ export const AgentDashboard = () => {
       </div>
     </div>
   )) : (
-    <div className="p-10 text-center opacity-30">
-        <p className="text-[10px] uppercase font-black tracking-widest">No Connections</p>
-    </div>
+    <p className="text-center text-gray-500 py-10">No users connected.</p>
   )}
 </div>
         <div className="p-4 border-t border-gray-100 bg-gray-50/50">

@@ -389,7 +389,7 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
     agent.program = program || agent.program;
     agent.bio = bio || agent.bio;
     agent.gender= gender || agent.gender;
-    agent.dateOfBirth = dob || agent.dateOfBirth;
+  agent.dob = dob || agent.dob;
     agent.address = address || agent.address;
 
     // 5. Save the Document (triggers validation and updates timestamp)
@@ -477,6 +477,11 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
 });
 
 router.get('/my-users', authenticateToken, async (req, res) => {
+  // NEW UPDATE: Prevent the browser from caching old, expired signed URLs
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     await connectToDatabase();
     
@@ -498,45 +503,46 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     .sort({ lastActive: -1 })
     .lean();
     
-const processedUsers = await Promise.all(users.map(async (user) => {
-  let finalPhotoUrl = user.photoUrl;
+    const processedUsers = await Promise.all(users.map(async (user) => {
+      let finalPhotoUrl = user.photoUrl;
 
-  // If the URL contains idrive, we treat it as a private asset that needs signing
-  if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
-    try {
-      // 1. Extract the file key (e.g., users/69d922.../image.jpg)
-      const urlParts = user.photoUrl.split('/');
-      const userIndex = urlParts.indexOf('users');
-      
-      if (userIndex !== -1) {
-        const rawKey = urlParts.slice(userIndex).join('/');
-        const fileKey = decodeURIComponent(rawKey);
+      // STRENGTHENED PHOTO LOGIC: Ignore broken domain and reconstruct key
+      if (user.photoUrl && typeof user.photoUrl === 'string' && user.photoUrl.includes('users/')) {
+        try {
+          // 1. Extract only the filename, discarding the broken base domain
+          const urlParts = user.photoUrl.split('users/');
+          const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
+          const fileKey = `users/${fileName}`;
 
-        // 2. Force the use of the correct S3 endpoint by generating a new signed URL
-        const command = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-          Key: fileKey,
-        });
+          console.log("Generating fresh signed URL for user key:", fileKey);
 
-        // The s3Client uses the valid endpoint from your .env (e.g., s3.us-west-1.idrivee2-2.com)
-        finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          // 2. Reconstruct command with the clean key
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: fileKey,
+          });
+
+          // 3. Generate signed URL using the valid endpoint from your s3Client config
+          // Link is valid for 1 hour (3600 seconds)
+          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        } catch (s3Err) {
+          console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
+          finalPhotoUrl = null; 
+        }
       }
-    } catch (s3Err) {
-      console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
-      finalPhotoUrl = null; 
-    }
-  }
 
-  const lastSeen = user.lastActive || user.lastLogin;
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-  const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
+      // Online Status Logic
+      const lastSeen = user.lastActive || user.lastLogin;
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
 
-  return {
-    ...user,
-    photoUrl: finalPhotoUrl,
-    status: isOnline ? 'online' : 'offline'
-  };
-}));
+      return {
+        ...user,
+        photoUrl: finalPhotoUrl,
+        status: isOnline ? 'online' : 'offline'
+      };
+    }));
+
     res.json({
       success: true,
       count: processedUsers.length,
@@ -552,5 +558,4 @@ const processedUsers = await Promise.all(users.map(async (user) => {
     });
   }
 });
-
 export default router;

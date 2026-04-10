@@ -506,6 +506,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     });
   }
 });
+
 app.get('/api/agents/:slug', async (req, res) => {
   try {
     console.log("--- Profile Request Start ---");
@@ -759,6 +760,12 @@ app.post('/api/subscriptions/verify', async (req, res) => {
 });
 
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
+  // --- NEW UPDATE: CACHE CONTROL ---
+  // Forces the browser to fetch a fresh signed URL every time the dashboard loads
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     await connectToDatabase();
     
@@ -778,45 +785,42 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     .sort({ lastActive: -1 })
     .lean();
 
-const processedUsers = await Promise.all(users.map(async (user) => {
-  let finalPhotoUrl = user.photoUrl;
+    const processedUsers = await Promise.all(users.map(async (user) => {
+      let finalPhotoUrl = user.photoUrl;
 
-  // If the URL contains idrive, we treat it as a private asset that needs signing
-  if (user.photoUrl && user.photoUrl.includes('idrivee2.com')) {
-    try {
-      // 1. Extract the file key (e.g., users/69d922.../image.jpg)
-      const urlParts = user.photoUrl.split('/');
-      const userIndex = urlParts.indexOf('users');
-      
-      if (userIndex !== -1) {
-        const rawKey = urlParts.slice(userIndex).join('/');
-        const fileKey = decodeURIComponent(rawKey);
+      // STRENGTHENED PHOTO LOGIC: Reconstructs the key to avoid "ERR_NAME_NOT_RESOLVED"
+      if (user.photoUrl && typeof user.photoUrl === 'string' && user.photoUrl.includes('users/')) {
+        try {
+          const urlParts = user.photoUrl.split('users/');
+          const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
+          const fileKey = `users/${fileName}`;
 
-        // 2. Force the use of the correct S3 endpoint by generating a new signed URL
-        const command = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-          Key: fileKey,
-        });
+          console.log("Generating fresh signed URL for user:", fileKey);
 
-        // The s3Client uses the valid endpoint from your .env (e.g., s3.us-west-1.idrivee2-2.com)
-        finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: fileKey,
+          });
+
+          // Link is valid for 1 hour (3600 seconds)
+          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        } catch (s3Err) {
+          console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
+          finalPhotoUrl = null; 
+        }
       }
-    } catch (s3Err) {
-      console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
-      finalPhotoUrl = null; 
-    }
-  }
 
-  const lastSeen = user.lastActive || user.lastLogin;
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-  const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
+      // Online Status Logic
+      const lastSeen = user.lastActive || user.lastLogin;
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const isOnline = lastSeen && new Date(lastSeen) > fiveMinutesAgo;
 
-  return {
-    ...user,
-    photoUrl: finalPhotoUrl,
-    status: isOnline ? 'online' : 'offline'
-  };
-}));
+      return {
+        ...user,
+        photoUrl: finalPhotoUrl,
+        status: isOnline ? 'online' : 'offline'
+      };
+    }));
 
     res.json({
       success: true,
