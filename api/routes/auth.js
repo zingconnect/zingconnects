@@ -392,12 +392,11 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
   }
 });
 
-// --- USER ONBOARDING (DASHBOARD) ---
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
-    try {
+  try {
     const { firstName, lastName, dob, city, state } = req.body;
     
-    // 1. Prepare the update object
+    // 1. Prepare the base update object
     const updateData = {
       firstName,
       lastName,
@@ -406,12 +405,32 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       state,
       isProfileComplete: true
     };
+
+    // 2. Handle IDrive e2 Upload if a file exists
     if (req.file) {
-      console.log("File received:", req.file.originalname);
+      // Create a unique key for the user's photo
+      const fileKey = `users/${req.user.id}-${Date.now()}-${req.file.originalname}`;
+      
+      const uploadParams = {
+        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+        Key: fileKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      };
+
+      // Send the file to IDrive
+      await s3Client.send(new PutObjectCommand(uploadParams));
+      
+      // Save the URL/Key in the database
+      // You will use GetObjectCommand in my-session to sign this later
+      updateData.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.idrivee2.com/${fileKey}`;
+      
+      console.log("User photo uploaded to IDrive:", fileKey);
     }
-    // 3. Update the Database
+
+    // 3. Update the Database using the ID from the Token
     const updatedUser = await User.findByIdAndUpdate(
-      req.user.id, // Provided by your authenticateToken middleware
+      req.user.id, 
       updateData,
       { new: true }
     );
@@ -426,5 +445,6 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: "Failed to save profile" });
   }
 });
+
 
 export default router;

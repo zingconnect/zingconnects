@@ -422,32 +422,59 @@ app.get('/api/users/my-session', async (req, res) => {
   }
 });
 
-// 3. Update User Profile (Onboarding)
-app.put('/api/users/update-user-onboarding', async (req, res) => {
+// --- USER ONBOARDING (DASHBOARD) ---
+// Note: We use upload.single('photo') to enable req.body and req.file
+app.put('/api/users/update-user-onboarding', upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();
+
+    // 1. Verify the User (Handshake)
     const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: "No token" });
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const { firstName, lastName, dob, city, state } = req.body;
 
+    const updateData = {
+      firstName,
+      lastName,
+      dob,
+      city,
+      state,
+      isProfileComplete: true
+    };
+
+    // 2. Upload to IDrive e2 if a photo was provided
+    if (req.file) {
+      const fileKey = `users/${decoded.id}-${Date.now()}-${req.file.originalname}`;
+      
+      const uploadParams = {
+        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+        Key: fileKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      };
+
+      await s3Client.send(new PutObjectCommand(uploadParams));
+      
+      // Store the Key in the database (You will sign this later in my-session)
+      updateData.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.idrivee2.com/${fileKey}`;
+    }
+
+    // 3. Save to MongoDB
     const updatedUser = await User.findByIdAndUpdate(
       decoded.id,
-      { 
-        firstName, 
-        lastName, 
-        dob, 
-        city, 
-        state, 
-        isProfileComplete: true 
-      },
+      updateData,
       { new: true }
     );
 
+    if (!updatedUser) return res.status(404).json({ success: false, message: "User not found" });
+
     res.json({ success: true, user: updatedUser });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Profile update failed" });
+    console.error("USER ONBOARDING ERROR:", err);
+    res.status(500).json({ success: false, message: "Server error during update" });
   }
 });
 
