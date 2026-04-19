@@ -478,6 +478,136 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
   }
 });
 
+// This is the route the client/user calls to see Lawrence's profile
+router.get('/agent-public-profile/:id', async (req, res) => {
+  try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
+    
+    const agent = await AgentModel.findById(req.params.id).select('-password').lean();
+
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+    const now = new Date();
+    const lastActive = agent.lastActive || agent.createdAt;    
+    const isOnline = lastActive && (now - new Date(lastActive)) < (2 * 60 * 1000);
+
+    // --- PHOTO SIGNING (Same logic as your /me route) ---
+    let finalPhotoUrl = agent.photoUrl;
+    // ... insert your existing S3 signing logic here ...
+
+    res.json({
+      success: true,
+      agent: {
+        ...agent,
+        photoUrl: finalPhotoUrl,
+        // This is what the Frontend Dashboard needs to see!
+        status: isOnline ? 'online' : 'offline', 
+        lastSeenText: isOnline ? 'Online' : 'Offline'
+      }
+    });
+
+  } catch (err) {
+    console.error("Public Profile Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// --- GET PUBLIC AGENT PROFILE (FOR USER DASHBOARD) ---
+router.get('/agent-public-profile/:id', async (req, res) => {
+  try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
+    
+    // 1. Fetch the agent by ID
+    const agent = await AgentModel.findById(req.params.id).select('-password').lean();
+
+    if (!agent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Agent not found" 
+      });
+    }
+
+    // 2. DYNAMIC PRESENCE LOGIC
+    // We compare current server time with the agent's lastActive timestamp
+    const now = new Date();
+    const lastActive = agent.lastActive || agent.createdAt;
+    
+    // Define the 'online' window (2 minutes)
+    const isOnline = lastActive && (now - new Date(lastActive)) < (2 * 60 * 1000);
+
+    // 3. FULL S3 IMAGE SIGNING LOGIC
+    let finalPhotoUrl = agent.photoUrl;
+    
+    // Only attempt to sign if it's an S3/Idrive URL
+    if (agent.photoUrl && (agent.photoUrl.includes('idrivee2.com') || agent.photoUrl.includes('s3.'))) {
+      try {
+        // Extract the file key from the URL (everything after 'profiles/')
+        const urlParts = agent.photoUrl.split('/');
+        const profileIndex = urlParts.indexOf('profiles');
+        
+        if (profileIndex !== -1) {
+          const fileKey = urlParts.slice(profileIndex).join('/');
+          
+          if (s3Client) {
+            const command = new GetObjectCommand({
+              Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+              Key: decodeURIComponent(fileKey),
+            });
+            
+            // Generate a signed URL valid for 1 hour
+            finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          }
+        }
+      } catch (signErr) {
+        console.error(`Image Signing Failed for ${agent.firstName}:`, signErr.message);
+        // Fallback is already the original photoUrl
+      }
+    }
+
+    // If no photo at all, use a nice UI Avatar
+    if (!finalPhotoUrl) {
+      finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=random&color=fff&size=128`;
+    }
+
+    // 4. GENERATE LAST SEEN TEXT
+    let lastSeenDisplay = "Offline";
+    if (isOnline) {
+      lastSeenDisplay = "Online";
+    } else if (lastActive) {
+      const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
+      if (diffMins < 60) {
+        lastSeenDisplay = `${diffMins}m ago`;
+      } else if (diffMins < 1440) {
+        lastSeenDisplay = `${Math.floor(diffMins / 60)}h ago`;
+      } else {
+        lastSeenDisplay = new Date(lastActive).toLocaleDateString();
+      }
+    }
+
+    // 5. SEND RESPONSE
+    res.json({
+      success: true,
+      agent: {
+        ...agent,
+        photoUrl: finalPhotoUrl,
+        // The dashboard uses these fields to show the Green dot and status text
+        status: isOnline ? 'online' : 'offline', 
+        lastSeenText: lastSeenDisplay
+      }
+    });
+
+  } catch (err) {
+    console.error("Public Profile Fetch Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error while fetching agent status" 
+    });
+  }
+});
+
 // This route is specifically for the setInterval pulse from the Agent Dashboard
 router.post('/heartbeat', authenticateToken, async (req, res) => {
   try {

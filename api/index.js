@@ -465,7 +465,7 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching profile" });
   }
 });
-
+// --- GET LOGGED-IN AGENT PROFILE ---
 app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -476,6 +476,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
 
     const Agent = getAgentModel();
     
+    // Update lastActive every time they fetch their own profile
     let agent = await Agent.findByIdAndUpdate(
       req.user.id, 
       { lastActive: new Date() }, 
@@ -486,25 +487,28 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // Expiry Logic
+    // 1. Subscription Expiry Logic
     const now = new Date();
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
       await agent.save(); 
     }
 
-    // SIGNING LOGIC
-    let signedPhotoUrl = agent.photoUrl;
+    // 2. Presence Logic (Calculated for the UI)
+    const lastActiveDate = agent.lastActive || agent.createdAt;
+    const isOnline = (now - new Date(lastActiveDate)) < (2 * 60 * 1000);
 
+    // 3. S3 IDrive Image Signing Logic
+    let signedPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
+        // Extract key: handles URLs whether they have the bucket name in the path or subdomain
         const fileKey = agent.photoUrl.split('.com/')[1];
-        console.log("Generating URL for Key:", fileKey);
 
         if (fileKey && s3Client) {
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: fileKey,
+            Key: decodeURIComponent(fileKey),
           });
 
           signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
@@ -514,6 +518,12 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       }
     }
 
+    // 4. Fallback Avatar
+    if (!signedPhotoUrl) {
+      signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=random&color=fff&size=128`;
+    }
+
+    // 5. Response
     res.json({
       success: true,
       firstName: agent.firstName || "",
@@ -521,8 +531,8 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       occupation: agent.occupation || "",
       program: agent.program || "",
       bio: agent.bio || "",
-     gender: agent.gender || "", 
-     dob: agent.dob || "",
+      gender: agent.gender || "", 
+      dob: agent.dob || "",
       address: agent.address || "",
       photoUrl: signedPhotoUrl, 
       slug: agent.slug || "",
@@ -530,7 +540,9 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       isSubscribed: !!agent.isSubscribed,
       subscriptionAmount: agent.subscriptionAmount || 0,
       subscriptionDate: agent.subscriptionDate,
-      expiryDate: agent.expiryDate
+      expiryDate: agent.expiryDate,
+      status: isOnline ? 'online' : 'offline', // Added status field
+      lastActive: agent.lastActive
     }); 
 
   } catch (err) {
@@ -539,26 +551,32 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   }
 });
 
+// --- AGENT HEARTBEAT PULSE ---
 app.post('/api/agents/heartbeat', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-        const updatedAgent = await Agent.findByIdAndUpdate(
+    const AgentModel = getAgentModel(); // Ensure consistency with your helper
+
+    const updatedAgent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
       { lastActive: new Date() }, 
-      { new: true, select: 'lastActive' } // Efficient: only return the timestamp
+      { new: true, select: 'lastActive' } 
     );
 
     if (!updatedAgent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    res.json({ success: true, lastActive: updatedAgent.lastActive });
+    res.json({ 
+      success: true, 
+      lastActive: updatedAgent.lastActive,
+      status: 'online' 
+    });
   } catch (err) {
     console.error("Heartbeat Error:", err);
     res.status(500).json({ success: false });
   }
 });
-
 // 3. Update Agent Plan Selection
 app.post('/api/agents/update-plan', authenticateToken, async (req, res) => {
   try {

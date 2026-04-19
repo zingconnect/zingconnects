@@ -37,65 +37,49 @@ export const UserDashboard = () => {
     state: ''
   });
 
-  // --- HELPER: FORMAT LAST SEEN & STATUS ---
-  const getStatusInfo = (lastActive) => {
-    if (!lastActive) return { isOnline: false, label: "Offline" };
-    
-    const lastActiveDate = new Date(lastActive);
-    const now = new Date();
-    const diffInSeconds = Math.floor((now - lastActiveDate) / 1000);
-    
-    // Consider online if active in the last 2 minutes
-    if (diffInSeconds < 120) {
-      return { isOnline: true, label: "Online" };
-    }
-    
-    // Format "Last seen" for offline users
-    if (diffInSeconds < 3600) {
-      return { isOnline: false, label: `Last seen ${Math.floor(diffInSeconds / 60)}m ago` };
-    } else if (diffInSeconds < 86400) {
-      return { isOnline: false, label: `Last seen today at ${lastActiveDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` };
-    } else {
-      return { isOnline: false, label: `Last seen ${lastActiveDate.toLocaleDateString()}` };
-    }
-  };
+const getStatusInfo = (agentData) => {
+  if (!agentData) return { isOnline: false, label: "Connecting..." };
+  if (agentData.status === 'online') {
+    return { isOnline: true, label: "Online" };
+  }
+  if (agentData.lastSeenText) {
+    return { isOnline: false, label: agentData.lastSeenText };
+  }
+  if (agentData.lastActive) {
+    const diff = Math.floor((new Date() - new Date(agentData.lastActive)) / 1000);
+    if (diff < 120) return { isOnline: true, label: "Online" };
+  }
+
+  return { isOnline: false, label: "Offline" };
+};
 
   // --- INITIAL DATA FETCH ---
 useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return navigate('/');
 
-  const fetchUserSession = async () => {
-    try {
-      const response = await fetch('/api/users/my-session', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();
+const fetchUserSession = async () => {
+  try {
+    const response = await fetch('/api/users/my-session', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json();
+    
+    if (response.ok) {
+      // We set that directly into the state
+      setAgent(data.agent); 
+      setUser(data.user);
       
-      if (response.ok) {
-        setAgent(data.agent);
-        setUser(data.user);
-
-        if (!data.user.isProfileComplete) {
-          setShowOnboarding(true);
-        }
-
-        // Only set the initial message if the list is empty
-        setMessages(prev => prev.length === 0 ? [
-          {
-            id: 1,
-            text: `Hello! I'm ${data.agent.firstName}. How can I assist you today?`,
-            sender: 'agent',
-            time: '12:00 PM'
-          }
-        ] : prev);
+      if (!data.user.isProfileComplete) {
+        setShowOnboarding(true);
       }
-    } catch (err) {
-      console.error("Session fetch error:", err);
-    } finally {
-      setLoading(false);
     }
-  };
+  } catch (err) {
+    console.error("Session fetch error:", err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   fetchUserSession();
 
@@ -106,7 +90,7 @@ useEffect(() => {
   };
 }, [navigate]);
 
-  const agentStatus = getStatusInfo(agent?.lastActive);
+const agentStatus = getStatusInfo(agent);
 
   // --- PHOTO HANDLERS ---
   const handlePhotoClick = () => fileInputRef.current.click();
