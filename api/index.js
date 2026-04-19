@@ -26,8 +26,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use('/api/messages', messageRoutes); // Connects to your new messages.js file
-app.use('/api/auth', authRoutes);         // Keep auth separate for clarity
+app.use('/api/messages', messageRoutes); 
+app.use('/api/agents', authRoutes);
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
 

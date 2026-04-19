@@ -478,7 +478,6 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 4. AGENT HEARTBEAT ---
 // This route is specifically for the setInterval pulse from the Agent Dashboard
 router.post('/heartbeat', authenticateToken, async (req, res) => {
   try {
@@ -734,9 +733,9 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: "Server error during profile update" });
   }
 });
-
+// --- GET AGENT'S CONNECTED USERS ---
 router.get('/my-users', authenticateToken, async (req, res) => {
-  // Prevent browser caching so the status always reflects the current database state
+  // Clear cache to ensure real-time status updates
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -744,16 +743,17 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    const agentId = req.user.id || req.user._id;
+    // Get agent ID from the token (provided by authenticateToken middleware)
+    const agentId = req.user?.id || req.user?._id;
 
     if (!agentId) {
-      return res.status(400).json({ 
+      return res.status(401).json({ 
         success: false, 
-        message: "Invalid session metadata." 
+        message: "Unauthorized: Missing agent session metadata." 
       });
     }
 
-    // 1. Fetch users and sort by most recently active
+    // 1. Fetch users linked to this agent
     const users = await User.find({ connectedAgents: agentId })
       .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
@@ -762,12 +762,12 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // 2. Handle S3 Signed URLs for User Photos
+      // 2. Handle S3 Image Signing (IDrive e2 / AWS S3)
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
           let fileKey = user.photoUrl;
 
-          // If the stored URL contains the full path, extract just the key
+          // Clean up URL to get the raw S3 Key
           if (user.photoUrl.includes('users/')) {
             const urlParts = user.photoUrl.split('users/');
             const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
@@ -779,30 +779,28 @@ router.get('/my-users', authenticateToken, async (req, res) => {
             Key: fileKey,
           });
 
+          // s3Client must be imported or available in this scope
           finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         } catch (s3Err) {
           console.error(`[S3 Error] ${user.email}:`, s3Err.message);
         }
       }
 
-      // 3. Fallback to UI Avatars if no photo exists
+      // 3. Fallback to Avatar if photo doesn't exist
       if (!finalPhotoUrl) {
-        const fullName = `${user.firstName}+${user.lastName}`;
-        finalPhotoUrl = `https://ui-avatars.com/api/?name=${fullName}&background=random&color=fff&size=128`;
+        const initials = `${user.firstName || 'U'}+${user.lastName || ''}`;
+        finalPhotoUrl = `https://ui-avatars.com/api/?name=${initials}&background=random&color=fff&size=128`;
       }
 
-      // 4. Presence Logic (Heartbeat calculation)
+      // 4. Presence Calculation (Online if active in last 2 minutes)
       const lastSeen = user.lastActive || user.lastLogin;
       const now = new Date();
-      
-      // Tightened to 2 minutes for better accuracy
       const isOnline = lastSeen && (now - new Date(lastSeen)) < (2 * 60 * 1000);
 
-      // 5. Generate Human-Readable Last Seen Text
+      // 5. Human-Readable Status
       let lastSeenText = "Offline";
       if (lastSeen) {
-        const diffMs = now - new Date(lastSeen);
-        const diffMins = Math.floor(diffMs / 60000);
+        const diffMins = Math.floor((now - new Date(lastSeen)) / 60000);
         
         if (isOnline) {
           lastSeenText = "Online";
@@ -819,7 +817,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
         ...user,
         photoUrl: finalPhotoUrl,
         status: isOnline ? 'online' : 'offline',
-        lastSeenText: lastSeenText // Send this to display in the UI label
+        lastSeenText: lastSeenText
       };
     }));
 
@@ -830,10 +828,10 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("CRITICAL USER FETCH ERROR:", err);
+    console.error("AGENT USERS FETCH ERROR:", err);
     res.status(500).json({ 
       success: false, 
-      message: "System failed to sync user list",
+      message: "Server failed to retrieve user list",
       error: err.message
     });
   }
