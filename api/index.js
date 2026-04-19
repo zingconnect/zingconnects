@@ -3,21 +3,23 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import path from 'path';
+import path from 'path'; // <--- Kept this one
+import fs from 'fs';   // <--- Kept this one
 import jwt from 'jsonwebtoken'; 
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
-import path from 'path';
-import fs from 'fs';
+// REMOVED duplicate: import path from 'path'; 
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
 import { agentSchema } from './models/Agent.js'; 
 import User from './models/User.js'; 
 import authRoutes from './routes/auth.js';
+
+dotenv.config();
 
 dotenv.config();
 
