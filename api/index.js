@@ -311,17 +311,25 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
         });
     }
 });
-
 // --- STAGE 2: VERIFY OTP ---
 app.post('/api/agents/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
 
   try {
     await connectToDatabase();
+
+    // --- FIX 1: INITIALIZE THE MODEL ---
+    // In your architecture, Agent needs to be retrieved from the getter
+    const Agent = getAgentModel(); 
+
+    if (!email || !otp) {
+        return res.status(400).json({ success: false, message: "Email and OTP are required." });
+    }
+
     const agent = await Agent.findOne({ 
       email: email.toLowerCase().trim(),
       otp: otp,
-      otpExpires: { $gt: Date.now() } // $gt means "Greater Than" current time
+      otpExpires: { $gt: Date.now() } 
     });
 
     if (!agent) {
@@ -330,19 +338,29 @@ app.post('/api/agents/verify-otp', async (req, res) => {
         message: "The code is invalid or has expired. Please request a new one." 
       });
     }
+
+    // Update Agent Status
     agent.isVerified = true;
     agent.status = 'active';
     
-    // 3. Cleanup: Remove OTP data so the same code can't be used twice
+    // Cleanup OTP
     agent.otp = undefined; 
     agent.otpExpires = undefined;
     
     await agent.save();
+
+    // --- FIX 2: ENV CHECK ---
+    if (!process.env.JWT_SECRET) {
+        console.error("CRITICAL: JWT_SECRET is not defined in .env");
+        throw new Error("Security configuration missing");
+    }
+
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug }, 
+      { id: agent._id, slug: agent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
+
     res.status(200).json({ 
       success: true, 
       token: token, 
@@ -351,10 +369,16 @@ app.post('/api/agents/verify-otp', async (req, res) => {
     });
 
   } catch (err) {
-    console.error("OTP Verification Error:", err);
-    res.status(500).json({ success: false, message: "Internal server error during verification." });
+    // Check your Vercel logs or Terminal for this specific printout:
+    console.error("OTP Verification Error:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error during verification.",
+      error: err.message // Useful for debugging, remove in production
+    });
   }
 });
+
 
 app.post('/api/agents/login', async (req, res) => {
   try {

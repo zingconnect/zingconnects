@@ -266,31 +266,76 @@ router.post('/register', upload.single('photo'), async (req, res) => {
 // --- 2. STAGE 2: VERIFY OTP ---
 router.post('/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
+
   try {
+    // 1. CRITICAL: Ensure DB connection is active for this request
+    await connectToDatabase();
+    
+    // 2. Safely get the model
     const Agent = getAgentModel();
+
+    if (!email || !otp) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email and verification code are required." 
+      });
+    }
+
+    // 3. Find the agent with matching email, OTP, and check expiry
+    // $gt: Date.now() ensures the code hasn't expired yet
     const agent = await Agent.findOne({ 
       email: email.toLowerCase().trim(),
       otp: otp,
       otpExpires: { $gt: Date.now() }
     });
 
-    if (!agent) return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
+    if (!agent) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid or expired verification code. Please try again." 
+      });
+    }
 
+    // 4. Update agent status and clear OTP fields
     agent.isVerified = true;
     agent.status = 'active';
-    agent.otp = undefined;
+    agent.otp = undefined; 
     agent.otpExpires = undefined;
+    
     await agent.save();
 
+    // 5. Check if JWT_SECRET exists to avoid signing errors
+    if (!process.env.JWT_SECRET) {
+        console.error("JWT_SECRET is missing in environment variables.");
+        throw new Error("Server configuration error.");
+    }
+
+    // 6. Generate access token
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug, role: 'agent' }, 
+      { 
+        id: agent._id, 
+        slug: agent.slug, 
+        role: 'agent' 
+      }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
-    res.json({ success: true, token, slug: agent.slug });
+    // 7. Success Response
+    res.status(200).json({ 
+      success: true, 
+      token, 
+      slug: agent.slug,
+      message: "Account verified successfully!" 
+    });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: "Verification failed" });
+    console.error("OTP VERIFICATION CRASH:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Verification failed due to a server error.",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
 
