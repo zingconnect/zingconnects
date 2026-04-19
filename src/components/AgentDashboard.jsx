@@ -57,6 +57,20 @@ export const AgentDashboard = () => {
     },
   ];
 
+  const getStatusIcon = (status) => {
+  switch (status) {
+    case 'seen':
+      // Double Blue Check
+      return <BsCheckAll className="text-blue-500" size={18} />;
+    case 'delivered':
+      // Double Gray Check
+      return <BsCheckAll className="text-gray-400" size={18} />;
+    default:
+      // Single Gray Check
+      return <BsCheckAll className="text-gray-300" size={14} />;
+  }
+};
+
   // --- INITIAL FETCH & SCRIPT LOAD ---
   useEffect(() => {
     const script = document.createElement('script');
@@ -249,9 +263,8 @@ const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!newMessage.trim() || !selectedUser) return;
 
-  const tempId = Date.now();
   const textToSend = newMessage;
-  setNewMessage(''); // Clear input immediately for better UX
+  setNewMessage(''); 
 
   try {
     const token = localStorage.getItem('zingToken');
@@ -263,19 +276,19 @@ const handleSendMessage = async (e) => {
       },
       body: JSON.stringify({
         receiverId: selectedUser._id,
-        text: textToSend
+        text: textToSend,
+        fileType: 'text' // Explicitly set as text
       })
     });
 
     const data = await response.json();
 
     if (data.success) {
-      // Add the message to the UI (using the data from the server)
+      // The server response now includes status: 'sent' and fileType: 'text'
       setMessages(prev => [...prev, data.message]);
     }
   } catch (err) {
     console.error("Message failed to send:", err);
-    alert("Could not send message. Please try again.");
   }
 };
 
@@ -530,17 +543,40 @@ const handleSendMessage = async (e) => {
             <BsThreeDotsVertical className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
           </div>
         </header>
-            <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
-              {messages.map((m) => (
-                <div key={m.id} className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative ${m.sender === 'agent' ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'}`}>
-                  <p className="text-xs md:text-[13px] text-[#303030] leading-relaxed">{m.text}</p>
-                  <div className="flex items-center justify-end gap-1 mt-0.5">
-                    <span className="text-[9px] text-gray-400">{m.time}</span>
-                    {m.sender === 'agent' && <BsCheckAll size={14} className="text-blue-400" />}
-                  </div>
-                </div>
-              ))}
-            </div>
+           <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
+  {messages.map((m) => (
+    <div 
+      key={m._id || m.id} 
+      className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative ${
+        m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'
+      }`}
+    >
+      {/* 1. Handle Media Content */}
+      {m.fileType === 'image' && (
+        <img src={m.fileUrl} alt="Shared" className="rounded-lg mb-2 max-w-full h-auto cursor-pointer" />
+      )}
+      
+      {m.fileType === 'video' && (
+        <video controls className="rounded-lg mb-2 max-w-full">
+          <source src={m.fileUrl} type="video/mp4" />
+        </video>
+      )}
+
+      {/* 2. Handle Text Content */}
+      {m.text && <p className="text-xs md:text-[13px] text-[#303030] leading-relaxed pr-8">{m.text}</p>}
+
+      {/* 3. Time and Status Bar */}
+      <div className="flex items-center justify-end gap-1 mt-0.5">
+        <span className="text-[9px] text-gray-400">
+          {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
+        
+        {/* Only show status ticks for messages sent by the Agent */}
+        {m.senderModel === 'Agent' && getStatusIcon(m.status)}
+      </div>
+    </div>
+  ))}
+</div>
 
             <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
               <div className="flex items-center gap-1 md:gap-3 text-gray-500">

@@ -37,62 +37,87 @@ export const UserDashboard = () => {
     state: ''
   });
 
-const getStatusInfo = (agentData) => {
-  if (!agentData) return { isOnline: false, label: "Connecting..." };
-  if (agentData.status === 'online') {
-    return { isOnline: true, label: "Online" };
-  }
-  if (agentData.lastSeenText) {
-    return { isOnline: false, label: agentData.lastSeenText };
-  }
-  if (agentData.lastActive) {
-    const diff = Math.floor((new Date() - new Date(agentData.lastActive)) / 1000);
-    if (diff < 120) return { isOnline: true, label: "Online" };
-  }
-
-  return { isOnline: false, label: "Offline" };
-};
-
-  // --- INITIAL DATA FETCH ---
-useEffect(() => {
-  const token = localStorage.getItem('userToken');
-  if (!token) return navigate('/');
-
-const fetchUserSession = async () => {
-  try {
-    const response = await fetch('/api/users/my-session', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    
-    if (response.ok) {
-      // We set that directly into the state
-      setAgent(data.agent); 
-      setUser(data.user);
-      
-      if (!data.user.isProfileComplete) {
-        setShowOnboarding(true);
-      }
+  // --- HELPERS ---
+  const getStatusInfo = (agentData) => {
+    if (!agentData) return { isOnline: false, label: "Connecting..." };
+    if (agentData.status === 'online') return { isOnline: true, label: "Online" };
+    if (agentData.lastSeenText) return { isOnline: false, label: agentData.lastSeenText };
+    if (agentData.lastActive) {
+      const diff = Math.floor((new Date() - new Date(agentData.lastActive)) / 1000);
+      if (diff < 120) return { isOnline: true, label: "Online" };
     }
-  } catch (err) {
-    console.error("Session fetch error:", err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  fetchUserSession();
-
-  const interval = setInterval(fetchUserSession, 30000); 
-
-  return () => {
-    clearInterval(interval);
+    return { isOnline: false, label: "Offline" };
   };
-}, [navigate]);
 
-const agentStatus = getStatusInfo(agent);
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'seen':
+        return <BsCheckAll className="text-blue-500" size={18} />;
+      case 'delivered':
+        return <BsCheckAll className="text-gray-400" size={18} />;
+      default:
+        return <BsCheckAll className="text-gray-300" size={14} />;
+    }
+  };
 
-  // --- PHOTO HANDLERS ---
+  // --- HOOK 1: SESSION & ONBOARDING ---
+  useEffect(() => {
+    const token = localStorage.getItem('userToken');
+    if (!token) return navigate('/');
+
+    const fetchUserSession = async () => {
+      try {
+        const response = await fetch('/api/users/my-session', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        
+        if (response.ok) {
+          setAgent(data.agent); 
+          setUser(data.user);
+          if (!data.user.isProfileComplete) {
+            setShowOnboarding(true);
+          }
+        }
+      } catch (err) {
+        console.error("Session fetch error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUserSession();
+    const interval = setInterval(fetchUserSession, 30000); 
+    return () => clearInterval(interval);
+  }, [navigate]);
+
+  // --- HOOK 2: MESSAGE POLLING ---
+  useEffect(() => {
+    const token = localStorage.getItem('userToken');
+    if (!token || !agent?._id) return;
+
+    const fetchMessages = async () => {
+      try {
+        const response = await fetch(`/api/messages/${agent._id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (response.ok) {
+          setMessages(data.messages);
+        }
+      } catch (err) {
+        console.error("Failed to fetch messages:", err);
+      }
+    };
+
+    fetchMessages();
+    const interval = setInterval(fetchMessages, 5000); 
+    return () => clearInterval(interval);
+  }, [agent?._id]);
+
+  const agentStatus = getStatusInfo(agent);
+
+  // --- HANDLERS ---
   const handlePhotoClick = () => fileInputRef.current.click();
 
   const handleFileChange = (e) => {
@@ -127,18 +152,35 @@ const agentStatus = getStatusInfo(agent);
     }
   };
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || !agent?._id) return;
     
-    const msg = {
-      id: Date.now(),
-      text: newMessage,
-      sender: 'user',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    setMessages([...messages, msg]);
-    setNewMessage('');
+    const textToSend = newMessage;
+    setNewMessage(''); 
+
+    try {
+      const token = localStorage.getItem('userToken');
+      const response = await fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          receiverId: agent._id,
+          text: textToSend,
+          fileType: 'text'
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setMessages(prev => [...prev, data.message]);
+      }
+    } catch (err) {
+      console.error("Message failed to send:", err);
+    }
   };
 
   if (loading) return (
@@ -168,7 +210,6 @@ const agentStatus = getStatusInfo(agent);
                 ) : (
                     <span className="text-2xl font-black text-blue-600">{agent?.firstName?.[0]}</span>
                 )}
-                {/* Status Dot in Sidebar */}
                 <div className={`absolute bottom-2 right-2 w-4 h-4 rounded-full border-2 border-white ${agentStatus.isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
             </div>
             
@@ -194,21 +235,10 @@ const agentStatus = getStatusInfo(agent);
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  {/* Add this inside the onboarding form */}
-<div className="space-y-1">
-  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Gender</label>
-  <select 
-    required 
-    className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none appearance-none"
-    onChange={e => setFormData({...formData, gender: e.target.value})}
-    value={formData.gender}
-  >
-    <option value="" disabled>Select Gender</option>
-    <option value="male">Male</option>
-    <option value="female">Female</option>
-    <option value="prefer-not-to-say">Prefer not to say</option>
-  </select>
-</div>
+                  <div className="p-1">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Gender</p>
+                    <p className="text-xs font-bold text-gray-700 capitalize">{agent?.gender || 'N/A'}</p>
+                  </div>
                   <div className="p-1">
                     <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Date of Birth</p>
                     <p className="text-xs font-bold text-gray-700">
@@ -256,9 +286,25 @@ const agentStatus = getStatusInfo(agent);
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Date of Birth</label>
-                <input required type="date" className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" onChange={e => setFormData({...formData, dob: e.target.value})} />
+              <div className="grid grid-cols-2 gap-2 md:gap-4">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Date of Birth</label>
+                  <input required type="date" className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" onChange={e => setFormData({...formData, dob: e.target.value})} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Gender</label>
+                  <select 
+                    required 
+                    className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none appearance-none"
+                    onChange={e => setFormData({...formData, gender: e.target.value})}
+                    value={formData.gender}
+                  >
+                    <option value="" disabled>Select</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 md:gap-4">
@@ -327,13 +373,30 @@ const agentStatus = getStatusInfo(agent);
           </div>
 
           {messages.map((m) => (
-            <div key={m.id} className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 ${
-                m.sender === 'user' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+            <div key={m._id || m.id} className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 ${
+                m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
               }`}>
-              <p className="text-[12px] md:text-[14px] text-[#303030] leading-relaxed pr-8">{m.text}</p>
+              
+              {/* Media Handling */}
+              {m.fileType === 'image' && (
+                <img src={m.fileUrl} alt="attachment" className="rounded-lg mb-2 max-w-full" />
+              )}
+              {m.fileType === 'video' && (
+                <video controls className="rounded-lg mb-2 max-w-full">
+                  <source src={m.fileUrl} type="video/mp4" />
+                </video>
+              )}
+
+              {/* Text Content */}
+              {m.text && <p className="text-[12px] md:text-[14px] text-[#303030] leading-relaxed pr-8">{m.text}</p>}
+
               <div className="flex items-center justify-end gap-1 mt-0.5">
-                <span className="text-[8px] md:text-[9px] text-gray-400 font-medium">{m.time}</span>
-                {m.sender === 'user' && <BsCheckAll size={16} className="text-blue-400" />}
+                <span className="text-[8px] md:text-[9px] text-gray-400 font-medium">
+                  {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                
+                {/* Ticks only for User messages */}
+                {m.senderModel === 'User' && getStatusIcon(m.status)}
               </div>
             </div>
           ))}

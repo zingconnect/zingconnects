@@ -634,6 +634,8 @@ app.post('/api/users/handshake', async (req, res) => {
     res.status(500).json({ success: false, message: "Handshake failed" });
   }
 });
+
+
 app.get('/api/users/my-session', async (req, res) => {
   try {
     await connectToDatabase();
@@ -643,26 +645,50 @@ app.get('/api/users/my-session', async (req, res) => {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // --- ADD THIS LINE HERE ---
-    // This updates the "Last Seen" every time the user is active on the dashboard
+    // Update user presence
     await User.findByIdAndUpdate(decoded.id, { lastActive: new Date() });
 
     const user = await User.findById(decoded.id).populate({
       path: 'connectedAgents',
-      select: 'firstName lastName photoUrl occupation program bio slug'
+      select: 'firstName lastName photoUrl occupation program bio slug lastActive' // Ensure lastActive is selected
     });
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
     let activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
     
+    // --- START OF DYNAMIC STATUS CALCULATION ---
+    let isOnline = false;
+    let lastSeenDisplay = "Offline";
+
+    if (activeAgent) {
+      const AgentModel = getAgentModel();
+      // Fetch fresh data for the agent to get the most recent heartbeat
+      const freshAgent = await AgentModel.findById(activeAgent._id).lean();
+      
+      const now = new Date();
+      const lastActive = freshAgent.lastActive || freshAgent.createdAt;
+      
+      // Calculate if they were active in the last 2 minutes (120,000ms)
+      isOnline = lastActive && (now - new Date(lastActive)) < (2 * 60 * 1000);
+
+      if (isOnline) {
+        lastSeenDisplay = "Online";
+      } else if (lastActive) {
+        const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
+        lastSeenDisplay = diffMins < 60 ? `${diffMins}m ago` : "Offline";
+      }
+    }
+    // --- END OF DYNAMIC STATUS CALCULATION ---
+
+    // SIGNING LOGIC
     let signedPhotoUrl = activeAgent?.photoUrl;
     if (activeAgent?.photoUrl && activeAgent.photoUrl.includes('idrivee2.com')) {
       try {
         const fileKey = activeAgent.photoUrl.split('.com/')[1];
         const command = new GetObjectCommand({
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-          Key: fileKey,
+          Key: decodeURIComponent(fileKey),
         });
         signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       } catch (err) {
@@ -676,14 +702,18 @@ app.get('/api/users/my-session', async (req, res) => {
         id: user._id,
         email: user.email,
         isProfileComplete: user.isProfileComplete,
-        lastActive: user.lastActive // Pass this back so UI can use it
+        lastActive: user.lastActive
       },
       agent: activeAgent ? {
-        ...activeAgent._doc,
-        photoUrl: signedPhotoUrl
+        ...activeAgent.toObject ? activeAgent.toObject() : activeAgent,
+        photoUrl: signedPhotoUrl,
+        // Send the calculated status to the Frontend
+        status: isOnline ? 'online' : 'offline',
+        lastSeenText: lastSeenDisplay
       } : null
     });
   } catch (err) {
+    console.error("Session Error:", err);
     res.status(500).json({ message: "Session Error" });
   }
 });
