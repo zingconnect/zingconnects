@@ -11,14 +11,13 @@ import multer from 'multer';
 import nodemailer from 'nodemailer';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
-// REMOVED duplicate: import path from 'path'; 
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
 import { agentSchema } from './models/Agent.js'; 
 import User from './models/User.js'; 
 import authRoutes from './routes/auth.js';
-import messageRoutes from './routes/messages.js';
+import Message from './models/Message.js';
 
 dotenv.config();
 
@@ -474,6 +473,8 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
         return res.status(401).json({ success: false, message: "Invalid session" });
     }
 
+    const Agent = getAgentModel();
+    
     let agent = await Agent.findByIdAndUpdate(
       req.user.id, 
       { lastActive: new Date() }, 
