@@ -13,7 +13,6 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../index.js';
 import { agentSchema } from '../models/Agent.js';
 import User from '../models/User.js';
-import Message from '../models/Message.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -841,45 +840,5 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/:otherUserId', authenticateToken, async (req, res) => {
-  try {
-    await connectToDatabase();
-    const myId = req.user.id;
-    const { otherUserId } = req.params;
-
-    const messages = await Message.find({
-      $or: [
-        { senderId: myId, receiverId: otherUserId },
-        { senderId: otherUserId, receiverId: myId }
-      ]
-    }).sort({ createdAt: 1 });
-
-    res.json({ success: true, messages });
-  } catch (err) {
-    console.error("Chat Load Error:", err);
-    res.status(500).json({ success: false, message: "Error loading chat history" });
-  }
-});
-
-router.post('/send', authenticateToken, async (req, res) => {
-  try {
-    await connectToDatabase();
-    const { receiverId, text, receiverModel } = req.body;
-
-    const newMessage = new Message({
-      senderId: req.user.id,
-      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
-      receiverId,
-      receiverModel,
-      text
-    });
-
-    await newMessage.save();
-    res.status(201).json({ success: true, message: newMessage });
-  } catch (err) {
-    console.error("Send Error:", err);
-    res.status(500).json({ success: false, message: "Failed to send message" });
-  }
-});
 
 export default router;

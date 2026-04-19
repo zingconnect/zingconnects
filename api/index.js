@@ -16,17 +16,18 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
 import { agentSchema } from './models/Agent.js'; 
 import User from './models/User.js'; 
-import authRoutes from './routes/auth.js';
 import Message from './models/Message.js';
-
-dotenv.config();
+import authRoutes from './routes/auth.js';
+import messageRoutes from './routes/messages.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/api/agents', authRoutes);
+
+app.use('/api/messages', messageRoutes); // Connects to your new messages.js file
+app.use('/api/auth', authRoutes);         // Keep auth separate for clarity
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
 
@@ -1080,6 +1081,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   }
 });
 
+// --- 5. SEND MESSAGE ROUTE ---
 app.post('/api/messages/send', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1096,9 +1098,11 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
     await newMessage.save();
     res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Message failed to send" });
+    console.error("SEND MESSAGE ERROR:", err);
+    res.status(500).json({ success: false, message: "Server failed to save message" });
   }
 });
+
 // 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
