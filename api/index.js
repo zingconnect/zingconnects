@@ -14,7 +14,7 @@ import axios from 'axios';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
-import { agentSchema } from './models/Agent.js'; 
+import  Agent from './models/Agent.js';
 import User from './models/User.js'; 
 import Message from './models/Message.js';
 import authRoutes from './routes/auth.js';
@@ -635,53 +635,64 @@ app.post('/api/users/handshake', async (req, res) => {
   }
 });
 
-
 app.get('/api/users/my-session', async (req, res) => {
   try {
     await connectToDatabase();
+    
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.status(401).json({ message: "No token" });
 
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Update user presence
-    await User.findByIdAndUpdate(decoded.id, { lastActive: new Date() });
-
-    const user = await User.findById(decoded.id).populate({
+    // 1. Update user presence and populate agents
+    // Using 'returnDocument' fixes the Mongoose deprecation warning
+    const user = await User.findByIdAndUpdate(
+      decoded.id, 
+      { lastActive: new Date() },
+      { returnDocument: 'after' } 
+    ).populate({
       path: 'connectedAgents',
-      select: 'firstName lastName photoUrl occupation program bio slug lastActive' // Ensure lastActive is selected
+      select: 'firstName lastName photoUrl occupation program bio slug lastActive'
     });
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    let activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
+    // 2. Identify the active agent
+    let activeAgent = user.connectedAgents && user.connectedAgents.length > 0 
+      ? user.connectedAgents[user.connectedAgents.length - 1] 
+      : null;
     
-    // --- START OF DYNAMIC STATUS CALCULATION ---
     let isOnline = false;
     let lastSeenDisplay = "Offline";
 
     if (activeAgent) {
-      const AgentModel = getAgentModel();
-      // Fetch fresh data for the agent to get the most recent heartbeat
-      const freshAgent = await AgentModel.findById(activeAgent._id).lean();
+      // 3. Fetch fresh status from the Agent model
+      const freshAgent = await Agent.findById(activeAgent._id).lean();
       
-      const now = new Date();
-      const lastActive = freshAgent.lastActive || freshAgent.createdAt;
-      
-      // Calculate if they were active in the last 2 minutes (120,000ms)
-      isOnline = lastActive && (now - new Date(lastActive)) < (2 * 60 * 1000);
+      if (freshAgent) {
+        const now = new Date();
+        const lastActive = freshAgent.lastActive || freshAgent.createdAt;
+        
+        // Online if activity was within the last 2 minutes (120,000ms)
+        isOnline = lastActive && (now - new Date(lastActive)) < 120000;
 
-      if (isOnline) {
-        lastSeenDisplay = "Online";
-      } else if (lastActive) {
-        const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
-        lastSeenDisplay = diffMins < 60 ? `${diffMins}m ago` : "Offline";
+        if (isOnline) {
+          lastSeenDisplay = "Online";
+        } else if (lastActive) {
+          const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
+          if (diffMins < 60) {
+            lastSeenDisplay = `Last seen ${diffMins}m ago`;
+          } else if (diffMins < 1440) {
+            lastSeenDisplay = `Last seen ${Math.floor(diffMins / 60)}h ago`;
+          } else {
+            lastSeenDisplay = "Offline";
+          }
+        }
       }
     }
-    // --- END OF DYNAMIC STATUS CALCULATION ---
 
-    // SIGNING LOGIC
+    // 4. IDrive / S3 Image Signing Logic
     let signedPhotoUrl = activeAgent?.photoUrl;
     if (activeAgent?.photoUrl && activeAgent.photoUrl.includes('idrivee2.com')) {
       try {
@@ -692,10 +703,12 @@ app.get('/api/users/my-session', async (req, res) => {
         });
         signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       } catch (err) {
-        console.error("Signing failed", err);
+        console.error("Image signing failed:", err);
+        // Fallback to original URL if signing fails
       }
     }
 
+    // 5. Final Response
     res.json({
       success: true,
       user: {
@@ -705,19 +718,22 @@ app.get('/api/users/my-session', async (req, res) => {
         lastActive: user.lastActive
       },
       agent: activeAgent ? {
-        ...activeAgent.toObject ? activeAgent.toObject() : activeAgent,
+        // Convert Mongoose doc to plain object for spreading
+        ...(activeAgent.toObject ? activeAgent.toObject() : activeAgent),
         photoUrl: signedPhotoUrl,
-        // Send the calculated status to the Frontend
         status: isOnline ? 'online' : 'offline',
         lastSeenText: lastSeenDisplay
       } : null
     });
+
   } catch (err) {
     console.error("Session Error:", err);
-    res.status(500).json({ message: "Session Error" });
+    res.status(500).json({ 
+      message: "Session Error", 
+      error: err.message 
+    });
   }
 });
-
 
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {

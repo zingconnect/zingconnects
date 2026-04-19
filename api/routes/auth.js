@@ -11,8 +11,8 @@ import nodemailer from 'nodemailer';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../index.js';
-import { agentSchema } from '../models/Agent.js';
-import User from '../models/User.js';
+import {agentSchema} from '../models/Agent.js';
+import User from './models/User.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
