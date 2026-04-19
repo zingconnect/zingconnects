@@ -20,25 +20,33 @@ export const agentSchema = new mongoose.Schema({
     lowercase: true, 
     trim: true 
   },
-  password: { 
-    type: String, 
-    required: true, 
-    select: false 
-  }, 
+  password: { type: String, required: true, select: false },
   slug: { 
     type: String, 
     required: true, 
     unique: true,
-    index: true // Optimization for profile lookups
+    index: true 
   },
   address: String,
   occupation: String,
   program: String,
   bio: String,
-  dob: { type: Date }, // Consistent with registration/auth logic
+  dob: { type: Date }, 
   gender: String,
   role: { type: String, default: 'agent' },
   photoUrl: { type: String, default: '' },
+
+  // --- NEW VERIFICATION FIELDS ---
+  isVerified: { 
+    type: Boolean, 
+    default: false 
+  },
+  otp: { 
+    type: String 
+  },
+  otpExpires: { 
+    type: Date 
+  },
 
   lastActive: { 
     type: Date, 
@@ -58,11 +66,11 @@ export const agentSchema = new mongoose.Schema({
   status: { 
     type: String, 
     enum: ['active', 'suspended', 'pending'], 
-    default: 'active' 
+    default: 'pending' // Changed default to pending for safety
   },
   
   subscriptionDate: { type: Date },
-  subscriptionAmount: { type: Number, default: 0 }, // USD Amount
+  subscriptionAmount: { type: Number, default: 0 }, 
   expiryDate: { type: Date }, 
   
   expiryNotificationSent: { 
@@ -78,18 +86,16 @@ export const agentSchema = new mongoose.Schema({
   lastTransactionId: { type: String, default: '' }
 }, { 
   timestamps: true,
-  toJSON: { virtuals: true }, // Required for the dashboard to see isExpired
+  toJSON: { virtuals: true }, 
   toObject: { virtuals: true } 
 });
 
 // --- VIRTUALS ---
-// This allows the frontend to check agent.isExpired without extra logic
 agentSchema.virtual('isExpired').get(function() {
   if (!this.expiryDate) return false;
   return new Date() > this.expiryDate;
 });
 
-// Prevent model overwrite error in development/hot-reloading
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
 export default Agent;

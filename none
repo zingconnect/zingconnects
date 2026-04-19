@@ -96,8 +96,8 @@ const transporter = nodemailer.createTransport({
 });
 
 
-app.post('/api/agents/register-init', upload.single('photo'), async (req, res) => {
-  console.log("Registration Stage 1 (Complete Fields) started...");
+app.post('/api/agents/register', upload.single('photo'), async (req, res) => {
+  console.log("Registration attempt started...");
 
   try {
     await connectToDatabase();
@@ -115,15 +115,17 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
     let finalSlug = baseSlug;
     let counter = 1;
     let slugExists = await Agent.findOne({ slug: finalSlug });
+
     while (slugExists) {
       counter++;
       finalSlug = `${baseSlug}-${counter}`;
       slugExists = await Agent.findOne({ slug: finalSlug });
     }
 
-    // --- 2. PHOTO UPLOAD (IDRIVE) ---
+    // --- 2. PHOTO UPLOAD (REFINED FOR IDRIVE) ---
     let savedPhotoPath = "";
     if (req.file) {
+      console.log(`Uploading file: ${req.file.originalname}`);
       try {
         const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
         const fileKey = `profiles/${fileName}`;
@@ -136,10 +138,15 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
           ContentType: req.file.mimetype,
         }));
         
+        // IDrive E2 format: https://[bucket].[endpoint]/[key]
         const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
         savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
+        console.log("Upload Success:", savedPhotoPath);
+
       } catch (uploadErr) {
-        console.error("IDRIVE UPLOAD FAILED:", uploadErr.message);
+        // If this logs "Access Denied", your IDrive Keys are wrong.
+        // If this logs "NoSuchBucket", your bucket name is wrong.
+        console.error("IDRIVE UPLOAD FAILED:", uploadErr.name, "-", uploadErr.message);
       }
     }
 
@@ -147,11 +154,7 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // --- 4. OTP GENERATION ---
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = Date.now() + 10 * 60 * 1000;
-
-    // --- 5. CREATE COMPLETE DOCUMENT ---
+    // --- 4. CREATE DOCUMENT ---
     const newAgent = new Agent({
       firstName: firstName.trim(),
       lastName: (lastName || "").trim(),
@@ -162,39 +165,29 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
       occupation: req.body.occupation,
       address: req.body.address,
       bio: req.body.bio || "",
-      program: req.body.program || "N/A",
+      program: req.body.program || "N/A",  
       slug: finalSlug,
-      photoUrl: savedPhotoPath,
-      role: 'agent',
-      status: 'pending',     // Status is pending until OTP verified
-      isVerified: false,     // Critical for security
-      otp: otpCode,          // Store OTP to check in Stage 2
-      otpExpires: otpExpiry, 
-      isSubscribed: false,
-      plan: req.body.plan || "BASIC"
+      photoUrl: savedPhotoPath, // This will now be filled if upload succeeded
+      role: 'agent',    
+      status: 'active',           
+      isSubscribed: false,        
+      plan: req.body.plan || "BASIC" 
     });
 
-    await newAgent.save();
-
-    // --- 6. SEND BRANDED EMAIL ---
-    await transporter.sendMail({
-      from: '"ZingConnect Security" <no-reply@zingconnect.com>',
-      to: email,
-      subject: "Action Required: Verify Your Agent Profile",
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 12px; max-width: 500px; margin: auto;">
-          <h2 style="color: #1e3a8a;">Verify Your Account</h2>
-          <p>Hello <strong>${firstName}</strong>,</p>
-          <p>Please use the verification code below to complete your ZingConnect registration:</p>
-          <div style="background: #eff6ff; color: #2563eb; padding: 20px; text-align: center; font-size: 30px; font-weight: 900; letter-spacing: 8px; border-radius: 8px; margin: 20px 0;">
-            ${otpCode}
-          </div>
-          <p style="font-size: 12px; color: #6b7280;">This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-        </div>
-      `
+    await newAgent.save();    
+    
+    const token = jwt.sign(
+      { id: newAgent._id, slug: newAgent.slug }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '24h' }
+    );
+    
+    res.status(201).json({ 
+      success: true, 
+      token, 
+      slug: finalSlug, 
+      message: "Registration successful." 
     });
-
-    res.status(200).json({ success: true, message: "Initial registration success. OTP sent." });
 
   } catch (err) {
     console.error("Registration Error:", err);
@@ -202,49 +195,6 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
       success: false, 
       message: err.code === 11000 ? "Email already exists" : "Internal Server Error" 
     });
-  }
-});
-// --- STAGE 2: VERIFY OTP ---
-app.post('/api/agents/verify-otp', async (req, res) => {
-  const { email, otp } = req.body;
-
-  try {
-    await connectToDatabase();
-    const agent = await Agent.findOne({ 
-      email: email.toLowerCase().trim(),
-      otp: otp,
-      otpExpires: { $gt: Date.now() } // $gt means "Greater Than" current time
-    });
-
-    if (!agent) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "The code is invalid or has expired. Please request a new one." 
-      });
-    }
-    agent.isVerified = true;
-    agent.status = 'active';
-    
-    // 3. Cleanup: Remove OTP data so the same code can't be used twice
-    agent.otp = undefined; 
-    agent.otpExpires = undefined;
-    
-    await agent.save();
-    const token = jwt.sign(
-      { id: agent._id, slug: agent.slug }, 
-      process.env.JWT_SECRET, 
-      { expiresIn: '24h' }
-    );
-    res.status(200).json({ 
-      success: true, 
-      token: token, 
-      slug: agent.slug, 
-      message: "Your profile is now live!" 
-    });
-
-  } catch (err) {
-    console.error("OTP Verification Error:", err);
-    res.status(500).json({ success: false, message: "Internal server error during verification." });
   }
 });
 
@@ -257,7 +207,7 @@ app.post('/api/agents/login', async (req, res) => {
       return res.status(400).json({ success: false, message: "Email and password required" });
     }
 
-    // 1. Find agent and explicitly include password
+    // Find agent and explicitly include password for comparison
     const agent = await Agent.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('+password');
@@ -266,23 +216,12 @@ app.post('/api/agents/login', async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 2. NEW: CHECK VERIFICATION STATUS
-    // If the agent hasn't verified their OTP, block the login
-    if (agent.isVerified === false) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Account not verified. Please check your email for the OTP code.",
-        needsVerification: true // Helpful hint for the frontend
-      });
-    }
-
-    // 3. Compare Password
     const isMatch = await bcrypt.compare(password, agent.password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 4. JWT Generation
+    // JWT Generation - This matches your new middleware 'req.user' logic
     const token = jwt.sign(
       { 
         id: agent._id, 
@@ -293,13 +232,14 @@ app.post('/api/agents/login', async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    // 5. Final Payload
+    // Final Payload
     res.json({ 
       success: true, 
       token, 
       slug: agent.slug,
+      // Boolean forced to ensure frontend handles it correctly
       isSubscribed: Boolean(agent.isSubscribed), 
-      plan: agent.plan || "BASIC",          
+      plan: agent.plan || "BASIC",         
       message: "Agent Verified" 
     });
 

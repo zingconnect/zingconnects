@@ -72,7 +72,7 @@ export const AgentSlug = () => {
       setIsProcessing(false);
     }
   };
-  // --- HANDLER 2: AGENT PORTAL LOGIN (Updated to store subscription status) ---
+ // --- HANDLER 2: AGENT PORTAL LOGIN (Updated for OTP Verification & Sub Status) ---
   const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
@@ -86,18 +86,24 @@ export const AgentSlug = () => {
       const data = await response.json();
       
       if (response.ok && data.token) {
-        // --- UPDATED STORAGE LOGIC ---
+        // --- STANDARD LOGIN SUCCESS ---
         localStorage.setItem('zingToken', data.token);
         localStorage.setItem('agentSlug', data.slug);
-        
-        // Store subscription data so the Dashboard can access it immediately
         localStorage.setItem('isSubscribed', data.isSubscribed); 
         localStorage.setItem('agentPlan', data.plan);
 
         alert("Agent Verified. Entering Portal...");
         setIsLoginOpen(false);
         navigate('/agent/dashboard');
-      } else {
+      } 
+      else if (response.status === 403 && data.needsVerification) {
+        // --- NEW: REDIRECT TO OTP PAGE ---
+        alert(data.message); // "Account not verified. Please check your email..."
+        // We pass the email in state so the OTP page knows which account to verify
+        navigate('/verify-otp', { state: { email: loginEmail } });
+      } 
+      else {
+        // --- WRONG PASSWORD / EMAIL ---
         alert(data.message || "Invalid Agent Credentials");
       }
     } catch (err) {
@@ -106,7 +112,7 @@ export const AgentSlug = () => {
       setIsProcessing(false);
     }
   };
-
+  
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="w-8 h-8 border-[3px] border-blue-600 border-t-transparent rounded-full animate-spin" />

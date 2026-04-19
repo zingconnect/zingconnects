@@ -5,7 +5,8 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import nodemailer from 'nodemailer';
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../index.js';
 import { agentSchema } from '../models/Agent.js';
@@ -15,6 +16,15 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
+
+// --- NODEMAILER CONFIG ---
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
@@ -28,7 +38,7 @@ const authenticateToken = (req, res, next) => {
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ message: "Session Expired" });
-    req.user = user; // Contains id and slug
+    req.user = user;
     next();
   });
 };
@@ -43,15 +53,19 @@ const s3Client = new S3Client({
   },
 });
 
-// --- 1. AGENT REGISTRATION ---
+// --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
 router.post('/register', upload.single('photo'), async (req, res) => {
   try {
     const Agent = getAgentModel();
     const { firstName, lastName, email, password, address, occupation, program, bio, dob, gender, plan } = req.body;
 
+    // Check if email exists
+    const existing = await Agent.findOne({ email: email.toLowerCase().trim() });
+    if (existing) return res.status(400).json({ success: false, message: "Email already exists" });
+
+    // Hashing & Slug
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-
     const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
     let finalSlug = baseSlug;
     let counter = 1;
@@ -60,22 +74,25 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       finalSlug = `${baseSlug}-${counter.toString().padStart(2, '0')}`;
     }
 
+    // Photo Upload
     let savedPhotoPath = ""; 
     if (req.file) {
       const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
       const fileKey = `profiles/${fileName}`;
       const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-      
       await s3Client.send(new PutObjectCommand({
         Bucket: bucketName,
         Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       }));
-      
       const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
       savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
     }
+
+    // OTP Generation
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = Date.now() + 10 * 60 * 1000;
 
     const newAgent = new Agent({
       firstName: firstName.trim(),
@@ -91,23 +108,63 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       slug: finalSlug,
       photoUrl: savedPhotoPath,
       plan: plan || 'BASIC',
-      isSubscribed: false,
-      role: 'agent'
+      role: 'agent',
+      status: 'pending',
+      isVerified: false,
+      otp: otpCode,
+      otpExpires: otpExpiry
     });
 
     await newAgent.save();
-    res.status(201).json({ success: true, slug: finalSlug });
+
+    // Send Mail
+    await transporter.sendMail({
+      from: '"ZingConnect" <no-reply@zingconnect.com>',
+      to: email,
+      subject: "Verification Code",
+      html: `<b>Verification Code: ${otpCode}</b>`
+    });
+
+    res.status(200).json({ success: true, message: "OTP sent to email" });
     
   } catch (error) {
     console.error("Registration Error:", error);
-    res.status(error.code === 11000 ? 400 : 500).json({
-      success: false,
-      message: error.code === 11000 ? "Email already exists" : "Registration failed"
-    });
+    res.status(500).json({ success: false, message: "Registration failed" });
   }
 });
 
-// --- 2. AGENT LOGIN ---
+// --- 2. STAGE 2: VERIFY OTP ---
+router.post('/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+  try {
+    const Agent = getAgentModel();
+    const agent = await Agent.findOne({ 
+      email: email.toLowerCase().trim(),
+      otp: otp,
+      otpExpires: { $gt: Date.now() }
+    });
+
+    if (!agent) return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
+
+    agent.isVerified = true;
+    agent.status = 'active';
+    agent.otp = undefined;
+    agent.otpExpires = undefined;
+    await agent.save();
+
+    const token = jwt.sign(
+      { id: agent._id, slug: agent.slug, role: 'agent' }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '24h' }
+    );
+
+    res.json({ success: true, token, slug: agent.slug });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Verification failed" });
+  }
+});
+
+// --- 3. AGENT LOGIN ---
 router.post('/login', async (req, res) => {
   try {
     const Agent = getAgentModel();
@@ -116,13 +173,13 @@ router.post('/login', async (req, res) => {
       email: email.toLowerCase().trim() 
     }).select('+password');
     
-    if (!agent) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
-    }
+    if (!agent) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    
+    // Check if verified
+    if (!agent.isVerified) return res.status(403).json({ success: false, message: "Please verify your email first" });
+
     const isMatch = await bcrypt.compare(password, agent.password);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
-    }
+    if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' }, 
@@ -139,7 +196,6 @@ router.post('/login', async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Login API Error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
