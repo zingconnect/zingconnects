@@ -61,42 +61,51 @@ export const UserDashboard = () => {
   };
 
   // --- INITIAL DATA FETCH ---
-  useEffect(() => {
-    const fetchUserSession = async () => {
-      const token = localStorage.getItem('userToken');
-      if (!token) return navigate('/');
+ // --- INITIAL DATA FETCH & POLLING ---
+useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token) return navigate('/');
 
-      try {
-        const response = await fetch('/api/users/my-session', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        
-        if (response.ok) {
-          setAgent(data.agent);
-          setUser(data.user);
+  const fetchUserSession = async () => {
+    try {
+      const response = await fetch('/api/users/my-session', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        setAgent(data.agent);
+        setUser(data.user);
 
-          if (!data.user.isProfileComplete) {
-            setShowOnboarding(true);
-          }
-
-          setMessages([
-            {
-              id: 1,
-              text: `Hello! I'm ${data.agent.firstName}. How can I assist you today?`,
-              sender: 'agent',
-              time: '12:00 PM'
-            }
-          ]);
+        if (!data.user.isProfileComplete) {
+          setShowOnboarding(true);
         }
-      } catch (err) {
-        console.error("Session fetch error:", err);
-      } finally {
-        setLoading(false);
+
+        // Only set the initial message if the list is empty
+        setMessages(prev => prev.length === 0 ? [
+          {
+            id: 1,
+            text: `Hello! I'm ${data.agent.firstName}. How can I assist you today?`,
+            sender: 'agent',
+            time: '12:00 PM'
+          }
+        ] : prev);
       }
-    };
-    fetchUserSession();
-  }, [navigate]);
+    } catch (err) {
+      console.error("Session fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchUserSession();
+
+  const interval = setInterval(fetchUserSession, 30000); 
+
+  return () => {
+    clearInterval(interval);
+  };
+}, [navigate]);
 
   const agentStatus = getStatusInfo(agent?.lastActive);
 

@@ -592,8 +592,6 @@ app.post('/api/users/handshake', async (req, res) => {
     res.status(500).json({ success: false, message: "Handshake failed" });
   }
 });
-
-// 2. Updated My-Session with Private Image Signing
 app.get('/api/users/my-session', async (req, res) => {
   try {
     await connectToDatabase();
@@ -603,6 +601,10 @@ app.get('/api/users/my-session', async (req, res) => {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    // --- ADD THIS LINE HERE ---
+    // This updates the "Last Seen" every time the user is active on the dashboard
+    await User.findByIdAndUpdate(decoded.id, { lastActive: new Date() });
+
     const user = await User.findById(decoded.id).populate({
       path: 'connectedAgents',
       select: 'firstName lastName photoUrl occupation program bio slug'
@@ -610,12 +612,9 @@ app.get('/api/users/my-session', async (req, res) => {
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Get the last connected agent
     let activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
     
-    // --- START SIGNING LOGIC FOR AGENT IMAGE ---
     let signedPhotoUrl = activeAgent?.photoUrl;
-
     if (activeAgent?.photoUrl && activeAgent.photoUrl.includes('idrivee2.com')) {
       try {
         const fileKey = activeAgent.photoUrl.split('.com/')[1];
@@ -623,24 +622,23 @@ app.get('/api/users/my-session', async (req, res) => {
           Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
           Key: fileKey,
         });
-        // Generate a 1-hour signed URL
         signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       } catch (err) {
         console.error("Signing failed", err);
       }
     }
-    // --- END SIGNING LOGIC ---
 
     res.json({
       success: true,
       user: {
         id: user._id,
         email: user.email,
-        isProfileComplete: user.isProfileComplete // Crucial for Frontend overlay
+        isProfileComplete: user.isProfileComplete,
+        lastActive: user.lastActive // Pass this back so UI can use it
       },
       agent: activeAgent ? {
         ...activeAgent._doc,
-        photoUrl: signedPhotoUrl // Send the signed version instead of raw
+        photoUrl: signedPhotoUrl
       } : null
     });
   } catch (err) {
@@ -648,7 +646,6 @@ app.get('/api/users/my-session', async (req, res) => {
   }
 });
 
-// index.js or server.js
 
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {

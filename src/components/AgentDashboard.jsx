@@ -92,11 +92,12 @@ export const AgentDashboard = () => {
           if (userData.success && Array.isArray(userData.users)) {
             setUsers(userData.users);
 
-            // SYNC SELECTED USER: Update the currently viewed user with fresh data (signed URLs)
-            setSelectedUser(prev => {
-              if (!prev) return null;
-              return userData.users.find(u => u._id === prev._id) || prev;
-            });
+          setSelectedUser(prev => {
+        if (!prev) return null;
+      const freshUserData = userData.users.find(u => u._id === prev._id);
+  
+        return freshUserData ? { ...prev, ...freshUserData } : prev;
+      });
             
           } else {
             setUsers([]);
@@ -208,23 +209,72 @@ export const AgentDashboard = () => {
     }
   };
 
-  const handleSelectUser = (user) => {
-    setSelectedUser(user);
-    if (window.innerWidth < 1024) setShowSidebar(false);
-  };
+const handleSelectUser = async (user) => {
+  setSelectedUser(user);
+  setMessages([]); // Clear the screen immediately so old messages don't linger
+  if (window.innerWidth < 1024) setShowSidebar(false);
 
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-    const msg = {
-      id: Date.now(),
-      text: newMessage,
-      sender: 'agent',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    setMessages([...messages, msg]);
-    setNewMessage('');
-  };
+  try {
+    const token = localStorage.getItem('zingToken');
+    const response = await fetch(`/api/messages/${user._id}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json();
+    
+    if (data.success) {
+      setMessages(data.messages); // Load the real chat history
+    }
+  } catch (err) {
+    console.error("Failed to load chat history:", err);
+  }
+};
+
+// Add this to your Agent Dashboard
+useEffect(() => {
+  const heartBeat = setInterval(async () => {
+    const token = localStorage.getItem('zingToken');
+    await fetch('/api/agents/heartbeat', { 
+      method: 'POST', 
+      headers: { 'Authorization': `Bearer ${token}` } 
+    });
+  }, 60000); // Every minute
+
+  return () => clearInterval(heartBeat);
+}, []);
+
+const handleSendMessage = async (e) => {
+  e.preventDefault();
+  if (!newMessage.trim() || !selectedUser) return;
+
+  const tempId = Date.now();
+  const textToSend = newMessage;
+  setNewMessage(''); // Clear input immediately for better UX
+
+  try {
+    const token = localStorage.getItem('zingToken');
+    const response = await fetch('/api/messages/send', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        receiverId: selectedUser._id,
+        text: textToSend
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      // Add the message to the UI (using the data from the server)
+      setMessages(prev => [...prev, data.message]);
+    }
+  } catch (err) {
+    console.error("Message failed to send:", err);
+    alert("Could not send message. Please try again.");
+  }
+};
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-bold uppercase tracking-widest text-gray-400">

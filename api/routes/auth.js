@@ -706,6 +706,7 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
 });
 
 router.get('/my-users', authenticateToken, async (req, res) => {
+  // Prevent browser caching so the status always reflects the current database state
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -722,6 +723,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       });
     }
 
+    // 1. Fetch users and sort by most recently active
     const users = await User.find({ connectedAgents: agentId })
       .select('firstName lastName email photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
@@ -730,10 +732,12 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
+      // 2. Handle S3 Signed URLs for User Photos
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
           let fileKey = user.photoUrl;
 
+          // If the stored URL contains the full path, extract just the key
           if (user.photoUrl.includes('users/')) {
             const urlParts = user.photoUrl.split('users/');
             const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
@@ -751,18 +755,41 @@ router.get('/my-users', authenticateToken, async (req, res) => {
         }
       }
 
+      // 3. Fallback to UI Avatars if no photo exists
       if (!finalPhotoUrl) {
         const fullName = `${user.firstName}+${user.lastName}`;
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${fullName}&background=random&color=fff&size=128`;
       }
 
+      // 4. Presence Logic (Heartbeat calculation)
       const lastSeen = user.lastActive || user.lastLogin;
-      const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
+      const now = new Date();
+      
+      // Tightened to 2 minutes for better accuracy
+      const isOnline = lastSeen && (now - new Date(lastSeen)) < (2 * 60 * 1000);
+
+      // 5. Generate Human-Readable Last Seen Text
+      let lastSeenText = "Offline";
+      if (lastSeen) {
+        const diffMs = now - new Date(lastSeen);
+        const diffMins = Math.floor(diffMs / 60000);
+        
+        if (isOnline) {
+          lastSeenText = "Online";
+        } else if (diffMins < 60) {
+          lastSeenText = `${diffMins}m ago`;
+        } else if (diffMins < 1440) {
+          lastSeenText = `${Math.floor(diffMins / 60)}h ago`;
+        } else {
+          lastSeenText = new Date(lastSeen).toLocaleDateString();
+        }
+      }
 
       return {
         ...user,
         photoUrl: finalPhotoUrl,
-        status: isOnline ? 'online' : 'offline'
+        status: isOnline ? 'online' : 'offline',
+        lastSeenText: lastSeenText // Send this to display in the UI label
       };
     }));
 
