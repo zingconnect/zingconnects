@@ -16,7 +16,7 @@ export const agentSchema = new mongoose.Schema({
   email: { 
     type: String, 
     required: true, 
-    unique: true, 
+    unique: true, // Mongoose creates the index here automatically
     lowercase: true, 
     trim: true 
   },
@@ -24,8 +24,7 @@ export const agentSchema = new mongoose.Schema({
   slug: { 
     type: String, 
     required: true, 
-    unique: true,
-    index: true 
+    unique: true
   },
   address: String,
   occupation: String,
@@ -36,22 +35,12 @@ export const agentSchema = new mongoose.Schema({
   role: { type: String, default: 'agent' },
   photoUrl: { type: String, default: '' },
 
-  // --- NEW VERIFICATION FIELDS ---
-  isVerified: { 
-    type: Boolean, 
-    default: false 
-  },
-  otp: { 
-    type: String 
-  },
-  otpExpires: { 
-    type: Date 
-  },
+  // --- VERIFICATION FIELDS ---
+  isVerified: { type: Boolean, default: false },
+  otp: { type: String },
+  otpExpires: { type: Date },
 
-  lastActive: { 
-    type: Date, 
-    default: Date.now 
-  },
+  lastActive: { type: Date, default: Date.now },
   
   // --- SUBSCRIPTION & PAYMENT FIELDS ---
   plan: { 
@@ -59,35 +48,36 @@ export const agentSchema = new mongoose.Schema({
     enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], 
     default: 'BASIC' 
   },
-  isSubscribed: { 
-    type: Boolean, 
-    default: false 
-  },
+  isSubscribed: { type: Boolean, default: false },
   status: { 
     type: String, 
     enum: ['active', 'suspended', 'pending'], 
-    default: 'pending' // Changed default to pending for safety
+    default: 'pending' 
   },
   
   subscriptionDate: { type: Date },
   subscriptionAmount: { type: Number, default: 0 }, 
   expiryDate: { type: Date }, 
   
-  expiryNotificationSent: { 
-    type: Boolean, 
-    default: false 
-  },
+  expiryNotificationSent: { type: Boolean, default: false },
   paymentDetails: {
     amountNgn: { type: Number },
     rateUsed: { type: Number },
     currency: { type: String, default: 'NGN' }
   },
-
   lastTransactionId: { type: String, default: '' }
 }, { 
   timestamps: true,
   toJSON: { virtuals: true }, 
   toObject: { virtuals: true } 
+});
+
+// --- AUTO-CLEANUP INDEX ---
+// This deletes the document after 24 hours (86400 seconds) 
+// ONLY if isVerified is still false.
+agentSchema.index({ createdAt: 1 }, { 
+  expireAfterSeconds: 86400, 
+  partialFilterExpression: { isVerified: false } 
 });
 
 // --- VIRTUALS ---

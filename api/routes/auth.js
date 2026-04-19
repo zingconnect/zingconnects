@@ -5,6 +5,8 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
+import path from 'path';
+import fs from 'fs';
 import nodemailer from 'nodemailer';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -165,18 +167,22 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       console.log("New agent created successfully.");
     }
 
-    // 7. SEND MAIL
-    const logoPath = './public/logo.png'; 
 
-    try {
-      await transporter.sendMail({
-        from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`, 
+const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+
+if (!fs.existsSync(logoPath)) {
+    console.error(`❌ CRITICAL: Logo not found at ${logoPath}`);
+}
+
+try {
+    await transporter.sendMail({
+        from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
         to: lowerEmail,
-        subject: "Action Required: Verify Your Agent Profile",
+        subject: "Your Verification Code",
         attachments: [{
-          filename: 'logo.png',
-          path: logoPath, 
-          cid: 'zinglogo' 
+            filename: 'logo.png',
+            path: logoPath,
+            cid: 'zinglogo' // Must match the <img src="cid:zinglogo"> below
         }],
         html: `
           <!DOCTYPE html>
@@ -230,10 +236,10 @@ router.post('/register', upload.single('photo'), async (req, res) => {
           </body>
           </html>
         `
-      });
-    } catch (mailError) {
-      console.error("Email Delivery Failed:", mailError);
-    }
+    });
+} catch (mailError) {
+    console.error("Email Delivery Failed:", mailError);
+}
 
     // 8. FINAL RESPONSE
     res.status(200).json({ 

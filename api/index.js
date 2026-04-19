@@ -10,6 +10,8 @@ import multer from 'multer';
 import nodemailer from 'nodemailer';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
+import path from 'path';
+import fs from 'fs';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
@@ -208,17 +210,22 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
       await newAgent.save();
     }
 
-    // --- 7. SEND MAIL ---
-    const logoPath = './public/logo.png'; 
-    try {
-      await transporter.sendMail({
-        from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`, 
+   const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+
+// 2. Debugging: This will log to your console if the path is wrong before sending the mail
+if (!fs.existsSync(logoPath)) {
+    console.error(`❌ CRITICAL: Logo not found at ${logoPath}`);
+}
+
+try {
+    await transporter.sendMail({
+        from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
         to: lowerEmail,
         subject: "Your Verification Code",
         attachments: [{
-          filename: 'logo.png',
-          path: logoPath, 
-          cid: 'zinglogo'
+            filename: 'logo.png',
+            path: logoPath,
+            cid: 'zinglogo' // Must match the <img src="cid:zinglogo"> below
         }],
         html: `
           <!DOCTYPE html>
@@ -232,24 +239,37 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
               }
             </style>
           </head>
-          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: sans-serif;">
+          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
               <tr>
                 <td align="center" style="padding: 40px 10px;">
-                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden;">
+                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
                     <tr>
                       <td align="center" style="padding: 30px 40px 10px 40px;">
-                        <img src="cid:zinglogo" alt="ZingConnect" width="160">
+                        <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
                       </td>
                     </tr>
                     <tr>
                       <td style="padding: 20px 40px 40px 40px; text-align: center;">
-                        <h2 style="color: #111827;">Verify Your Account</h2>
-                        <p style="color: #4b5563;">Hello <strong>${firstName}</strong>, Use the code below:</p>
-                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin: 20px 0;">
+                        <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                        <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                          Hello <strong>${firstName}</strong>,<br>
+                          Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                        </p>
+                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
                           ${otpCode}
                         </div>
-                        <p style="color: #9ca3af; font-size: 13px;">Valid for 10 minutes.</p>
+                        <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                          This code is valid for <strong>10 minutes</strong>.<br>
+                          If you didn't request this, you can safely ignore this email.
+                        </p>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                          &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                        </p>
                       </td>
                     </tr>
                   </table>
@@ -259,10 +279,10 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
           </body>
           </html>
         `
-      });
-    } catch (mailErr) {
-      console.error("Mail error:", mailErr.message);
-    }
+    });
+} catch (mailError) {
+    console.error("Email Delivery Failed:", mailError);
+}
 
     res.status(200).json({ success: true, message: "Initial registration success. OTP sent." });
 
