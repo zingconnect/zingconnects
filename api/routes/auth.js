@@ -142,10 +142,9 @@ const logoPath = './public/logo.png';
 
 try {
       await transporter.sendMail({
- from: '"ZingConnect Security" <no-reply@zingconnect.com>',
-  to: email,
-  subject: "Action Required: Verify Your Agent Profile",
-  
+    from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`, 
+    to: email.toLowerCase().trim(),
+    subject: "Your Verification Code",
   attachments: [{
     filename: 'logo.png',
     path: logoPath, 
