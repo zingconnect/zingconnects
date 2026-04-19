@@ -654,7 +654,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
   try {
     // Ensure DB connection
     await connectToDatabase();
-    const { firstName, lastName, dob, city, state } = req.body;
+    const { firstName, lastName, dob, gender, city, state } = req.body;
     const updateData = {
       firstName,
       lastName,
@@ -679,8 +679,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
 
       await s3Client.send(new PutObjectCommand(uploadParams));
 
-      // FIX: Store ONLY the key. 
-      // Do not store the https:// domain.
       updateData.photoUrl = fileKey; 
       
       console.log(`[Storage] Photo uploaded for user: ${req.user.id} with key: ${fileKey}`);

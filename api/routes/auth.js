@@ -651,7 +651,7 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
 
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
-    const { firstName, lastName, dob, city, state } = req.body;
+    const { firstName, lastName, dob, gender, city, state } = req.body;
     
     const updateData = {
       firstName,
@@ -670,7 +670,7 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
       
       const uploadParams = {
-        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+        Bucket: process.env.IDRIVE_BUCKET_NAME || "",
         Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
