@@ -417,17 +417,19 @@ router.get('/profile', authenticateToken, async (req, res) => {
     });
   }
 });
-
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    const Agent = getAgentModel(); 
+    // FIX: Rename 'Agent' to 'AgentModel' to avoid the "already declared" error
+    const AgentModel = getAgentModel(); 
 
-    const agent = await Agent.findByIdAndUpdate(
+    // FIX: Changed { new: true } to { returnDocument: 'after' } 
+    // Added .lean() to make it a plain JS object for easier handling
+    const agent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
       { lastActive: new Date() }, 
-      { new: true }
+      { returnDocument: 'after' } 
     ).select('-password').lean();
     
     if (!agent) {
@@ -477,12 +479,17 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
       subscriptionAmount: agent.subscriptionAmount || 0,
       subscriptionDate: agent.subscriptionDate,
       expiryDate: agent.expiryDate,
-      lastActive: agent.lastActive // Optional: useful for debugging
+      lastActive: agent.lastActive 
     });
 
   } catch (err) {
-    console.error("Profile Fetch Error:", err);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    // This detailed log helps you see the REAL error in your Vercel dashboard
+    console.error("Profile Fetch Error:", err.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error",
+      error: err.message 
+    });
   }
 });
 

@@ -70,6 +70,9 @@ export async function connectToDatabase() {
 
 // Initialize Model on the default connection
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+const getAgentModel = () => {
+  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+};
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -473,7 +476,6 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// --- GET LOGGED-IN AGENT PROFILE ---
 app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -482,43 +484,37 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
         return res.status(401).json({ success: false, message: "Invalid session" });
     }
 
-    const Agent = getAgentModel();
+    // Use the helper we just defined above
+    const AgentModel = getAgentModel();
     
-    // Update lastActive every time they fetch their own profile
-    let agent = await Agent.findByIdAndUpdate(
+    let agent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
       { lastActive: new Date() }, 
-      { new: true }
+      { returnDocument: 'after' } 
     ).select('-password'); 
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // 1. Subscription Expiry Logic
     const now = new Date();
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
       await agent.save(); 
     }
 
-    // 2. Presence Logic (Calculated for the UI)
     const lastActiveDate = agent.lastActive || agent.createdAt;
-    const isOnline = (now - new Date(lastActiveDate)) < (2 * 60 * 1000);
+    const isOnline = (now - new Date(lastActiveDate)) < (120000);
 
-    // 3. S3 IDrive Image Signing Logic
     let signedPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
-        // Extract key: handles URLs whether they have the bucket name in the path or subdomain
         const fileKey = agent.photoUrl.split('.com/')[1];
-
         if (fileKey && s3Client) {
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: decodeURIComponent(fileKey),
           });
-
           signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         }
       } catch (s3Err) {
@@ -526,12 +522,10 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       }
     }
 
-    // 4. Fallback Avatar
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=random&color=fff&size=128`;
     }
 
-    // 5. Response
     res.json({
       success: true,
       firstName: agent.firstName || "",
@@ -549,7 +543,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       subscriptionAmount: agent.subscriptionAmount || 0,
       subscriptionDate: agent.subscriptionDate,
       expiryDate: agent.expiryDate,
-      status: isOnline ? 'online' : 'offline', // Added status field
+      status: isOnline ? 'online' : 'offline',
       lastActive: agent.lastActive
     }); 
 
