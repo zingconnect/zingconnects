@@ -659,6 +659,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       firstName,
       lastName,
       dob,
+      gender,
       city,
       state,
       isProfileComplete: true,

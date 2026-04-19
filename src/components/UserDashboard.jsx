@@ -32,6 +32,7 @@ export const UserDashboard = () => {
     firstName: '',
     lastName: '',
     dob: '',
+    gender: '',
     city: '',
     state: ''
   });
@@ -118,6 +119,7 @@ export const UserDashboard = () => {
     data.append('firstName', formData.firstName);
     data.append('lastName', formData.lastName);
     data.append('dob', formData.dob);
+    data.append('gender', formData.gender);
     data.append('city', formData.city);
     data.append('state', formData.state);
 
@@ -200,10 +202,21 @@ export const UserDashboard = () => {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="p-1">
-                    <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Gender</p>
-                    <p className="text-xs font-bold text-gray-700 capitalize">{agent?.gender || 'N/A'}</p>
-                  </div>
+                  {/* Add this inside the onboarding form */}
+<div className="space-y-1">
+  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Gender</label>
+  <select 
+    required 
+    className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none appearance-none"
+    onChange={e => setFormData({...formData, gender: e.target.value})}
+    value={formData.gender}
+  >
+    <option value="" disabled>Select Gender</option>
+    <option value="male">Male</option>
+    <option value="female">Female</option>
+    <option value="prefer-not-to-say">Prefer not to say</option>
+  </select>
+</div>
                   <div className="p-1">
                     <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Date of Birth</p>
                     <p className="text-xs font-bold text-gray-700">

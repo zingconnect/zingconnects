@@ -4,11 +4,11 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true, // <--- This already creates the index!
+    unique: true, 
     lowercase: true,
     trim: true
   },
-  // --- NEW PROFILE FIELDS ---
+  // --- PROFILE FIELDS ---
   firstName: {
     type: String,
     trim: true,
@@ -21,6 +21,14 @@ const userSchema = new mongoose.Schema({
   },
   dob: {
     type: String, 
+    default: ""
+  },
+  // --- ADDED GENDER FIELD ---
+  gender: {
+    type: String,
+    lowercase: true,
+    trim: true,
+    enum: ['male', 'female', 'other', 'prefer-not-to-say', ''], // Validates allowed values
     default: ""
   },
   city: {
@@ -61,8 +69,6 @@ const userSchema = new mongoose.Schema({
 }, { 
   timestamps: true 
 });
-
-// REMOVED: userSchema.index({ email: 1 }); <--- DELETE THIS LINE
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 export default User;
