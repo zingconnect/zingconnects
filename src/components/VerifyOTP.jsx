@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BsShieldCheck, BsCheckCircleFill, BsCopy } from 'react-icons/bs';
+import { BsShieldCheck, BsCheckCircleFill, BsCopy, BsArrowLeft } from 'react-icons/bs'; // Added BsArrowLeft
 import ZingConnectLogo from '../../public/logo.png';
 
 export const VerifyOTP = () => {
@@ -56,18 +56,28 @@ export const VerifyOTP = () => {
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-blue-950 font-sans flex flex-col items-center">
-      {/* HEADER - Increased Logo Size */}
+      {/* HEADER */}
       <header className="w-full py-10 flex justify-center px-6">
         <img 
           src={ZingConnectLogo} 
           alt="ZingConnect" 
-          className="h-12 md:h-16 w-auto transition-all" // Significantly larger logo
+          className="h-12 md:h-16 w-auto transition-all"
         />
       </header>
 
       <main className="flex-1 w-full max-w-2xl px-6 flex flex-col justify-center items-center text-center">
         {!isSuccess ? (
           <div className="w-full animate-in fade-in slide-in-from-bottom-4 duration-700">
+            
+            {/* BACK BUTTON - Added This Section */}
+            <button 
+              onClick={() => navigate(-1)} // Takes user back to previous page
+              className="group mb-8 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-blue-600 transition-colors"
+            >
+              <BsArrowLeft className="group-hover:-translate-x-1 transition-transform" size={14} />
+              Back to Registration
+            </button>
+
             {/* ICON & TITLE SECTION */}
             <div className="mb-10">
               <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm">
@@ -79,7 +89,7 @@ export const VerifyOTP = () => {
               </p>
             </div>
 
-            {/* OTP FORM - No Card Box, Floating on Background */}
+            {/* OTP FORM */}
             <form onSubmit={handleVerify} className="w-full max-w-sm mx-auto space-y-8">
               <div className="relative">
                 <input
@@ -101,12 +111,12 @@ export const VerifyOTP = () => {
               </button>
 
               <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider">
-                Didn't get a code? <span className="text-blue-600 cursor-pointer">Resend</span>
+                Didn't get a code? <span className="text-blue-600 cursor-pointer hover:underline">Resend</span>
               </p>
             </form>
           </div>
         ) : (
-          /* SUCCESS STATE - Clean Dashboard Look */
+          /* SUCCESS STATE */
           <div className="w-full animate-in zoom-in-95 duration-700">
             <div className="inline-flex items-center justify-center w-24 h-24 bg-green-50 text-green-500 rounded-full mb-8 shadow-inner">
               <BsCheckCircleFill size={48} />

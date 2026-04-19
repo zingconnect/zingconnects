@@ -95,34 +95,51 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res) => {
   console.log("Registration Stage 1 (Complete Fields) started...");
 
   try {
     await connectToDatabase();
+    const Agent = getAgentModel(); // Ensure model is initialized
 
     const { firstName, lastName, email, password } = req.body;
     if (!firstName || !email || !password) {
       return res.status(400).json({ success: false, message: "Required fields missing" });
     }
 
-    // --- 1. SLUG GENERATION ---
-    const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
-    const cleanLast = (lastName || "").trim().replace(/[^a-zA-Z0-9]/g, '');
-    const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase() || "agent";
-    
-    let finalSlug = baseSlug;
-    let counter = 1;
-    let slugExists = await Agent.findOne({ slug: finalSlug });
-    while (slugExists) {
-      counter++;
-      finalSlug = `${baseSlug}-${counter}`;
-      slugExists = await Agent.findOne({ slug: finalSlug });
+    const lowerEmail = email.toLowerCase().trim();
+
+    // --- 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS ---
+    let existingAgent = await Agent.findOne({ email: lowerEmail });
+
+    if (existingAgent && existingAgent.isVerified) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email already registered and verified. Please login." 
+      });
     }
 
-    // --- 2. PHOTO UPLOAD (IDRIVE) ---
-    let savedPhotoPath = "";
+    // --- 2. PASSWORD HASHING ---
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // --- 3. SLUG GENERATION ---
+    let finalSlug = existingAgent ? existingAgent.slug : "";
+    if (!existingAgent) {
+      const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
+      const cleanLast = (lastName || "").trim().replace(/[^a-zA-Z0-9]/g, '');
+      const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase() || "agent";
+      
+      finalSlug = baseSlug;
+      let counter = 1;
+      while (await Agent.findOne({ slug: finalSlug })) {
+        counter++;
+        finalSlug = `${baseSlug}-${counter}`;
+      }
+    }
+
+    // --- 4. PHOTO UPLOAD (IDRIVE) ---
+    let savedPhotoPath = existingAgent ? existingAgent.photoUrl : "";
     if (req.file) {
       try {
         const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
@@ -143,120 +160,121 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
       }
     }
 
-    // --- 3. PASSWORD HASHING ---
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // --- 4. OTP GENERATION ---
+    // --- 5. OTP GENERATION ---
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiry = Date.now() + 10 * 60 * 1000;
 
-    // --- 5. CREATE COMPLETE DOCUMENT ---
-    const newAgent = new Agent({
-      firstName: firstName.trim(),
-      lastName: (lastName || "").trim(),
-      email: email.toLowerCase().trim(),
-      password: hashedPassword,
-      dob: req.body.dob,
-      gender: req.body.gender,
-      occupation: req.body.occupation,
-      address: req.body.address,
-      bio: req.body.bio || "",
-      program: req.body.program || "N/A",
-      slug: finalSlug,
-      photoUrl: savedPhotoPath,
-      role: 'agent',
-      status: 'pending',     // Status is pending until OTP verified
-      isVerified: false,     // Critical for security
-      otp: otpCode,          // Store OTP to check in Stage 2
-      otpExpires: otpExpiry, 
-      isSubscribed: false,
-      plan: req.body.plan || "BASIC"
-    });
+    // --- 6. CREATE OR UPDATE DOCUMENT ---
+    if (existingAgent) {
+      // Update the unverified existing record
+      existingAgent.firstName = firstName.trim();
+      existingAgent.lastName = (lastName || "").trim();
+      existingAgent.password = hashedPassword;
+      existingAgent.dob = req.body.dob;
+      existingAgent.gender = req.body.gender;
+      existingAgent.occupation = req.body.occupation;
+      existingAgent.address = req.body.address;
+      existingAgent.bio = req.body.bio || "";
+      existingAgent.program = req.body.program || "";
+      existingAgent.photoUrl = savedPhotoPath;
+      existingAgent.otp = otpCode;
+      existingAgent.otpExpires = otpExpiry;
+      existingAgent.plan = req.body.plan || "BASIC";
+      
+      await existingAgent.save();
+    } else {
+      // Create new record
+      const newAgent = new Agent({
+        firstName: firstName.trim(),
+        lastName: (lastName || "").trim(),
+        email: lowerEmail,
+        password: hashedPassword,
+        dob: req.body.dob,
+        gender: req.body.gender,
+        occupation: req.body.occupation,
+        address: req.body.address,
+        bio: req.body.bio || "",
+        program: req.body.program || "",
+        slug: finalSlug,
+        photoUrl: savedPhotoPath,
+        role: 'agent',
+        status: 'pending',
+        isVerified: false,
+        otp: otpCode,
+        otpExpires: otpExpiry,
+        isSubscribed: false,
+        plan: req.body.plan || "BASIC"
+      });
+      await newAgent.save();
+    }
 
-    await newAgent.save();
-
-const logoPath = './public/logo.png'; 
-
-await transporter.sendMail({
- from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`, 
-    to: email.toLowerCase().trim(),
-    subject: "Your Verification Code",
-  attachments: [{
-    filename: 'logo.png',
-    path: logoPath, 
-    cid: 'zinglogo' // This ID matches the img src below
-  }],
-  
-  html: `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        @media only screen and (max-width: 600px) {
-          .container { width: 100% !important; border-radius: 0 !important; }
-          .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
-        }
-      </style>
-    </head>
-    <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-        <tr>
-          <td align="center" style="padding: 40px 10px;">
-            <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-              
+    // --- 7. SEND MAIL ---
+    const logoPath = './public/logo.png'; 
+    try {
+      await transporter.sendMail({
+        from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`, 
+        to: lowerEmail,
+        subject: "Your Verification Code",
+        attachments: [{
+          filename: 'logo.png',
+          path: logoPath, 
+          cid: 'zinglogo'
+        }],
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              @media only screen and (max-width: 600px) {
+                .container { width: 100% !important; border-radius: 0 !important; }
+                .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+              }
+            </style>
+          </head>
+          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: sans-serif;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
               <tr>
-                <td align="center" style="padding: 30px 40px 10px 40px;">
-                  <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
-                </td>
-              </tr>
-
-              <tr>
-                <td style="padding: 20px 40px 40px 40px; text-align: center;">
-                  <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
-                  <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
-                    Hello <strong>${firstName}</strong>,<br>
-                    Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
-                  </p>
-                  
-                  <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
-                    ${otpCode}
-                  </div>
-
-                  <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
-                    This code is valid for <strong>10 minutes</strong>.<br>
-                    If you didn't request this, you can safely ignore this email.
-                  </p>
-                </td>
-              </tr>
-
-              <tr>
-                <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
-                  <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                    &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
-                  </p>
+                <td align="center" style="padding: 40px 10px;">
+                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                      <td align="center" style="padding: 30px 40px 10px 40px;">
+                        <img src="cid:zinglogo" alt="ZingConnect" width="160">
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                        <h2 style="color: #111827;">Verify Your Account</h2>
+                        <p style="color: #4b5563;">Hello <strong>${firstName}</strong>, Use the code below:</p>
+                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin: 20px 0;">
+                          ${otpCode}
+                        </div>
+                        <p style="color: #9ca3af; font-size: 13px;">Valid for 10 minutes.</p>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
-          </td>
-        </tr>
-      </table>
-    </body>
-    </html>
-  `
-});
+          </body>
+          </html>
+        `
+      });
+    } catch (mailErr) {
+      console.error("Mail error:", mailErr.message);
+    }
 
     res.status(200).json({ success: true, message: "Initial registration success. OTP sent." });
 
   } catch (err) {
     console.error("Registration Error:", err);
-    res.status(err.code === 11000 ? 400 : 500).json({ 
+    res.status(500).json({ 
       success: false, 
-      message: err.code === 11000 ? "Email already exists" : "Internal Server Error" 
+      message: "Internal Server Error during registration." 
     });
   }
 });
+
 // --- STAGE 2: VERIFY OTP ---
 app.post('/api/agents/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
