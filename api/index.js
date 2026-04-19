@@ -18,7 +18,7 @@ import { agentSchema } from './models/Agent.js';
 import User from './models/User.js'; 
 import Message from './models/Message.js';
 import authRoutes from './routes/auth.js';
-import messageRoutes from './routes/messages.js';
+import messageRoutes from './routes/message.js';
 
 dotenv.config();
 

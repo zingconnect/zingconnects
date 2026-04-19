@@ -1,15 +1,21 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import Message from '../models/Message.js'; 
-import { authenticateToken } from '../routes/auth.js';
+// Since auth.js and messages.js are in the same 'routes' folder:
+import { authenticateToken } from './auth.js'; 
 
 const router = express.Router();
 
+// --- GET CHAT HISTORY ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
   try {
-    await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
+
+    // Validate ID to prevent Mongoose casting errors
+    if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
+      return res.status(400).json({ success: false, message: "Invalid User ID" });
+    }
 
     const messages = await Message.find({
       $or: [
@@ -25,23 +31,26 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
   }
 });
 
+// --- SEND MESSAGE ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {
-    await connectToDatabase();
-
     const { receiverId, text, receiverModel } = req.body;
+
+    if (!text || !receiverId) {
+      return res.status(400).json({ success: false, message: "Text and receiverId are required" });
+    }
+
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
+      // Fallback logic for the receiver model
       receiverModel: receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent'),
       text
     });
 
-    // 3. Save to MongoDB
     await newMessage.save();
 
-    // 4. Return the new message so the UI can display it immediately
     res.status(201).json({ 
       success: true, 
       message: newMessage 
@@ -56,3 +65,5 @@ router.post('/send', authenticateToken, async (req, res) => {
     });
   }
 });
+
+export default router;
