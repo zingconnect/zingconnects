@@ -16,7 +16,7 @@ export const agentSchema = new mongoose.Schema({
   email: { 
     type: String, 
     required: true, 
-    unique: true, // Mongoose creates the index here automatically
+    unique: true, // This automatically handles the index.
     lowercase: true, 
     trim: true 
   },
@@ -24,7 +24,7 @@ export const agentSchema = new mongoose.Schema({
   slug: { 
     type: String, 
     required: true, 
-    unique: true
+    unique: true // Ensure no extra index: true is added here
   },
   address: String,
   occupation: String,
@@ -73,8 +73,7 @@ export const agentSchema = new mongoose.Schema({
 });
 
 // --- AUTO-CLEANUP INDEX ---
-// This deletes the document after 24 hours (86400 seconds) 
-// ONLY if isVerified is still false.
+// This deletes the document after 24 hours ONLY if isVerified is still false.
 agentSchema.index({ createdAt: 1 }, { 
   expireAfterSeconds: 86400, 
   partialFilterExpression: { isVerified: false } 
@@ -86,6 +85,7 @@ agentSchema.virtual('isExpired').get(function() {
   return new Date() > this.expiryDate;
 });
 
+// Initialize model
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
 export default Agent;

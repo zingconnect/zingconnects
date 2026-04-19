@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BsShieldCheck, BsCheckCircleFill, BsCopy, BsArrowLeft } from 'react-icons/bs'; // Added BsArrowLeft
+import { BsShieldCheck, BsCheckCircleFill, BsCopy, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
 export const VerifyOTP = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const email = location.state?.email;
+  // If you passed the first name from the previous screen, get it here
+  const firstName = location.state?.firstName || 'Agent'; 
 
   const [otp, setOtp] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false); // New state for resending
   const [isSuccess, setIsSuccess] = useState(false);
   const [serverSlug, setServerSlug] = useState('');
   const [copied, setCopied] = useState(false);
@@ -17,6 +20,34 @@ export const VerifyOTP = () => {
   useEffect(() => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
+
+  // --- RESEND LOGIC ---
+  const handleResend = async () => {
+    if (isResending) return;
+    setIsResending(true);
+
+    try {
+      // We hit your registration/init endpoint which you've confirmed 
+      // updates existing unverified agents with a new OTP.
+      const response = await fetch('/api/agents/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, firstName, resend: true }), // Added a flag just in case
+      });
+
+      if (response.ok) {
+        alert("A new security code has been sent to your email.");
+        setOtp(''); // Clear input for the new code
+      } else {
+        const data = await response.json();
+        alert(data.message || "Failed to resend code.");
+      }
+    } catch (err) {
+      alert("Network error. Please try again.");
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   const handleVerify = async (e) => {
     e.preventDefault();
@@ -56,29 +87,21 @@ export const VerifyOTP = () => {
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-blue-950 font-sans flex flex-col items-center">
-      {/* HEADER */}
       <header className="w-full py-10 flex justify-center px-6">
-        <img 
-          src={ZingConnectLogo} 
-          alt="ZingConnect" 
-          className="h-12 md:h-16 w-auto transition-all"
-        />
+        <img src={ZingConnectLogo} alt="ZingConnect" className="h-12 md:h-16 w-auto transition-all" />
       </header>
 
       <main className="flex-1 w-full max-w-2xl px-6 flex flex-col justify-center items-center text-center">
         {!isSuccess ? (
           <div className="w-full animate-in fade-in slide-in-from-bottom-4 duration-700">
-            
-            {/* BACK BUTTON - Added This Section */}
             <button 
-              onClick={() => navigate(-1)} // Takes user back to previous page
+              onClick={() => navigate(-1)} 
               className="group mb-8 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-blue-600 transition-colors"
             >
               <BsArrowLeft className="group-hover:-translate-x-1 transition-transform" size={14} />
               Back to Registration
             </button>
 
-            {/* ICON & TITLE SECTION */}
             <div className="mb-10">
               <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mb-6 mx-auto shadow-sm">
                 <BsShieldCheck size={40} />
@@ -89,7 +112,6 @@ export const VerifyOTP = () => {
               </p>
             </div>
 
-            {/* OTP FORM */}
             <form onSubmit={handleVerify} className="w-full max-w-sm mx-auto space-y-8">
               <div className="relative">
                 <input
@@ -111,12 +133,18 @@ export const VerifyOTP = () => {
               </button>
 
               <p className="text-[11px] text-gray-400 font-bold uppercase tracking-wider">
-                Didn't get a code? <span className="text-blue-600 cursor-pointer hover:underline">Resend</span>
+                Didn't get a code?{' '}
+                <span 
+                  onClick={handleResend}
+                  className={`text-blue-600 cursor-pointer hover:underline ${isResending ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isResending ? "Sending..." : "Resend"}
+                </span>
               </p>
             </form>
           </div>
         ) : (
-          /* SUCCESS STATE */
+          /* SUCCESS STATE REMAINS SAME */
           <div className="w-full animate-in zoom-in-95 duration-700">
             <div className="inline-flex items-center justify-center w-24 h-24 bg-green-50 text-green-500 rounded-full mb-8 shadow-inner">
               <BsCheckCircleFill size={48} />
@@ -149,7 +177,6 @@ export const VerifyOTP = () => {
         )}
       </main>
 
-      {/* FOOTER */}
       <footer className="w-full py-12 text-center">
         <p className="text-[9px] font-black text-gray-300 uppercase tracking-[0.5em]">
           ZingConnect Secure Protocol &copy; {new Date().getFullYear()}

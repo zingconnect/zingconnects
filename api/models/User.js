@@ -4,7 +4,7 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true,
+    unique: true, // <--- This already creates the index!
     lowercase: true,
     trim: true
   },
@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema({
     default: ""
   },
   dob: {
-    type: String, // Storing as string from date input
+    type: String, 
     default: ""
   },
   city: {
@@ -40,7 +40,7 @@ const userSchema = new mongoose.Schema({
   // --- STATUS FLAGS ---
   isProfileComplete: {
     type: Boolean,
-    default: false // This triggers the onboarding overlay on the frontend
+    default: false 
   },
   isVerified: {
     type: Boolean,
@@ -62,8 +62,7 @@ const userSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-userSchema.index({ email: 1 });
+// REMOVED: userSchema.index({ email: 1 }); <--- DELETE THIS LINE
 
-// Ensure we don't re-compile the model if it already exists (Vercel/Hot Reloading safety)
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 export default User;
