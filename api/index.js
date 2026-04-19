@@ -441,12 +441,20 @@ app.post('/api/agents/login', async (req, res) => {
     res.status(500).json({ success: false, message: "Server login error" });
   }
 });
-
 app.get('/api/agents/profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    await Agent.findByIdAndUpdate(req.user.id, { lastActive: new Date() });
-    let agent = await Agent.findById(req.user.id).select('-password'); 
+    
+    // FIX: Define Agent using your helper function if it's not imported globally
+    const AgentModel = getAgentModel(); 
+    
+    await AgentModel.findByIdAndUpdate(
+      req.user.id, 
+      { lastActive: new Date() },
+      { returnDocument: 'after' } 
+    );
+
+    let agent = await AgentModel.findById(req.user.id).select('-password'); 
     
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -454,7 +462,6 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
 
     // Logic for expiry check
     if (agent.isSubscribed && agent.expiryDate && new Date() > new Date(agent.expiryDate)) {
-      console.log(`Locking account for ${agent.email} - Subscription Expired.`);
       agent.isSubscribed = false;
       await agent.save();
     }
@@ -465,6 +472,7 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching profile" });
   }
 });
+
 // --- GET LOGGED-IN AGENT PROFILE ---
 app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {

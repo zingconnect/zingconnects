@@ -11,7 +11,7 @@ import nodemailer from 'nodemailer';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../index.js';
-import {agentSchema} from '../models/Agent.js';
+import { Agent, agentSchema } from '../models/Agent.js';
 import User from './models/User.js';
 
 const router = express.Router();
@@ -378,12 +378,15 @@ router.get('/profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
+    // Ensure the model is retrieved correctly using your helper
     const AgentModel = getAgentModel();
 
+    // 1. Update presence and fetch data
+    // Changed { new: true } to { returnDocument: 'after' } to fix Mongoose warning
     let agent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
       { lastActive: new Date() }, 
-      { new: true }
+      { returnDocument: 'after' } 
     ).select('-password');
     
     if (!agent) {
@@ -391,6 +394,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
+    // 2. Auto-lock logic for expired subscriptions
     const now = new Date();
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       console.log(`Auto-locking: Plan expired for ${agent.email}`);
@@ -398,10 +402,14 @@ router.get('/profile', authenticateToken, async (req, res) => {
       await agent.save();
     }
 
+    // 3. Send clean JSON response
     res.json(agent);
 
   } catch (err) {
+    // This detailed log will show up in your Vercel/Terminal logs
     console.error("DETAILED PROFILE ERROR:", err);
+    
+    // Returning JSON here prevents the "Unexpected token A" error on the frontend
     res.status(500).json({ 
       success: false, 
       message: "Profile fetch error", 
