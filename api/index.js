@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import { agentSchema } from './models/Agent.js'; 
 import User from './models/User.js'; 
 import authRoutes from './routes/auth.js';
+import messageRoutes from './routes/messages.js';
 
 dotenv.config();
 
@@ -444,8 +445,7 @@ app.post('/api/agents/login', async (req, res) => {
 app.get('/api/agents/profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    // FIX: Changed req.user.id to req.user.id
+    await Agent.findByIdAndUpdate(req.user.id, { lastActive: new Date() });
     let agent = await Agent.findById(req.user.id).select('-password'); 
     
     if (!agent) {
@@ -470,14 +470,16 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // FIX: Use req.user.id to match your middleware logic
     if (!req.user || !req.user.id) {
-        return res.status(401).json({ success: false, message: "Invalid session credentials" });
+        return res.status(401).json({ success: false, message: "Invalid session" });
     }
 
-    // Agent is already defined at the top of your server file
-    let agent = await Agent.findById(req.user.id).select('-password'); 
-    
+    let agent = await Agent.findByIdAndUpdate(
+      req.user.id, 
+      { lastActive: new Date() }, 
+      { new: true }
+    ).select('-password'); 
+
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
@@ -532,6 +534,26 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("FULL DEBUG ERROR:", err.stack);
     res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post('/api/agents/heartbeat', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+        const updatedAgent = await Agent.findByIdAndUpdate(
+      req.user.id, 
+      { lastActive: new Date() }, 
+      { new: true, select: 'lastActive' } // Efficient: only return the timestamp
+    );
+
+    if (!updatedAgent) {
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+
+    res.json({ success: true, lastActive: updatedAgent.lastActive });
+  } catch (err) {
+    console.error("Heartbeat Error:", err);
+    res.status(500).json({ success: false });
   }
 });
 
@@ -1037,6 +1059,45 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   }
 });
 
+
+app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const myId = req.user.id;
+    const { otherUserId } = req.params;
+
+    const messages = await Message.find({
+      $or: [
+        { senderId: myId, receiverId: otherUserId },
+        { senderId: otherUserId, receiverId: myId }
+      ]
+    }).sort({ createdAt: 1 }); // Oldest first for chat flow
+
+    res.json({ success: true, messages });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error loading chat" });
+  }
+});
+
+app.post('/api/messages/send', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { receiverId, text, receiverModel } = req.body;
+
+    const newMessage = new Message({
+      senderId: req.user.id,
+      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      receiverId,
+      receiverModel,
+      text
+    });
+
+    await newMessage.save();
+    res.status(201).json({ success: true, message: newMessage });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Message failed to send" });
+  }
+});
 // 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {

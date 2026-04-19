@@ -13,6 +13,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../index.js';
 import { agentSchema } from '../models/Agent.js';
 import User from '../models/User.js';
+import Message from '../models/Message.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -375,15 +376,17 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// --- 3. GET AGENT PROFILE ---
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 2. Get the model safely
-    const Agent = getAgentModel();
+    const AgentModel = getAgentModel();
 
-    let agent = await Agent.findById(req.user.id).select('-password');
+    let agent = await AgentModel.findByIdAndUpdate(
+      req.user.id, 
+      { lastActive: new Date() }, 
+      { new: true }
+    ).select('-password');
     
     if (!agent) {
       console.error(`Agent ID ${req.user.id} not found.`);
@@ -396,12 +399,10 @@ router.get('/profile', authenticateToken, async (req, res) => {
       agent.isSubscribed = false;
       await agent.save();
     }
-    agent.lastActive = now;
-    await agent.save();
+
     res.json(agent);
 
   } catch (err) {
-    // This catches the error that was causing your 500
     console.error("DETAILED PROFILE ERROR:", err);
     res.status(500).json({ 
       success: false, 
@@ -411,15 +412,17 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
-    // 1. Ensure Database is connected
     await connectToDatabase();
     
-    const Agent = getAgentModel();
-    // Use .lean() to get a plain JS object, making it easier to modify properties
-    const agent = await Agent.findById(req.user.id).select('-password').lean();
+    const Agent = getAgentModel(); 
+
+    const agent = await Agent.findByIdAndUpdate(
+      req.user.id, 
+      { lastActive: new Date() }, 
+      { new: true }
+    ).select('-password').lean();
     
     if (!agent) {
       return res.status(404).json({ 
@@ -427,8 +430,9 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
         message: "Agent not found" 
       });
     }
-    let finalPhotoUrl = agent.photoUrl;
 
+    // 3. HANDLE PHOTO SIGNING
+    let finalPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
         const urlParts = agent.photoUrl.split('/');
@@ -436,11 +440,10 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
         
         if (profileIndex !== -1) {
           const fileKey = urlParts.slice(profileIndex).join('/');
-
           if (s3Client) {
             const command = new GetObjectCommand({
               Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-              Key: decodeURIComponent(fileKey), // Decode in case the DB stored it encoded
+              Key: decodeURIComponent(fileKey),
             });
             finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
           }
@@ -449,6 +452,8 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
         console.error("Image Signing Failed:", signErr.message);
       }
     }
+
+    // 4. RETURN RESPONSE
     res.json({
       success: true,
       firstName: agent.firstName || "",
@@ -465,12 +470,39 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
       isSubscribed: !!agent.isSubscribed,
       subscriptionAmount: agent.subscriptionAmount || 0,
       subscriptionDate: agent.subscriptionDate,
-      expiryDate: agent.expiryDate
+      expiryDate: agent.expiryDate,
+      lastActive: agent.lastActive // Optional: useful for debugging
     });
 
   } catch (err) {
     console.error("Profile Fetch Error:", err);
     res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// --- 4. AGENT HEARTBEAT ---
+// This route is specifically for the setInterval pulse from the Agent Dashboard
+router.post('/heartbeat', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
+    const updatedAgent = await AgentModel.findByIdAndUpdate(
+      req.user.id, 
+      { lastActive: new Date() }, 
+      { new: true, select: 'lastActive' } // Only return what we need
+    );
+
+    if (!updatedAgent) {
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+    res.json({ 
+      success: true, 
+      lastActive: updatedAgent.lastActive 
+    });
+
+  } catch (err) {
+    console.error("HEARTBEAT ERROR:", err);
+    res.status(500).json({ success: false });
   }
 });
 // --- 4. UPDATE AGENT PLAN ---
@@ -806,6 +838,47 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       message: "System failed to sync user list",
       error: err.message
     });
+  }
+});
+
+router.get('/:otherUserId', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const myId = req.user.id;
+    const { otherUserId } = req.params;
+
+    const messages = await Message.find({
+      $or: [
+        { senderId: myId, receiverId: otherUserId },
+        { senderId: otherUserId, receiverId: myId }
+      ]
+    }).sort({ createdAt: 1 });
+
+    res.json({ success: true, messages });
+  } catch (err) {
+    console.error("Chat Load Error:", err);
+    res.status(500).json({ success: false, message: "Error loading chat history" });
+  }
+});
+
+router.post('/send', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { receiverId, text, receiverModel } = req.body;
+
+    const newMessage = new Message({
+      senderId: req.user.id,
+      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      receiverId,
+      receiverModel,
+      text
+    });
+
+    await newMessage.save();
+    res.status(201).json({ success: true, message: newMessage });
+  } catch (err) {
+    console.error("Send Error:", err);
+    res.status(500).json({ success: false, message: "Failed to send message" });
   }
 });
 

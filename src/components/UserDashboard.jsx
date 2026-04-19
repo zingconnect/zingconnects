@@ -61,7 +61,6 @@ export const UserDashboard = () => {
   };
 
   // --- INITIAL DATA FETCH ---
- // --- INITIAL DATA FETCH & POLLING ---
 useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return navigate('/');

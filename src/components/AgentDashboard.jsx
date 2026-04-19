@@ -211,7 +211,6 @@ export const AgentDashboard = () => {
 
 const handleSelectUser = async (user) => {
   setSelectedUser(user);
-  setMessages([]); // Clear the screen immediately so old messages don't linger
   if (window.innerWidth < 1024) setShowSidebar(false);
 
   try {
@@ -219,10 +218,14 @@ const handleSelectUser = async (user) => {
     const response = await fetch(`/api/messages/${user._id}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    const data = await response.json();
-    
-    if (data.success) {
-      setMessages(data.messages); // Load the real chat history
+
+    const contentType = response.headers.get("content-type");
+    if (response.ok && contentType && contentType.indexOf("application/json") !== -1) {
+      const data = await response.json();
+      setMessages(data.messages);
+    } else {
+      console.warn("API route not found or returned HTML. Check backend routes.");
+      setMessages([]); // Fallback to empty chat
     }
   } catch (err) {
     console.error("Failed to load chat history:", err);
