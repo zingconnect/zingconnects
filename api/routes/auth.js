@@ -67,27 +67,38 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       occupation, program, bio, dob, gender, plan 
     } = req.body;
 
+    if (!email) {
+        return res.status(400).json({ success: false, message: "Email is required." });
+    }
+
     const lowerEmail = email.toLowerCase().trim();
 
     // 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS
     let existingAgent = await Agent.findOne({ email: lowerEmail });
 
     if (existingAgent && existingAgent.isVerified) {
-      // If the account is already verified, block registration
       return res.status(400).json({ 
         success: false, 
         message: "Email already registered. Please login." 
       });
     }
 
-    // 2. PASSWORD HASHING
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    // 2. CONDITIONAL PASSWORD HASHING
+    // Fix: If password is missing (resend scenario), keep existing hash or set to empty
+    let hashedPassword = existingAgent ? existingAgent.password : "";
+
+    if (password && password.trim() !== "") {
+      const salt = await bcrypt.genSalt(10);
+      hashedPassword = await bcrypt.hash(password, salt);
+    } else if (!existingAgent) {
+      // If it's a new registration and no password is provided
+      return res.status(400).json({ success: false, message: "Password is required for registration." });
+    }
 
     // 3. SLUG GENERATION (Only for new agents)
     let finalSlug = existingAgent ? existingAgent.slug : "";
     if (!existingAgent) {
-      const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+      const baseSlug = `${firstName || 'agent'}${lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
       finalSlug = baseSlug;
       let counter = 1;
       while (await Agent.findOne({ slug: finalSlug })) {
@@ -124,20 +135,21 @@ router.post('/register', upload.single('photo'), async (req, res) => {
 
     // 6. SAVE OR UPDATE AGENT
     if (existingAgent) {
-      // UPDATE existing unverified agent
-      existingAgent.firstName = firstName.trim();
-      existingAgent.lastName = lastName.trim();
-      existingAgent.password = hashedPassword;
-      existingAgent.address = address || "";
-      existingAgent.occupation = occupation || "";
-      existingAgent.program = program || "";
-      existingAgent.bio = bio || "";
-      existingAgent.dob = dob;
-      existingAgent.gender = gender;
+      // UPDATE existing unverified agent - only update fields if they are sent
+      if (firstName) existingAgent.firstName = firstName.trim();
+      if (lastName) existingAgent.lastName = lastName.trim();
+      
+      existingAgent.password = hashedPassword; // Either the new hash or the old one
+      existingAgent.address = address || existingAgent.address || "";
+      existingAgent.occupation = occupation || existingAgent.occupation || "";
+      existingAgent.program = program || existingAgent.program || "";
+      existingAgent.bio = bio || existingAgent.bio || "";
+      existingAgent.dob = dob || existingAgent.dob;
+      existingAgent.gender = gender || existingAgent.gender;
       existingAgent.photoUrl = savedPhotoPath;
       existingAgent.otp = otpCode;
       existingAgent.otpExpires = otpExpiry;
-      existingAgent.plan = plan || 'BASIC';
+      existingAgent.plan = plan || existingAgent.plan || 'BASIC';
       
       await existingAgent.save();
       console.log("Existing unverified agent updated with new OTP.");
@@ -145,7 +157,7 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       // CREATE brand new agent
       const newAgent = new Agent({
         firstName: firstName.trim(),
-        lastName: lastName.trim(),
+        lastName: (lastName || "").trim(),
         email: lowerEmail,
         password: hashedPassword,
         address: address || "",
@@ -167,81 +179,76 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       console.log("New agent created successfully.");
     }
 
+    // 7. EMAIL DELIVERY
+    const logoPath = path.join(process.cwd(), 'public', 'logo.png');
 
-const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+    try {
+        await transporter.sendMail({
+            from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
+            to: lowerEmail,
+            subject: "Your Verification Code",
+            attachments: [{
+                filename: 'logo.png',
+                path: logoPath,
+                cid: 'zinglogo'
+            }],
+            html: `
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                  @media only screen and (max-width: 600px) {
+                    .container { width: 100% !important; border-radius: 0 !important; }
+                    .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+                  }
+                </style>
+              </head>
+              <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td align="center" style="padding: 40px 10px;">
+                      <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                        <tr>
+                          <td align="center" style="padding: 30px 40px 10px 40px;">
+                            <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                            <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                            <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                              Hello <strong>${firstName || 'Agent'}</strong>,<br>
+                              Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                            </p>
+                            <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
+                              ${otpCode}
+                            </div>
+                            <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                              This code is valid for <strong>10 minutes</strong>.<br>
+                              If you didn't request this, you can safely ignore this email.
+                            </p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                            <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                              &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </body>
+              </html>
+            `
+        });
+    } catch (mailError) {
+        console.error("Email Delivery Failed:", mailError);
+    }
 
-if (!fs.existsSync(logoPath)) {
-    console.error(`❌ CRITICAL: Logo not found at ${logoPath}`);
-}
-
-try {
-    await transporter.sendMail({
-        from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
-        to: lowerEmail,
-        subject: "Your Verification Code",
-        attachments: [{
-            filename: 'logo.png',
-            path: logoPath,
-            cid: 'zinglogo' // Must match the <img src="cid:zinglogo"> below
-        }],
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-              @media only screen and (max-width: 600px) {
-                .container { width: 100% !important; border-radius: 0 !important; }
-                .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
-              }
-            </style>
-          </head>
-          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-              <tr>
-                <td align="center" style="padding: 40px 10px;">
-                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                    <tr>
-                      <td align="center" style="padding: 30px 40px 10px 40px;">
-                        <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 20px 40px 40px 40px; text-align: center;">
-                        <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
-                        <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
-                          Hello <strong>${firstName}</strong>,<br>
-                          Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
-                        </p>
-                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
-                          ${otpCode}
-                        </div>
-                        <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
-                          This code is valid for <strong>10 minutes</strong>.<br>
-                          If you didn't request this, you can safely ignore this email.
-                        </p>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
-                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                          &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
-                        </p>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </body>
-          </html>
-        `
-    });
-} catch (mailError) {
-    console.error("Email Delivery Failed:", mailError);
-}
-
-    // 8. FINAL RESPONSE
     res.status(200).json({ 
       success: true, 
       message: "Registration initiated. Please check your email for the OTP." 

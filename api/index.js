@@ -107,18 +107,22 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
         const Agent = getAgentModel();
 
         const { firstName, lastName, email, password } = req.body;
+        const isResend = req.body.resend === 'true' || req.body.resend === true;
 
-        // Check for required fields ONLY if this is a brand new registration
-        // For a 'resend', we might only have email and firstName
-        if (!email || (!password && !req.body.resend)) {
-            return res.status(400).json({ success: false, message: "Required fields missing" });
+        // --- 1. VALIDATION ---
+        if (!email) {
+            return res.status(400).json({ success: false, message: "Email is required." });
+        }
+
+        // Require password only if it's NOT a resend attempt
+        if (!isResend && !password) {
+            return res.status(400).json({ success: false, message: "Password is required for registration." });
         }
 
         const lowerEmail = email.toLowerCase().trim();
 
-        // --- 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS ---
+        // Check verification status
         let existingAgent = await Agent.findOne({ email: lowerEmail });
-
         if (existingAgent && existingAgent.isVerified) {
             return res.status(400).json({ 
                 success: false, 
@@ -127,10 +131,9 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
         }
 
         // --- 2. CONDITIONAL PASSWORD HASHING ---
-        // This prevents the "Illegal arguments" crash when password is undefined
+        // If no new password is sent (resend case), keep the existing one
         let hashedPassword = existingAgent ? existingAgent.password : ""; 
-
-        if (password) {
+        if (password && password.trim() !== "") {
             const salt = await bcrypt.genSalt(10);
             hashedPassword = await bcrypt.hash(password, salt);
         }
@@ -138,15 +141,16 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
         // --- 3. SLUG GENERATION ---
         let finalSlug = existingAgent ? existingAgent.slug : "";
         if (!existingAgent) {
+            // Clean names: remove special characters, default to 'agent' if first name missing
             const cleanFirst = (firstName || "agent").trim().replace(/[^a-zA-Z0-9]/g, '');
             const cleanLast = (lastName || "").trim().replace(/[^a-zA-Z0-9]/g, '');
-            const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
+            const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase() || "agent";
             
             finalSlug = baseSlug;
             let counter = 1;
             while (await Agent.findOne({ slug: finalSlug })) {
-                counter++;
                 finalSlug = `${baseSlug}-${counter}`;
+                counter++;
             }
         }
 
@@ -169,39 +173,37 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
                 savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
             } catch (uploadErr) {
                 console.error("IDRIVE UPLOAD FAILED:", uploadErr.message);
+                // We continue even if upload fails so registration isn't blocked
             }
         }
 
         // --- 5. OTP GENERATION ---
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiry = Date.now() + 10 * 60 * 1000;
+        const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
 
         // --- 6. CREATE OR UPDATE DOCUMENT ---
         if (existingAgent) {
-            // Update the unverified existing record
+            // Update the existing unverified record
             if (firstName) existingAgent.firstName = firstName.trim();
-            if (lastName) existingAgent.lastName = (lastName || "").trim();
+            if (lastName !== undefined) existingAgent.lastName = (lastName || "").trim();
             
-            // Only update password if a new one was actually provided
-            if (password) existingAgent.password = hashedPassword;
-            
-            if (req.body.dob) existingAgent.dob = req.body.dob;
-            if (req.body.gender) existingAgent.gender = req.body.gender;
-            if (req.body.occupation) existingAgent.occupation = req.body.occupation;
-            if (req.body.address) existingAgent.address = req.body.address;
-            
-            existingAgent.bio = req.body.bio || existingAgent.bio || "";
-            existingAgent.program = req.body.program || existingAgent.program || "";
+            existingAgent.password = hashedPassword; 
             existingAgent.photoUrl = savedPhotoPath;
             existingAgent.otp = otpCode;
             existingAgent.otpExpires = otpExpiry;
-            existingAgent.plan = req.body.plan || existingAgent.plan || "BASIC";
+
+            // Optional fields update
+            const fields = ['dob', 'gender', 'occupation', 'address', 'bio', 'program', 'plan'];
+            fields.forEach(field => {
+                if (req.body[field]) existingAgent[field] = req.body[field];
+            });
             
             await existingAgent.save();
+            console.log("Record Updated:", lowerEmail);
         } else {
-            // Create new record
+            // Create brand new record
             const newAgent = new Agent({
-                firstName: firstName.trim(),
+                firstName: (firstName || "Agent").trim(),
                 lastName: (lastName || "").trim(),
                 email: lowerEmail,
                 password: hashedPassword,
@@ -222,24 +224,24 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
                 plan: req.body.plan || "BASIC"
             });
             await newAgent.save();
+            console.log("New Record Created:", lowerEmail);
         }
 
+        // --- 7. EMAIL DELIVERY ---
         const logoPath = path.join(process.cwd(), 'public', 'logo.png');
-
-        if (!fs.existsSync(logoPath)) {
-            console.error(`❌ CRITICAL: Logo not found at ${logoPath}`);
-        }
+        // If logo doesn't exist, we skip attachment to prevent mailer crash
+        const attachments = fs.existsSync(logoPath) ? [{
+            filename: 'logo.png',
+            path: logoPath,
+            cid: 'zinglogo'
+        }] : [];
 
         try {
             await transporter.sendMail({
                 from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
                 to: lowerEmail,
                 subject: "Your Verification Code",
-                attachments: [{
-                    filename: 'logo.png',
-                    path: logoPath,
-                    cid: 'zinglogo'
-                }],
+                attachments,
                 html: `
                   <!DOCTYPE html>
                   <html>
@@ -295,15 +297,17 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
             });
         } catch (mailError) {
             console.error("Email Delivery Failed:", mailError);
+            // Optionally return a 500 here if you want to force the user to retry
         }
 
-        res.status(200).json({ success: true, message: "Initial registration success. OTP sent." });
+        res.status(200).json({ success: true, message: "Verification code sent to your email." });
 
     } catch (err) {
-        console.error("Registration Error:", err);
+        console.error("Detailed Registration Error:", err);
         res.status(500).json({ 
             success: false, 
-            message: "Internal Server Error during registration." 
+            message: "Internal Server Error during registration.",
+            error: err.message
         });
     }
 });
