@@ -3,21 +3,17 @@ import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
-import Flutterwave from 'flutterwave-node-v3';
-import axios from 'axios';
 import nodemailer from 'nodemailer';
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { connectToDatabase } from '../index.js';
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { connectToDatabase } from '../index.js'; // Ensure this path is correct
 import { agentSchema } from '../models/Agent.js';
-import User from '../models/User.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
+// Helper to get Model (Prevents "Model already exists" error)
+const getAgentModel = () => mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
-// --- NODEMAILER CONFIG ---
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -26,24 +22,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const getAgentModel = () => {
-  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
-};
-
-// --- AUTH MIDDLEWARE ---
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ message: "Access Denied: No Token Provided" });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: "Session Expired" });
-    req.user = user;
-    next();
-  });
-};
-
-// --- IDRIVE E2 CONFIG ---
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
   endpoint: process.env.IDRIVE_ENDPOINT,
@@ -53,19 +31,21 @@ const s3Client = new S3Client({
   },
 });
 
-// --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
+// --- 1. STAGE 1: REGISTRATION ---
 router.post('/register', upload.single('photo'), async (req, res) => {
   try {
+    // CRITICAL FIX: You MUST await the connection before any DB query
+    await connectToDatabase();
+    
     const Agent = getAgentModel();
     const { firstName, lastName, email, password, address, occupation, program, bio, dob, gender, plan } = req.body;
 
-    // Check if email exists
     const existing = await Agent.findOne({ email: email.toLowerCase().trim() });
     if (existing) return res.status(400).json({ success: false, message: "Email already exists" });
 
-    // Hashing & Slug
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+    
     const baseSlug = `${firstName}${lastName}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
     let finalSlug = baseSlug;
     let counter = 1;
@@ -74,23 +54,23 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       finalSlug = `${baseSlug}-${counter.toString().padStart(2, '0')}`;
     }
 
-    // Photo Upload
     let savedPhotoPath = ""; 
     if (req.file) {
       const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
       const fileKey = `profiles/${fileName}`;
       const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
+      
       await s3Client.send(new PutObjectCommand({
         Bucket: bucketName,
         Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       }));
+      
       const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
       savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
     }
 
-    // OTP Generation
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiry = Date.now() + 10 * 60 * 1000;
 
@@ -99,16 +79,12 @@ router.post('/register', upload.single('photo'), async (req, res) => {
       lastName: lastName.trim(),
       email: email.toLowerCase().trim(),
       password: hashedPassword,
-      address,
-      occupation,
+      address, occupation, dob, gender,
       program: program || "N/A",
       bio: bio || "",
-      dob,
-      gender,
       slug: finalSlug,
       photoUrl: savedPhotoPath,
       plan: plan || 'BASIC',
-      role: 'agent',
       status: 'pending',
       isVerified: false,
       otp: otpCode,
@@ -117,22 +93,86 @@ router.post('/register', upload.single('photo'), async (req, res) => {
 
     await newAgent.save();
 
-    // Send Mail
-    await transporter.sendMail({
-      from: '"ZingConnect" <no-reply@zingconnect.com>',
-      to: email,
-      subject: "Verification Code",
-      html: `<b>Verification Code: ${otpCode}</b>`
-    });
+  const logoPath = './public/logo.png'; 
+  
+  await transporter.sendMail({
+    from: '"ZingConnect Security" <no-reply@zingconnect.com>',
+    to: email,
+    subject: "Action Required: Verify Your Agent Profile",
+    
+    attachments: [{
+      filename: 'logo.png',
+      path: logoPath, 
+      cid: 'zinglogo' // This ID matches the img src below
+    }],
+    
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          @media only screen and (max-width: 600px) {
+            .container { width: 100% !important; border-radius: 0 !important; }
+            .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+          }
+        </style>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr>
+            <td align="center" style="padding: 40px 10px;">
+              <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                
+                <tr>
+                  <td align="center" style="padding: 30px 40px 10px 40px;">
+                    <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                  </td>
+                </tr>
+  
+                <tr>
+                  <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                    <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                    <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                      Hello <strong>${firstName}</strong>,<br>
+                      Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                    </p>
+                    
+                    <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
+                      ${otpCode}
+                    </div>
+  
+                    <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                      This code is valid for <strong>10 minutes</strong>.<br>
+                      If you didn't request this, you can safely ignore this email.
+                    </p>
+                  </td>
+                </tr>
+  
+                <tr>
+                  <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                    <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                      &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `
+  });
+  
 
-    res.status(200).json({ success: true, message: "OTP sent to email" });
+    res.status(200).json({ success: true, message: "OTP sent" });
     
   } catch (error) {
-    console.error("Registration Error:", error);
-    res.status(500).json({ success: false, message: "Registration failed" });
+    console.error("Reg Error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
-
 // --- 2. STAGE 2: VERIFY OTP ---
 router.post('/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
