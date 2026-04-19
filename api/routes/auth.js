@@ -359,6 +359,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
+
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
     // 1. Ensure Database is connected

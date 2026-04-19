@@ -100,201 +100,212 @@ const transporter = nodemailer.createTransport({
 });
 
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res) => {
-  console.log("Registration Stage 1 (Complete Fields) started...");
+    console.log("Registration Stage 1 (Complete Fields) started...");
 
-  try {
-    await connectToDatabase();
-    const Agent = getAgentModel(); // Ensure model is initialized
+    try {
+        await connectToDatabase();
+        const Agent = getAgentModel();
 
-    const { firstName, lastName, email, password } = req.body;
-    if (!firstName || !email || !password) {
-      return res.status(400).json({ success: false, message: "Required fields missing" });
+        const { firstName, lastName, email, password } = req.body;
+
+        // Check for required fields ONLY if this is a brand new registration
+        // For a 'resend', we might only have email and firstName
+        if (!email || (!password && !req.body.resend)) {
+            return res.status(400).json({ success: false, message: "Required fields missing" });
+        }
+
+        const lowerEmail = email.toLowerCase().trim();
+
+        // --- 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS ---
+        let existingAgent = await Agent.findOne({ email: lowerEmail });
+
+        if (existingAgent && existingAgent.isVerified) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Email already registered and verified. Please login." 
+            });
+        }
+
+        // --- 2. CONDITIONAL PASSWORD HASHING ---
+        // This prevents the "Illegal arguments" crash when password is undefined
+        let hashedPassword = existingAgent ? existingAgent.password : ""; 
+
+        if (password) {
+            const salt = await bcrypt.genSalt(10);
+            hashedPassword = await bcrypt.hash(password, salt);
+        }
+
+        // --- 3. SLUG GENERATION ---
+        let finalSlug = existingAgent ? existingAgent.slug : "";
+        if (!existingAgent) {
+            const cleanFirst = (firstName || "agent").trim().replace(/[^a-zA-Z0-9]/g, '');
+            const cleanLast = (lastName || "").trim().replace(/[^a-zA-Z0-9]/g, '');
+            const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase();
+            
+            finalSlug = baseSlug;
+            let counter = 1;
+            while (await Agent.findOne({ slug: finalSlug })) {
+                counter++;
+                finalSlug = `${baseSlug}-${counter}`;
+            }
+        }
+
+        // --- 4. PHOTO UPLOAD (IDRIVE) ---
+        let savedPhotoPath = existingAgent ? existingAgent.photoUrl : "";
+        if (req.file) {
+            try {
+                const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
+                const fileKey = `profiles/${fileName}`;
+                const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
+                
+                await s3Client.send(new PutObjectCommand({
+                    Bucket: bucketName,
+                    Key: fileKey,
+                    Body: req.file.buffer,
+                    ContentType: req.file.mimetype,
+                }));
+                
+                const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+                savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
+            } catch (uploadErr) {
+                console.error("IDRIVE UPLOAD FAILED:", uploadErr.message);
+            }
+        }
+
+        // --- 5. OTP GENERATION ---
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiry = Date.now() + 10 * 60 * 1000;
+
+        // --- 6. CREATE OR UPDATE DOCUMENT ---
+        if (existingAgent) {
+            // Update the unverified existing record
+            if (firstName) existingAgent.firstName = firstName.trim();
+            if (lastName) existingAgent.lastName = (lastName || "").trim();
+            
+            // Only update password if a new one was actually provided
+            if (password) existingAgent.password = hashedPassword;
+            
+            if (req.body.dob) existingAgent.dob = req.body.dob;
+            if (req.body.gender) existingAgent.gender = req.body.gender;
+            if (req.body.occupation) existingAgent.occupation = req.body.occupation;
+            if (req.body.address) existingAgent.address = req.body.address;
+            
+            existingAgent.bio = req.body.bio || existingAgent.bio || "";
+            existingAgent.program = req.body.program || existingAgent.program || "";
+            existingAgent.photoUrl = savedPhotoPath;
+            existingAgent.otp = otpCode;
+            existingAgent.otpExpires = otpExpiry;
+            existingAgent.plan = req.body.plan || existingAgent.plan || "BASIC";
+            
+            await existingAgent.save();
+        } else {
+            // Create new record
+            const newAgent = new Agent({
+                firstName: firstName.trim(),
+                lastName: (lastName || "").trim(),
+                email: lowerEmail,
+                password: hashedPassword,
+                dob: req.body.dob,
+                gender: req.body.gender,
+                occupation: req.body.occupation,
+                address: req.body.address,
+                bio: req.body.bio || "",
+                program: req.body.program || "",
+                slug: finalSlug,
+                photoUrl: savedPhotoPath,
+                role: 'agent',
+                status: 'pending',
+                isVerified: false,
+                otp: otpCode,
+                otpExpires: otpExpiry,
+                isSubscribed: false,
+                plan: req.body.plan || "BASIC"
+            });
+            await newAgent.save();
+        }
+
+        const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+
+        if (!fs.existsSync(logoPath)) {
+            console.error(`❌ CRITICAL: Logo not found at ${logoPath}`);
+        }
+
+        try {
+            await transporter.sendMail({
+                from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
+                to: lowerEmail,
+                subject: "Your Verification Code",
+                attachments: [{
+                    filename: 'logo.png',
+                    path: logoPath,
+                    cid: 'zinglogo'
+                }],
+                html: `
+                  <!DOCTYPE html>
+                  <html>
+                  <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                      @media only screen and (max-width: 600px) {
+                        .container { width: 100% !important; border-radius: 0 !important; }
+                        .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+                      }
+                    </style>
+                  </head>
+                  <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                      <tr>
+                        <td align="center" style="padding: 40px 10px;">
+                          <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                            <tr>
+                              <td align="center" style="padding: 30px 40px 10px 40px;">
+                                <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                                <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                                <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                                  Hello <strong>${firstName || 'Agent'}</strong>,<br>
+                                  Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                                </p>
+                                <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
+                                  ${otpCode}
+                                </div>
+                                <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                                  This code is valid for <strong>10 minutes</strong>.<br>
+                                  If you didn't request this, you can safely ignore this email.
+                                </p>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                                <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                                  &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                                </p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </body>
+                  </html>
+                `
+            });
+        } catch (mailError) {
+            console.error("Email Delivery Failed:", mailError);
+        }
+
+        res.status(200).json({ success: true, message: "Initial registration success. OTP sent." });
+
+    } catch (err) {
+        console.error("Registration Error:", err);
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal Server Error during registration." 
+        });
     }
-
-    const lowerEmail = email.toLowerCase().trim();
-
-    // --- 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS ---
-    let existingAgent = await Agent.findOne({ email: lowerEmail });
-
-    if (existingAgent && existingAgent.isVerified) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email already registered and verified. Please login." 
-      });
-    }
-
-    // --- 2. PASSWORD HASHING ---
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // --- 3. SLUG GENERATION ---
-    let finalSlug = existingAgent ? existingAgent.slug : "";
-    if (!existingAgent) {
-      const cleanFirst = firstName.trim().replace(/[^a-zA-Z0-9]/g, '');
-      const cleanLast = (lastName || "").trim().replace(/[^a-zA-Z0-9]/g, '');
-      const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase() || "agent";
-      
-      finalSlug = baseSlug;
-      let counter = 1;
-      while (await Agent.findOne({ slug: finalSlug })) {
-        counter++;
-        finalSlug = `${baseSlug}-${counter}`;
-      }
-    }
-
-    // --- 4. PHOTO UPLOAD (IDRIVE) ---
-    let savedPhotoPath = existingAgent ? existingAgent.photoUrl : "";
-    if (req.file) {
-      try {
-        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
-        const fileKey = `profiles/${fileName}`;
-        const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-        
-        await s3Client.send(new PutObjectCommand({
-          Bucket: bucketName,
-          Key: fileKey,
-          Body: req.file.buffer,
-          ContentType: req.file.mimetype,
-        }));
-        
-        const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
-        savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
-      } catch (uploadErr) {
-        console.error("IDRIVE UPLOAD FAILED:", uploadErr.message);
-      }
-    }
-
-    // --- 5. OTP GENERATION ---
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = Date.now() + 10 * 60 * 1000;
-
-    // --- 6. CREATE OR UPDATE DOCUMENT ---
-    if (existingAgent) {
-      // Update the unverified existing record
-      existingAgent.firstName = firstName.trim();
-      existingAgent.lastName = (lastName || "").trim();
-      existingAgent.password = hashedPassword;
-      existingAgent.dob = req.body.dob;
-      existingAgent.gender = req.body.gender;
-      existingAgent.occupation = req.body.occupation;
-      existingAgent.address = req.body.address;
-      existingAgent.bio = req.body.bio || "";
-      existingAgent.program = req.body.program || "";
-      existingAgent.photoUrl = savedPhotoPath;
-      existingAgent.otp = otpCode;
-      existingAgent.otpExpires = otpExpiry;
-      existingAgent.plan = req.body.plan || "BASIC";
-      
-      await existingAgent.save();
-    } else {
-      // Create new record
-      const newAgent = new Agent({
-        firstName: firstName.trim(),
-        lastName: (lastName || "").trim(),
-        email: lowerEmail,
-        password: hashedPassword,
-        dob: req.body.dob,
-        gender: req.body.gender,
-        occupation: req.body.occupation,
-        address: req.body.address,
-        bio: req.body.bio || "",
-        program: req.body.program || "",
-        slug: finalSlug,
-        photoUrl: savedPhotoPath,
-        role: 'agent',
-        status: 'pending',
-        isVerified: false,
-        otp: otpCode,
-        otpExpires: otpExpiry,
-        isSubscribed: false,
-        plan: req.body.plan || "BASIC"
-      });
-      await newAgent.save();
-    }
-
-   const logoPath = path.join(process.cwd(), 'public', 'logo.png');
-
-// 2. Debugging: This will log to your console if the path is wrong before sending the mail
-if (!fs.existsSync(logoPath)) {
-    console.error(`❌ CRITICAL: Logo not found at ${logoPath}`);
-}
-
-try {
-    await transporter.sendMail({
-        from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
-        to: lowerEmail,
-        subject: "Your Verification Code",
-        attachments: [{
-            filename: 'logo.png',
-            path: logoPath,
-            cid: 'zinglogo' // Must match the <img src="cid:zinglogo"> below
-        }],
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-              @media only screen and (max-width: 600px) {
-                .container { width: 100% !important; border-radius: 0 !important; }
-                .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
-              }
-            </style>
-          </head>
-          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-              <tr>
-                <td align="center" style="padding: 40px 10px;">
-                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                    <tr>
-                      <td align="center" style="padding: 30px 40px 10px 40px;">
-                        <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 20px 40px 40px 40px; text-align: center;">
-                        <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
-                        <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
-                          Hello <strong>${firstName}</strong>,<br>
-                          Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
-                        </p>
-                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
-                          ${otpCode}
-                        </div>
-                        <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
-                          This code is valid for <strong>10 minutes</strong>.<br>
-                          If you didn't request this, you can safely ignore this email.
-                        </p>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
-                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                          &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
-                        </p>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </body>
-          </html>
-        `
-    });
-} catch (mailError) {
-    console.error("Email Delivery Failed:", mailError);
-}
-
-    res.status(200).json({ success: true, message: "Initial registration success. OTP sent." });
-
-  } catch (err) {
-    console.error("Registration Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error during registration." 
-    });
-  }
 });
 
 // --- STAGE 2: VERIFY OTP ---
