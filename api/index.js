@@ -1336,6 +1336,75 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
+
+router.post('/get-upload-url', authenticateToken, async (req, res) => {
+  try {
+    const { fileName, fileType } = req.body;
+
+    if (!fileName || !fileType) {
+      return res.status(400).json({ success: false, message: "File metadata missing" });
+    }
+    const fileExtension = fileName.split('.').pop();
+    const key = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.IDRIVE_BUCKET_NAME,
+      Key: key,
+      ContentType: fileType,
+    });
+
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+
+    res.json({ 
+      success: true, 
+      uploadUrl, 
+      key 
+    });
+
+  } catch (err) {
+    console.error("Presigned URL Error:", err);
+    res.status(500).json({ success: false, message: "Server error generating upload link" });
+  }
+});
+
+// --- CONFIRM UPLOAD & SAVE TO DB ---
+router.post('/confirm-upload', authenticateToken, async (req, res) => {
+  try {
+    const { receiverId, text, fileUrl, fileType } = req.body;
+
+    if (!receiverId || !fileUrl) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
+    
+    const newMessage = new Message({
+      senderId: req.user.id,
+      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      receiverId,
+      receiverModel,
+      text: text || "",
+      fileUrl: fileUrl, // This is the 'key' (path) from Step 1
+      fileType: fileType, // 'image' or 'video'
+      status: 'sent'
+    });
+
+    await newMessage.save();
+    const signedUrlForFrontend = await generateSignedUrl(fileUrl);
+    const responseData = newMessage.toObject();
+    responseData.fileUrl = signedUrlForFrontend;
+
+    res.status(201).json({ 
+      success: true, 
+      message: responseData 
+    });
+
+  } catch (err) {
+    console.error("Confirmation Error:", err);
+    res.status(500).json({ success: false, message: "Failed to save message" });
+  }
+});
+
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

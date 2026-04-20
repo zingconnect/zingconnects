@@ -234,8 +234,9 @@ const [caption, setCaption] = useState("");          // The text to send with th
   };
   
 
-  const handleFileUpload = (e) => {
+const handleFileUpload = (e) => {
   const file = e.target.files[0];
+  // Using selectedUser to match your dashboard's state
   if (!file || !selectedUser) return;
 
   const isVideo = file.type.startsWith('video/');
@@ -247,8 +248,9 @@ const [caption, setCaption] = useState("");          // The text to send with th
     return;
   }
 
-  if (file.size > 4.5 * 1024 * 1024) {
-    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Vercel limits uploads to 4.5MB.`);
+  const maxLimit = 100 * 1024 * 1024; 
+  if (file.size > maxLimit) {
+    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
     e.target.value = null; 
     return;
   }
@@ -262,41 +264,79 @@ const [caption, setCaption] = useState("");          // The text to send with th
   if (e.target) e.target.value = null; 
 };
 
+
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
 
   setIsUploading(true);
-  const formData = new FormData();
-  
-  formData.append('file', previewFile);
-  formData.append('receiverId', selectedUser._id);
-  formData.append('senderModel', 'Agent');
-  formData.append('text', caption); 
-  
-  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-  formData.append('fileType', detectedType);
 
   try {
-    const token = localStorage.getItem('zingToken');    
-    const response = await fetch('/api/messages/upload', {
+    const token = localStorage.getItem('zingToken');
+    const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+
+    // --- STEP 1: GET THE UPLOAD PERMISSION (PRESIGNED URL) ---
+    // We send only the metadata (name, type) to avoid Vercel's size limits
+    const urlResponse = await fetch('/api/messages/get-upload-url', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({ 
+        fileName: previewFile.name, 
+        fileType: previewFile.type 
+      })
     });
 
-    const data = await response.json();
+    const urlData = await urlResponse.json();
     
-    if (data.success) {
-      setMessages(prev => [...prev, data.message]);
+    if (!urlData.success || !urlData.uploadUrl) {
+      throw new Error(urlData.message || "Could not generate upload permission.");
+    }
+
+    const { uploadUrl, key } = urlData;
+
+    const directUpload = await fetch(uploadUrl, {
+      method: 'PUT',
+      body: previewFile,
+      headers: { 
+        'Content-Type': previewFile.type 
+      }
+    });
+
+    if (!directUpload.ok) {
+      throw new Error("Failed to upload media to storage server.");
+    }
+
+    const confirmResponse = await fetch('/api/messages/confirm-upload', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({
+        receiverId: selectedUser._id,
+        text: caption,
+        fileUrl: key, // Using the path returned from Step 1
+        fileType: detectedType
+      })
+    });
+
+    const finalData = await confirmResponse.json();
+
+    if (finalData.success) {
+      // Success! Update local UI
+      setMessages(prev => [...prev, finalData.message]);
       setPreviewUrl(null);
       setPreviewFile(null);
       setCaption("");
     } else {
-      alert(data.error || "Upload failed");
+      alert(finalData.error || "Database failed to record the message.");
     }
+
   } catch (err) {
     console.error("Critical Upload Error:", err);
-    alert("System error during upload.");
+    alert(err.message || "System error during upload.");
   } finally {
     setIsUploading(false);
   }

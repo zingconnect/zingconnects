@@ -313,10 +313,9 @@ const handleSendWithPreview = async () => {
       .catch(e => console.error("Unlock failed", e));
   }
 };
-
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
-    if (!file || !agent?._id) return;
+  if (!file || !agent?._id) return;
 
   const isVideo = file.type.startsWith('video/');
   const isImage = file.type.startsWith('image/');
@@ -325,52 +324,76 @@ const handleFileUpload = (e) => {
     alert("Please upload only images or videos.");
     return;
   }
-  if (file.size > 4.5 * 1024 * 1024) {
-    alert(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max limit is 4.5MB.`);
+   const maxLimit = 100 * 1024 * 1024; 
+  if (file.size > maxLimit) {
+    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
     e.target.value = null; 
     return;
   }
+
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
   }
 
-  // 4. Set State
+  // Set State for the WhatsApp-style preview overlay
   const localUrl = URL.createObjectURL(file);
   setPreviewFile(file);
   setPreviewUrl(localUrl);
   setCaption(""); 
-
   if (e.target) e.target.value = null; 
 };
 
 const handleFinalSend = async () => {
-  // Guard: Don't run if no file, if already uploading, or if no agent selected
   if (!previewFile || isUploading || !agent?._id) return;
 
   setIsUploading(true);
-  const formData = new FormData();
-  
-  // Determine type again to be safe
+  const token = localStorage.getItem('userToken'); 
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
 
-  formData.append('file', previewFile);
-  formData.append('receiverId', agent._id);
-  formData.append('senderModel', 'User'); 
-  formData.append('text', caption.trim()); 
-  formData.append('fileType', detectedType);
-
   try {
-    const token = localStorage.getItem('userToken'); 
-    
-    const response = await fetch('/api/messages/upload', {
+    const urlResponse = await fetch('/api/messages/get-upload-url', {
       method: 'POST',
       headers: { 
+        'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}` 
       },
-      body: formData
+      body: JSON.stringify({ 
+        fileName: previewFile.name, 
+        fileType: previewFile.type 
+      })
     });
 
-    const data = await response.json();
+    const urlData = await urlResponse.json();
+    if (!urlData.success || !urlData.uploadUrl) {
+      throw new Error(urlData.message || "Could not get upload permission");
+    }
+
+    const { uploadUrl, key } = urlData;
+
+    // --- STEP 2: DIRECT UPLOAD TO STORAGE ---
+    // Uploading directly to iDrive/S3 bypassing Vercel
+    const uploadResult = await fetch(uploadUrl, {
+      method: 'PUT',
+      body: previewFile,
+      headers: { 'Content-Type': previewFile.type }
+    });
+
+    if (!uploadResult.ok) throw new Error("Media storage upload failed");
+    const confirmResponse = await fetch('/api/messages/confirm-upload', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({
+        receiverId: agent._id,
+        text: caption.trim(),
+        fileUrl: key, 
+        fileType: detectedType
+      })
+    });
+
+    const data = await confirmResponse.json();
     
     if (data.success) {
       // 1. Add new message to the list
@@ -385,8 +408,8 @@ const handleFinalSend = async () => {
       alert(data.error || "Upload failed");
     }
   } catch (err) {
-    console.error("Upload Error:", err);
-    alert("System error during upload. Please check your connection.");
+    console.error("Critical Upload Error:", err);
+    alert(err.message || "System error during upload. Please check your connection.");
   } finally {
     setIsUploading(false);
   }

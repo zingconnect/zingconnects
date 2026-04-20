@@ -23,7 +23,6 @@ const s3Client = new S3Client({
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- HELPER FUNCTION FOR SIGNED URLS ---
 // Converts a private key (like 'chat/123.jpg') into a working temporary link
 const generateSignedUrl = async (key) => {
   try {
@@ -168,7 +167,6 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       if (receiver && receiver.pushSubscription) {
         const payload = JSON.stringify({
           title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
-          // UPDATED: If there is a caption (text), show it in the notification; otherwise show fallback
           body: text ? text : (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
           data: { url: receiverModel === 'Agent' ? `/agent/dashboard?userId=${req.user.id}` : '/user/dashboard' }
         });
@@ -196,6 +194,96 @@ router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
     res.json({ success: true, count: result.modifiedCount });
   } catch (err) {
     res.status(500).json({ success: false });
+  }
+});
+
+router.post('/get-upload-url', authenticateToken, async (req, res) => {
+  try {
+    const { fileName, fileType } = req.body;
+    const key = `chat/${Date.now()}-${fileName}`;
+
+    // Create the "Put" command
+    const command = new PutObjectCommand({
+      Bucket: process.env.IDRIVE_BUCKET_NAME,
+      Key: key,
+      ContentType: fileType,
+    });
+
+    // Generate a URL that the frontend can PUSH data to
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 600 }); // 10 min window
+
+    res.json({ success: true, uploadUrl, key });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Could not generate upload pass" });
+  }
+});
+
+// --- 4. CONFIRM UPLOAD & SAVE MESSAGE ---
+// This is called AFTER the frontend successfully PUTS the file to iDrive/S3
+router.post('/confirm-upload', authenticateToken, async (req, res) => {
+  try {
+    const { receiverId, text, fileUrl, fileType } = req.body;
+
+    // Validation
+    if (!receiverId || !fileUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing receiver ID or file path." 
+      });
+    }
+
+    // Determine the direction of the message based on the logged-in user's role
+    const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
+    const senderModel = req.user.role === 'agent' ? 'Agent' : 'User';
+
+    const newMessage = new Message({
+      senderId: req.user.id,
+      senderModel: senderModel,
+      receiverId,
+      receiverModel,
+      text: text || "", // This is your caption
+      fileUrl: fileUrl, // This is the 'key' (e.g., 'chat/123-video.mp4')
+      fileType: fileType, // 'image' or 'video'
+      status: 'sent'
+    });
+
+    await newMessage.save();
+
+    // Generate a temporary signed URL so the frontend can display the media immediately
+    const signedUrlForFrontend = await generateSignedUrl(fileUrl);
+        const responseData = newMessage.toObject();
+    responseData.fileUrl = signedUrlForFrontend;
+    try {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      const receiver = await TargetModel.findById(receiverId);
+      
+      if (receiver && receiver.pushSubscription) {
+        const payload = JSON.stringify({
+          title: `New ${fileType} from ${req.user.firstName || 'Zing'}`,
+          body: text ? text : (fileType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
+          data: { 
+            url: receiverModel === 'Agent' 
+              ? `/agent/dashboard?userId=${req.user.id}` 
+              : '/user/dashboard' 
+          }
+        });
+        webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
+      }
+    } catch (pushErr) {
+      console.error("Push Notification Failed:", pushErr);
+    }
+
+    res.status(201).json({ 
+      success: true, 
+      message: responseData 
+    });
+
+  } catch (err) {
+    console.error("CONFIRMATION ERROR:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to save message to database." 
+    });
   }
 });
 
