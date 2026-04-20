@@ -44,7 +44,7 @@ const s3Client = new S3Client({
 const upload = multer({ storage: multer.memoryStorage() });
 
 webpush.setVapidDetails(
-  'mailto:zingconnectyou@gmail.com',
+`mailto:${process.env.VITE_EMAIL}`,
   process.env.VITE_PUBLIC_KEY, 
   process.env.VITE_PRIVATE_KEY
 );
