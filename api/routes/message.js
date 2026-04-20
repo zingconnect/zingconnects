@@ -42,7 +42,6 @@ const generateSignedUrl = async (key) => {
     return null;
   }
 };
-
 // --- 1. GET CHAT HISTORY ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
   try {
@@ -60,9 +59,14 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
       ]
     }).sort({ createdAt: 1 }).lean(); 
 
-    // Generate signed URLs for all media messages so they display correctly
+    // Generate signed URLs for all media messages
     const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl && (m.fileType === 'image' || m.fileType === 'video')) {
+        
+        if (m.fileUrl.includes('idrivee2.com/')) {
+          m.fileUrl = m.fileUrl.split('idrivee2.com/').pop().split('/').slice(1).join('/');
+        }
+
         m.fileUrl = await generateSignedUrl(m.fileUrl);
       }
       return m;
@@ -74,7 +78,6 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error loading chat history" });
   }
 });
-
 // --- 2. SEND TEXT MESSAGE ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {

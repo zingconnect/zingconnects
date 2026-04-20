@@ -1209,31 +1209,37 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Server failed to save message" });
   }
 });
-
-// --- UPDATED: GET CHAT MESSAGES ---
+// --- UPDATED: GET CHAT MESSAGES WITH SANITIZATION ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
-
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
     }).sort({ createdAt: 1 }).lean();
-
-    // Convert stored Keys into working Presigned URLs
     const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl) {
-        m.fileUrl = await getPrivateUrl(m.fileUrl);
+        let fileKey = m.fileUrl;
+        if (fileKey.startsWith('http')) {
+          const urlParts = fileKey.split('idrivee2.com/');
+          if (urlParts.length > 1) {
+            // Split by '/' and remove the first part (the bucket name)
+            const pathParts = urlParts[1].split('/');
+            fileKey = pathParts.slice(1).join('/'); 
+          }
+        }
+        m.fileUrl = await getPrivateUrl(fileKey);
       }
       return m;
     }));
 
     res.json({ success: true, messages: signedMessages });
   } catch (err) {
+    console.error("Chat Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });
