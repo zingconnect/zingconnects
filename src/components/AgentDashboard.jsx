@@ -45,6 +45,10 @@ const fileInputRef = useRef(null);
 const cameraInputRef = useRef(null);
 const [isUploading, setIsUploading] = useState(false);
 
+const [previewFile, setPreviewFile] = useState(null); // The actual file object
+const [previewUrl, setPreviewUrl] = useState(null);   // The local blob for <img> src
+const [caption, setCaption] = useState("");          // The text to send with the image
+
   const plans = [
     {
       tier: 'BASIC',
@@ -227,7 +231,9 @@ const [isUploading, setIsUploading] = useState(false);
       setPaymentProcessing(false);
     }
   };
-const handleFileUpload = async (e) => {
+  
+
+  const handleFileUpload = (e) => {
   const file = e.target.files[0];
   if (!file || !selectedUser) return;
 
@@ -239,33 +245,51 @@ const handleFileUpload = async (e) => {
     alert("Please upload only images or videos.");
     return;
   }
+
   if (file.size > 4.5 * 1024 * 1024) {
     alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Vercel limits uploads to 4.5MB.`);
     e.target.value = null; 
     return;
   }
 
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+
+  setPreviewFile(file);
+  setPreviewUrl(URL.createObjectURL(file));
+  setCaption(""); 
+
+  if (e.target) e.target.value = null; 
+};
+
+const handleFinalSend = async () => {
+  if (!previewFile || isUploading || !selectedUser) return;
+
   setIsUploading(true);
   const formData = new FormData();
-  formData.append('file', file);
+  
+  formData.append('file', previewFile);
   formData.append('receiverId', selectedUser._id);
-  formData.append('senderModel', 'Agent'); 
-  formData.append('fileType', detectedType); // Send 'video' or 'image'
+  formData.append('senderModel', 'Agent');
+  formData.append('text', caption); 
+  
+  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+  formData.append('fileType', detectedType);
 
   try {
-    const token = localStorage.getItem('agentToken');    
+    const token = localStorage.getItem('zingToken');    
     const response = await fetch('/api/messages/upload', {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}` 
-      },
+      headers: { 'Authorization': `Bearer ${token}` },
       body: formData
     });
 
     const data = await response.json();
     
     if (data.success) {
-      setMessages(prev => [...prev, data.message]);      
+      setMessages(prev => [...prev, data.message]);
+      setPreviewUrl(null);
+      setPreviewFile(null);
+      setCaption("");
     } else {
       alert(data.error || "Upload failed");
     }
@@ -274,9 +298,9 @@ const handleFileUpload = async (e) => {
     alert("System error during upload.");
   } finally {
     setIsUploading(false);
-    if (e.target) e.target.value = null; 
   }
 };
+
 
   const handleLogout = () => {
     const currentSlug = agentData.slug;
@@ -791,16 +815,32 @@ const handleSendMessage = async (e) => {
       }`}
     >
       {/* 1. Handle Media Content */}
-     {m.fileType === 'image' && (
-  <img 
-    src={m.fileUrl} 
-    alt="attachment" 
-    className="rounded-lg mb-2 max-w-full object-cover min-h-[100px] bg-gray-100"
-    onError={(e) => {
-      console.error("Image failed to load:", m.fileUrl);
-      e.target.src = 'https://via.placeholder.com/150?text=Error+Loading+Image';
-    }}
-  />
+{m.fileType === 'image' && (
+  <div className="relative mb-2 mt-1">
+    <img 
+      src={m.fileUrl} 
+      alt="attachment" 
+      className="
+        rounded-lg 
+        bg-gray-100 
+        object-cover 
+        /* Mobile: Takes up most of the bubble width */
+        w-full 
+        max-w-[280px] 
+        max-h-[300px] 
+        /* Desktop: Slightly larger but contained */
+        md:max-w-[350px] 
+        md:max-h-[400px] 
+        transition-all 
+        hover:opacity-95 
+        cursor-pointer
+      "
+      onError={(e) => {
+        console.error("Image failed to load:", m.fileUrl);
+        e.target.src = 'https://via.placeholder.com/150?text=Error+Loading+Image';
+      }}
+    />
+  </div>
 )}
       {/* 2. Handle Text Content */}
       {m.text && <p className="text-xs md:text-[13px] text-[#303030] leading-relaxed pr-8">{m.text}</p>}
@@ -817,6 +857,47 @@ const handleSendMessage = async (e) => {
     </div>
   ))}
 </div>
+
+{/* --- AGENT WHATSAPP PREVIEW OVERLAY --- */}
+    {previewUrl && (
+      <div className="absolute inset-0 z-[500] bg-slate-950 flex flex-col animate-in fade-in zoom-in duration-200">
+        <div className="p-4 flex justify-between items-center text-white/70">
+          <button onClick={() => { setPreviewUrl(null); setPreviewFile(null); }} className="p-2 hover:bg-white/10 rounded-full">
+            <BsChevronLeft size={24} />
+          </button>
+          <span className="text-[10px] font-black uppercase tracking-widest">Official Media Preview</span>
+          <div className="w-10" />
+        </div>
+
+        <div className="flex-1 flex items-center justify-center p-6">
+          <img src={previewUrl} className="max-h-full max-w-full object-contain rounded-xl shadow-2xl border border-white/5" />
+        </div>
+
+        <div className="p-6 bg-slate-900/90 backdrop-blur-xl border-t border-white/5">
+          <div className="max-w-4xl mx-auto flex items-center gap-4 bg-white/5 p-2 rounded-2xl border border-white/10">
+            <input
+              type="text"
+              placeholder="Add an official caption..."
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
+              autoFocus
+            />
+            <button 
+              onClick={handleFinalSend}
+              disabled={isUploading}
+              className="bg-blue-600 hover:bg-blue-500 text-white p-4 rounded-xl transition-all shadow-lg shadow-blue-900/20"
+            >
+              {isUploading ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+              ) : (
+                <BsCheckCircleFill size={20} />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
 <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
   {/* HIDDEN INPUTS */}

@@ -41,11 +41,11 @@ export const UserDashboard = () => {
   const lastNotifiedId = useRef(null);
   
   const cameraInputRef = useRef(null); // Ref for direct camera access
-const [isUploading, setIsUploading] = useState(false); // Tracking upload state
-  // Onboarding & Photo State
+const [previewFile, setPreviewFile] = useState(null); // Use this for the actual file
+const [caption, setCaption] = useState("");
+const [isUploading, setIsUploading] = useState(false);       // The text to send with the image
+
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -231,14 +231,47 @@ useEffect(() => {
   // --- HANDLERS ---
   const handlePhotoClick = () => fileInputRef.current.click();
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setSelectedFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+const handleFileChange = (e) => {
+  const file = e.target.files[0];
+  
+  if (file) {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
     }
-  };
+    setSelectedFile(file);
+    const localUrl = URL.createObjectURL(file);
+    setPreviewUrl(localUrl);    
+    setCaption(""); 
+  }
+};
 
+const handleSendWithPreview = async () => {
+  if (!selectedFile || isUploading) return;
+  setIsUploading(true);
+
+  try {
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    
+    const uploadRes = await axios.post('/api/upload', formData);
+    const { fileUrl, fileType } = uploadRes.data;
+    const payload = {
+      receiverId: selectedUser._id,
+      text: caption.trim(), // The caption typed in the preview
+      fileUrl: fileUrl,
+      fileType: fileType,
+      senderModel: 'User' // or 'User' depending on the dashboard
+    };
+    socket.emit('sendMessage', payload);
+    setPreviewUrl(null);
+    setSelectedFile(null);
+    setCaption("");
+  } catch (error) {
+    console.error("Failed to send media:", error);
+  } finally {
+    setIsUploading(false);
+  }
+};
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem('userToken');
@@ -276,25 +309,52 @@ useEffect(() => {
   }
 };
 
-const handleFileUpload = async (e) => {
+// This function handles picking the file and showing the preview
+const handleFileUpload = (e) => {
   const file = e.target.files[0];
   if (!file || !agent?._id) return;
 
   const isVideo = file.type.startsWith('video/');
   const isImage = file.type.startsWith('image/');
   const detectedType = isVideo ? 'video' : 'image';
-  if (file.size > 4.5 * 1024 * 1024) {
-    alert("File too large. Please select a file under 4.5MB.");
+
+  if (!isVideo && !isImage) {
+    alert("Please upload only images or videos.");
     return;
   }
 
+  if (file.size > 4.5 * 1024 * 1024) {
+    alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Limit is 4.5MB.`);
+    e.target.value = null; 
+    return;
+  }
+
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+
+  setPreviewFile(file);
+  setPreviewUrl(URL.createObjectURL(file));
+  setCaption(""); 
+
+  if (e.target) e.target.value = null; 
+};
+
+// This function handles the actual upload when you click the send button in the overlay
+const handleFinalSend = async () => {
+  if (!previewFile || isUploading || !agent?._id) return;
+
   setIsUploading(true);
   const formData = new FormData();
-  formData.append('file', file);
+  
+  formData.append('file', previewFile);
   formData.append('receiverId', agent._id);
+  formData.append('senderModel', 'User'); // Mark this as User
+  formData.append('text', caption); 
+  
+  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+  formData.append('fileType', detectedType);
 
   try {
-    const token = localStorage.getItem('userToken');
+    const token = localStorage.getItem('userToken'); // Use userToken here    
     const response = await fetch('/api/messages/upload', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
@@ -302,14 +362,20 @@ const handleFileUpload = async (e) => {
     });
 
     const data = await response.json();
+    
     if (data.success) {
       setMessages(prev => [...prev, data.message]);
+      setPreviewUrl(null);
+      setPreviewFile(null);
+      setCaption("");
+    } else {
+      alert(data.error || "Upload failed");
     }
   } catch (err) {
-    console.error("Upload failed:", err);
+    console.error("Upload Error:", err);
+    alert("System error during upload.");
   } finally {
     setIsUploading(false);
-    e.target.value = null; // Reset input
   }
 };
 
@@ -546,15 +612,52 @@ const handleFileUpload = async (e) => {
         m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
       }`}
     >
-      {/* Media Handling */}
-      {m.fileType === 'image' && (
-        <img src={m.fileUrl} alt="attachment" className="rounded-lg mb-2 max-w-full object-cover" />
-      )}
-      {m.fileType === 'video' && (
-        <video controls className="rounded-lg mb-2 max-w-full">
-          <source src={m.fileUrl} type="video/mp4" />
-        </video>
-      )}
+     {/* Media Handling */}
+{m.fileType === 'image' && (
+  <div className="relative mb-2 mt-1">
+    <img 
+      src={m.fileUrl} 
+      alt="attachment" 
+      className="
+        rounded-lg 
+        bg-gray-100 
+        object-cover 
+        /* Responsive Sizing */
+        w-full 
+        max-w-[260px] 
+        max-h-[300px] 
+        md:max-w-[380px] 
+        md:max-h-[450px] 
+        cursor-pointer
+        transition-opacity
+        hover:opacity-95
+      " 
+      onError={(e) => {
+        e.target.onerror = null;
+        e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+      }}
+    />
+  </div>
+)}
+
+{m.fileType === 'video' && (
+  <div className="relative mb-2 mt-1">
+    <video 
+      controls 
+      className="
+        rounded-lg 
+        w-full 
+        max-w-[260px] 
+        md:max-w-[380px] 
+        max-h-[450px]
+        bg-black
+      "
+    >
+      <source src={m.fileUrl} type="video/mp4" />
+      Your browser does not support the video tag.
+    </video>
+  </div>
+)}
 
       {/* Text Content */}
       {m.text && (
@@ -579,10 +682,74 @@ const handleFileUpload = async (e) => {
   {/* This empty div is what the useRef targets to keep the chat scrolled down */}
   <div ref={messagesEndRef} className="h-4 shrink-0" />
 </main>
+{/* --- INSERT WHATSAPP PREVIEW HERE --- */}
+        {previewUrl && (
+          <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="p-4 flex justify-between items-center text-white">
+              <button 
+                onClick={() => { setPreviewUrl(null); setSelectedFile(null); }} 
+                className="p-2 hover:bg-white/10 rounded-full transition-colors"
+              >
+                <BsChevronLeft size={24} />
+              </button>
+              <span className="font-bold uppercase tracking-widest text-[10px]">Preview Media</span>
+              <div className="w-10" /> 
+            </div>
+
+            {/* Image Preview Container */}
+            <div className="flex-1 flex items-center justify-center p-4">
+              <img 
+                src={previewUrl} 
+                alt="Preview" 
+                className="max-h-full max-w-full object-contain rounded-lg shadow-2xl" 
+              />
+            </div>
+
+            {/* Caption Input Area */}
+            <div className="p-4 bg-black/40 backdrop-blur-md">
+              <div className="max-w-4xl mx-auto flex items-end gap-3 bg-white/10 p-2 rounded-2xl border border-white/20">
+                <input
+                  type="text"
+                  placeholder="Add a caption..."
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
+                  autoFocus
+                />
+                <button 
+                  onClick={handleFinalSend}
+                  disabled={isUploading}
+                  className="bg-blue-600 text-white p-4 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg"
+                >
+                  {isUploading ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                  ) : (
+                    <BsSendFill size={20} />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
 <footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3 z-20 border-t border-gray-200 pb-safe">
   {/* Hidden Inputs for File and Camera */}
-  <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
-  <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
+  <input 
+    type="file" 
+    ref={fileInputRef} 
+    onChange={handleFileUpload} 
+    accept="image/*,video/*" 
+    className="hidden" 
+  />
+  <input 
+    type="file" 
+    ref={cameraInputRef} 
+    onChange={handleFileUpload} 
+    accept="image/*,video/*" 
+    capture="environment" 
+    className="hidden" 
+  />
 
   <div className="flex gap-1 md:gap-2 text-gray-500">
     {/* Attachment Button */}
