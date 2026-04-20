@@ -49,6 +49,7 @@ export const UserDashboard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('online');
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [formData, setFormData] = useState({

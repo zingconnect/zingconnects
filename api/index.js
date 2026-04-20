@@ -20,12 +20,22 @@ import Message from './models/Message.js';
 import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
 import webpush from 'web-push';
+import { Server } from 'socket.io';
+import http from 'http';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const server = http.createServer(app); // Create the HTTP server
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Adjust this to your frontend URL for security
+    methods: ["GET", "POST"]
+  }
+});
 
 app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);
@@ -114,6 +124,32 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
+io.on("connection", (socket) => {
+  console.log("A user connected:", socket.id);
+  socket.on("join-main-room", (userId) => {
+    socket.join(userId);
+    console.log(`User ${userId} joined their private room`);
+  });
+  socket.on("call-user", ({ userToCall, signalData, fromId, fromName }) => {
+    io.to(userToCall).emit("incoming-call", { 
+      signal: signalData, 
+      fromId, 
+      fromName 
+    });
+  });
+
+  socket.on("answer-call", (data) => {
+    io.to(data.to).emit("call-accepted", data.signal);
+  });
+  socket.on("end-call", ({ to }) => {
+    io.to(to).emit("call-ended");
+  });
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected");
+  });
+});
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
