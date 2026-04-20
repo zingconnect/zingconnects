@@ -200,39 +200,40 @@ router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
 router.post('/get-upload-url', authenticateToken, async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
-    const key = `chat/${Date.now()}-${fileName}`;
 
-    // Create the "Put" command
+    if (!fileName || !fileType) {
+      return res.status(400).json({ success: false, message: "File metadata missing" });
+    }
+
+    const fileExtension = fileName.split('.').pop();
+    const key = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
+
     const command = new PutObjectCommand({
       Bucket: process.env.IDRIVE_BUCKET_NAME,
       Key: key,
       ContentType: fileType,
     });
 
-    // Generate a URL that the frontend can PUSH data to
-    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 600 }); // 10 min window
+    // Generate the URL that the frontend uses to PUT the file directly to iDrive
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
     res.json({ success: true, uploadUrl, key });
   } catch (err) {
+    console.error("Presigned URL Error:", err);
     res.status(500).json({ success: false, message: "Could not generate upload pass" });
   }
 });
 
-// --- 4. CONFIRM UPLOAD & SAVE MESSAGE ---
-// This is called AFTER the frontend successfully PUTS the file to iDrive/S3
+// --- 2. CONFIRM UPLOAD & SAVE MESSAGE ---
+// Called AFTER the frontend successfully uploads the file to storage
 router.post('/confirm-upload', authenticateToken, async (req, res) => {
   try {
     const { receiverId, text, fileUrl, fileType } = req.body;
 
-    // Validation
     if (!receiverId || !fileUrl) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing receiver ID or file path." 
-      });
+      return res.status(400).json({ success: false, message: "Missing receiver ID or file path." });
     }
 
-    // Determine the direction of the message based on the logged-in user's role
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
     const senderModel = req.user.role === 'agent' ? 'Agent' : 'User';
 
@@ -241,18 +242,22 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
       senderModel: senderModel,
       receiverId,
       receiverModel,
-      text: text || "", // This is your caption
-      fileUrl: fileUrl, // This is the 'key' (e.g., 'chat/123-video.mp4')
-      fileType: fileType, // 'image' or 'video'
+      text: text || "",
+      fileUrl: fileUrl, // Storing the 'key'
+      fileType: fileType,
       status: 'sent'
     });
 
     await newMessage.save();
 
-    // Generate a temporary signed URL so the frontend can display the media immediately
-    const signedUrlForFrontend = await generateSignedUrl(fileUrl);
-        const responseData = newMessage.toObject();
+    // Use your signing helper to give the frontend a working temporary link
+    // Make sure 'getPrivateUrl' or 'generateSignedUrl' is imported/accessible here
+    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
+    
+    const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
+
+    // --- PUSH NOTIFICATION ---
     try {
       const TargetModel = receiverModel === 'Agent' ? Agent : User;
       const receiver = await TargetModel.findById(receiverId);
@@ -273,17 +278,11 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
       console.error("Push Notification Failed:", pushErr);
     }
 
-    res.status(201).json({ 
-      success: true, 
-      message: responseData 
-    });
+    res.status(201).json({ success: true, message: responseData });
 
   } catch (err) {
     console.error("CONFIRMATION ERROR:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to save message to database." 
-    });
+    res.status(500).json({ success: false, message: "Failed to save message to database." });
   }
 });
 

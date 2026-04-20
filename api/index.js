@@ -1337,7 +1337,8 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
-// --- 1. GET UPLOAD PERMISSION (Bypasses Vercel 4.5MB Limit) ---
+
+// --- 1. GET UPLOAD PERMISSION ---
 app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
@@ -1355,28 +1356,21 @@ app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => 
       ContentType: fileType,
     });
 
+    // Use the s3Client defined in your index.js
     const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
-    res.json({ 
-      success: true, 
-      uploadUrl, 
-      key 
-    });
-
+    res.json({ success: true, uploadUrl, key });
   } catch (err) {
     console.error("Presigned URL Error:", err);
-    res.status(500).json({ success: false, message: "Server error generating upload link" });
+    res.status(500).json({ success: false, message: "Could not generate upload pass", error: err.message });
   }
 });
 
 // --- 2. CONFIRM UPLOAD & SAVE TO DB ---
 app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
+    await connectToDatabase(); // Ensure DB is connected for Vercel Serverless
     const { receiverId, text, fileUrl, fileType } = req.body;
-
-    if (!receiverId || !fileUrl) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
-    }
 
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
     
@@ -1386,27 +1380,23 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
       receiverId,
       receiverModel,
       text: text || "",
-      fileUrl: fileUrl, // This is the 'key' (path) from Step 1
-      fileType: fileType, // 'image' or 'video'
+      fileUrl: fileUrl, 
+      fileType: fileType,
       status: 'sent'
     });
 
     await newMessage.save();
     
-    // Generates the temporary viewing link for the frontend
-    const signedUrlForFrontend = await generateSignedUrl(fileUrl);
+    // Uses your existing getPrivateUrl function from index.js
+    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
     
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
-    res.status(201).json({ 
-      success: true, 
-      message: responseData 
-    });
-
+    res.status(201).json({ success: true, message: responseData });
   } catch (err) {
     console.error("Confirmation Error:", err);
-    res.status(500).json({ success: false, message: "Failed to save message" });
+    res.status(500).json({ success: false, message: "Failed to save message", error: err.message });
   }
 });
 
