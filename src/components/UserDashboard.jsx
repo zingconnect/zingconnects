@@ -45,6 +45,7 @@ export const UserDashboard = () => {
   const [previewUrl, setPreviewUrl] = useState(null); // Added this to stop the "not defined" error
   const [caption, setCaption] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [fullscreenImage, setFullscreenImage] = useState(null);
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [formData, setFormData] = useState({
@@ -624,59 +625,59 @@ const handleFinalSend = async () => {
         m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
       }`}
     >
-     {/* Media Handling */}
-{m.fileType === 'image' && (
+    {/* Media Handling */}
+{(m.fileType === 'image' || m.fileType === 'video') && (
   <div className="relative mb-2 mt-1">
-    <img 
-      src={m.fileUrl} 
-      alt="attachment" 
-      className="
-        rounded-lg 
-        bg-gray-100 
-        object-cover 
-        /* Responsive Sizing */
-        w-full 
-        max-w-[260px] 
-        max-h-[300px] 
-        md:max-w-[380px] 
-        md:max-h-[450px] 
-        cursor-pointer
-        transition-opacity
-        hover:opacity-95
-      " 
-      onError={(e) => {
-        e.target.onerror = null;
-        e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
-      }}
-    />
+    {m.fileType === 'image' ? (
+      <img 
+        src={m.fileUrl} 
+        alt="attachment" 
+        /* Trigger Fullscreen Modal */
+        onClick={() => setFullscreenImage(m.fileUrl)} 
+        className="
+          rounded-lg 
+          bg-gray-100 
+          object-cover 
+          w-full 
+          max-w-[260px] 
+          max-h-[300px] 
+          md:max-w-[380px] 
+          md:max-h-[450px] 
+          cursor-pointer
+          transition-opacity
+          hover:opacity-95
+        " 
+        onError={(e) => {
+          e.target.onerror = null;
+          e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+        }}
+      />
+    ) : (
+      <video 
+        controls 
+        className="
+          rounded-lg 
+          w-full 
+          max-w-[260px] 
+          md:max-w-[380px] 
+          max-h-[450px]
+          bg-black
+        "
+      >
+        <source src={m.fileUrl} type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
+    )}
   </div>
 )}
 
-{m.fileType === 'video' && (
-  <div className="relative mb-2 mt-1">
-    <video 
-      controls 
-      className="
-        rounded-lg 
-        w-full 
-        max-w-[260px] 
-        md:max-w-[380px] 
-        max-h-[450px]
-        bg-black
-      "
-    >
-      <source src={m.fileUrl} type="video/mp4" />
-      Your browser does not support the video tag.
-    </video>
-  </div>
+{/* Text Content (Caption) */}
+{/* By placing this right under the media inside the bubble, it acts as a caption */}
+{m.text && (
+  <p className={`text-[12px] md:text-[14px] leading-relaxed pr-10 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+    {m.text}
+  </p>
 )}
-
-      {/* Text Content */}
-      {m.text && (
-        <p className="text-[12px] md:text-[14px] text-[#303030] leading-relaxed pr-10 break-words">
-          {m.text}
-        </p>
-      )}
 
       {/* Timestamp and Ticks */}
       <div className="flex items-center justify-end gap-1 mt-0.5">
@@ -831,6 +832,23 @@ const handleFinalSend = async () => {
           </div>
         </button>
       )}
+
+      {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
+{fullscreenImage && (
+  <div 
+    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
+    onClick={() => setFullscreenImage(null)}
+  >
+    <button className="absolute top-6 right-6 text-white/70 hover:text-white">
+      <BsChevronLeft size={30} className="rotate-180" /> {/* Close Icon */}
+    </button>
+    <img 
+      src={fullscreenImage} 
+      className="max-w-full max-h-full object-contain shadow-2xl" 
+      alt="Full view" 
+    />
+  </div>
+)}
     </div>
   );
 };

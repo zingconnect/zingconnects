@@ -1286,11 +1286,12 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     await connectToDatabase();
-    const { receiverId } = req.body;
+    
+    // 1. UPDATE: Destructure 'text' from req.body
+    const { receiverId, text } = req.body; 
 
     if (!req.file) return res.status(400).json({ success: false, message: "No file" });
 
@@ -1311,14 +1312,14 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
 
     await parallelUploads3.done();
 
-    // Store only the filename (Key) in the database
+    // 2. UPDATE: Pass 'text' to the new Message constructor
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
       receiverModel: req.user.role === 'agent' ? 'User' : 'Agent',
-      text: "",
-      fileUrl: fileName, // DO NOT save the full static URL
+      text: text || "", // <--- Use the text from the frontend or default to empty
+      fileUrl: fileName, 
       fileType: detectedType,
       status: 'sent'
     });
@@ -1335,7 +1336,6 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
-
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

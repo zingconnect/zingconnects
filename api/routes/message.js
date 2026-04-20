@@ -151,8 +151,8 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
       receiverModel,
-      text: "", 
-      fileUrl: fileName, // SAVE ONLY THE KEY
+      text: text || "",
+      fileUrl: fileName, 
       fileType: detectedType,
       status: 'sent'
     });

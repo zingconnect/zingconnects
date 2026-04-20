@@ -33,7 +33,8 @@ export const AgentDashboard = () => {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showSidebar, setShowSidebar] = useState(true);
-  
+  const [fullscreenImage, setFullscreenImage] = useState(null);
+
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
@@ -806,48 +807,49 @@ const handleSendMessage = async (e) => {
             <BsThreeDotsVertical className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
           </div>
         </header>
-           <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
+          <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
   {messages.map((m) => (
     <div 
       key={m._id || m.id} 
-      className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative ${
-        m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end' : 'bg-white self-start'
+      className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
+        m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
       }`}
     >
-      {/* 1. Handle Media Content */}
-{m.fileType === 'image' && (
-  <div className="relative mb-2 mt-1">
-    <img 
-      src={m.fileUrl} 
-      alt="attachment" 
-      className="
-        rounded-lg 
-        bg-gray-100 
-        object-cover 
-        /* Mobile: Takes up most of the bubble width */
-        w-full 
-        max-w-[280px] 
-        max-h-[300px] 
-        /* Desktop: Slightly larger but contained */
-        md:max-w-[350px] 
-        md:max-h-[400px] 
-        transition-all 
-        hover:opacity-95 
-        cursor-pointer
-      "
-      onError={(e) => {
-        console.error("Image failed to load:", m.fileUrl);
-        e.target.src = 'https://via.placeholder.com/150?text=Error+Loading+Image';
-      }}
-    />
-  </div>
-)}
-      {/* 2. Handle Text Content */}
-      {m.text && <p className="text-xs md:text-[13px] text-[#303030] leading-relaxed pr-8">{m.text}</p>}
+      {/* 1. Handle Media Content (Image or Video) */}
+      {(m.fileType === 'image' || m.fileType === 'video') && (
+        <div className="relative mb-1.5 mt-0.5">
+          {m.fileType === 'image' ? (
+            <img 
+              src={m.fileUrl} 
+              alt="attachment" 
+              onClick={() => setFullscreenImage(m.fileUrl)} 
+              className="rounded-lg bg-gray-100 object-cover w-full max-w-[280px] max-h-[320px] md:max-w-[400px] md:max-h-[500px] cursor-pointer transition-opacity hover:opacity-95"
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = 'https://via.placeholder.com/300x200?text=Media+Unavailable';
+              }}
+            />
+          ) : (
+            <video 
+              controls 
+              className="rounded-lg w-full max-w-[280px] md:max-w-[400px] max-h-[500px] bg-black shadow-inner"
+            >
+              <source src={m.fileUrl} type="video/mp4" />
+            </video>
+          )}
+        </div>
+      )}
+
+      {/* 2. Handle Text Content (Acts as caption if media is present) */}
+      {m.text && (
+        <p className={`text-[13px] md:text-[15px] text-[#303030] leading-relaxed break-words ${m.fileType ? 'px-1 pb-1 pt-1' : 'pr-8'}`}>
+          {m.text}
+        </p>
+      )}
 
       {/* 3. Time and Status Bar */}
-      <div className="flex items-center justify-end gap-1 mt-0.5">
-        <span className="text-[9px] text-gray-400">
+      <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
+        <span className="text-[9px] text-gray-400 font-bold uppercase">
           {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </span>
         
@@ -857,7 +859,6 @@ const handleSendMessage = async (e) => {
     </div>
   ))}
 </div>
-
 {/* --- AGENT WHATSAPP PREVIEW OVERLAY --- */}
     {previewUrl && (
       <div className="absolute inset-0 z-[500] bg-slate-950 flex flex-col animate-in fade-in zoom-in duration-200">
@@ -979,6 +980,28 @@ const handleSendMessage = async (e) => {
           </div>
         )}
       </main>
+      {/* --- FULLSCREEN IMAGE OVERLAY --- */}
+{fullscreenImage && (
+  <div 
+    className="fixed inset-0 z-[30000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-300"
+    onClick={() => setFullscreenImage(null)}
+  >
+    {/* Close Header */}
+    <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/60 to-transparent">
+       <button className="text-white hover:text-gray-300 transition-colors">
+         <BsChevronLeft size={28} />
+       </button>
+       <span className="text-white text-[10px] font-black uppercase tracking-widest italic">Encrypted View</span>
+       <div className="w-8" />
+    </div>
+
+    <img 
+      src={fullscreenImage} 
+      className="max-w-[95%] max-h-[85%] object-contain shadow-2xl" 
+      alt="Full view" 
+    />
+  </div>
+)}
     </div>
   );
 };
