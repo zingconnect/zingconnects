@@ -72,14 +72,11 @@ export const agentSchema = new mongoose.Schema({
   toObject: { virtuals: true } 
 });
 
-// --- AUTO-CLEANUP INDEX ---
-// This deletes the document after 24 hours ONLY if isVerified is still false.
 agentSchema.index({ createdAt: 1 }, { 
   expireAfterSeconds: 86400, 
   partialFilterExpression: { isVerified: false } 
 });
 
-// --- VIRTUALS ---
 agentSchema.virtual('isExpired').get(function() {
   if (!this.expiryDate) return false;
   return new Date() > this.expiryDate;

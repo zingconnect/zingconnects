@@ -14,7 +14,7 @@ import axios from 'axios';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
-import  Agent from './models/Agent.js';
+import { agentSchema } from './models/Agent.js';
 import User from './models/User.js'; 
 import Message from './models/Message.js';
 import authRoutes from './routes/auth.js';
@@ -103,7 +103,7 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
 
     try {
         await connectToDatabase();
-        const Agent = getAgentModel();
+        const AgentModel = getAgentModel();
 
         const { firstName, lastName, email, password } = req.body;
         const isResend = req.body.resend === 'true' || req.body.resend === true;
@@ -121,7 +121,7 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
         const lowerEmail = email.toLowerCase().trim();
 
         // Check verification status
-        let existingAgent = await Agent.findOne({ email: lowerEmail });
+        let existingAgent = await AgentModel.findOne({ email: lowerEmail });
         if (existingAgent && existingAgent.isVerified) {
             return res.status(400).json({ 
                 success: false, 
@@ -145,7 +145,7 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
             
             finalSlug = baseSlug;
             let counter = 1;
-            while (await Agent.findOne({ slug: finalSlug })) {
+            while (await AgentModel.findOne({ slug: finalSlug })) {
                 finalSlug = `${baseSlug}-${counter}`;
                 counter++;
             }
@@ -173,14 +173,10 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
                 // We continue even if upload fails so registration isn't blocked
             }
         }
-
-        // --- 5. OTP GENERATION ---
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-        // --- 6. CREATE OR UPDATE DOCUMENT ---
         if (existingAgent) {
-            // Update the existing unverified record
             if (firstName) existingAgent.firstName = firstName.trim();
             if (lastName !== undefined) existingAgent.lastName = (lastName || "").trim();
             
@@ -199,7 +195,7 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
             console.log("Record Updated:", lowerEmail);
         } else {
             // Create brand new record
-            const newAgent = new Agent({
+            const newAgent = new AgentModel({
                 firstName: (firstName || "Agent").trim(),
                 lastName: (lastName || "").trim(),
                 email: lowerEmail,
@@ -226,7 +222,6 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
 
         // --- 7. EMAIL DELIVERY ---
         const logoPath = path.join(process.cwd(), 'public', 'logo.png');
-        // If logo doesn't exist, we skip attachment to prevent mailer crash
         const attachments = fs.existsSync(logoPath) ? [{
             filename: 'logo.png',
             path: logoPath,
@@ -317,13 +312,13 @@ app.post('/api/agents/verify-otp', async (req, res) => {
 
     // --- FIX 1: INITIALIZE THE MODEL ---
     // In your architecture, Agent needs to be retrieved from the getter
-    const Agent = getAgentModel(); 
+    const AgentModel = getAgentModel(); 
 
     if (!email || !otp) {
         return res.status(400).json({ success: false, message: "Email and OTP are required." });
     }
 
-    const agent = await Agent.findOne({ 
+    const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim(),
       otp: otp,
       otpExpires: { $gt: Date.now() } 
@@ -335,18 +330,13 @@ app.post('/api/agents/verify-otp', async (req, res) => {
         message: "The code is invalid or has expired. Please request a new one." 
       });
     }
-
-    // Update Agent Status
     agent.isVerified = true;
-    agent.status = 'active';
-    
-    // Cleanup OTP
+    agent.status = 'active';    
     agent.otp = undefined; 
     agent.otpExpires = undefined;
     
     await agent.save();
 
-    // --- FIX 2: ENV CHECK ---
     if (!process.env.JWT_SECRET) {
         console.error("CRITICAL: JWT_SECRET is not defined in .env");
         throw new Error("Security configuration missing");
@@ -366,7 +356,6 @@ app.post('/api/agents/verify-otp', async (req, res) => {
     });
 
   } catch (err) {
-    // Check your Vercel logs or Terminal for this specific printout:
     console.error("OTP Verification Error:", err.message);
     res.status(500).json({ 
       success: false, 
@@ -387,7 +376,7 @@ app.post('/api/agents/login', async (req, res) => {
     }
 
     // 1. Find agent and explicitly include password
-    const agent = await Agent.findOne({ 
+    const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('+password');
     
@@ -395,8 +384,6 @@ app.post('/api/agents/login', async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 2. NEW: CHECK VERIFICATION STATUS
-    // If the agent hasn't verified their OTP, block the login
     if (agent.isVerified === false) {
       return res.status(403).json({ 
         success: false, 
@@ -798,28 +785,23 @@ app.get('/api/agents/:slug', async (req, res) => {
     console.log("Slug requested:", req.params.slug);
     
     await connectToDatabase();
+    const AgentModel = getAgentModel(); 
 
-    // 1. Check if the Agent model is available
     if (!Agent) {
       throw new Error("Agent model is not initialized");
     }
 
-    const agent = await Agent.findOne({ slug: req.params.slug }).select('-password');
+    const agent = await AgentModel.findOne({ slug: req.params.slug }).select('-password');
     
     if (!agent) {
       console.log("Profile not found in MongoDB for slug:", req.params.slug);
       return res.status(404).json({ message: "Agent not found" });
     }
 
-    // Convert to plain object so we can modify photoUrl
     const agentObj = agent.toObject();
 
-    // 2. STRENGTHENED PHOTO LOGIC
-    // Only attempt S3 signing if photoUrl exists and looks like an IDrive path
     if (agentObj.photoUrl && typeof agentObj.photoUrl === 'string' && agentObj.photoUrl.includes('profiles/')) {
       try {
-        // Extract just the filename. 
-        // Example: https://.../profiles/17123456-pic.jpg -> profiles/17123456-pic.jpg
         const urlParts = agentObj.photoUrl.split('profiles/');
         const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
         const fileKey = `profiles/${fileName}`;
