@@ -62,6 +62,8 @@ const [connectionStatus, setConnectionStatus] = useState('online');
 const [callStatus, setCallStatus] = useState('idle'); // idle, ringing, connecting, connected, ended
 const [isIncomingCall, setIsIncomingCall] = useState(false);
 const [activeCaller, setActiveCaller] = useState(null);
+const [isMuted, setIsMuted] = useState(false);
+const [isSpeakerOn, setIsSpeakerOn] = useState(false);
 const connectionRef = useRef();
 
   // Subscription States
@@ -1428,13 +1430,19 @@ const handleSendMessage = async (e) => {
   <div className="fixed inset-0 z-[2000] bg-slate-900 flex flex-col items-center justify-center text-white animate-in fade-in duration-300">
     <div className="flex flex-col items-center space-y-6">
       {/* User/Agent Avatar */}
-      <div className="w-32 h-32 rounded-full border-4 border-blue-500/30 p-1">
-        <img 
-          src={agentData?.photoUrl || "/default-avatar.png"} 
-          className="w-full h-full rounded-full object-cover" 
-          alt="Caller"
-        />
-      </div>
+     <div className="w-32 h-32 rounded-full border-4 border-blue-500/30 p-1 relative">
+    <img 
+      src={isIncomingCall ? activeCaller?.photoUrl : selectedUser?.photoUrl || "/default-avatar.png"} 
+      className="w-full h-full rounded-full object-cover shadow-2xl" 
+      alt="Caller"
+      onError={(e) => {
+        e.target.src = `https://ui-avatars.com/api/?name=${isIncomingCall ? activeCaller?.fromName : selectedUser?.firstName}&background=random&color=fff`;
+      }}
+    />
+    {callStatus === 'ringing' && (
+      <div className="absolute inset-0 w-full h-full bg-blue-500 rounded-full animate-ping opacity-20"></div>
+    )}
+  </div>
       
       <div className="text-center">
         <h2 className="text-2xl font-bold">{agentData?.firstName} {agentData?.lastName}</h2>
@@ -1459,7 +1467,40 @@ const handleSendMessage = async (e) => {
             <BsMicMuteFill size={24} />
           </button>
         )}
-      </div>
+      </div>{/* Call Controls */}
+<div className="flex items-center gap-8 mt-12">
+  {/* LOUD SPEAKER BUTTON */}
+  <button 
+    onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+    className={`w-14 h-14 rounded-full flex flex-col items-center justify-center transition-all ${isSpeakerOn ? 'bg-white text-slate-900' : 'bg-white/10 text-white hover:bg-white/20'}`}
+  >
+    <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20">
+      <path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/>
+      <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z"/>
+      <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z"/>
+    </svg>
+    <span className="text-[8px] font-bold uppercase mt-1">Speaker</span>
+  </button>
+
+  {/* MAIN END CALL BUTTON */}
+  <button 
+    onClick={handleEndCall}
+    className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-90"
+  >
+    <div className="rotate-[135deg]">
+       <BsTelephoneFill size={32} />
+    </div>
+  </button>
+
+  {/* MUTE BUTTON */}
+  <button 
+    onClick={() => setIsMuted(!isMuted)}
+    className={`w-14 h-14 rounded-full flex flex-col items-center justify-center transition-all ${isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+  >
+    {isMuted ? <BsMicMuteFill size={20} /> : <BsMicMuteFill size={20} className="opacity-50" />}
+    <span className="text-[8px] font-bold uppercase mt-1">{isMuted ? 'Muted' : 'Mute'}</span>
+  </button>
+</div>
     </div>
   </div>
 )}
