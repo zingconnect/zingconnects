@@ -262,6 +262,16 @@ useEffect(() => {
     }
   };
 
+  const unlockAudio = () => {
+  notificationSound.current.play()
+    .then(() => {
+      notificationSound.current.pause();
+      notificationSound.current.currentTime = 0;
+      console.log("Audio unlocked for iOS");
+    })
+    .catch(e => console.error("Unlock failed", e));
+};
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !agent?._id) return;
@@ -363,6 +373,11 @@ useEffect(() => {
                        "{agent?.bio || "Secured communications specialist."}"
                     </p>
                 </div>
+                {!hasInteracted && (
+  <button onClick={unlockAudio} className="fixed inset-0 z-50 bg-black/20 flex items-center justify-center">
+    <div className="bg-white p-4 rounded-lg">Tap to enable message alerts</div>
+  </button>
+)}
             </div>
         </main>
       </aside>
