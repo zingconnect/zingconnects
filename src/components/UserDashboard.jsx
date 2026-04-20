@@ -28,7 +28,9 @@ function urlBase64ToUint8Array(base64String) {
 export const UserDashboard = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+
   // --- STATE ---
   const [agent, setAgent] = useState(null);
   const [user, setUser] = useState(null);
@@ -37,13 +39,12 @@ export const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
-  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
-  const lastNotifiedId = useRef(null);
   
-  const cameraInputRef = useRef(null); // Ref for direct camera access
-const [previewFile, setPreviewFile] = useState(null); // Use this for the actual file
-const [caption, setCaption] = useState("");
-const [isUploading, setIsUploading] = useState(false);       // The text to send with the image
+  // Media & Upload State (FIXED NAMES)
+  const [previewFile, setPreviewFile] = useState(null); 
+  const [previewUrl, setPreviewUrl] = useState(null); // Added this to stop the "not defined" error
+  const [caption, setCaption] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [formData, setFormData] = useState({
@@ -54,6 +55,9 @@ const [isUploading, setIsUploading] = useState(false);       // The text to send
     city: '',
     state: ''
   });
+
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
+  const lastNotifiedId = useRef(null);
 
   // --- HELPERS ---
   const getStatusInfo = (agentData) => {
@@ -309,62 +313,70 @@ const handleSendWithPreview = async () => {
   }
 };
 
-// This function handles picking the file and showing the preview
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
-  if (!file || !agent?._id) return;
+    if (!file || !agent?._id) return;
 
   const isVideo = file.type.startsWith('video/');
   const isImage = file.type.startsWith('image/');
-  const detectedType = isVideo ? 'video' : 'image';
-
+  
   if (!isVideo && !isImage) {
     alert("Please upload only images or videos.");
     return;
   }
-
   if (file.size > 4.5 * 1024 * 1024) {
-    alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Limit is 4.5MB.`);
+    alert(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max limit is 4.5MB.`);
     e.target.value = null; 
     return;
   }
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+  }
 
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-
+  // 4. Set State
+  const localUrl = URL.createObjectURL(file);
   setPreviewFile(file);
-  setPreviewUrl(URL.createObjectURL(file));
+  setPreviewUrl(localUrl);
   setCaption(""); 
 
   if (e.target) e.target.value = null; 
 };
 
-// This function handles the actual upload when you click the send button in the overlay
 const handleFinalSend = async () => {
+  // Guard: Don't run if no file, if already uploading, or if no agent selected
   if (!previewFile || isUploading || !agent?._id) return;
 
   setIsUploading(true);
   const formData = new FormData();
   
+  // Determine type again to be safe
+  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+
   formData.append('file', previewFile);
   formData.append('receiverId', agent._id);
-  formData.append('senderModel', 'User'); // Mark this as User
-  formData.append('text', caption); 
-  
-  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+  formData.append('senderModel', 'User'); 
+  formData.append('text', caption.trim()); 
   formData.append('fileType', detectedType);
 
   try {
-    const token = localStorage.getItem('userToken'); // Use userToken here    
+    const token = localStorage.getItem('userToken'); 
+    
     const response = await fetch('/api/messages/upload', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 
+        'Authorization': `Bearer ${token}` 
+      },
       body: formData
     });
 
     const data = await response.json();
     
     if (data.success) {
+      // 1. Add new message to the list
       setMessages(prev => [...prev, data.message]);
+      
+      // 2. IMPORTANT: Clean up memory and UI
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
       setPreviewFile(null);
       setCaption("");
@@ -373,7 +385,7 @@ const handleFinalSend = async () => {
     }
   } catch (err) {
     console.error("Upload Error:", err);
-    alert("System error during upload.");
+    alert("System error during upload. Please check your connection.");
   } finally {
     setIsUploading(false);
   }
