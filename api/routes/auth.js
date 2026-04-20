@@ -72,7 +72,7 @@ const AgentModel = getAgentModel();
     const lowerEmail = email.toLowerCase().trim();
 
     // 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS
-    let existingAgent = await Agent.findOne({ email: lowerEmail });
+    let existingAgent = await AgentModel.findOne({ email: lowerEmail });
 
     if (existingAgent && existingAgent.isVerified) {
       return res.status(400).json({ 
