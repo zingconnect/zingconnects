@@ -69,6 +69,10 @@ export async function connectToDatabase() {
 }
 
 
+const getAgentModel = () => {
+  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+};
+
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -787,7 +791,7 @@ app.get('/api/agents/:slug', async (req, res) => {
     await connectToDatabase();
     const AgentModel = getAgentModel(); 
 
-    if (!Agent) {
+    if (!AgentModel) {
       throw new Error("Agent model is not initialized");
     }
 
