@@ -19,6 +19,10 @@ export const AgentSlug = () => {
   const [loginEmail, setLoginEmail] = useState(''); // Portal email for Agents
   const [loginPassword, setLoginPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // --- REMEMBER ME STATES ---
+  const [rememberUser, setRememberUser] = useState(false);
+  const [rememberAgent, setRememberAgent] = useState(false);
 
   // Fetch Agent Profile on Load
   useEffect(() => {
@@ -39,7 +43,22 @@ export const AgentSlug = () => {
     fetchAgentProfile();
   }, [slug]);
 
-  // --- HANDLER 1: USER HANDSHAKE (Email Only) ---
+  // Load Remembered Credentials
+  useEffect(() => {
+    const savedUserEmail = localStorage.getItem('rememberedUserEmail');
+    const savedAgentEmail = localStorage.getItem('rememberedAgentEmail');
+    
+    if (savedUserEmail) {
+      setUserEmail(savedUserEmail);
+      setRememberUser(true);
+    }
+    if (savedAgentEmail) {
+      setLoginEmail(savedAgentEmail);
+      setRememberAgent(true);
+    }
+  }, []);
+
+  // --- HANDLER 1: USER HANDSHAKE ---
   const handleUserInquiry = async (e) => {
     e.preventDefault();
     if (!userEmail) return alert("Please enter your email to continue.");
@@ -59,6 +78,13 @@ export const AgentSlug = () => {
       const data = await response.json();
       
       if (response.ok) {
+        // Handle Remember Me logic
+        if (rememberUser) {
+          localStorage.setItem('rememberedUserEmail', userEmail);
+        } else {
+          localStorage.removeItem('rememberedUserEmail');
+        }
+
         localStorage.setItem('userToken', data.token);
         localStorage.setItem('userEmail', userEmail);
         alert("Verification Successful. Opening User Dashboard...");
@@ -72,7 +98,8 @@ export const AgentSlug = () => {
       setIsProcessing(false);
     }
   };
- // --- HANDLER 2: AGENT PORTAL LOGIN (Updated for OTP Verification & Sub Status) ---
+
+  // --- HANDLER 2: AGENT PORTAL LOGIN ---
   const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
@@ -86,7 +113,13 @@ export const AgentSlug = () => {
       const data = await response.json();
       
       if (response.ok && data.token) {
-        // --- STANDARD LOGIN SUCCESS ---
+        // Handle Remember Me logic
+        if (rememberAgent) {
+          localStorage.setItem('rememberedAgentEmail', loginEmail);
+        } else {
+          localStorage.removeItem('rememberedAgentEmail');
+        }
+
         localStorage.setItem('zingToken', data.token);
         localStorage.setItem('agentSlug', data.slug);
         localStorage.setItem('isSubscribed', data.isSubscribed); 
@@ -97,13 +130,10 @@ export const AgentSlug = () => {
         navigate('/agent/dashboard');
       } 
       else if (response.status === 403 && data.needsVerification) {
-        // --- NEW: REDIRECT TO OTP PAGE ---
-        alert(data.message); // "Account not verified. Please check your email..."
-        // We pass the email in state so the OTP page knows which account to verify
+        alert(data.message);
         navigate('/verify-otp', { state: { email: loginEmail } });
       } 
       else {
-        // --- WRONG PASSWORD / EMAIL ---
         alert(data.message || "Invalid Agent Credentials");
       }
     } catch (err) {
@@ -131,7 +161,6 @@ export const AgentSlug = () => {
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-blue-950 font-sans selection:bg-blue-100 overflow-x-hidden">
       
-      {/* Dynamic Header */}
       <header className="py-3 px-4 md:py-4 md:px-12 flex justify-between items-center bg-white/70 backdrop-blur-xl fixed top-0 w-full z-40 border-b border-gray-100/50">
         <img src={ZingConnectLogo} alt="ZingConnect" className="h-5 md:h-7 w-auto cursor-pointer" onClick={() => navigate('/')} />
         <button 
@@ -145,10 +174,8 @@ export const AgentSlug = () => {
         </button>
       </header>
 
-      {/* Main Container */}
       <main className={`transition-all duration-1000 pt-24 md:pt-40 pb-10 px-4 md:px-6 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 md:gap-16 items-start md:items-center ${isLoginOpen ? 'blur-2xl scale-[0.98] pointer-events-none' : ''}`}>
         
-        {/* RIGHT SIDE: User Inquiry Card */}
         <div className="w-full max-w-lg mx-auto lg:ml-auto order-first lg:order-last animate-in fade-in slide-in-from-top-10 lg:slide-in-from-right-10 duration-1000 delay-300">
           <div className="bg-white p-6 md:p-12 rounded-[2.5rem] md:rounded-[4rem] shadow-xl lg:shadow-[0_40px_100px_-20px_rgba(0,0,0,0.08)] border border-gray-100 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50/50 rounded-full -mr-12 -mt-12 blur-2xl" />
@@ -170,6 +197,19 @@ export const AgentSlug = () => {
                     placeholder="Enter email to verify..."
                     className="w-full px-6 py-4 md:px-8 md:py-5 bg-gray-50/50 border border-gray-100 rounded-[1.5rem] md:rounded-[2rem] text-xs md:text-sm outline-none focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-50 transition-all"
                   />
+                  {/* User Remember Me */}
+                  <div className="flex items-center gap-2 ml-4 mt-3">
+                    <input 
+                      type="checkbox" 
+                      id="rememberUser"
+                      checked={rememberUser}
+                      onChange={(e) => setRememberUser(e.target.checked)}
+                      className="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <label htmlFor="rememberUser" className="text-[8px] md:text-[9px] font-black text-gray-400 uppercase tracking-widest cursor-pointer">
+                      Remember Identity
+                    </label>
+                  </div>
                 </div>
                 
                 <button 
@@ -181,14 +221,13 @@ export const AgentSlug = () => {
                 </button>
                 
                 <p className="text-[8px] text-center text-gray-400 font-medium px-4 leading-relaxed">
-                  By initializing, you agree to the <span className="text-blue-600 underline">Security Terms</span>.
+                  By initializing, you agree to the <span className="text-blue-600 underline cursor-pointer">Security Terms</span>.
                 </p>
               </div>
             </form>
           </div>
         </div>
 
-        {/* LEFT SIDE: Profile Info */}
         <div className="space-y-8 md:space-y-10 animate-in fade-in slide-in-from-bottom-10 duration-1000">
           <div className="space-y-3 md:space-y-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50/50 border border-blue-100 text-blue-600 rounded-full">
@@ -247,11 +286,10 @@ export const AgentSlug = () => {
             </div>
           </div>
 
-          {/* Social Proof Footer */}
           <div className="pt-6 border-t border-gray-100 flex items-center justify-center lg:justify-start gap-4 md:gap-6">
             <div className="flex -space-x-2 md:-space-x-3">
               {[1, 2, 3, 4].map(i => (
-                <div key={i} className={`w-8 h-8 md:w-10 md:h-10 rounded-full border-2 md:border-4 border-[#FDFDFD] bg-blue-${i+1}00 shadow-sm`} />
+                <div key={i} className={`w-8 h-8 md:w-10 md:h-10 rounded-full border-2 md:border-4 border-[#FDFDFD] bg-blue-${(i+1)*100} shadow-sm`} />
               ))}
             </div>
             <div>
@@ -262,7 +300,6 @@ export const AgentSlug = () => {
         </div>
       </main>
 
-      {/* AGENT PORTAL MODAL */}
       {isLoginOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-blue-950/20 backdrop-blur-2xl">
           <div className="w-full max-w-sm bg-white p-8 md:p-12 rounded-[3rem] shadow-2xl border border-gray-100">
@@ -291,6 +328,21 @@ export const AgentSlug = () => {
                   {showPassword ? <BsEyeSlashFill size={16} /> : <BsEyeFill size={16} />}
                 </button>
               </div>
+
+              {/* Agent Remember Me */}
+              <div className="flex items-center gap-2 ml-2 mt-1">
+                <input 
+                  type="checkbox" 
+                  id="rememberAgent"
+                  checked={rememberAgent}
+                  onChange={(e) => setRememberAgent(e.target.checked)}
+                  className="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <label htmlFor="rememberAgent" className="text-[9px] font-black text-gray-400 uppercase tracking-widest cursor-pointer">
+                  Remember Access Key ID
+                </label>
+              </div>
+
               <button disabled={isProcessing} className="w-full py-5 bg-blue-950 text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg mt-2 disabled:opacity-50">
                 {isProcessing ? "Verifying..." : "Establish Connection"}
               </button>
@@ -302,7 +354,6 @@ export const AgentSlug = () => {
         </div>
       )}
 
-      {/* Decorative Footer */}
       <footer className="fixed bottom-6 left-0 w-full px-6 md:px-12 flex justify-between items-center pointer-events-none opacity-20 md:opacity-30">
         <p className="text-[7px] md:text-[8px] font-black text-blue-950 uppercase tracking-[0.3em]">Sys.04 // {slug}</p>
         <p className="text-[7px] md:text-[8px] font-black text-blue-950 uppercase tracking-[0.3em]">ZingConnect</p>
