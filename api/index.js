@@ -49,6 +49,17 @@ webpush.setVapidDetails(
   process.env.VITE_PRIVATE_KEY
 );
 
+
+const getPrivateUrl = async (fileKey) => {
+  if (!fileKey || fileKey.startsWith('http')) return fileKey;
+  const command = new GetObjectCommand({
+    Bucket: process.env.IDRIVE_BUCKET_NAME,
+    Key: fileKey,
+  });
+  // URL expires in 1 hour
+  return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+};
+
 let cachedDb = null;
 
 export async function connectToDatabase() {
@@ -1193,35 +1204,31 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
   }
 });
 
-// --- MARK MESSAGES AS READ ---
-app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req, res) => {
+// --- UPDATED: GET CHAT MESSAGES ---
+app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const myId = req.user.id; 
-    const { otherUserId } = req.params; 
+    const myId = req.user.id;
+    const { otherUserId } = req.params;
 
-    const result = await Message.updateMany(
-      { 
-        senderId: otherUserId, 
-        receiverId: myId, 
-        status: { $ne: 'seen' } 
-      },
-      { 
-        $set: { 
-          status: 'seen',
-          seenAt: new Date() 
-        } 
+    const messages = await Message.find({
+      $or: [
+        { senderId: myId, receiverId: otherUserId },
+        { senderId: otherUserId, receiverId: myId }
+      ]
+    }).sort({ createdAt: 1 }).lean();
+
+    // Convert stored Keys into working Presigned URLs
+    const signedMessages = await Promise.all(messages.map(async (m) => {
+      if (m.fileUrl) {
+        m.fileUrl = await getPrivateUrl(m.fileUrl);
       }
-    );
+      return m;
+    }));
 
-    res.json({ 
-      success: true, 
-      message: "Messages marked as read",
-      modifiedCount: result.modifiedCount 
-    });
+    res.json({ success: true, messages: signedMessages });
   } catch (err) {
-    console.error("MARK READ ERROR:", err);
-    res.status(500).json({ success: false, message: "Failed to update status" });
+    res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });
 
@@ -1271,61 +1278,48 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
 app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     await connectToDatabase();
-    const { receiverId } = req.body; // No need to trust the frontend for fileType
+    const { receiverId } = req.body;
 
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: "No file provided" });
-    }
-    const mimeType = req.file.mimetype; // e.g., "video/mp4" or "image/jpeg"
+    if (!req.file) return res.status(400).json({ success: false, message: "No file" });
+
+    const mimeType = req.file.mimetype;
     const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
-
     const fileExtension = req.file.originalname.split('.').pop();
     const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
+
     const parallelUploads3 = new Upload({
       client: s3Client,
       params: {
         Bucket: process.env.IDRIVE_BUCKET_NAME,
         Key: fileName,
         Body: req.file.buffer,
-        ContentType: mimeType, // Setting the correct MIME type is crucial for videos to play
+        ContentType: mimeType,
       },
     });
 
     await parallelUploads3.done();
 
-    const fileUrl = `${process.env.IDRIVE_ENDPOINT}/${process.env.IDRIVE_BUCKET_NAME}/${fileName}`;
+    // Store only the filename (Key) in the database
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
       receiverModel: req.user.role === 'agent' ? 'User' : 'Agent',
       text: "",
-      fileUrl: fileUrl,
-      fileType: detectedType, // Uses the detected "video" or "image"
+      fileUrl: fileName, // DO NOT save the full static URL
+      fileType: detectedType,
       status: 'sent'
     });
 
     await newMessage.save();
-    try {
-      const TargetModel = newMessage.receiverModel === 'Agent' ? Agent : User;
-      const receiver = await TargetModel.findById(receiverId);
 
-      if (receiver && receiver.pushSubscription) {
-        const payload = JSON.stringify({
-          title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
-          body: detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo",
-          data: {
-            url: newMessage.receiverModel === 'Agent' ? '/agent-dashboard' : '/user-dashboard'
-          }
-        });
-        webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
-      }
-    } catch (pErr) {}
+    // Generate a working link for the immediate frontend response
+    const responseData = newMessage.toObject();
+    responseData.fileUrl = await getPrivateUrl(fileName);
 
-    res.status(201).json({ success: true, message: newMessage });
-
+    res.status(201).json({ success: true, message: responseData });
   } catch (err) {
-    console.error("IDRIVE UPLOAD ERROR:", err);
+    console.error("UPLOAD ERROR:", err);
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
