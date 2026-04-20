@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import Peer from 'simple-peer';
+import Peer from 'simple-peer/simplepeer.min.js'; // Using the minified version is more stable in Vite
+import { Buffer } from 'buffer'; // Add this import here too
+
+// --- POLYFILLS MUST BE FIRST ---
+window.global = window;
+window.process = { env: {} };
+window.Buffer = Buffer;
 import { 
   BsSearch, 
   BsThreeDotsVertical, 
@@ -177,7 +183,6 @@ const handleAcceptCall = async () => {
   try {
     setCallStatus('connecting');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-
     const peer = new Peer({
       initiator: false,
       trickle: false,
@@ -194,7 +199,7 @@ const handleAcceptCall = async () => {
       audio.srcObject = remoteStream;
       audio.play();
     });
-    peer.signal(activeCaller.signal);
+    peer.signal(activeCaller.signal); 
     connectionRef.current = peer;
     setCallStatus('connected');
   } catch (err) {
