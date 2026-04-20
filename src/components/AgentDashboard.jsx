@@ -791,16 +791,17 @@ const handleSendMessage = async (e) => {
       }`}
     >
       {/* 1. Handle Media Content */}
-      {m.fileType === 'image' && (
-        <img src={m.fileUrl} alt="Shared" className="rounded-lg mb-2 max-w-full h-auto cursor-pointer" />
-      )}
-      
-      {m.fileType === 'video' && (
-        <video controls className="rounded-lg mb-2 max-w-full">
-          <source src={m.fileUrl} type="video/mp4" />
-        </video>
-      )}
-
+     {m.fileType === 'image' && (
+  <img 
+    src={m.fileUrl} 
+    alt="attachment" 
+    className="rounded-lg mb-2 max-w-full object-cover min-h-[100px] bg-gray-100"
+    onError={(e) => {
+      console.error("Image failed to load:", m.fileUrl);
+      e.target.src = 'https://via.placeholder.com/150?text=Error+Loading+Image';
+    }}
+  />
+)}
       {/* 2. Handle Text Content */}
       {m.text && <p className="text-xs md:text-[13px] text-[#303030] leading-relaxed pr-8">{m.text}</p>}
 
