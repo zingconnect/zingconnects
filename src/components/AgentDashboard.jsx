@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   BsSearch, 
@@ -272,6 +272,20 @@ const handleSelectUser = async (user) => {
   }
 };
 
+// Add this inside the AgentDashboard component
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const userIdFromUrl = params.get('userId');
+  
+  if (userIdFromUrl && users.length > 0) {
+    const userToSelect = users.find(u => u._id === userIdFromUrl);
+    if (userToSelect) {
+      handleSelectUser(userToSelect);
+      // Clean the URL so refreshing doesn't keep resetting the chat
+      navigate('/agent/dashboard', { replace: true });
+    }
+  }
+}, [users, navigate]); // Fires as soon as the user list is loaded from the API
 
 // Add this to your Agent Dashboard
 useEffect(() => {
