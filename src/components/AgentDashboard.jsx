@@ -34,6 +34,7 @@ export const AgentDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showSidebar, setShowSidebar] = useState(true);
   const [fullscreenImage, setFullscreenImage] = useState(null);
+const [fullscreenVideo, setFullscreenVideo] = useState(null);
 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -264,6 +265,22 @@ const handleFileUpload = (e) => {
   if (e.target) e.target.value = null; 
 };
 
+const handleDownload = async (fileUrl, fileName) => {
+  try {
+    const response = await fetch(fileUrl);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName || 'download';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("Download failed:", error);
+  }
+};
 
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
@@ -849,16 +866,17 @@ const handleSendMessage = async (e) => {
         </header>
           <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
   {messages.map((m) => (
-    <div 
-      key={m._id || m.id} 
-      className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
-        m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-      }`}
-    >
-      {/* 1. Handle Media Content (Image or Video) */}
-      {(m.fileType === 'image' || m.fileType === 'video') && (
-        <div className="relative mb-1.5 mt-0.5">
-          {m.fileType === 'image' ? (
+  <div 
+    key={m._id || m.id} 
+    className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
+      m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+    }`}
+  >
+    {/* 1. Handle Media Content (Image or Video) */}
+    {(m.fileType === 'image' || m.fileType === 'video') && (
+      <div className="relative mb-1.5 mt-0.5 group">
+        {m.fileType === 'image' ? (
+          <>
             <img 
               src={m.fileUrl} 
               alt="attachment" 
@@ -869,35 +887,64 @@ const handleSendMessage = async (e) => {
                 e.target.src = 'https://via.placeholder.com/300x200?text=Media+Unavailable';
               }}
             />
-          ) : (
+            {/* Quick Download Overlay for Image */}
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
+              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+              title="Download Image"
+            >
+              <BsDownload size={14} />
+            </button>
+          </>
+        ) : (
+          <div className="relative">
             <video 
-              controls 
-              className="rounded-lg w-full max-w-[280px] md:max-w-[400px] max-h-[500px] bg-black shadow-inner"
+              className="rounded-lg w-full max-w-[280px] md:max-w-[400px] max-h-[500px] bg-black shadow-inner cursor-pointer"
+              onClick={() => setFullscreenVideo(m.fileUrl)} // THIS TRIGGERS FULLSCREEN
             >
               <source src={m.fileUrl} type="video/mp4" />
             </video>
-          )}
-        </div>
-      )}
+            
+            {/* Play Icon Overlay to indicate it's clickable */}
+            <div 
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              onClick={() => setFullscreenVideo(m.fileUrl)}
+            >
+              <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
+                <BsPlayFill size={30} />
+              </div>
+            </div>
 
-      {/* 2. Handle Text Content (Acts as caption if media is present) */}
-      {m.text && (
-        <p className={`text-[13px] md:text-[15px] text-[#303030] leading-relaxed break-words ${m.fileType ? 'px-1 pb-1 pt-1' : 'pr-8'}`}>
-          {m.text}
-        </p>
-      )}
-
-      {/* 3. Time and Status Bar */}
-      <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
-        <span className="text-[9px] text-gray-400 font-bold uppercase">
-          {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-        
-        {/* Only show status ticks for messages sent by the Agent */}
-        {m.senderModel === 'Agent' && getStatusIcon(m.status)}
+            {/* Quick Download Overlay for Video */}
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
+              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
+              title="Download Video"
+            >
+              <BsDownload size={14} />
+            </button>
+          </div>
+        )}
       </div>
+    )}
+
+    {/* 2. Handle Text Content */}
+    {m.text && (
+      <p className={`text-[13px] md:text-[15px] text-[#303030] leading-relaxed break-words ${m.fileType ? 'px-1 pb-1 pt-1' : 'pr-8'}`}>
+        {m.text}
+      </p>
+    )}
+
+    {/* 3. Time and Status Bar */}
+    <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
+      <span className="text-[9px] text-gray-400 font-bold uppercase">
+        {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </span>
+      {m.senderModel === 'Agent' && getStatusIcon(m.status)}
     </div>
-  ))}
+  </div>
+))}
+
 </div>
 {/* --- AGENT WHATSAPP PREVIEW OVERLAY --- */}
 {previewUrl && (
@@ -1039,21 +1086,65 @@ const handleSendMessage = async (e) => {
 {fullscreenImage && (
   <div 
     className="fixed inset-0 z-[30000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-300"
-    onClick={() => setFullscreenImage(null)}
+    onClick={() => setFullscreenImage(null)} // Click outside to close
   >
-    {/* Close Header */}
-    <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/60 to-transparent">
-       <button className="text-white hover:text-gray-300 transition-colors">
+    {/* Header with Controls */}
+    <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
+       <button 
+         className="text-white hover:text-gray-300 transition-colors"
+         onClick={() => setFullscreenImage(null)} // Explicit close button
+       >
          <BsChevronLeft size={28} />
        </button>
-       <span className="text-white text-[10px] font-black uppercase tracking-widest italic">Encrypted View</span>
-       <div className="w-8" />
+
+       {/* NEW DOWNLOAD BUTTON FOR IMAGES */}
+       <button 
+         onClick={(e) => { 
+           e.stopPropagation(); // Prevents the overlay from closing
+           handleDownload(fullscreenImage, 'image'); 
+         }}
+         className="bg-white text-black px-4 py-2 rounded-lg flex items-center gap-2 text-[10px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
+         title="Save Image to Device"
+       >
+         <BsDownload size={16} /> Save Image
+       </button>
+       
+       <span className="text-white text-[10px] font-black uppercase tracking-widest italic opacity-60 hidden md:block">
+         Encrypted View
+       </span>
     </div>
 
     <img 
       src={fullscreenImage} 
-      className="max-w-[95%] max-h-[85%] object-contain shadow-2xl" 
+      className="max-w-[95%] max-h-[85%] object-contain shadow-2xl cursor-default" 
       alt="Full view" 
+      onClick={(e) => e.stopPropagation()} // Prevents closing when clicking the image itself
+    />
+  </div>
+)}
+
+{/* --- FULLSCREEN VIDEO OVERLAY --- */}
+{fullscreenVideo && (
+  <div className="fixed inset-0 z-[40000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-300">
+    {/* Header with Controls */}
+    <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent">
+       <button onClick={() => setFullscreenVideo(null)} className="text-white hover:text-gray-300">
+         <BsChevronLeft size={28} />
+       </button>
+       
+       <button 
+         onClick={() => handleDownload(fullscreenVideo, 'video')}
+         className="bg-white text-black px-4 py-2 rounded-lg flex items-center gap-2 text-[10px] font-black uppercase tracking-widest shadow-xl active:scale-95"
+       >
+         <BsDownload size={16} /> Save Video
+       </button>
+    </div>
+
+    <video 
+      src={fullscreenVideo} 
+      controls 
+      autoPlay 
+      className="max-w-full max-h-[90vh] shadow-2xl" 
     />
   </div>
 )}

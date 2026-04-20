@@ -46,6 +46,7 @@ export const UserDashboard = () => {
   const [caption, setCaption] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
+  const [fullscreenVideo, setFullscreenVideo] = useState(null);
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [formData, setFormData] = useState({
@@ -415,6 +416,23 @@ const handleFinalSend = async () => {
   }
 };
 
+const handleDownload = async (url, type) => {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `zing-${type}-${Date.now()}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error("Download failed:", err);
+  }
+};
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !agent?._id) return;
@@ -640,79 +658,88 @@ const handleFinalSend = async () => {
     </p>
   </div>
 
-  {/* 3. Message List */}
-  {messages.map((m) => (
-    <div 
-      key={m._id || m.id} 
-      className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 ${
-        m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-      }`}
-    >
+ {/* 3. Message List */}
+{messages.map((m) => (
+  <div 
+    key={m._id || m.id} 
+    className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 ${
+      m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+    }`}
+  >
     {/* Media Handling */}
-{(m.fileType === 'image' || m.fileType === 'video') && (
-  <div className="relative mb-2 mt-1">
-    {m.fileType === 'image' ? (
-      <img 
-        src={m.fileUrl} 
-        alt="attachment" 
-        /* Trigger Fullscreen Modal */
-        onClick={() => setFullscreenImage(m.fileUrl)} 
-        className="
-          rounded-lg 
-          bg-gray-100 
-          object-cover 
-          w-full 
-          max-w-[260px] 
-          max-h-[300px] 
-          md:max-w-[380px] 
-          md:max-h-[450px] 
-          cursor-pointer
-          transition-opacity
-          hover:opacity-95
-        " 
-        onError={(e) => {
-          e.target.onerror = null;
-          e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
-        }}
-      />
-    ) : (
-      <video 
-        controls 
-        className="
-          rounded-lg 
-          w-full 
-          max-w-[260px] 
-          md:max-w-[380px] 
-          max-h-[450px]
-          bg-black
-        "
-      >
-        <source src={m.fileUrl} type="video/mp4" />
-        Your browser does not support the video tag.
-      </video>
-    )}
-  </div>
-)}
+    {(m.fileType === 'image' || m.fileType === 'video') && (
+      <div className="relative mb-2 mt-1 group">
+        {m.fileType === 'image' ? (
+          <>
+            <img 
+              src={m.fileUrl} 
+              alt="attachment" 
+              onClick={() => setFullscreenImage(m.fileUrl)} 
+              className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+              }}
+            />
+            {/* Quick Download Overlay for User Dashboard */}
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
+              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+              title="Download Image"
+            >
+              <BsDownload size={14} />
+            </button>
+          </>
+        ) : (
+          <div className="relative">
+            <video 
+              className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
+              onClick={() => setFullscreenVideo(m.fileUrl)}
+            >
+              <source src={m.fileUrl} type="video/mp4" />
+            </video>
 
-{/* Text Content (Caption) */}
-{/* By placing this right under the media inside the bubble, it acts as a caption */}
-{m.text && (
-  <p className={`text-[12px] md:text-[14px] leading-relaxed pr-10 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
-    {m.text}
-  </p>
-)}
+            {/* Play Indicator Overlay */}
+            <div 
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              onClick={() => setFullscreenVideo(m.fileUrl)}
+            >
+              <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
+                <BsPlayFill size={30} />
+              </div>
+            </div>
 
-      {/* Timestamp and Ticks */}
-      <div className="flex items-center justify-end gap-1 mt-0.5">
-        <span className="text-[8px] md:text-[9px] text-gray-400 font-medium">
-          {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-        
-        {/* Only User messages get the status ticks (Gray/Blue) */}
-        {m.senderModel === 'User' && getStatusIcon(m.status)}
+            {/* Quick Download Overlay for Video */}
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
+              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
+              title="Download Video"
+            >
+              <BsDownload size={14} />
+            </button>
+          </div>
+        )}
       </div>
+    )}
+
+    {/* Text Content (Caption) */}
+    {m.text && (
+      <p className={`text-[12px] md:text-[14px] leading-relaxed pr-10 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+        {m.text}
+      </p>
+    )}
+
+    {/* Time / Status Bar */}
+    <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
+      <span className="text-[9px] text-gray-400 font-bold uppercase">
+        {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </span>
+      {/* Note: Users usually don't see status ticks in this specific app logic, 
+          but you can add them here if your backend tracks User-sent message status */}
     </div>
-  ))}
+  </div>
+))}
+
 
   {/* 4. THE FIX: Scroll Anchor */}
   {/* This empty div is what the useRef targets to keep the chat scrolled down */}
@@ -882,6 +909,93 @@ const handleFinalSend = async () => {
       className="max-w-full max-h-full object-contain shadow-2xl" 
       alt="Full view" 
     />
+  </div>
+)}
+
+{/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
+{fullscreenImage && (
+  <div 
+    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
+    onClick={() => setFullscreenImage(null)}
+  >
+    {/* Top Navigation Bar */}
+    <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
+      <button 
+        onClick={() => setFullscreenImage(null)}
+        className="text-white/70 hover:text-white transition-colors"
+      >
+        <BsChevronLeft size={30} />
+      </button>
+
+      {/* DOWNLOAD BUTTON */}
+      <button 
+        onClick={(e) => { 
+          e.stopPropagation(); // Stops the overlay from closing when downloading
+          handleDownload(fullscreenImage, 'image'); 
+        }}
+        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all"
+      >
+        <BsDownload size={18} />
+        <span>Save to Device</span>
+      </button>
+    </div>
+
+    {/* The Image */}
+    <img 
+      src={fullscreenImage} 
+      className="max-w-[95%] max-h-[85%] object-contain shadow-2xl" 
+      alt="Full view" 
+      onClick={(e) => e.stopPropagation()} // Prevents closing if the user clicks the image itself
+    />
+    
+    <p className="absolute bottom-10 text-white/40 text-[10px] uppercase tracking-[0.2em] font-medium">
+      Secure Preview Mode
+    </p>
+  </div>
+)}
+
+{/* --- FULLSCREEN VIDEO OVERLAY --- */}
+{fullscreenVideo && (
+  <div 
+    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
+    onClick={() => setFullscreenVideo(null)} // Click background to close
+  >
+    {/* Top Navigation Bar */}
+    <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
+      <button 
+        onClick={() => setFullscreenVideo(null)}
+        className="text-white/70 hover:text-white transition-colors"
+      >
+        <BsChevronLeft size={30} />
+      </button>
+
+      {/* DOWNLOAD BUTTON */}
+      <button 
+        onClick={(e) => { 
+          e.stopPropagation(); // Prevents overlay from closing
+          handleDownload(fullscreenVideo, 'video'); 
+        }}
+        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all"
+      >
+        <BsDownload size={18} />
+        <span>Save Video</span>
+      </button>
+    </div>
+
+    {/* The Video Element */}
+    <video 
+      src={fullscreenVideo} 
+      controls 
+      autoPlay 
+      className="max-w-[95%] max-h-[85%] shadow-2xl rounded-lg" 
+      onClick={(e) => e.stopPropagation()} // Clicking video won't close overlay
+    >
+      Your browser does not support the video tag.
+    </video>
+    
+    <p className="absolute bottom-10 text-white/40 text-[10px] uppercase tracking-[0.2em] font-medium">
+      Video Preview Mode
+    </p>
   </div>
 )}
     </div>
