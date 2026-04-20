@@ -1286,6 +1286,7 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     await connectToDatabase();
@@ -1336,14 +1337,15 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
-
-router.post('/get-upload-url', authenticateToken, async (req, res) => {
+// --- 1. GET UPLOAD PERMISSION (Bypasses Vercel 4.5MB Limit) ---
+app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
 
     if (!fileName || !fileType) {
       return res.status(400).json({ success: false, message: "File metadata missing" });
     }
+    
     const fileExtension = fileName.split('.').pop();
     const key = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
 
@@ -1367,8 +1369,8 @@ router.post('/get-upload-url', authenticateToken, async (req, res) => {
   }
 });
 
-// --- CONFIRM UPLOAD & SAVE TO DB ---
-router.post('/confirm-upload', authenticateToken, async (req, res) => {
+// --- 2. CONFIRM UPLOAD & SAVE TO DB ---
+app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
     const { receiverId, text, fileUrl, fileType } = req.body;
 
@@ -1390,7 +1392,10 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
     });
 
     await newMessage.save();
+    
+    // Generates the temporary viewing link for the frontend
     const signedUrlForFrontend = await generateSignedUrl(fileUrl);
+    
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
