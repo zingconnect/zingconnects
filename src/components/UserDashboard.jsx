@@ -5,13 +5,15 @@ import {
   BsPlusLg, 
   BsSendFill, 
   BsCheckAll,
-  BsChevronLeft,
+  BsChevronLeft, // Kept this one
   BsShieldLockFill,
   BsGearFill,
   BsArrowRight,
   BsCameraFill,
   BsMicFill,      
-  BsPaperclip
+  BsPaperclip,
+  BsDownload,    // Now properly imported
+  BsPlayFill     // Now properly imported
 } from 'react-icons/bs';
 
 function urlBase64ToUint8Array(base64String) {

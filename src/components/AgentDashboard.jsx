@@ -8,7 +8,11 @@ import {
   BsChevronLeft,
   BsShieldLockFill,
   BsCreditCard2BackFill,
-  BsCheckCircleFill
+  BsCheckCircleFill,
+  BsDownload, 
+  BsPlayFill, 
+  BsCheck,
+  BsSendFill
 } from 'react-icons/bs';
 
 function urlBase64ToUint8Array(base64String) {
@@ -78,17 +82,17 @@ const [caption, setCaption] = useState("");          // The text to send with th
     },
   ];
 
-  const getStatusIcon = (status) => {
+ const getStatusIcon = (status) => {
   switch (status) {
     case 'seen':
-      // Double Blue Check
-      return <BsCheckAll className="text-blue-500" size={18} />;
+      // Double Blue Check (Read)
+      return <BsCheckAll className="text-blue-400" size={18} />;
     case 'delivered':
-      // Double Gray Check
+      // Double Gray Check (Received by phone)
       return <BsCheckAll className="text-gray-400" size={18} />;
     default:
-      // Single Gray Check
-      return <BsCheckAll className="text-gray-300" size={14} />;
+      // Single Gray Check (Sent to server)
+      return <BsCheck className="text-gray-400" size={16} />;
   }
 };
 
