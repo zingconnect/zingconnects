@@ -118,11 +118,12 @@ router.post('/send', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to send", error: err.message });
   }
 });
-
 // --- 3. UPLOAD MEDIA (IMAGE/VIDEO) ---
 router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
-    const { receiverId } = req.body;
+    // UPDATED: Added 'text' to destructuring
+    const { receiverId, text } = req.body; 
+    
     if (!req.file) return res.status(400).json({ success: false, message: "No file provided" });
 
     const mimeType = req.file.mimetype;
@@ -142,7 +143,6 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     });
     await parallelUploads3.done();
 
-    // Create a working temporary link for the immediate frontend response
     const signedUrlForFrontend = await generateSignedUrl(fileName);
 
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
@@ -151,7 +151,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
       receiverModel,
-      text: text || "",
+      text: text || "", 
       fileUrl: fileName, 
       fileType: detectedType,
       status: 'sent'
@@ -159,18 +159,17 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
 
     await newMessage.save();
 
-    // Prepare response with the working link
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
-    // Push Notification logic
     try {
       const TargetModel = receiverModel === 'Agent' ? Agent : User;
       const receiver = await TargetModel.findById(receiverId);
       if (receiver && receiver.pushSubscription) {
         const payload = JSON.stringify({
           title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
-          body: detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo",
+          // UPDATED: If there is a caption (text), show it in the notification; otherwise show fallback
+          body: text ? text : (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
           data: { url: receiverModel === 'Agent' ? `/agent/dashboard?userId=${req.user.id}` : '/user/dashboard' }
         });
         webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
@@ -181,10 +180,10 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
 
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
-    res.status(500).json({ success: false, message: "Upload failed" });
+    // Best practice: send the error message to the frontend during debugging
+    res.status(500).json({ success: false, error: err.message, message: "Upload failed" });
   }
 });
-
 // --- 4. MARK AS READ ---
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {
