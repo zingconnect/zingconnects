@@ -17,11 +17,28 @@ self.addEventListener('push', function(event) {
     self.registration.showNotification(data.title, options)
   );
 });
-
-// Open the app when the notification is clicked
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
+  
+  // The specific chat URL sent from the backend (e.g., /agent/dashboard?userId=123)
+  const targetUrl = new URL(event.notification.data.url, self.location.origin).href;
+
   event.waitUntil(
-    clients.openWindow(event.notification.data.url)
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      // 1. Check if the app is already open in any tab
+      for (let i = 0; i < windowClients.length; i++) {
+        const client = windowClients[i];
+        
+        // 2. If it's open, focus it and tell it to go to the chat URL
+        if (client.url.includes('/dashboard') && 'navigate' in client) {
+          return client.focus().then(() => client.navigate(targetUrl));
+        }
+      }
+
+      // 3. If no dashboard tab is open, open a new one
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
   );
 });
