@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import Peer from 'simple-peer';
 import { 
   BsSearch, 
   BsThreeDotsVertical, 
@@ -13,7 +14,9 @@ import {
   BsDownload, 
   BsPlayFill, 
   BsCheck,
-  BsSendFill
+  BsSendFill,
+  BsTelephoneFill, 
+  BsTelephoneXFill
 } from 'react-icons/bs';
 
 function urlBase64ToUint8Array(base64String) {
@@ -49,6 +52,7 @@ const [connectionStatus, setConnectionStatus] = useState('online');
 const [callStatus, setCallStatus] = useState('idle'); // idle, ringing, connecting, connected, ended
 const [isIncomingCall, setIsIncomingCall] = useState(false);
 const [activeCaller, setActiveCaller] = useState(null);
+const connectionRef = useRef();
 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -118,6 +122,7 @@ useEffect(() => {
       setCallStatus('connected');
     });
     socket.on("call-ended", () => {
+      if (connectionRef.current) connectionRef.current.destroy();
       setCallStatus('idle');
       setIsIncomingCall(false);
       setActiveCaller(null);
@@ -131,29 +136,84 @@ useEffect(() => {
   }
 }, [agentData, socket]);
 
-const handleStartCall = (targetUserId) => {
+const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
-  
-  socket.emit("call-user", {
-    userToCall: targetUserId,
-    fromId: agentData._id,
-    fromName: `${agentData.firstName} ${agentData.lastName}`,
-    fromPhoto: agentData.photoUrl
-  });
+
+  try {
+    setCallStatus('ringing');
+    setIsIncomingCall(false);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const peer = new Peer({
+      initiator: true,
+      trickle: false,
+      stream: stream
+    });
+    peer.on('signal', (data) => {
+      socket.emit("call-user", {
+        userToCall: targetUserId,
+        signalData: data, // This is the WebRTC handshake
+        fromId: agentData._id,
+        fromName: `${agentData.firstName} ${agentData.lastName}`
+      });
+    });
+    peer.on('stream', (remoteStream) => {
+      const audio = document.createElement('audio');
+      audio.srcObject = remoteStream;
+      audio.play();
+    });
+
+    connectionRef.current = peer;
+  } catch (err) {
+    console.error("Mic access denied:", err);
+    setCallStatus('idle');
+  }
 };
 
-const handleAcceptCall = () => {
-  setCallStatus('connecting');
-  socket.emit("answer-call", { to: activeCaller.fromId });
-  setCallStatus('connected');
-};
+const handleAcceptCall = async () => {
+  try {
+    setCallStatus('connecting');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
 
+    const peer = new Peer({
+      initiator: false,
+      trickle: false,
+      stream: stream
+    });
+    peer.on('signal', (data) => {
+      socket.emit("answer-call", { 
+        to: activeCaller.fromId, 
+        signal: data 
+      });
+    });
+    peer.on('stream', (remoteStream) => {
+      const audio = document.createElement('audio');
+      audio.srcObject = remoteStream;
+      audio.play();
+    });
+    peer.signal(activeCaller.signal);
+    connectionRef.current = peer;
+    setCallStatus('connected');
+  } catch (err) {
+    console.error("Failed to accept call:", err);
+  }
+};
 const handleEndCall = () => {
+  // 1. Identify who to notify
   const targetId = activeCaller?.fromId || selectedUser?._id;
-  socket.emit("end-call", { to: targetId });
+    if (targetId) {
+    socket.emit("end-call", { to: targetId });
+  }
+  if (connectionRef.current) {
+    connectionRef.current.destroy(); 
+    connectionRef.current = null;
+  }
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    stream.getTracks().forEach(track => track.stop());
+  }).catch(err => console.log("Stream already closed"));
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCaller(null);
+    console.log("Call ended and hardware released.");
 };
 
 useEffect(() => {

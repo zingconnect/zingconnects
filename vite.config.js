@@ -8,5 +8,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  
+  // Add this block to fix the "process is not defined" error
+  define: {
+    global: 'window',
+    'process.env': {},
+  },
 })

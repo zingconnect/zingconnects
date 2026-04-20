@@ -32,7 +32,7 @@ app.use(express.json());
 const server = http.createServer(app); // Create the HTTP server
 const io = new Server(server, {
   cors: {
-    origin: "*", // Adjust this to your frontend URL for security
+    origin: "https://zingconnect.vercel.app", // Adjust this to your frontend URL for security
     methods: ["GET", "POST"]
   }
 });

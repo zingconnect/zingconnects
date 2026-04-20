@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
+import { Buffer } from 'buffer';
 
 // --- SERVICE WORKER REGISTRATION ---
 // This tells the browser to run your background script (sw.js)
@@ -16,7 +17,8 @@ if ('serviceWorker' in navigator) {
       });
   });
 }
-// -----------------------------------
+
+window.Buffer = Buffer;
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
