@@ -60,6 +60,13 @@ export const UserDashboard = () => {
     city: '',
     state: ''
   });
+  // --- CALL STATE ---
+const [callStatus, setCallStatus] = useState('idle'); // idle, ringing, connecting, connected
+const [activeCall, setActiveCall] = useState(null);
+const [isMuted, setIsMuted] = useState(false);
+const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+
+const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
 
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const lastNotifiedId = useRef(null);
@@ -86,6 +93,80 @@ export const UserDashboard = () => {
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
+
+  useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token) return;
+
+  const checkIncomingCalls = async () => {
+    try {
+      const response = await fetch('/api/calls/check-incoming', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+
+      if (data.hasIncomingCall && callStatus === 'idle') {
+        setActiveCall(data.callData);
+        setCallStatus('ringing');
+      } else if (!data.hasIncomingCall && callStatus === 'ringing') {
+        // Agent hung up before we answered
+        setCallStatus('idle');
+        setActiveCall(null);
+      }
+    } catch (err) {
+      console.error("Call poll error:", err);
+    }
+  };
+
+  const callInterval = setInterval(checkIncomingCalls, 3000); 
+  return () => clearInterval(callInterval);
+}, [callStatus]);
+
+// --- Updated Audio Logic for UserDashboard ---
+useEffect(() => {
+  const ring = ringtoneRef.current;
+  
+  if (callStatus === 'ringing') {
+    ring.loop = true;
+    ring.play().catch((err) => {
+      console.warn("Ringtone blocked until user interaction:", err);
+    });
+  } else {
+    ring.pause();
+    ring.currentTime = 0;
+  }
+  return () => {
+    ring.pause();
+    ring.currentTime = 0;
+  };
+}, [callStatus]);
+
+const handleAcceptCall = async () => {
+  const token = localStorage.getItem('userToken');
+  try {
+    await fetch('/api/calls/accept', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    setCallStatus('connected');
+  } catch (err) {
+    console.error("Failed to accept call", err);
+  }
+};
+
+const handleEndCall = async () => {
+  const token = localStorage.getItem('userToken');
+  try {
+    await fetch('/api/calls/end', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    setCallStatus('idle');
+    setActiveCall(null);
+  } catch (err) {
+    console.error("Failed to end call", err);
+  }
+};
 
 useEffect(() => {
   const setupNotifications = async () => {
@@ -1001,6 +1082,68 @@ const handleDownload = async (url, type) => {
     </p>
   </div>
 )}
+
+{/* --- CALL OVERLAY --- */}
+{callStatus !== 'idle' && (
+  <div className="fixed inset-0 z-[50000] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white">
+    <div className="flex flex-col items-center space-y-8 animate-in zoom-in duration-300">
+      
+      {/* Avatar with Pulsing Effect */}
+      <div className="relative">
+        <div className="w-32 h-32 rounded-full border-4 border-blue-500/30 p-1">
+          <img 
+            src={agent?.photoUrl || "/default-agent.png"} 
+            className="w-full h-full rounded-full object-cover"
+            alt="Agent"
+          />
+        </div>
+        {callStatus === 'ringing' && (
+          <div className="absolute -inset-4 border-2 border-blue-500/20 rounded-full animate-ping"></div>
+        )}
+      </div>
+
+      <div className="text-center">
+        <h2 className="text-2xl font-bold">{agent?.firstName} {agent?.lastName}</h2>
+        <p className="text-blue-400 font-black uppercase tracking-widest text-[10px] mt-2 italic">
+          {callStatus === 'ringing' && "Incoming Secure Call..."}
+          {callStatus === 'connected' && "Line Encrypted"}
+        </p>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex items-center gap-10 mt-10">
+        {callStatus === 'ringing' ? (
+          <>
+            {/* Decline */}
+            <button onClick={handleEndCall} className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:scale-110 transition-transform">
+              <BsTelephoneFill className="rotate-[135deg]" size={24} />
+            </button>
+            {/* Accept */}
+            <button onClick={handleAcceptCall} className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:scale-110 transition-transform">
+              <BsTelephoneFill size={24} />
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Connected Controls: Speaker, End, Mute */}
+            <button onClick={() => setIsSpeakerOn(!isSpeakerOn)} className={`w-12 h-12 rounded-full flex items-center justify-center ${isSpeakerOn ? 'bg-white text-black' : 'bg-white/10'}`}>
+              <BsPlayFill className="rotate-90" size={20} />
+            </button>
+            
+            <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/50">
+              <BsTelephoneFill className="rotate-[135deg]" size={30} />
+            </button>
+
+            <button onClick={() => setIsMuted(!isMuted)} className={`w-12 h-12 rounded-full flex items-center justify-center ${isMuted ? 'bg-red-500' : 'bg-white/10'}`}>
+              <BsMicFill size={20} />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
     </div>
   );
 };

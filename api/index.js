@@ -22,6 +22,7 @@ import messageRoutes from './routes/message.js';
 import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
+import callRoutes from './routes/callRoutes.js';
 
 dotenv.config();
 
@@ -37,6 +38,8 @@ const io = new Server(server, {
   }
 });
 
+
+app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);
 
@@ -1446,9 +1449,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
 
     await newMessage.save();
-    
-    // Uses your existing getPrivateUrl function from index.js
-    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
+        const signedUrlForFrontend = await getPrivateUrl(fileUrl);
     
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
@@ -1457,6 +1458,81 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
   } catch (err) {
     console.error("Confirmation Error:", err);
     res.status(500).json({ success: false, message: "Failed to save message", error: err.message });
+  }
+});
+
+// Check for incoming calls (Polling)
+app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    // Find a call where the current user is the receiver and it's still ringing
+    const incoming = await Call.findOne({ 
+      receiver: req.user.id, 
+      status: 'ringing' 
+    }).populate('caller', 'firstName lastName photoUrl');
+
+    if (!incoming) return res.json({ hasIncomingCall: false });
+
+    // Handle signed URL if the caller's photo is stored in IDrive/S3
+    let photo = incoming.caller.photoUrl;
+    if (photo && !photo.startsWith('http')) {
+      photo = await getPrivateUrl(photo);
+    }
+
+    res.json({
+      hasIncomingCall: true,
+      callId: incoming._id,
+      callerData: {
+        fromName: `${incoming.caller.firstName} ${incoming.caller.lastName}`,
+        photoUrl: photo,
+        callerId: incoming.caller._id
+      }
+    });
+  } catch (err) {
+    console.error("Check Incoming Call Error:", err);
+    res.status(500).json({ success: false, message: "Error checking line" });
+  }
+});
+
+// Accept an incoming call
+app.post('/api/calls/accept', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { callId } = req.body;
+
+    if (!callId) return res.status(400).json({ message: "Missing callId" });
+
+    const call = await Call.findByIdAndUpdate(
+      callId, 
+      { status: 'connected', startTime: Date.now() }, 
+      { new: true }
+    );
+
+    res.json({ success: true, call });
+  } catch (err) {
+    console.error("Accept Call Error:", err);
+    res.status(500).json({ success: false, message: "Failed to connect call" });
+  }
+});
+
+// End/Decline/Cancel a call
+app.post('/api/calls/end', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { callId } = req.body;
+
+    if (!callId) return res.status(400).json({ message: "Missing callId" });
+
+    await Call.findByIdAndUpdate(callId, { 
+      status: 'ended', 
+      endTime: Date.now() 
+    });
+
+    res.json({ success: true, message: "Call ended successfully" });
+  } catch (err) {
+    console.error("End Call Error:", err);
+    res.status(500).json({ success: false, message: "Error terminating call" });
   }
 });
 

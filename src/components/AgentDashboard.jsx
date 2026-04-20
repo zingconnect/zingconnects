@@ -119,16 +119,13 @@ const [caption, setCaption] = useState("");          // The text to send with th
       return <BsCheck className="text-gray-400" size={16} />;
   }
 };
-
 useEffect(() => {
   const ringtone = ringtoneRef.current;
-  ringtone.loop = true; // Keep it playing until answered
+  ringtone.pause();
+  ringtone.currentTime = 0;
 
   if (callStatus === 'ringing') {
-    ringtone.play().catch(err => console.log("Audio play blocked by browser:", err));
-  } else {
-    ringtone.pause();
-    ringtone.currentTime = 0; // Reset to start
+    console.log("Outgoing call: Visual indicators active.");
   }
   return () => {
     ringtone.pause();
@@ -163,6 +160,52 @@ useEffect(() => {
     };
   }
 }, [agentData, socket]);
+
+useEffect(() => {
+  const token = localStorage.getItem('agentToken'); // Or your agent's specific token key
+  if (!token) return;
+
+  const checkForIncomingCalls = async () => {
+    // We only check if the agent isn't already in a call
+    if (callStatus !== 'idle') return;
+
+    try {
+      const response = await fetch('/api/calls/agent/check-incoming', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+
+      if (data.hasIncomingCall) {
+        setIsIncomingCall(true);
+        setActiveCaller(data.callerData); // Data about the user calling
+        setCallStatus('ringing');
+      }
+    } catch (err) {
+      console.error("Error checking for user calls:", err);
+    }
+  };
+
+  const interval = setInterval(checkForIncomingCalls, 3000);
+  return () => clearInterval(interval);
+}, [callStatus]);
+
+useEffect(() => {
+  const ringtone = ringtoneRef.current;
+  
+  // Only play sound if the Agent is RECEIVING a call
+  if (callStatus === 'ringing' && isIncomingCall) {
+    ringtone.loop = true;
+    ringtone.play().catch(err => console.log("Audio blocked:", err));
+  } else {
+    ringtone.pause();
+    ringtone.currentTime = 0;
+  }
+
+  return () => {
+    ringtone.pause();
+    ringtone.currentTime = 0;
+  };
+}, [callStatus, isIncomingCall]);
 
 const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
@@ -1012,393 +1055,207 @@ const handleSendMessage = async (e) => {
         </div>
       </aside>
 
-      <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative overflow-hidden`}>
-        {selectedUser ? (
-          <>
-       <header className="h-[55px] md:h-[65px] bg-[#f0f2f5] px-3 flex justify-between items-center z-10 border-l border-gray-200 shadow-sm">
-  <div className="flex items-center gap-3">
-    <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
-      <BsChevronLeft size={18} />
-    </button>
-    
-    <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
-      <img 
-        src={selectedUser.photoUrl} 
-        alt="Profile" 
-        className="w-full h-full object-cover" 
-        onError={(e) => {
-          e.target.onerror = null; 
-          e.target.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}+${selectedUser.lastName}&background=random&color=fff`;
-        }}
-      />
-    </div>
+    <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-[#efeae2] relative overflow-hidden`}>
+  {selectedUser ? (
+    <>
+      <header className="h-[55px] md:h-[65px] bg-[#f0f2f5] px-3 flex justify-between items-center z-10 border-l border-gray-200 shadow-sm">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-200 rounded-full transition-colors">
+            <BsChevronLeft size={18} />
+          </button>
+          
+          <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
+            <img 
+              src={selectedUser.photoUrl} 
+              alt="Profile" 
+              className="w-full h-full object-cover" 
+              onError={(e) => {
+                e.target.onerror = null; 
+                e.target.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}+${selectedUser.lastName}&background=random&color=fff`;
+              }}
+            />
+          </div>
 
-    <div className="overflow-hidden flex flex-col justify-center">
-      <h2 className="text-sm font-bold text-gray-800 truncate max-w-[140px] md:max-w-none leading-tight">
-        {selectedUser.firstName ? `${selectedUser.firstName} ${selectedUser.lastName}` : 'Unknown User'}
-      </h2>
+          <div className="overflow-hidden flex flex-col justify-center">
+            <h2 className="text-sm font-bold text-gray-800 truncate max-w-[140px] md:max-w-none leading-tight">
+              {selectedUser.firstName ? `${selectedUser.firstName} ${selectedUser.lastName}` : 'Unknown User'}
+            </h2>
+            <p className="text-[11px] font-medium text-gray-500 lowercase truncate leading-tight">
+              {selectedUser.email}
+            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${selectedUser.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></span>
+              <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">
+                {selectedUser.city ? `${selectedUser.city}, ${selectedUser.state}` : 'Verified Node'}
+              </p>
+            </div>
+          </div>
+        </div>
 
-      <p className="text-[11px] font-medium text-gray-500 lowercase truncate leading-tight">
-        {selectedUser.email}
-      </p>
+        <div className="flex items-center gap-4 md:gap-6 text-gray-500 mr-2">
+          <button 
+            onClick={() => {
+              setIsIncomingCall(false); 
+              setCallStatus('ringing'); 
+              handleStartCall(selectedUser._id); 
+            }}
+            className="hover:text-green-600 transition-colors active:scale-90 p-2" 
+            title="Voice Call"
+          >
+            <BsTelephoneFill size={18} />
+          </button>
+          <div className="h-6 w-[1px] bg-gray-300 mx-1 hidden md:block"></div>
+          <BsThreeDotsVertical className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
+        </div>
+      </header>
 
-      <div className="flex items-center gap-1.5 mt-0.5">
-        <span className={`w-1.5 h-1.5 rounded-full ${selectedUser.status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></span>
-        <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">
-          {selectedUser.city ? `${selectedUser.city}, ${selectedUser.state}` : 'Verified Node'}
-        </p>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
+        {messages.length >= limit && (
+          <div className="flex justify-center py-6">
+            <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase tracking-[0.2em] bg-white border border-gray-200 text-gray-400 px-6 py-2.5 rounded-full hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm active:scale-95">
+              ↑ Load Older Messages
+            </button>
+          </div>
+        )}
+
+        {messages.map((m) => (
+          <div key={m._id || m.id} className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'}`}>
+            {(m.fileType === 'image' || m.fileType === 'video') && (
+              <div className="relative mb-1.5 mt-0.5 group">
+                {m.fileType === 'image' ? (
+                  <>
+                    <img src={m.fileUrl} alt="attachment" onClick={() => setFullscreenImage(m.fileUrl)} className="rounded-lg bg-gray-100 object-cover w-full max-w-[280px] max-h-[320px] md:max-w-[400px] md:max-h-[500px] cursor-pointer transition-opacity hover:opacity-95" />
+                    <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"><BsDownload size={14} /></button>
+                  </>
+                ) : (
+                  <div className="relative">
+                    <video className="rounded-lg w-full max-w-[280px] md:max-w-[400px] max-h-[500px] bg-black shadow-inner cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}><source src={m.fileUrl} type="video/mp4" /></video>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm"><BsPlayFill size={30} /></div></div>
+                    <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"><BsDownload size={14} /></button>
+                  </div>
+                )}
+              </div>
+            )}
+            {m.text && <p className={`text-[13px] md:text-[15px] text-[#303030] leading-relaxed break-words ${m.fileType ? 'px-1 pb-1 pt-1' : 'pr-8'}`}>{m.text}</p>}
+            <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
+              <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              {m.senderModel === 'Agent' && getStatusIcon(m.status)}
+            </div>
+          </div>
+        ))}
       </div>
-    </div>
-  </div>
 
-  <div className="flex items-center gap-4 md:gap-6 text-gray-500 mr-2">
-    {/* --- UPDATED CALL BUTTON --- */}
-    <button 
-      onClick={() => {
-        setIsIncomingCall(false); // Agent is making the call
-        setCallStatus('ringing'); // Start the ringing state
-        handleStartCall(selectedUser._id); // Your logic to emit the socket event
-      }}
-      className="hover:text-green-600 transition-colors active:scale-90 p-2" 
-      title="Voice Call"
-    >
-      <BsTelephoneFill size={18} />
-    </button>
-
-    <div className="h-6 w-[1px] bg-gray-300 mx-1 hidden md:block"></div>
-    
-    <BsThreeDotsVertical className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
-  </div>
-</header>
-          <div 
-  ref={scrollRef} // Attach your scrollRef here
-  className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col"
->
-  
-  {/* 1. LOAD MORE BUTTON (Placed at the very top) */}
-  {messages.length >= limit && (
-    <div className="flex justify-center py-6">
-      <button 
-        onClick={() => setLimit(prev => prev + 30)}
-        className="text-[10px] font-black uppercase tracking-[0.2em] bg-white border border-gray-200 text-gray-400 px-6 py-2.5 rounded-full hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm active:scale-95"
-      >
-        ↑ Load Older Messages
-      </button>
+      <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
+        <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
+        <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
+        <div className="flex items-center gap-1 md:gap-3 text-gray-500">
+          <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90"><svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" height="20" width="20"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></button>
+          <button type="button" onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90"><svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20"><path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 7.07 3h1.858a1 1 0 0 1 .707.293l.83.828a3 3 0 0 0 2.12.879H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/><path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/></svg></button>
+        </div>
+        <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+          <input disabled={isUploading} value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isUploading ? "Uploading..." : "Type a message"} className="flex-1 bg-white px-4 py-2.5 rounded-full text-sm outline-none border border-gray-200 focus:border-blue-300 transition-all" />
+          <button type="submit" disabled={isUploading || !newMessage.trim()} className={`p-3 rounded-full transition-all active:scale-90 shadow-md ${newMessage.trim() && !isUploading ? 'bg-blue-600 text-white' : 'bg-gray-400 text-white'}`}><svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18"><path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/></svg></button>
+        </form>
+      </footer>
+    </>
+  ) : (
+    <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30">
+      <BsShieldLockFill size={40} className="mb-4" />
+      <h1 className="text-2xl font-black uppercase tracking-widest text-blue-950">ZingConnect</h1>
+      <p className="text-[10px] font-bold uppercase tracking-widest">Secure Terminal</p>
     </div>
   )}
 
-  {/* 2. EXISTING MESSAGE MAPPING */}
-  {messages.map((m) => (
-    <div 
-      key={m._id || m.id} 
-      className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
-        m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-      }`}
-    >
-    {/* 1. Handle Media Content (Image or Video) */}
-    {(m.fileType === 'image' || m.fileType === 'video') && (
-      <div className="relative mb-1.5 mt-0.5 group">
-        {m.fileType === 'image' ? (
-          <>
-            <img 
-              src={m.fileUrl} 
-              alt="attachment" 
-              onClick={() => setFullscreenImage(m.fileUrl)} 
-              className="rounded-lg bg-gray-100 object-cover w-full max-w-[280px] max-h-[320px] md:max-w-[400px] md:max-h-[500px] cursor-pointer transition-opacity hover:opacity-95"
-              onError={(e) => {
-                e.target.onerror = null;
-                e.target.src = 'https://via.placeholder.com/300x200?text=Media+Unavailable';
-              }}
-            />
-            {/* Quick Download Overlay for Image */}
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
-              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-              title="Download Image"
-            >
-              <BsDownload size={14} />
-            </button>
-          </>
-        ) : (
-          <div className="relative">
-            <video 
-              className="rounded-lg w-full max-w-[280px] md:max-w-[400px] max-h-[500px] bg-black shadow-inner cursor-pointer"
-              onClick={() => setFullscreenVideo(m.fileUrl)} // THIS TRIGGERS FULLSCREEN
-            >
-              <source src={m.fileUrl} type="video/mp4" />
-            </video>
-            
-            {/* Play Icon Overlay to indicate it's clickable */}
-            <div 
-              className="absolute inset-0 flex items-center justify-center pointer-events-none"
-              onClick={() => setFullscreenVideo(m.fileUrl)}
-            >
-              <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
-                <BsPlayFill size={30} />
+  {/* --- ACTIVE CALL OVERLAY --- */}
+  {callStatus !== 'idle' && (
+    <div className="fixed inset-0 z-[40000] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white animate-in fade-in duration-300">
+      <div className="flex flex-col items-center space-y-10">
+        
+        {/* 1. CALLER AVATAR */}
+        <div className="w-40 h-40 rounded-full border-4 border-blue-500/20 p-1 relative">
+          <img 
+            src={isIncomingCall ? activeCaller?.photoUrl : selectedUser?.photoUrl || "/default-avatar.png"} 
+            className="w-full h-full rounded-full object-cover shadow-2xl" 
+            alt="Caller"
+            onError={(e) => {
+              e.target.src = `https://ui-avatars.com/api/?name=${isIncomingCall ? activeCaller?.fromName : selectedUser?.firstName}&background=0D1117&color=fff`;
+            }}
+          />
+          <div className="absolute inset-0 w-full h-full bg-blue-500 rounded-full animate-ping opacity-10"></div>
+        </div>
+
+        {/* 2. TEXT & STATUS */}
+        <div className="text-center">
+          <h2 className="text-3xl font-extrabold tracking-tighter text-white">
+            {isIncomingCall 
+              ? (activeCaller?.fromName || "Incoming Call...") 
+              : (selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : "Secure Line")}
+          </h2>
+
+          <div className="flex flex-col items-center gap-3 mt-4">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${
+                callStatus === 'connected' ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' : 'bg-blue-500 animate-bounce shadow-[0_0_8px_#3b82f6]'
+              }`}></span>
+              <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
+                {callStatus === 'ringing' && "Ringing Source..."}
+                {callStatus === 'connecting' && "Establishing Connection..."}
+                {callStatus === 'connected' && "Line Encrypted"}
+              </p>
+            </div>
+            {callStatus === 'connected' && <span className="text-white/40 font-mono text-xs tracking-widest">00:05</span>}
+          </div>
+        </div>
+
+        {/* 3. DYNAMIC CONTROLS (INCOMING VS ACTIVE) */}
+        <div className="flex items-center justify-center gap-10 mt-16">
+          {isIncomingCall && callStatus === 'ringing' ? (
+            <>
+              {/* Decline */}
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95">
+                  <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
+                </button>
+                <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">Decline</span>
               </div>
-            </div>
-
-            {/* Quick Download Overlay for Video */}
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
-              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
-              title="Download Video"
-            >
-              <BsDownload size={14} />
-            </button>
-          </div>
-        )}
-      </div>
-    )}
-
-    {/* 2. Handle Text Content */}
-    {m.text && (
-      <p className={`text-[13px] md:text-[15px] text-[#303030] leading-relaxed break-words ${m.fileType ? 'px-1 pb-1 pt-1' : 'pr-8'}`}>
-        {m.text}
-      </p>
-    )}
-
-    {/* 3. Time and Status Bar */}
-    <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
-      <span className="text-[9px] text-gray-400 font-bold uppercase">
-        {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </span>
-      {m.senderModel === 'Agent' && getStatusIcon(m.status)}
-    </div>
-  </div>
-))}
-
-</div>
-{/* --- AGENT WHATSAPP PREVIEW OVERLAY --- */}
-{previewUrl && (
-  <div className="absolute inset-0 z-[500] bg-slate-950 flex flex-col animate-in fade-in zoom-in duration-200">
-    <div className="p-4 flex justify-between items-center text-white/70">
-      <button onClick={() => { setPreviewUrl(null); setPreviewFile(null); }} className="p-2 hover:bg-white/10 rounded-full">
-        <BsChevronLeft size={24} />
-      </button>
-      <span className="text-[10px] font-black uppercase tracking-widest">Official Media Preview</span>
-      <div className="w-10" />
-    </div>
-
-    {/* UPDATED SECTION BELOW */}
-    <div className="flex-1 flex items-center justify-center p-6">
-      {previewFile?.type.startsWith('video/') ? (
-        <video 
-          src={previewUrl} 
-          controls 
-          autoPlay 
-          className="max-h-full max-w-full rounded-xl shadow-2xl border border-white/5" 
-        />
-      ) : (
-        <img 
-          src={previewUrl} 
-          alt="Preview"
-          className="max-h-full max-w-full object-contain rounded-xl shadow-2xl border border-white/5" 
-        />
-      )}
-    </div>
-    {/* END OF UPDATED SECTION */}
-
-    <div className="p-6 bg-slate-900/90 backdrop-blur-xl border-t border-white/5">
-      <div className="max-w-4xl mx-auto flex items-center gap-4 bg-white/5 p-2 rounded-2xl border border-white/10">
-        <input
-          type="text"
-          placeholder="Add an official caption..."
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
-          autoFocus
-        />
-        <button 
-          onClick={handleFinalSend}
-          disabled={isUploading}
-          className="bg-blue-600 hover:bg-blue-500 text-white p-4 rounded-xl transition-all shadow-lg shadow-blue-900/20"
-        >
-          {isUploading ? (
-            <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+              {/* Accept */}
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={handleAcceptCall} className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center hover:bg-green-600 transition-all shadow-2xl shadow-green-500/40 animate-bounce active:scale-95">
+                  <BsTelephoneFill size={32} color="white" />
+                </button>
+                <span className="text-[9px] font-bold uppercase text-green-500/60 tracking-widest">Accept</span>
+              </div>
+            </>
           ) : (
-            <BsCheckCircleFill size={20} />
-          )}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
-<footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
-  {/* HIDDEN INPUTS */}
-  {/* 1. Attachment Input: Allows picking existing Image or Video from gallery */}
-  <input 
-    type="file" 
-    ref={fileInputRef} 
-    onChange={handleFileUpload} 
-    accept="image/*,video/*" 
-    className="hidden" 
-  />
-  
-  {/* 2. Camera Input: Triggers the device camera for either Image or Video capture */}
-  <input 
-    type="file" 
-    ref={cameraInputRef} 
-    onChange={handleFileUpload} 
-    accept="image/*,video/*" 
-    capture="environment" 
-    className="hidden" 
-  />
-
-  <div className="flex items-center gap-1 md:gap-3 text-gray-500">
-    {/* ATTACHMENT BUTTON */}
-    <button 
-      type="button"
-      onClick={() => fileInputRef.current.click()}
-      disabled={isUploading}
-      className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90" 
-      title="Attach Image or Video"
-    >
-      <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" height="20" width="20">
-        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-      </svg>
-    </button>
-
-    {/* CAMERA BUTTON (Image & Video) */}
-    <button 
-      type="button"
-      onClick={() => cameraInputRef.current.click()}
-      disabled={isUploading}
-      className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90" 
-      title="Take Photo or Video"
-    >
-      <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20">
-        <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 7.07 3h1.858a1 1 0 0 1 .707.293l.83.828a3 3 0 0 0 2.12.879H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/>
-        <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
-      </svg>
-    </button>
-  </div>
-
-  <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
-    <input 
-      disabled={isUploading}
-      value={newMessage}
-      onChange={(e) => setNewMessage(e.target.value)}
-      placeholder={isUploading ? "Uploading..." : "Type a message"}
-      className="flex-1 bg-white px-4 py-2.5 rounded-full text-sm outline-none border border-gray-200 focus:border-blue-300 transition-all"
-    />
-    <button 
-      type="submit"
-      disabled={isUploading || !newMessage.trim()}
-      className={`p-3 rounded-full transition-all active:scale-90 shadow-md ${
-        newMessage.trim() && !isUploading ? 'bg-blue-600 text-white' : 'bg-gray-400 text-white'
-      }`}
-    >
-      <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18">
-        <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
-      </svg>
-    </button>
-  </form>
-</footer>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30">
-            <BsShieldLockFill size={40} className="mb-4" />
-            <h1 className="text-2xl font-black uppercase tracking-widest text-blue-950">ZingConnect</h1>
-            <p className="text-[10px] font-bold uppercase tracking-widest">Secure Terminal</p>
-          </div>
-        )}
-{/* --- ACTIVE CALL OVERLAY --- */}
-{callStatus !== 'idle' && (
-  <div className="fixed inset-0 z-[40000] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white animate-in fade-in duration-300">
-    <div className="flex flex-col items-center space-y-10">
-      
-      {/* 1. CALLER AVATAR */}
-      <div className="w-40 h-40 rounded-full border-4 border-blue-500/20 p-1 relative">
-        <img 
-          src={isIncomingCall ? activeCaller?.photoUrl : selectedUser?.photoUrl || "/default-avatar.png"} 
-          className="w-full h-full rounded-full object-cover shadow-2xl" 
-          alt="Caller"
-          onError={(e) => {
-            e.target.src = `https://ui-avatars.com/api/?name=${isIncomingCall ? activeCaller?.fromName : selectedUser?.firstName}&background=0D1117&color=fff`;
-          }}
-        />
-        {/* Pulsing ring for active calls */}
-        <div className="absolute inset-0 w-full h-full bg-blue-500 rounded-full animate-ping opacity-10"></div>
-      </div>
-
-      {/* 2. TEXT & STATUS (The block you just shared) */}
-      <div className="text-center">
-        <h2 className="text-3xl font-extrabold tracking-tighter text-white">
-          {isIncomingCall 
-            ? (activeCaller?.fromName || "Incoming...") 
-            : (selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : "Secure Line")}
-        </h2>
-
-        <div className="flex flex-col items-center gap-3 mt-4">
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${
-              callStatus === 'connected' ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' : 'bg-blue-500 animate-bounce shadow-[0_0_8px_#3b82f6]'
-            }`}></span>
-            
-            <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
-              {callStatus === 'ringing' && "Ringing Source..."}
-              {callStatus === 'connecting' && "Establishing Connection..."}
-              {callStatus === 'connected' && "Line Encrypted"}
-            </p>
-          </div>
-          
-          {callStatus === 'connected' && (
-            <span className="text-white/40 font-mono text-xs tracking-widest">00:05</span>
+            <>
+              {/* Speaker */}
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={() => setIsSpeakerOn(!isSpeakerOn)} className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isSpeakerOn ? 'bg-white text-slate-900 shadow-lg shadow-white/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                  <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20"><path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/><path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z"/><path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z"/></svg>
+                </button>
+                <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">Speaker</span>
+              </div>
+              {/* End Call */}
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95">
+                  <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
+                </button>
+                <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">{callStatus === 'connected' ? 'End Call' : 'Cancel'}</span>
+              </div>
+              {/* Mute */}
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={() => setIsMuted(!isMuted)} className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isMuted ? 'bg-red-500 shadow-lg shadow-red-500/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                  <BsMicMuteFill size={20} color="white" className={isMuted ? "opacity-100" : "opacity-50"} />
+                </button>
+                <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">{isMuted ? 'Muted' : 'Mute'}</span>
+              </div>
+            </>
           )}
         </div>
       </div>
-
-      {/* 3. CONSOLIDATED CONTROLS (The buttons block) */}
-      <div className="flex items-center justify-center gap-10 mt-16">
-        {/* Speaker Button */}
-        <div className="flex flex-col items-center gap-2">
-          <button 
-            onClick={() => setIsSpeakerOn(!isSpeakerOn)}
-            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
-              isSpeakerOn ? 'bg-white text-slate-900 shadow-lg shadow-white/20' : 'bg-white/10 text-white hover:bg-white/20'
-            }`}
-          >
-            <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20">
-              <path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/>
-              <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z"/>
-              <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z"/>
-            </svg>
-          </button>
-          <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">Speaker</span>
-        </div>
-
-        {/* End Call Button */}
-        <div className="flex flex-col items-center gap-2">
-          <button 
-            onClick={handleEndCall}
-            className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95"
-          >
-            <div className="rotate-[135deg]">
-               <BsTelephoneFill size={32} color="white" />
-            </div>
-          </button>
-          <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">End Call</span>
-        </div>
-
-        {/* Mute Button */}
-        <div className="flex flex-col items-center gap-2">
-          <button 
-            onClick={() => setIsMuted(!isMuted)}
-            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
-              isMuted ? 'bg-red-500 shadow-lg shadow-red-500/20' : 'bg-white/10 text-white hover:bg-white/20'
-            }`}
-          >
-            <BsMicMuteFill size={20} color="white" className={isMuted ? "opacity-100" : "opacity-50"} />
-          </button>
-          <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">{isMuted ? 'Muted' : 'Mute'}</span>
-        </div>
-      </div>
     </div>
-  </div>
-)}
-      </main>
+  )}
+</main>
       {/* --- FULLSCREEN IMAGE OVERLAY --- */}
 {fullscreenImage && (
   <div 
