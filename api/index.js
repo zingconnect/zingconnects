@@ -68,11 +68,6 @@ export async function connectToDatabase() {
   }
 }
 
-// Initialize Model on the default connection
-const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
-const getAgentModel = () => {
-  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
-};
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -134,8 +129,6 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
             });
         }
 
-        // --- 2. CONDITIONAL PASSWORD HASHING ---
-        // If no new password is sent (resend case), keep the existing one
         let hashedPassword = existingAgent ? existingAgent.password : ""; 
         if (password && password.trim() !== "") {
             const salt = await bcrypt.genSalt(10);

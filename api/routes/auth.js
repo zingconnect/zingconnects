@@ -11,8 +11,8 @@ import nodemailer from 'nodemailer';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../index.js';
-import { Agent, agentSchema } from '../models/Agent.js';
-import User from './models/User.js';
+import { agentSchema } from '../models/Agent.js';
+import User from '../models/User.js'; 
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -57,10 +57,9 @@ const s3Client = new S3Client({
 // --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
 router.post('/register', upload.single('photo'), async (req, res) => {
   try {
-    // CRITICAL: Ensure DB is connected before any operation
     await connectToDatabase();
     
-    const Agent = getAgentModel();
+const AgentModel = getAgentModel();
     const { 
       firstName, lastName, email, password, address, 
       occupation, program, bio, dob, gender, plan 
@@ -267,11 +266,9 @@ router.post('/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
 
   try {
-    // 1. CRITICAL: Ensure DB connection is active for this request
     await connectToDatabase();
     
-    // 2. Safely get the model
-    const Agent = getAgentModel();
+const AgentModel = getAgentModel();
 
     if (!email || !otp) {
       return res.status(400).json({ 
@@ -280,9 +277,7 @@ router.post('/verify-otp', async (req, res) => {
       });
     }
 
-    // 3. Find the agent with matching email, OTP, and check expiry
-    // $gt: Date.now() ensures the code hasn't expired yet
-    const agent = await Agent.findOne({ 
+  const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim(),
       otp: otp,
       otpExpires: { $gt: Date.now() }
@@ -341,9 +336,9 @@ router.post('/verify-otp', async (req, res) => {
 // --- 3. AGENT LOGIN ---
 router.post('/login', async (req, res) => {
   try {
-    const Agent = getAgentModel();
+const AgentModel = getAgentModel();
     const { email, password } = req.body;
-    const agent = await Agent.findOne({ 
+    const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('+password');
     
@@ -650,9 +645,9 @@ router.post('/heartbeat', authenticateToken, async (req, res) => {
 // --- 4. UPDATE AGENT PLAN ---
 router.post('/update-plan', authenticateToken, async (req, res) => {
   try {
-    const Agent = getAgentModel();
+    const AgentModel = getAgentModel();
     const { plan } = req.body;
-    const updatedAgent = await Agent.findByIdAndUpdate(
+    const updatedAgent = await AgentModel.findByIdAndUpdate(
       req.user.id,
       { plan: plan },
       { new: true }
@@ -666,11 +661,9 @@ router.post('/update-plan', authenticateToken, async (req, res) => {
 router.post('/verify', authenticateToken, async (req, res) => {
   const { transaction_id, plan, usdAmount } = req.body;
   const agentId = req.user.id;
-  const Agent = getAgentModel();
+  const AgentModel = getAgentModel();
 
   try {
-    // 1. USE FIXED RATE FROM .ENV
-    // We use Number() to ensure it's a digit and 1550 as a hard fallback
     const currentRate = Number(process.env.USD_TO_NGN_RATE) || 1550;
 
     // 2. Verify with Flutterwave
@@ -695,7 +688,7 @@ router.post('/verify', authenticateToken, async (req, res) => {
           expiry.setFullYear(now.getFullYear() + 1); // 1 Year
         }
 
-        const updatedAgent = await Agent.findByIdAndUpdate(
+        const updatedAgent = await AgentModel.findByIdAndUpdate(
           agentId, 
           {
             $set: {
@@ -742,10 +735,10 @@ router.post('/verify', authenticateToken, async (req, res) => {
 // --- 6. UPDATE AGENT PROFILE & SECURITY (FIXED) ---
 router.put('/update-profile', authenticateToken, async (req, res) => {
   try {
-    const Agent = getAgentModel();
-    
+const AgentModel = getAgentModel();
+
     // 1. Find the Agent Document
-    const agent = await Agent.findById(req.user.id).select('+password');
+    const agent = await AgentModel.findById(req.user.id).select('+password');
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent account not found" });
     }
