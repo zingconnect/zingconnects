@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-const socket = io(import.meta.env.VITE_API_URL);
 import { 
   BsSearch, 
   BsThreeDotsVertical, 
@@ -65,6 +64,7 @@ const [isUploading, setIsUploading] = useState(false);
 const [previewFile, setPreviewFile] = useState(null); // The actual file object
 const [previewUrl, setPreviewUrl] = useState(null);   // The local blob for <img> src
 const [caption, setCaption] = useState("");          // The text to send with the image
+const socket = io(import.meta.env.VITE_API_URL);
 
   const plans = [
     {
