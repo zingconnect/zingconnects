@@ -12,7 +12,7 @@ self.addEventListener('push', function(event) {
   }
   
   // Use absolute URL for the logo to ensure it displays correctly
-  const iconUrl = new URL('/logo.png', self.location.origin).href;
+  const iconUrl = new URL('/logo-s.png', self.location.origin).href;
 
   const options = {
     body: data.body || 'You have a new message.',

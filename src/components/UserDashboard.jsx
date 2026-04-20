@@ -33,6 +33,7 @@ export const UserDashboard = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [hasInteracted, setHasInteracted] = useState(false);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const lastNotifiedId = useRef(null);
@@ -174,17 +175,13 @@ useEffect(() => {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
 
-        // --- 1. ALERT LOGIC (ONE TEXT = ONE SOUND) ---
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
           lastMsg.status !== 'seen' && 
           lastMsg._id !== lastNotifiedId.current // Check against the Ref
         ) {
-          // Update Ref immediately to block the sound from playing on the next poll
           lastNotifiedId.current = lastMsg._id;
-
-          // Play Sound via Ref (ensure notificationSound is a useRef at the top)
           if (notificationSound.current) {
             notificationSound.current.currentTime = 0;
             notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
@@ -194,7 +191,7 @@ useEffect(() => {
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName}`, {
               body: lastMsg.text || "Sent a file",
-              icon: '/logo.png', // Point to your brand logo in public folder
+              icon: '/logo-s.png', // Point to your brand logo in public folder
               tag: 'zing-msg'    // Grouping tag to prevent spam
             });
           }
@@ -262,14 +259,17 @@ useEffect(() => {
     }
   };
 
-  const unlockAudio = () => {
-  notificationSound.current.play()
-    .then(() => {
-      notificationSound.current.pause();
-      notificationSound.current.currentTime = 0;
-      console.log("Audio unlocked for iOS");
-    })
-    .catch(e => console.error("Unlock failed", e));
+ const unlockAudio = () => {
+  if (notificationSound.current) {
+    notificationSound.current.play()
+      .then(() => {
+        notificationSound.current.pause();
+        notificationSound.current.currentTime = 0;
+        setHasInteracted(true); // <--- ADD THIS to hide the overlay
+        console.log("Audio unlocked for iOS");
+      })
+      .catch(e => console.error("Unlock failed", e));
+  }
 };
 
   const handleSendMessage = async (e) => {
@@ -373,14 +373,10 @@ useEffect(() => {
                        "{agent?.bio || "Secured communications specialist."}"
                     </p>
                 </div>
-                {!hasInteracted && (
-  <button onClick={unlockAudio} className="fixed inset-0 z-50 bg-black/20 flex items-center justify-center">
-    <div className="bg-white p-4 rounded-lg">Tap to enable message alerts</div>
-  </button>
-)}
             </div>
         </main>
       </aside>
+
 
       {/* --- ONBOARDING OVERLAY --- */}
       {showOnboarding && (
@@ -571,6 +567,26 @@ useEffect(() => {
           </div>
         </footer>
       </div>
+
+      {!hasInteracted && (
+        <button 
+          onClick={unlockAudio} 
+          className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
+        >
+          <div className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100">
+             <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+               <BsShieldLockFill className="text-blue-600" size={28} />
+             </div>
+             <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
+             <p className="text-gray-500 text-sm font-semibold leading-relaxed">
+               Tap to authenticate your session and enable secure message alerts.
+             </p>
+             <div className="bg-blue-600 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-blue-200">
+               SYNC & ENTER
+             </div>
+          </div>
+        </button>
+      )}
     </div>
   );
 };
