@@ -15,7 +15,7 @@ import {
 export const UserDashboard = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
-  
+  const messagesEndRef = useRef(null);
   // --- STATE ---
   const [agent, setAgent] = useState(null);
   const [user, setUser] = useState(null);
@@ -23,6 +23,7 @@ export const UserDashboard = () => {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
+  const notificationSound = new Audio('/sounds/notification.mp3');
   
   // Onboarding & Photo State
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -60,6 +61,14 @@ export const UserDashboard = () => {
     }
   };
 
+useEffect(() => {
+    // Timeout ensures the DOM has rendered the new message before scrolling
+    const timer = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [messages]);
+
   // --- HOOK 1: SESSION & ONBOARDING ---
   useEffect(() => {
     const token = localStorage.getItem('userToken');
@@ -92,9 +101,13 @@ export const UserDashboard = () => {
   }, [navigate]);
 
   // --- HOOK 2: MESSAGE POLLING ---
-  useEffect(() => {
+ useEffect(() => {
     const token = localStorage.getItem('userToken');
     if (!token || !agent?._id) return;
+
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
 
     const fetchMessages = async () => {
       try {
@@ -102,18 +115,44 @@ export const UserDashboard = () => {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
-        if (response.ok) {
+
+        if (response.ok && data.success) {
+          const hasNewMessage = data.messages.length > messages.length;
+          const lastMessage = data.messages[data.messages.length - 1];
+
+          // Trigger if a new message arrived from the Agent
+          if (hasNewMessage && lastMessage?.senderModel === 'Agent') {
+            
+            // A. Play Sound
+            notificationSound.currentTime = 0;
+            notificationSound.play().catch(e => console.log("Sound blocked by browser until user interacts"));
+
+            // B. Browser Notification
+            if (Notification.permission === "granted") {
+              new Notification(`Agent ${agent.firstName}`, {
+                body: lastMessage.text || "Sent a file",
+                icon: agent.photoUrl || '/favicon.ico',
+              });
+            }
+
+            // C. Mark as Read in DB (Updates Agent's ticks to blue)
+            await fetch(`/api/messages/mark-read/${agent._id}`, {
+              method: 'PATCH',
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+          }
+
           setMessages(data.messages);
         }
       } catch (err) {
-        console.error("Failed to fetch messages:", err);
+        console.error("Polling error:", err);
       }
     };
 
     fetchMessages();
     const interval = setInterval(fetchMessages, 5000); 
     return () => clearInterval(interval);
-  }, [agent?._id]);
+  }, [agent?._id, messages.length]);
 
   const agentStatus = getStatusInfo(agent);
 
@@ -362,45 +401,62 @@ export const UserDashboard = () => {
         </header>
 
         <main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
-          <div className="absolute inset-0 opacity-[0.05] pointer-events-none" 
-               style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} />
+  {/* 1. Background Pattern */}
+  <div 
+    className="absolute inset-0 opacity-[0.05] pointer-events-none" 
+    style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
+  />
 
-          <div className="self-center z-10 my-4 px-4 py-1.5 bg-[#fff9c2] rounded-lg shadow-sm border border-yellow-100 flex items-center gap-2 max-w-[90%]">
-            <BsShieldLockFill size={10} className="text-gray-600" />
-            <p className="text-[9px] md:text-[10px] text-gray-600 text-center font-medium leading-tight">
-              Messages are end-to-end encrypted. No one outside of this chat can read them.
-            </p>
-          </div>
+  {/* 2. Encryption Notice */}
+  <div className="self-center z-10 my-4 px-4 py-1.5 bg-[#fff9c2] rounded-lg shadow-sm border border-yellow-100 flex items-center gap-2 max-w-[90%]">
+    <BsShieldLockFill size={10} className="text-gray-600" />
+    <p className="text-[9px] md:text-[10px] text-gray-600 text-center font-medium leading-tight">
+      Messages are end-to-end encrypted. No one outside of this chat can read them.
+    </p>
+  </div>
 
-          {messages.map((m) => (
-            <div key={m._id || m.id} className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 ${
-                m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-              }`}>
-              
-              {/* Media Handling */}
-              {m.fileType === 'image' && (
-                <img src={m.fileUrl} alt="attachment" className="rounded-lg mb-2 max-w-full" />
-              )}
-              {m.fileType === 'video' && (
-                <video controls className="rounded-lg mb-2 max-w-full">
-                  <source src={m.fileUrl} type="video/mp4" />
-                </video>
-              )}
+  {/* 3. Message List */}
+  {messages.map((m) => (
+    <div 
+      key={m._id || m.id} 
+      className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 ${
+        m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+      }`}
+    >
+      {/* Media Handling */}
+      {m.fileType === 'image' && (
+        <img src={m.fileUrl} alt="attachment" className="rounded-lg mb-2 max-w-full object-cover" />
+      )}
+      {m.fileType === 'video' && (
+        <video controls className="rounded-lg mb-2 max-w-full">
+          <source src={m.fileUrl} type="video/mp4" />
+        </video>
+      )}
 
-              {/* Text Content */}
-              {m.text && <p className="text-[12px] md:text-[14px] text-[#303030] leading-relaxed pr-8">{m.text}</p>}
+      {/* Text Content */}
+      {m.text && (
+        <p className="text-[12px] md:text-[14px] text-[#303030] leading-relaxed pr-10 break-words">
+          {m.text}
+        </p>
+      )}
 
-              <div className="flex items-center justify-end gap-1 mt-0.5">
-                <span className="text-[8px] md:text-[9px] text-gray-400 font-medium">
-                  {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                
-                {/* Ticks only for User messages */}
-                {m.senderModel === 'User' && getStatusIcon(m.status)}
-              </div>
-            </div>
-          ))}
-        </main>
+      {/* Timestamp and Ticks */}
+      <div className="flex items-center justify-end gap-1 mt-0.5">
+        <span className="text-[8px] md:text-[9px] text-gray-400 font-medium">
+          {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
+        
+        {/* Only User messages get the status ticks (Gray/Blue) */}
+        {m.senderModel === 'User' && getStatusIcon(m.status)}
+      </div>
+    </div>
+  ))}
+
+  {/* 4. THE FIX: Scroll Anchor */}
+  {/* This empty div is what the useRef targets to keep the chat scrolled down */}
+  <div ref={messagesEndRef} className="h-4 shrink-0" />
+</main>
+
 
         <footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-4 z-20 border-t border-gray-200 pb-safe">
           <div className="flex gap-3 md:gap-5 text-gray-500">

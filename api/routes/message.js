@@ -66,4 +66,40 @@ router.post('/send', authenticateToken, async (req, res) => {
   }
 });
 
+// --- MARK MESSAGES AS READ ---
+router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
+  try {
+    const myId = req.user.id;
+    const { otherUserId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
+      return res.status(400).json({ success: false, message: "Invalid User ID" });
+    }
+
+    // Update all messages sent TO me from THIS user that aren't 'seen' yet
+    const result = await Message.updateMany(
+      { 
+        senderId: otherUserId, 
+        receiverId: myId, 
+        status: { $ne: 'seen' } 
+      },
+      { 
+        $set: { 
+          status: 'seen',
+          seenAt: new Date() 
+        } 
+      }
+    );
+
+    res.json({ 
+      success: true, 
+      message: "Messages marked as read", 
+      count: result.modifiedCount 
+    });
+  } catch (err) {
+    console.error("PATCH /mark-read Error:", err);
+    res.status(500).json({ success: false, message: "Failed to update message status" });
+  }
+});
+
 export default router;

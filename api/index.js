@@ -1148,6 +1148,38 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
   }
 });
 
+// --- MARK MESSAGES AS READ ---
+app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const myId = req.user.id; // The Agent's ID
+    const { otherUserId } = req.params; // The User's ID
+
+    const result = await Message.updateMany(
+      { 
+        senderId: otherUserId, 
+        receiverId: myId, 
+        status: { $ne: 'seen' } 
+      },
+      { 
+        $set: { 
+          status: 'seen',
+          seenAt: new Date() // Updates your tracking field
+        } 
+      }
+    );
+
+    res.json({ 
+      success: true, 
+      message: "Messages marked as read",
+      modifiedCount: result.modifiedCount 
+    });
+  } catch (err) {
+    console.error("MARK READ ERROR:", err);
+    res.status(500).json({ success: false, message: "Failed to update status" });
+  }
+});
+
 // 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {

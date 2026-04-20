@@ -29,6 +29,7 @@ export const AgentDashboard = () => {
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
 
+const notificationSound = new Audio('/sounds/notification.mp3');
   // --- PLANS CONFIGURATION ---
   const plans = [
     {
@@ -229,17 +230,17 @@ const handleSelectUser = async (user) => {
 
   try {
     const token = localStorage.getItem('zingToken');
-    const response = await fetch(`/api/messages/${user._id}`, {
+        const response = await fetch(`/api/messages/${user._id}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
-    const contentType = response.headers.get("content-type");
-    if (response.ok && contentType && contentType.indexOf("application/json") !== -1) {
+    if (response.ok) {
       const data = await response.json();
       setMessages(data.messages);
-    } else {
-      console.warn("API route not found or returned HTML. Check backend routes.");
-      setMessages([]); // Fallback to empty chat
+      await fetch(`/api/messages/mark-read/${user._id}`, {
+        method: 'PATCH', // or POST depending on your backend
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
     }
   } catch (err) {
     console.error("Failed to load chat history:", err);
@@ -257,6 +258,105 @@ useEffect(() => {
   }, 60000); // Every minute
 
   return () => clearInterval(heartBeat);
+}, []);
+
+// --- REAL-TIME UPDATES (POLLING) ---
+useEffect(() => {
+  if (!isSubscribed) return;
+
+  const refreshData = async () => {
+    const token = localStorage.getItem('zingToken');
+    if (!token) return;
+
+    try {
+      // 1. Update the User List (Sidebar) to see new messages/online status
+      const userRes = await fetch('/api/agents/my-users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const userData = await userRes.json();
+      if (userData.success && Array.isArray(userData.users)) {
+        setUsers(userData.users);
+      }
+
+      // 2. If a chat is open, update the messages (for the blue checkmarks)
+      if (selectedUser) {
+        const msgRes = await fetch(`/api/messages/${selectedUser._id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const msgData = await msgRes.json();
+        if (msgData.success) {
+          setMessages(msgData.messages);
+        }
+      }
+    } catch (err) {
+      console.error("Polling refresh error:", err);
+    }
+  };
+
+  const interval = setInterval(refreshData, 5000); // Refresh every 5 seconds
+  return () => clearInterval(interval);
+}, [selectedUser, isSubscribed]);
+
+useEffect(() => {
+  // 1. Request Permission for Popups on Load
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+
+  if (!isSubscribed) return;
+
+  const refreshMessages = async () => {
+    const token = localStorage.getItem('zingToken');
+    if (!selectedUser || !token) return;
+
+    try {
+      const response = await fetch(`/api/messages/${selectedUser._id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+
+      if (data.success && Array.isArray(data.messages)) {
+        const hasNewMessage = data.messages.length > messages.length;
+        const lastMessage = data.messages[data.messages.length - 1];
+        if (hasNewMessage && lastMessage?.senderModel !== 'Agent') {
+          
+          notificationSound.currentTime = 0;
+          notificationSound.play().catch(() => {
+            console.log("Audio waiting for user interaction...");
+          });
+
+          if (Notification.permission === "granted") {
+            const popup = new Notification(`New Message: ${selectedUser.firstName}`, {
+              body: lastMessage.text || "Sent a file",
+              icon: selectedUser.photoUrl || '/favicon.ico',
+              tag: 'zing-connect-msg', // Groups notifications
+              silent: true // We use our own sound above
+            });
+
+            popup.onclick = () => {
+              window.focus();
+              popup.close();
+            };
+          }
+        }
+        
+        setMessages(data.messages);
+      }
+    } catch (err) {
+      console.error("Polling error:", err);
+    }
+  };
+
+  const pollInterval = setInterval(refreshMessages, 5000);
+  return () => clearInterval(pollInterval);
+}, [selectedUser, isSubscribed, messages.length]);
+
+useEffect(() => {
+  if (!("Notification" in window)) {
+    console.log("This browser does not support desktop notifications");
+  } else if (Notification.permission !== "granted") {
+    Notification.requestPermission();
+  }
 }, []);
 
 const handleSendMessage = async (e) => {
