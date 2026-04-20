@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import webpush from 'web-push';
 import multer from 'multer';
 import { Upload } from "@aws-sdk/lib-storage"; 
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"; 
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"; 
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; 
 import Message from '../models/Message.js';
 import User from '../models/User.js';
@@ -197,6 +197,7 @@ router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   }
 });
 
+// --- 5. GET DIRECT UPLOAD URL ---
 router.post('/get-upload-url', authenticateToken, async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
@@ -214,7 +215,6 @@ router.post('/get-upload-url', authenticateToken, async (req, res) => {
       ContentType: fileType,
     });
 
-    // Generate the URL that the frontend uses to PUT the file directly to iDrive
     const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
     res.json({ success: true, uploadUrl, key });
@@ -224,8 +224,6 @@ router.post('/get-upload-url', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 2. CONFIRM UPLOAD & SAVE MESSAGE ---
-// Called AFTER the frontend successfully uploads the file to storage
 router.post('/confirm-upload', authenticateToken, async (req, res) => {
   try {
     const { receiverId, text, fileUrl, fileType } = req.body;
@@ -243,16 +241,14 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
       receiverId,
       receiverModel,
       text: text || "",
-      fileUrl: fileUrl, // Storing the 'key'
+      fileUrl: fileUrl, 
       fileType: fileType,
       status: 'sent'
     });
 
     await newMessage.save();
 
-    // Use your signing helper to give the frontend a working temporary link
-    // Make sure 'getPrivateUrl' or 'generateSignedUrl' is imported/accessible here
-    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
+    const signedUrlForFrontend = await generateSignedUrl(fileUrl);
     
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
