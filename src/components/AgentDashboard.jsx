@@ -4,10 +4,7 @@ import { io } from 'socket.io-client';
 import Peer from 'simple-peer/simplepeer.min.js'; // Using the minified version is more stable in Vite
 import { Buffer } from 'buffer'; // Add this import here too
 
-// --- POLYFILLS MUST BE FIRST ---
-window.global = window;
-window.process = { env: {} };
-window.Buffer = Buffer;
+
 import { 
   BsSearch, 
   BsThreeDotsVertical, 
@@ -19,14 +16,16 @@ import {
   BsCheckCircleFill,
   BsDownload, 
   BsPlayFill, 
-  BsCheck,
-  BsSendFill,
   BsTelephoneFill, 
-  BsTelephoneXFill
+  BsTelephoneXFill,
+  BsMicMuteFill // Added this to prevent crash on call screen
 } from 'react-icons/bs';
 
+
+// --- POLYFILLS MUST BE FIRST ---
 window.global = window;
 window.process = { env: {} };
+window.Buffer = Buffer;
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -1320,33 +1319,40 @@ const handleSendMessage = async (e) => {
               </div>
             </div>
 
-            <div className="flex gap-12 mt-12">
-              {/* DECLINE / END CALL BUTTON */}
-              <button 
-                onClick={handleEndCall} 
-                className="group flex flex-col items-center gap-3"
-              >
-                <div className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all hover:rotate-12 shadow-xl shadow-red-500/20 active:scale-90">
-                  <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="24" width="24">
-                    <path d="M11 10.5a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5h5.5a.5.5 0 0 1 .5.5v7zM4.147 9c-.329 0-.6-.2-.718-.475L3.05 7.615c-.141-.34-.357-.648-.64-.903a2.678 2.678 0 0 1-.603-3.033l.292-.615A.678.678 0 0 1 2.707 2.6l2.307 1.794c.225.175.367.436.395.717l.173 1.734c.026.258-.086.512-.3.689l-1.135.91zm9.706-3.033a2.678 2.678 0 0 0-.603-3.033l-.292-.615a.678.678 0 0 0-1.015-.063L9.636 4.05c-.225.175-.367.436-.395.717l-.173 1.734c-.026.258.086.512.3.689l1.135.91c.329 0 .6-.2.718-.475l.379-.91c.141-.34.357-.648.64-.903z"/>
-                  </svg>
-                </div>
-                <span className="text-[10px] font-bold uppercase text-gray-400">End</span>
-              </button>
-              
-              {/* ACCEPT BUTTON (Visible only when being called) */}
-              {isIncomingCall && callStatus === 'ringing' && (
-                <button 
-                  onClick={handleAcceptCall} 
-                  className="group flex flex-col items-center gap-3"
-                >
-                  <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center hover:bg-green-600 transition-all shadow-xl shadow-green-500/20 animate-bounce active:scale-90">
-                    <BsTelephoneFill size={24} />
-                  </div>
-                  <span className="text-[10px] font-bold uppercase text-gray-400">Accept</span>
-                </button>
-              )}
-            </div>
+           {/* Action Buttons */}
+<div className="flex gap-10 mt-12">
+  {isIncomingCall && callStatus === 'ringing' ? (
+    <>
+      {/* Accept Button */}
+      <button 
+        onClick={handleAcceptCall}
+        className="bg-green-500 p-5 rounded-full hover:bg-green-600 transition-all shadow-lg animate-bounce"
+      >
+        <BsTelephoneFill size={28} />
+      </button>
+      
+      {/* Decline Button */}
+      <button 
+        onClick={handleEndCall}
+        className="bg-red-500 p-5 rounded-full hover:bg-red-600 transition-all shadow-lg"
+      >
+        <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="28" width="28">
+           <path d="M3.5 1.5A1.5 1.5 0 0 1 5 0h6a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 11 16H5a1.5 1.5 0 0 1-1.5-1.5v-13zM5 1h6a.5.5 0 0 0 .5.5v13a.5.5 0 0 0-.5.5H5a.5.5 0 0 0-.5-.5v-13A.5.5 0 0 0 5 1z"/>
+        </svg>
+      </button>
+    </>
+  ) : (
+    /* End Call Button (For when call is connected or outgoing) */
+    <button 
+      onClick={handleEndCall}
+      className="bg-red-500 p-6 rounded-full hover:bg-red-600 transition-all shadow-xl"
+    >
+      <div className="rotate-[135deg]">
+        <BsTelephoneFill size={32} />
+      </div>
+    </button>
+  )}
+</div>
           </div>
         </div>
       )}
@@ -1431,7 +1437,7 @@ const handleSendMessage = async (e) => {
       </div>
       
       <div className="text-center">
-        <h2 className="text-2xl font-bold">{agent?.firstName} {agent?.lastName}</h2>
+        <h2 className="text-2xl font-bold">{agentData?.firstName} {agentData?.lastName}</h2>
         <p className="text-blue-400 font-black uppercase tracking-[0.2em] text-xs mt-2 animate-pulse">
           {callStatus === 'ringing' && "Ringing..."}
           {callStatus === 'connecting' && "Securing Line..."}
