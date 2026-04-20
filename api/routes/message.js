@@ -1,8 +1,10 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import Message from '../models/Message.js'; 
-// Since auth.js and messages.js are in the same 'routes' folder:
-import { authenticateToken } from './auth.js'; 
+import webpush from 'web-push'; // Import web-push
+import Message from '../models/Message.js';
+import User from '../models/User.js';   // Need this to find receiver's phone ID
+import Agent from '../models/Agent.js'; // Need this to find receiver's phone ID
+import { authenticateToken } from '../middleware/auth.js'; // Assuming this is your path
 
 const router = express.Router();
 
@@ -12,7 +14,6 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
     const myId = req.user.id;
     const { otherUserId } = req.params;
 
-    // Validate ID to prevent Mongoose casting errors
     if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
       return res.status(400).json({ success: false, message: "Invalid User ID" });
     }
@@ -31,7 +32,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
   }
 });
 
-// --- SEND MESSAGE ---
+// --- SEND MESSAGE (WITH MOBILE PUSH TRIGGER) ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {
     const { receiverId, text, receiverModel } = req.body;
@@ -40,16 +41,39 @@ router.post('/send', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Text and receiverId are required" });
     }
 
+    const finalReceiverModel = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
+
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
-      // Fallback logic for the receiver model
-      receiverModel: receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent'),
+      receiverModel: finalReceiverModel,
       text
     });
 
     await newMessage.save();
+
+    // --- MOBILE PUSH LOGIC ---
+    try {
+      const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
+      const receiver = await TargetModel.findById(receiverId);
+
+      if (receiver && receiver.pushSubscription) {
+        const payload = JSON.stringify({
+          title: `New Message from ${req.user.firstName || 'Zing'}`,
+          body: text,
+          data: {
+            url: finalReceiverModel === 'Agent' ? '/agent-dashboard/chat' : '/user-dashboard/chat'
+          }
+        });
+
+        webpush.sendNotification(receiver.pushSubscription, payload)
+          .catch(err => console.log("Push failed (User likely offline/expired):", err.message));
+      }
+    } catch (pushErr) {
+      console.error("Notification trigger error:", pushErr);
+      // We don't stop the response because the message was successfully saved
+    }
 
     res.status(201).json({ 
       success: true, 
@@ -76,7 +100,6 @@ router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid User ID" });
     }
 
-    // Update all messages sent TO me from THIS user that aren't 'seen' yet
     const result = await Message.updateMany(
       { 
         senderId: otherUserId, 

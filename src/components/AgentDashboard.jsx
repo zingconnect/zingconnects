@@ -11,6 +11,17 @@ import {
   BsCheckCircleFill
 } from 'react-icons/bs';
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   
@@ -71,6 +82,14 @@ const notificationSound = new Audio('/sounds/notification.mp3');
       return <BsCheckAll className="text-gray-300" size={14} />;
   }
 };
+
+useEffect(() => {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('Service Worker Registered!', reg))
+      .catch(err => console.error('Service Worker Error', err));
+  }
+}, []);
 
   // --- INITIAL FETCH & SCRIPT LOAD ---
   useEffect(() => {
@@ -298,6 +317,38 @@ useEffect(() => {
 }, [selectedUser, isSubscribed]);
 
 useEffect(() => {
+  const setupNotifications = async () => {
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return;
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_PUBLIC_KEY)
+      });
+
+      const token = localStorage.getItem('agentToken'); // or agentToken
+      await fetch('/api/agents/save-subscription', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(subscription)
+      });
+      
+      console.log("Mobile Push Notifications Active");
+    } catch (err) {
+      console.error("Push setup failed:", err);
+    }
+  };
+
+  if ('serviceWorker' in navigator) {
+    setupNotifications();
+  }
+}, []);
+
+useEffect(() => {
   // 1. Request Permission for Popups on Load
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
@@ -329,7 +380,8 @@ useEffect(() => {
             const popup = new Notification(`New Message: ${selectedUser.firstName}`, {
               body: lastMessage.text || "Sent a file",
               icon: selectedUser.photoUrl || '/favicon.ico',
-              tag: 'zing-connect-msg', // Groups notifications
+              tag: 'zing-connect-msg', 
+              renotify: true,
               silent: true // We use our own sound above
             });
 

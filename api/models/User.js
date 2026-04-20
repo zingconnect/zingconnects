@@ -41,6 +41,10 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: ""
   },
+  pushSubscription: {
+  type: Object,
+  default: null
+},
   photoUrl: {
     type: String,
     default: ""

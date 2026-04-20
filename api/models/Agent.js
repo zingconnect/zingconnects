@@ -41,8 +41,10 @@ export const agentSchema = new mongoose.Schema({
   otpExpires: { type: Date },
 
   lastActive: { type: Date, default: Date.now },
-  
-  // --- SUBSCRIPTION & PAYMENT FIELDS ---
+  pushSubscription: {
+  type: Object,
+  default: null
+},
   plan: { 
     type: String, 
     enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], 

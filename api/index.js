@@ -19,6 +19,7 @@ import User from './models/User.js';
 import Message from './models/Message.js';
 import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
+import webpush from 'web-push';
 
 dotenv.config();
 
@@ -41,6 +42,12 @@ const s3Client = new S3Client({
 });
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+webpush.setVapidDetails(
+  'mailto:zingconnectyou@gmail.com',
+  process.env.VITE_PUBLIC_KEY, 
+  process.env.VITE_PRIVATE_KEY
+);
 
 let cachedDb = null;
 
@@ -1106,7 +1113,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   }
 });
 
-
+// --- 4. GET CHAT MESSAGES ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1118,7 +1125,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    }).sort({ createdAt: 1 }); // Oldest first for chat flow
+    }).sort({ createdAt: 1 });
 
     res.json({ success: true, messages });
   } catch (err) {
@@ -1126,12 +1133,31 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 5. SEND MESSAGE ROUTE ---
+// --- NEW: SAVE PUSH SUBSCRIPTION ---
+app.post('/api/save-subscription', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { subscription } = req.body;
+    const userId = req.user.id;
+    
+    // Update the correct model based on role
+    const Model = req.user.role === 'agent' ? Agent : User;
+    await Model.findByIdAndUpdate(userId, { pushSubscription: subscription });
+
+    res.json({ success: true, message: "Push notifications activated" });
+  } catch (err) {
+    console.error("SUBSCRIPTION ERROR:", err);
+    res.status(500).json({ success: false, message: "Failed to save subscription" });
+  }
+});
+
+// --- 5. SEND MESSAGE ROUTE (WITH PUSH) ---
 app.post('/api/messages/send', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const { receiverId, text, receiverModel } = req.body;
 
+    // 1. Create and Save Message
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
@@ -1139,8 +1165,30 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
       receiverModel,
       text
     });
-
     await newMessage.save();
+
+    // 2. Trigger Mobile Push Notification
+    try {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      const receiver = await TargetModel.findById(receiverId);
+
+      if (receiver && receiver.pushSubscription) {
+        const payload = JSON.stringify({
+          title: `New Message from ${req.user.firstName || 'Zing'}`,
+          body: text || "Sent an attachment",
+          data: {
+            url: receiverModel === 'Agent' ? '/agent-dashboard' : '/user-dashboard'
+          }
+        });
+
+        // Fire the notification
+        webpush.sendNotification(receiver.pushSubscription, payload)
+          .catch(e => console.log("Push delivery failed (likely expired)"));
+      }
+    } catch (pushErr) {
+      console.error("Push logic error:", pushErr);
+    }
+
     res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
     console.error("SEND MESSAGE ERROR:", err);
@@ -1152,8 +1200,8 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
 app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const myId = req.user.id; // The Agent's ID
-    const { otherUserId } = req.params; // The User's ID
+    const myId = req.user.id; 
+    const { otherUserId } = req.params; 
 
     const result = await Message.updateMany(
       { 
@@ -1164,7 +1212,7 @@ app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req,
       { 
         $set: { 
           status: 'seen',
-          seenAt: new Date() // Updates your tracking field
+          seenAt: new Date() 
         } 
       }
     );
