@@ -55,14 +55,11 @@ export async function connectToDatabase() {
     if (cachedDb && mongoose.connection.readyState === 1) {
     return cachedDb;
   }
-
-  // FIXED: Removed useNewUrlParser and useUnifiedTopology
   const opts = {
     serverSelectionTimeoutMS: 10000, 
     socketTimeoutMS: 45000, 
     family: 4 
   };
-
   try {
     // Log host only for safety
     console.log("Connecting to:", process.env.AGENT_DB_URI.split('@')[1]); 
@@ -1270,6 +1267,69 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { receiverId } = req.body; // No need to trust the frontend for fileType
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file provided" });
+    }
+    const mimeType = req.file.mimetype; // e.g., "video/mp4" or "image/jpeg"
+    const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
+
+    const fileExtension = req.file.originalname.split('.').pop();
+    const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
+    const parallelUploads3 = new Upload({
+      client: s3Client,
+      params: {
+        Bucket: process.env.IDRIVE_BUCKET_NAME,
+        Key: fileName,
+        Body: req.file.buffer,
+        ContentType: mimeType, // Setting the correct MIME type is crucial for videos to play
+      },
+    });
+
+    await parallelUploads3.done();
+
+    const fileUrl = `${process.env.IDRIVE_ENDPOINT}/${process.env.IDRIVE_BUCKET_NAME}/${fileName}`;
+    const newMessage = new Message({
+      senderId: req.user.id,
+      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      receiverId,
+      receiverModel: req.user.role === 'agent' ? 'User' : 'Agent',
+      text: "",
+      fileUrl: fileUrl,
+      fileType: detectedType, // Uses the detected "video" or "image"
+      status: 'sent'
+    });
+
+    await newMessage.save();
+    try {
+      const TargetModel = newMessage.receiverModel === 'Agent' ? Agent : User;
+      const receiver = await TargetModel.findById(receiverId);
+
+      if (receiver && receiver.pushSubscription) {
+        const payload = JSON.stringify({
+          title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
+          body: detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo",
+          data: {
+            url: newMessage.receiverModel === 'Agent' ? '/agent-dashboard' : '/user-dashboard'
+          }
+        });
+        webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
+      }
+    } catch (pErr) {}
+
+    res.status(201).json({ success: true, message: newMessage });
+
+  } catch (err) {
+    console.error("IDRIVE UPLOAD ERROR:", err);
+    res.status(500).json({ success: false, message: "Upload failed" });
+  }
+});
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 export default app;

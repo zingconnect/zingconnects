@@ -41,7 +41,9 @@ export const AgentDashboard = () => {
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);  
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
   const lastNotifiedId = useRef(null);
-
+const fileInputRef = useRef(null);
+const cameraInputRef = useRef(null);
+const [isUploading, setIsUploading] = useState(false);
 
   const plans = [
     {
@@ -225,6 +227,56 @@ export const AgentDashboard = () => {
       setPaymentProcessing(false);
     }
   };
+const handleFileUpload = async (e) => {
+  const file = e.target.files[0];
+  if (!file || !selectedUser) return;
+
+  const isVideo = file.type.startsWith('video/');
+  const isImage = file.type.startsWith('image/');
+  const detectedType = isVideo ? 'video' : 'image';
+
+  if (!isVideo && !isImage) {
+    alert("Please upload only images or videos.");
+    return;
+  }
+  if (file.size > 4.5 * 1024 * 1024) {
+    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Vercel limits uploads to 4.5MB.`);
+    e.target.value = null; 
+    return;
+  }
+
+  setIsUploading(true);
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('receiverId', selectedUser._id);
+  formData.append('senderModel', 'Agent'); 
+  formData.append('fileType', detectedType); // Send 'video' or 'image'
+
+  try {
+    const token = localStorage.getItem('agentToken');    
+    const response = await fetch('/api/messages/upload', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}` 
+      },
+      body: formData
+    });
+
+    const data = await response.json();
+    
+    if (data.success) {
+      setMessages(prev => [...prev, data.message]);      
+    } else {
+      alert(data.error || "Upload failed");
+    }
+  } catch (err) {
+    console.error("Critical Upload Error:", err);
+    alert("System error during upload.");
+  } finally {
+    setIsUploading(false);
+    if (e.target) e.target.value = null; 
+  }
+};
 
   const handleLogout = () => {
     const currentSlug = agentData.slug;
@@ -765,47 +817,77 @@ const handleSendMessage = async (e) => {
   ))}
 </div>
 
-            <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
-              <div className="flex items-center gap-1 md:gap-3 text-gray-500">
-                <button className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90" title="Attach Document">
-                  <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" height="20" width="20" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-                  </svg>
-                </button>
-                <button className="p-2 hover:bg-gray-200 rounded-full transition-all hidden md:block active:scale-90" title="Camera">
-                  <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 7.07 3h1.858a1 1 0 0 1 .707.293l.83.828a3 3 0 0 0 2.12.879H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/>
-                    <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
-                  </svg>
-                </button>
-              </div>
+<footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
+  {/* HIDDEN INPUTS */}
+  {/* 1. Attachment Input: Allows picking existing Image or Video from gallery */}
+  <input 
+    type="file" 
+    ref={fileInputRef} 
+    onChange={handleFileUpload} 
+    accept="image/*,video/*" 
+    className="hidden" 
+  />
+  
+  {/* 2. Camera Input: Triggers the device camera for either Image or Video capture */}
+  <input 
+    type="file" 
+    ref={cameraInputRef} 
+    onChange={handleFileUpload} 
+    accept="image/*,video/*" 
+    capture="environment" 
+    className="hidden" 
+  />
 
-              <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
-                <input 
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Type a message"
-                  className="flex-1 bg-white px-4 py-2.5 rounded-full text-sm outline-none border border-gray-200 focus:border-blue-300 transition-all"
-                />
-                <button 
-                  type="submit"
-                  className={`p-3 rounded-full transition-all active:scale-90 shadow-md ${
-                    newMessage.trim() ? 'bg-blue-600 text-white' : 'bg-gray-400 text-white'
-                  }`}
-                >
-                  {newMessage.trim() ? (
-                    <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
-                    </svg>
-                  ) : (
-                    <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h2.5a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1H7v-2.025A5 5 0 0 1 2.5 8V7a.5.5 0 0 1 .5-.5z"/>
-                      <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3z"/>
-                    </svg>
-                  )}
-                </button>
-              </form>
-            </footer>
+  <div className="flex items-center gap-1 md:gap-3 text-gray-500">
+    {/* ATTACHMENT BUTTON */}
+    <button 
+      type="button"
+      onClick={() => fileInputRef.current.click()}
+      disabled={isUploading}
+      className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90" 
+      title="Attach Image or Video"
+    >
+      <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" height="20" width="20">
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+      </svg>
+    </button>
+
+    {/* CAMERA BUTTON (Image & Video) */}
+    <button 
+      type="button"
+      onClick={() => cameraInputRef.current.click()}
+      disabled={isUploading}
+      className="p-2 hover:bg-gray-200 rounded-full transition-all active:scale-90" 
+      title="Take Photo or Video"
+    >
+      <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20">
+        <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 7.07 3h1.858a1 1 0 0 1 .707.293l.83.828a3 3 0 0 0 2.12.879H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/>
+        <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
+      </svg>
+    </button>
+  </div>
+
+  <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+    <input 
+      disabled={isUploading}
+      value={newMessage}
+      onChange={(e) => setNewMessage(e.target.value)}
+      placeholder={isUploading ? "Uploading..." : "Type a message"}
+      className="flex-1 bg-white px-4 py-2.5 rounded-full text-sm outline-none border border-gray-200 focus:border-blue-300 transition-all"
+    />
+    <button 
+      type="submit"
+      disabled={isUploading || !newMessage.trim()}
+      className={`p-3 rounded-full transition-all active:scale-90 shadow-md ${
+        newMessage.trim() && !isUploading ? 'bg-blue-600 text-white' : 'bg-gray-400 text-white'
+      }`}
+    >
+      <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="18" width="18">
+        <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
+      </svg>
+    </button>
+  </form>
+</footer>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30">

@@ -9,7 +9,9 @@ import {
   BsShieldLockFill,
   BsGearFill,
   BsArrowRight,
-  BsCameraFill
+  BsCameraFill,
+  BsMicFill,      
+  BsPaperclip
 } from 'react-icons/bs';
 
 function urlBase64ToUint8Array(base64String) {
@@ -38,6 +40,8 @@ export const UserDashboard = () => {
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const lastNotifiedId = useRef(null);
   
+  const cameraInputRef = useRef(null); // Ref for direct camera access
+const [isUploading, setIsUploading] = useState(false); // Tracking upload state
   // Onboarding & Photo State
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -269,6 +273,43 @@ useEffect(() => {
         console.log("Audio unlocked for iOS");
       })
       .catch(e => console.error("Unlock failed", e));
+  }
+};
+
+const handleFileUpload = async (e) => {
+  const file = e.target.files[0];
+  if (!file || !agent?._id) return;
+
+  const isVideo = file.type.startsWith('video/');
+  const isImage = file.type.startsWith('image/');
+  const detectedType = isVideo ? 'video' : 'image';
+  if (file.size > 4.5 * 1024 * 1024) {
+    alert("File too large. Please select a file under 4.5MB.");
+    return;
+  }
+
+  setIsUploading(true);
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('receiverId', agent._id);
+
+  try {
+    const token = localStorage.getItem('userToken');
+    const response = await fetch('/api/messages/upload', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      setMessages(prev => [...prev, data.message]);
+    }
+  } catch (err) {
+    console.error("Upload failed:", err);
+  } finally {
+    setIsUploading(false);
+    e.target.value = null; // Reset input
   }
 };
 
@@ -538,34 +579,58 @@ useEffect(() => {
   {/* This empty div is what the useRef targets to keep the chat scrolled down */}
   <div ref={messagesEndRef} className="h-4 shrink-0" />
 </main>
+<footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3 z-20 border-t border-gray-200 pb-safe">
+  {/* Hidden Inputs for File and Camera */}
+  <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
+  <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
 
+  <div className="flex gap-1 md:gap-2 text-gray-500">
+    {/* Attachment Button */}
+    <button 
+      onClick={() => fileInputRef.current.click()} 
+      disabled={isUploading}
+      className="p-2 hover:bg-black/5 rounded-full transition-colors"
+    >
+      <BsPaperclip size={22} />
+    </button>
 
-        <footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-4 z-20 border-t border-gray-200 pb-safe">
-          <div className="flex gap-3 md:gap-5 text-gray-500">
-            <BsPlusLg className="cursor-pointer hover:text-gray-700" size={20} />
-          </div>
-          
-          <form onSubmit={handleSendMessage} className="flex-1">
-            <input 
-              value={newMessage} 
-              onChange={(e) => setNewMessage(e.target.value)} 
-              placeholder="Type your secure message" 
-              className="w-full bg-white px-4 py-2.5 md:py-3 rounded-full text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20" 
-            />
-          </form>
-
-          <div className="w-10 md:w-12 flex justify-center items-center">
-            <button 
-              type="submit" 
-              onClick={handleSendMessage} 
-              className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all ${
-                newMessage.trim() ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-500 border border-gray-100'
-              }`}
-            >
-              <BsSendFill size={16} className={newMessage.trim() ? "ml-0.5" : ""} />
-            </button>
-          </div>
-        </footer>
+    {/* Camera Button */}
+    <button 
+      onClick={() => cameraInputRef.current.click()} 
+      disabled={isUploading}
+      className="p-2 hover:bg-black/5 rounded-full transition-colors"
+    >
+      <BsCameraFill size={22} />
+    </button>
+  </div>
+  
+  <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+    <input 
+      value={newMessage} 
+      onChange={(e) => setNewMessage(e.target.value)} 
+      disabled={isUploading}
+      placeholder={isUploading ? "Uploading file..." : "Type your secure message"} 
+      className="w-full bg-white px-4 py-2.5 md:py-3 rounded-full text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20" 
+    />
+    
+    {/* Voice/Send Toggle */}
+    {newMessage.trim() ? (
+      <button 
+        type="submit" 
+        className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+      >
+        <BsSendFill size={16} className="ml-0.5" />
+      </button>
+    ) : (
+      <button 
+        type="button"
+        className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-white text-gray-500 border border-gray-100 flex items-center justify-center hover:text-blue-600"
+      >
+        <BsMicFill size={20} />
+      </button>
+    )}
+  </form>
+</footer>
       </div>
 
       {!hasInteracted && (

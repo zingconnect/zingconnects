@@ -51,9 +51,11 @@ notificationSent: {
   timestamps: true 
 });
 
-// Indexing for faster chat loading and status updates
+
 messageSchema.index({ senderId: 1, receiverId: 1, createdAt: 1 });
-messageSchema.index({ receiverId: 1, status: 1 }); // Useful for "Mark all as seen"
+messageSchema.index({ receiverId: 1, status: 1 });
+messageSchema.index({ senderId: 1, receiverId: 1, fileType: 1 });
+
 
 const Message = mongoose.models.Message || mongoose.model('Message', messageSchema);
 export default Message;

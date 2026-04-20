@@ -1,12 +1,17 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import webpush from 'web-push'; // Import web-push
+import webpush from 'web-push';
+import multer from 'multer'; // 1. Import Multer
+import { Upload } from "@aws-sdk/lib-storage"; // 2. Import S3 Upload helper
 import Message from '../models/Message.js';
-import User from '../models/User.js';   // Need this to find receiver's phone ID
-import Agent from '../models/Agent.js'; // Need this to find receiver's phone ID
+import User from '../models/User.js';
+import Agent from '../models/Agent.js';
 import { authenticateToken } from './auth.js';
+import { s3Client } from '../config/s3Config.js'; // Ensure your s3Client is exported from a config file
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
+
 
 // --- GET CHAT HISTORY ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
@@ -57,7 +62,7 @@ router.post('/send', authenticateToken, async (req, res) => {
     try {
       const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
       const receiver = await TargetModel.findById(receiverId);
-      
+
 if (receiver && receiver.pushSubscription) {
   const payload = JSON.stringify({
     title: `New Message from ${req.user.firstName || 'Zing'}`,
@@ -93,7 +98,6 @@ if (receiver && receiver.pushSubscription) {
   }
 });
 
-// --- MARK MESSAGES AS READ ---
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {
     const myId = req.user.id;
@@ -125,6 +129,74 @@ router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("PATCH /mark-read Error:", err);
     res.status(500).json({ success: false, message: "Failed to update message status" });
+  }
+});
+
+router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    const { receiverId } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file provided" });
+    }
+
+    // Detect type (image or video)
+    const mimeType = req.file.mimetype;
+    const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
+
+    // Generate unique name
+    const fileExtension = req.file.originalname.split('.').pop();
+    const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
+
+    // Upload to iDrive e2
+    const parallelUploads3 = new Upload({
+      client: s3Client,
+      params: {
+        Bucket: process.env.IDRIVE_BUCKET_NAME,
+        Key: fileName,
+        Body: req.file.buffer,
+        ContentType: mimeType,
+      },
+    });
+
+    await parallelUploads3.done();
+    const fileUrl = `${process.env.IDRIVE_ENDPOINT}/${process.env.IDRIVE_BUCKET_NAME}/${fileName}`;
+    const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
+    const newMessage = new Message({
+      senderId: req.user.id,
+      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      receiverId,
+      receiverModel,
+      text: "", // Empty for media
+      fileUrl: fileUrl,
+      fileType: detectedType,
+      status: 'sent'
+    });
+
+    await newMessage.save();
+    try {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      const receiver = await TargetModel.findById(receiverId);
+
+      if (receiver && receiver.pushSubscription) {
+        const payload = JSON.stringify({
+          title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
+          body: detectedType === 'video' ? "🎥 Sent a video attachment" : "📷 Sent a photo attachment",
+          data: {
+            url: receiverModel === 'Agent' 
+              ? `/agent/dashboard?userId=${req.user.id}` 
+              : '/user/dashboard'
+          }
+        });
+        webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
+      }
+    } catch (pErr) { console.error("Push Error:", pErr); }
+
+    res.status(201).json({ success: true, message: newMessage });
+
+  } catch (err) {
+    console.error("UPLOAD ERROR:", err);
+    res.status(500).json({ success: false, message: "Upload failed", error: err.message });
   }
 });
 
