@@ -84,14 +84,6 @@ const lastNotifiedId = useRef(null);
   }
 };
 
-useEffect(() => {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('Service Worker Registered!', reg))
-      .catch(err => console.error('Service Worker Error', err));
-  }
-}, []);
-
   // --- INITIAL FETCH & SCRIPT LOAD ---
   useEffect(() => {
     const script = document.createElement('script');

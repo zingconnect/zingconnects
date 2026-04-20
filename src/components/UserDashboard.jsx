@@ -73,14 +73,6 @@ export const UserDashboard = () => {
     }
   };
 
-  useEffect(() => {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('Service Worker Registered!', reg))
-      .catch(err => console.error('Service Worker Error', err));
-  }
-}, []);
-
 useEffect(() => {
   const setupNotifications = async () => {
     try {
