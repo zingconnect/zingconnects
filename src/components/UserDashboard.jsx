@@ -174,41 +174,41 @@ useEffect(() => {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
 
-        // --- MODIFIED ALERT LOGIC ---
+        // --- 1. ALERT LOGIC (ONE TEXT = ONE SOUND) ---
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
           lastMsg.status !== 'seen' && 
-          lastMsg._id !== lastNotifiedId.current // Check the REF, not state
+          lastMsg._id !== lastNotifiedId.current // Check against the Ref
         ) {
-          // 1. Update the Ref immediately so the next poll (in 5s) doesn't trigger again
+          // Update Ref immediately to block the sound from playing on the next poll
           lastNotifiedId.current = lastMsg._id;
 
-          // 2. Play Sound using .current (Referencing the stable Audio object)
+          // Play Sound via Ref (ensure notificationSound is a useRef at the top)
           if (notificationSound.current) {
             notificationSound.current.currentTime = 0;
-            notificationSound.current.play().catch(e => console.log("Audio blocked: Need user interaction"));
+            notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
           }
 
-          // 3. Browser Notification
+          // Browser Notification (Branding Fix)
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName}`, {
               body: lastMsg.text || "Sent a file",
-              icon: agent.photoUrl || '/favicon.ico',
-              tag: 'zing-msg' // 'tag' groups notifications so you don't get 10 popups
+              icon: '/logo.png', // Point to your brand logo in public folder
+              tag: 'zing-msg'    // Grouping tag to prevent spam
             });
           }
 
-          // 4. Mark as Read in DB
+          // Mark as Read (Silent Background update)
           fetch(`/api/messages/mark-read/${agent._id}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
 
-        // --- STATE UPDATE ---
+        // --- 2. STATE UPDATE (STABILITY) ---
         setMessages(prev => {
-          // Only update if the message count changed to prevent keyboard flickering
+          // Only re-render if the number of messages actually changed
           if (prev.length !== incomingMessages.length) {
             return incomingMessages;
           }
@@ -219,7 +219,7 @@ useEffect(() => {
       console.error("Polling error:", err);
     }
   };
-  
+
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);
