@@ -99,7 +99,7 @@ const AgentModel = getAgentModel();
       const baseSlug = `${firstName || 'agent'}${lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
       finalSlug = baseSlug;
       let counter = 1;
-      while (await Agent.findOne({ slug: finalSlug })) {
+      while (await AgentModel.findOne({ slug: finalSlug })) {
         counter++;
         finalSlug = `${baseSlug}-${counter.toString().padStart(2, '0')}`;
       }
@@ -153,7 +153,7 @@ const AgentModel = getAgentModel();
       console.log("Existing unverified agent updated with new OTP.");
     } else {
       // CREATE brand new agent
-      const newAgent = new Agent({
+      const newAgent = new AgentModel({
         firstName: firstName.trim(),
         lastName: (lastName || "").trim(),
         email: lowerEmail,
