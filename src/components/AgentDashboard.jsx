@@ -319,31 +319,50 @@ useEffect(() => {
 useEffect(() => {
   const setupNotifications = async () => {
     try {
+      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
+      if (!publicKey) {
+        console.warn("Push Notification setup skipped: VITE_PUBLIC_KEY is not defined.");
+        return;
+      }
       const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
+      if (permission !== 'granted') {
+        console.warn("Notifications permission denied by user.");
+        return;
+      }
       const registration = await navigator.serviceWorker.ready;
+      const existingSubscription = await registration.pushManager.getSubscription();
+      
+      if (existingSubscription) {
+        console.log("User already has an active subscription.");
+        return;
+      }
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_PUBLIC_KEY)
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
       });
-
-      const token = localStorage.getItem('agentToken'); // or agentToken
-      await fetch('/api/agents/save-subscription', {
+      const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+      
+      if (!token) {
+        console.warn("No auth token found, cannot save subscription to backend.");
+        return;
+      }
+      const response = await fetch('/api/save-subscription', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(subscription)
+        body: JSON.stringify({ subscription }) // Sending as an object for consistency
       });
-      
-      console.log("Mobile Push Notifications Active");
+      if (response.ok) {
+        console.log("Mobile Push Notifications Active");
+      }
     } catch (err) {
       console.error("Push setup failed:", err);
     }
   };
 
-  if ('serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
 }, []);

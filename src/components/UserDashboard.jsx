@@ -83,35 +83,49 @@ export const UserDashboard = () => {
 useEffect(() => {
   const setupNotifications = async () => {
     try {
+      // 1. Guard: Check if key exists to prevent "length" error
+      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
+      if (!publicKey) {
+        console.warn("Push setup skipped: VITE_PUBLIC_KEY is missing.");
+        return;
+      }
+
+      // 2. Request permission
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') return;
       const registration = await navigator.serviceWorker.ready;
+      const existingSub = await registration.pushManager.getSubscription();
+      if (existingSub) {
+        console.log("User is already subscribed to push.");
+        return; 
+      }
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_PUBLIC_KEY)
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
       });
+      const token = localStorage.getItem('userToken'); 
+      if (!token) return;
 
-      const token = localStorage.getItem('userToken'); // or agentToken
-      await fetch('/api/users/save-subscription', {
+      const response = await fetch('/api/save-subscription', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(subscription)
+        body: JSON.stringify({ subscription }) // Wrap in object to match backend req.body
       });
-      
-      console.log("Mobile Push Notifications Active");
+
+      if (response.ok) {
+        console.log("User Mobile Push Notifications Active");
+      }
     } catch (err) {
-      console.error("Push setup failed:", err);
+      console.error("User Push setup failed:", err);
     }
   };
-
-  if ('serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
 }, []);
-
 useEffect(() => {
     // Timeout ensures the DOM has rendered the new message before scrolling
     const timer = setTimeout(() => {
