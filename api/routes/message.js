@@ -4,7 +4,7 @@ import webpush from 'web-push'; // Import web-push
 import Message from '../models/Message.js';
 import User from '../models/User.js';   // Need this to find receiver's phone ID
 import Agent from '../models/Agent.js'; // Need this to find receiver's phone ID
-import { authenticateToken } from '../middleware/auth.js'; // Assuming this is your path
+import { authenticateToken } from './auth.js';
 
 const router = express.Router();
 

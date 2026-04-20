@@ -36,8 +36,10 @@ const messageSchema = new mongoose.Schema({
     enum: ['text', 'image', 'video', 'file'],
     default: 'text'
   },
-  // --- STATUS TRACKING ---
-  status: {
+notificationSent: {
+    type: Boolean,
+    default: false
+  },  status: {
     type: String,
     enum: ['sent', 'delivered', 'seen'],
     default: 'sent'
