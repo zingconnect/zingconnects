@@ -3,13 +3,14 @@ import mongoose from 'mongoose';
 import webpush from 'web-push';
 import multer from 'multer';
 import { Upload } from "@aws-sdk/lib-storage"; 
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"; // Added GetObjectCommand
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // Added getSignedUrl
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"; 
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; 
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import Agent from '../models/Agent.js';
 import { authenticateToken } from './auth.js';
 
+// 1. Initialize S3 Client locally to avoid "s3Client is not defined" 500 errors
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
   endpoint: process.env.IDRIVE_ENDPOINT,
@@ -23,17 +24,26 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- HELPER FUNCTION FOR SIGNED URLS ---
+// Converts a private key (like 'chat/123.jpg') into a working temporary link
 const generateSignedUrl = async (key) => {
-  if (!key) return null;
-  if (key.startsWith('http')) return key;
-  const command = new GetObjectCommand({
-    Bucket: process.env.IDRIVE_BUCKET_NAME,
-    Key: key,
-  });
-  return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  try {
+    if (!key) return null;
+    if (key.startsWith('http')) return key; // Return as-is if already a full URL
+    
+    const command = new GetObjectCommand({
+      Bucket: process.env.IDRIVE_BUCKET_NAME,
+      Key: key,
+    });
+    
+    // URL remains valid for 1 hour
+    return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  } catch (err) {
+    console.error("Presigned URL Error:", err);
+    return null;
+  }
 };
 
-// --- GET CHAT HISTORY ---
+// --- 1. GET CHAT HISTORY ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
   try {
     const myId = req.user.id;
@@ -48,9 +58,9 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    }).sort({ createdAt: 1 }).lean(); // Use lean() for faster processing/editing
+    }).sort({ createdAt: 1 }).lean(); 
 
-    // Generate signed URLs for all media messages
+    // Generate signed URLs for all media messages so they display correctly
     const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl && (m.fileType === 'image' || m.fileType === 'video')) {
         m.fileUrl = await generateSignedUrl(m.fileUrl);
@@ -65,7 +75,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
   }
 });
 
-// --- SEND MESSAGE (TEXT ONLY) ---
+// --- 2. SEND TEXT MESSAGE ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {
     const { receiverId, text, receiverModel } = req.body;
@@ -84,6 +94,7 @@ router.post('/send', authenticateToken, async (req, res) => {
 
     await newMessage.save();
 
+    // Mobile Push Trigger
     try {
       const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
       const receiver = await TargetModel.findById(receiverId);
@@ -105,7 +116,7 @@ router.post('/send', authenticateToken, async (req, res) => {
   }
 });
 
-// --- UPLOAD MEDIA (IMAGE/VIDEO) ---
+// --- 3. UPLOAD MEDIA (IMAGE/VIDEO) ---
 router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     const { receiverId } = req.body;
@@ -138,7 +149,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       receiverId,
       receiverModel,
       text: "", 
-      fileUrl: fileName, // Save the KEY, not the full URL
+      fileUrl: fileName, // SAVE ONLY THE KEY
       fileType: detectedType,
       status: 'sent'
     });
@@ -171,6 +182,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
   }
 });
 
+// --- 4. MARK AS READ ---
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {
     const myId = req.user.id;

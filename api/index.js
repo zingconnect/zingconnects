@@ -51,13 +51,19 @@ webpush.setVapidDetails(
 
 
 const getPrivateUrl = async (fileKey) => {
-  if (!fileKey || fileKey.startsWith('http')) return fileKey;
-  const command = new GetObjectCommand({
-    Bucket: process.env.IDRIVE_BUCKET_NAME,
-    Key: fileKey,
-  });
-  // URL expires in 1 hour
-  return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  try {
+    if (!fileKey) return null;
+    if (fileKey.startsWith('http')) return fileKey;
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.IDRIVE_BUCKET_NAME,
+      Key: fileKey,
+    });
+    return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  } catch (err) {
+    console.error("Signing error:", err);
+    return null;
+  }
 };
 
 let cachedDb = null;
@@ -1321,6 +1327,26 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
     res.status(500).json({ success: false, message: "Upload failed" });
+  }
+});
+
+app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    // Get the agent data
+    const agent = await Agent.findById(req.user.id).select('-password').lean();
+    
+    if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+    // Generate a signed URL for the Agent's own profile photo
+    if (agent.photoUrl && !agent.photoUrl.startsWith('http')) {
+      agent.photoUrl = await getPrivateUrl(agent.photoUrl);
+    }
+
+    res.json({ agent });
+  } catch (err) {
+    console.error("Dashboard Error:", err);
+    res.status(500).json({ message: "Error fetching dashboard" });
   }
 });
 
