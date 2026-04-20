@@ -96,38 +96,27 @@ const [caption, setCaption] = useState("");          // The text to send with th
  const getStatusIcon = (status) => {
   switch (status) {
     case 'seen':
-      // Double Blue Check (Read)
       return <BsCheckAll className="text-blue-400" size={18} />;
     case 'delivered':
-      // Double Gray Check (Received by phone)
       return <BsCheckAll className="text-gray-400" size={18} />;
     default:
-      // Single Gray Check (Sent to server)
       return <BsCheck className="text-gray-400" size={16} />;
   }
 };
 
 useEffect(() => {
-  // Only register if the socket is connected and agentData is loaded
   if (socket && agentData?._id) {
-    
-    // Register agent in their private socket room
-    socket.emit("join-main-room", agentData._id);
+        socket.emit("join-main-room", agentData._id);
 
     // Listen for Incoming Calls
     socket.on("incoming-call", (data) => {
       setActiveCaller(data); 
       setIsIncomingCall(true);
       setCallStatus('ringing');
-      // ringtone.play(); // Optional: add your audio logic here
     });
-
-    // Listen for User picking up
     socket.on("call-accepted", () => {
       setCallStatus('connected');
     });
-
-    // Listen for Hang-ups
     socket.on("call-ended", () => {
       setCallStatus('idle');
       setIsIncomingCall(false);
