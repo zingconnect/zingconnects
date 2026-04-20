@@ -57,15 +57,18 @@ router.post('/send', authenticateToken, async (req, res) => {
     try {
       const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
       const receiver = await TargetModel.findById(receiverId);
-
-      if (receiver && receiver.pushSubscription) {
-        const payload = JSON.stringify({
-          title: `New Message from ${req.user.firstName || 'Zing'}`,
-          body: text,
-          data: {
-            url: finalReceiverModel === 'Agent' ? '/agent-dashboard/chat' : '/user-dashboard/chat'
-          }
-        });
+      
+if (receiver && receiver.pushSubscription) {
+  const payload = JSON.stringify({
+    title: `New Message from ${req.user.firstName || 'Zing'}`,
+    body: text,
+    data: {
+      // MATCHING YOUR APP.JSX ROUTES EXACTLY
+      url: finalReceiverModel === 'Agent' 
+        ? `/agent/dashboard?userId=${req.user.id}` 
+        : '/user/dashboard'
+    }
+  });
 
         webpush.sendNotification(receiver.pushSubscription, payload)
           .catch(err => console.log("Push failed (User likely offline/expired):", err.message));

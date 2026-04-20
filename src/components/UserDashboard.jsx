@@ -35,6 +35,7 @@ export const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const notificationSound = new Audio('/sounds/notification.mp3');
+  const lastNotifiedId = useRef(null);
   
   // Onboarding & Photo State
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -83,49 +84,50 @@ export const UserDashboard = () => {
 useEffect(() => {
   const setupNotifications = async () => {
     try {
-      // 1. Guard: Check if key exists to prevent "length" error
       const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-      if (!publicKey) {
-        console.warn("Push setup skipped: VITE_PUBLIC_KEY is missing.");
-        return;
-      }
+      if (!publicKey) return;
 
-      // 2. Request permission
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') return;
+
       const registration = await navigator.serviceWorker.ready;
-      const existingSub = await registration.pushManager.getSubscription();
-      if (existingSub) {
-        console.log("User is already subscribed to push.");
-        return; 
+      
+      // Get existing or create new
+      let subscription = await registration.pushManager.getSubscription();
+      
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey)
+        });
       }
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey)
-      });
+
       const token = localStorage.getItem('userToken'); 
       if (!token) return;
 
+      // ALWAYS send it to the backend to ensure the DB is synced
       const response = await fetch('/api/save-subscription', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ subscription }) // Wrap in object to match backend req.body
+        body: JSON.stringify({ subscription }) 
       });
 
       if (response.ok) {
-        console.log("User Mobile Push Notifications Active");
+        console.log("Database synced with Push Subscription");
       }
     } catch (err) {
       console.error("User Push setup failed:", err);
     }
   };
+
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
 }, []);
+
 useEffect(() => {
     // Timeout ensures the DOM has rendered the new message before scrolling
     const timer = setTimeout(() => {
@@ -165,59 +167,66 @@ useEffect(() => {
     return () => clearInterval(interval);
   }, [navigate]);
 
-  // --- HOOK 2: MESSAGE POLLING ---
- useEffect(() => {
-    const token = localStorage.getItem('userToken');
-    if (!token || !agent?._id) return;
+  useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token || !agent?._id) return;
 
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
+  const fetchMessages = async () => {
+    try {
+      const response = await fetch(`/api/messages/${agent._id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
 
-    const fetchMessages = async () => {
-      try {
-        const response = await fetch(`/api/messages/${agent._id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
+      if (response.ok && data.success) {
+        const incomingMessages = data.messages;
+        const lastMsg = incomingMessages[incomingMessages.length - 1];
 
-        if (response.ok && data.success) {
-          const hasNewMessage = data.messages.length > messages.length;
-          const lastMessage = data.messages[data.messages.length - 1];
+        // 1. ALERT LOGIC
+        if (
+          lastMsg && 
+          lastMsg.senderModel === 'Agent' && 
+          lastMsg.status !== 'seen' && 
+          lastMsg._id !== lastNotifiedId.current
+        ) {
+          lastNotifiedId.current = lastMsg._id;
 
-          // Trigger if a new message arrived from the Agent
-          if (hasNewMessage && lastMessage?.senderModel === 'Agent') {
-            
-            // A. Play Sound
-            notificationSound.currentTime = 0;
-            notificationSound.play().catch(e => console.log("Sound blocked by browser until user interacts"));
+          // Sound (will work as long as user has tapped the screen once)
+          notificationSound.currentTime = 0;
+          notificationSound.play().catch(() => console.log("Audio blocked: User must interact first"));
 
-            // B. Browser Notification
-            if (Notification.permission === "granted") {
-              new Notification(`Agent ${agent.firstName}`, {
-                body: lastMessage.text || "Sent a file",
-                icon: agent.photoUrl || '/favicon.ico',
-              });
-            }
-
-            // C. Mark as Read in DB (Updates Agent's ticks to blue)
-            await fetch(`/api/messages/mark-read/${agent._id}`, {
-              method: 'PATCH',
-              headers: { 'Authorization': `Bearer ${token}` }
+          if (Notification.permission === "granted") {
+            new Notification(`Agent ${agent.firstName}`, {
+              body: lastMsg.text || "Sent a file",
+              icon: agent.photoUrl || '/favicon.ico',
+              tag: 'zing-user-msg' // Prevents multiple notification banners
             });
           }
 
-          setMessages(data.messages);
+          fetch(`/api/messages/mark-read/${agent._id}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).catch(err => console.error("Mark read failed:", err));
         }
-      } catch (err) {
-        console.error("Polling error:", err);
-      }
-    };
 
-    fetchMessages();
-    const interval = setInterval(fetchMessages, 5000); 
-    return () => clearInterval(interval);
-  }, [agent?._id, messages.length]);
+        // 2. STATE UPDATE: Only update if there is actually a new message
+        // This prevents the mobile keyboard from flickering/closing during polling
+        setMessages(prev => {
+          if (prev.length !== incomingMessages.length) {
+            return incomingMessages;
+          }
+          return prev;
+        });
+      }
+    } catch (err) {
+      console.error("Polling error:", err);
+    }
+  };
+
+  fetchMessages();
+  const interval = setInterval(fetchMessages, 5000); 
+  return () => clearInterval(interval);
+}, [agent?._id]);
 
   const agentStatus = getStatusInfo(agent);
 

@@ -41,6 +41,7 @@ export const AgentDashboard = () => {
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
 
 const notificationSound = new Audio('/sounds/notification.mp3');
+const lastNotifiedId = useRef(null);
   // --- PLANS CONFIGURATION ---
   const plans = [
     {
@@ -242,29 +243,49 @@ useEffect(() => {
       window.location.href = '/';
     }
   };
-
 const handleSelectUser = async (user) => {
-  setSelectedUser(user);
   if (window.innerWidth < 1024) setShowSidebar(false);
-
+  setMessages([]); // Clear the state so the screen doesn't show the previous user's chat
+  setSelectedUser(user);
   try {
     const token = localStorage.getItem('zingToken');
-        const response = await fetch(`/api/messages/${user._id}`, {
+    if (!token) return;
+    const response = await fetch(`/api/messages/${user._id}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
     if (response.ok) {
-      const data = await response.json();
-      setMessages(data.messages);
-      await fetch(`/api/messages/mark-read/${user._id}`, {
-        method: 'PATCH', // or POST depending on your backend
+            const data = await response.json();
+      if (data.success && Array.isArray(data.messages)) {
+        setMessages(data.messages);
+      }
+      fetch(`/api/messages/mark-read/${user._id}`, {
+        method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
-      });
+      }).catch(err => console.error("Mark read background error:", err));
+      
+    } else {
+      console.error("Server returned an error while fetching messages");
     }
   } catch (err) {
     console.error("Failed to load chat history:", err);
   }
 };
+
+// Add this inside the AgentDashboard component
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const userIdFromUrl = params.get('userId');
+  
+  if (userIdFromUrl && users.length > 0) {
+    const userToSelect = users.find(u => u._id === userIdFromUrl);
+    if (userToSelect) {
+      handleSelectUser(userToSelect);
+      // Clean the URL so refreshing doesn't keep resetting the chat
+      navigate('/agent/dashboard', { replace: true });
+    }
+  }
+}, [users, navigate]); // Fires as soon as the user list is loaded from the API
 
 // Add this to your Agent Dashboard
 useEffect(() => {
@@ -320,45 +341,39 @@ useEffect(() => {
   const setupNotifications = async () => {
     try {
       const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-      if (!publicKey) {
-        console.warn("Push Notification setup skipped: VITE_PUBLIC_KEY is not defined.");
-        return;
-      }
+      if (!publicKey) return;
+
       const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        console.warn("Notifications permission denied by user.");
-        return;
-      }
+      if (permission !== 'granted') return;
+
       const registration = await navigator.serviceWorker.ready;
-      const existingSubscription = await registration.pushManager.getSubscription();
       
-      if (existingSubscription) {
-        console.log("User already has an active subscription.");
-        return;
+      // Get existing or new
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey)
+        });
       }
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey)
-      });
-      const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-      
-      if (!token) {
-        console.warn("No auth token found, cannot save subscription to backend.");
-        return;
-      }
-      const response = await fetch('/api/save-subscription', {
+
+      // We use zingToken here because that is what your AgentDashboard uses
+      const token = localStorage.getItem('zingToken');
+      if (!token) return;
+
+      // Sync with backend
+      await fetch('/api/save-subscription', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ subscription }) // Sending as an object for consistency
+        body: JSON.stringify({ subscription }) 
       });
-      if (response.ok) {
-        console.log("Mobile Push Notifications Active");
-      }
+      
+      console.log("Agent Mobile Push Synced to DB");
     } catch (err) {
-      console.error("Push setup failed:", err);
+      console.error("Agent Push setup failed:", err);
     }
   };
 
@@ -373,11 +388,11 @@ useEffect(() => {
     Notification.requestPermission();
   }
 
-  if (!isSubscribed) return;
+  if (!isSubscribed || !selectedUser?._id) return;
 
   const refreshMessages = async () => {
     const token = localStorage.getItem('zingToken');
-    if (!selectedUser || !token) return;
+    if (!token) return;
 
     try {
       const response = await fetch(`/api/messages/${selectedUser._id}`, {
@@ -386,32 +401,41 @@ useEffect(() => {
       const data = await response.json();
 
       if (data.success && Array.isArray(data.messages)) {
-        const hasNewMessage = data.messages.length > messages.length;
-        const lastMessage = data.messages[data.messages.length - 1];
-        if (hasNewMessage && lastMessage?.senderModel !== 'Agent') {
-          
-          notificationSound.currentTime = 0;
-          notificationSound.play().catch(() => {
-            console.log("Audio waiting for user interaction...");
-          });
+        const incomingMessages = data.messages;
+        const lastMessage = incomingMessages[incomingMessages.length - 1];
 
+        // NEW LOGIC: Only alert if it's a NEW unread message from a User
+        if (
+          lastMessage && 
+          lastMessage.senderModel === 'User' && 
+          lastMessage.status !== 'seen' &&
+          lastMessage._id !== lastNotifiedId.current
+        ) {
+          // Update ref immediately to kill the loop
+          lastNotifiedId.current = lastMessage._id;
+
+          // A. Play Sound
+          notificationSound.currentTime = 0;
+          notificationSound.play().catch(e => console.log("Audio blocked by mobile browser"));
+
+          // B. Browser Notification
           if (Notification.permission === "granted") {
             const popup = new Notification(`New Message: ${selectedUser.firstName}`, {
               body: lastMessage.text || "Sent a file",
               icon: selectedUser.photoUrl || '/favicon.ico',
-              tag: 'zing-connect-msg', 
-              renotify: true,
-              silent: true // We use our own sound above
+              tag: 'zing-msg'
             });
-
-            popup.onclick = () => {
-              window.focus();
-              popup.close();
-            };
+            popup.onclick = () => { window.focus(); popup.close(); };
           }
+
+          // C. Background Mark-Read (Stops the server from thinking it's still new)
+          fetch(`/api/messages/mark-read/${selectedUser._id}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).catch(err => console.error("Auto-mark read failed:", err));
         }
         
-        setMessages(data.messages);
+        setMessages(incomingMessages);
       }
     } catch (err) {
       console.error("Polling error:", err);
@@ -420,7 +444,7 @@ useEffect(() => {
 
   const pollInterval = setInterval(refreshMessages, 5000);
   return () => clearInterval(pollInterval);
-}, [selectedUser, isSubscribed, messages.length]);
+}, [selectedUser?._id, isSubscribed]);
 
 useEffect(() => {
   if (!("Notification" in window)) {
