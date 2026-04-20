@@ -2,12 +2,23 @@ import express from 'express';
 import mongoose from 'mongoose';
 import webpush from 'web-push';
 import multer from 'multer'; // 1. Import Multer
-import { Upload } from "@aws-sdk/lib-storage"; // 2. Import S3 Upload helper
+import { Upload } from "@aws-sdk/lib-storage"; 
+import { S3Client } from "@aws-sdk/client-s3";
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import Agent from '../models/Agent.js';
 import { authenticateToken } from './auth.js';
-import { s3Client } from '../config/s3Config.js'; // Ensure your s3Client is exported from a config file
+
+
+
+const s3Client = new S3Client({
+  region: process.env.IDRIVE_REGION,
+  endpoint: process.env.IDRIVE_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.IDRIVE_ACCESS_KEY_ID,
+    secretAccessKey: process.env.IDRIVE_SECRET_ACCESS_KEY,
+  },
+});
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
