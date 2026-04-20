@@ -900,45 +900,60 @@ const handleSendMessage = async (e) => {
   ))}
 </div>
 {/* --- AGENT WHATSAPP PREVIEW OVERLAY --- */}
-    {previewUrl && (
-      <div className="absolute inset-0 z-[500] bg-slate-950 flex flex-col animate-in fade-in zoom-in duration-200">
-        <div className="p-4 flex justify-between items-center text-white/70">
-          <button onClick={() => { setPreviewUrl(null); setPreviewFile(null); }} className="p-2 hover:bg-white/10 rounded-full">
-            <BsChevronLeft size={24} />
-          </button>
-          <span className="text-[10px] font-black uppercase tracking-widest">Official Media Preview</span>
-          <div className="w-10" />
-        </div>
+{previewUrl && (
+  <div className="absolute inset-0 z-[500] bg-slate-950 flex flex-col animate-in fade-in zoom-in duration-200">
+    <div className="p-4 flex justify-between items-center text-white/70">
+      <button onClick={() => { setPreviewUrl(null); setPreviewFile(null); }} className="p-2 hover:bg-white/10 rounded-full">
+        <BsChevronLeft size={24} />
+      </button>
+      <span className="text-[10px] font-black uppercase tracking-widest">Official Media Preview</span>
+      <div className="w-10" />
+    </div>
 
-        <div className="flex-1 flex items-center justify-center p-6">
-          <img src={previewUrl} className="max-h-full max-w-full object-contain rounded-xl shadow-2xl border border-white/5" />
-        </div>
+    {/* UPDATED SECTION BELOW */}
+    <div className="flex-1 flex items-center justify-center p-6">
+      {previewFile?.type.startsWith('video/') ? (
+        <video 
+          src={previewUrl} 
+          controls 
+          autoPlay 
+          className="max-h-full max-w-full rounded-xl shadow-2xl border border-white/5" 
+        />
+      ) : (
+        <img 
+          src={previewUrl} 
+          alt="Preview"
+          className="max-h-full max-w-full object-contain rounded-xl shadow-2xl border border-white/5" 
+        />
+      )}
+    </div>
+    {/* END OF UPDATED SECTION */}
 
-        <div className="p-6 bg-slate-900/90 backdrop-blur-xl border-t border-white/5">
-          <div className="max-w-4xl mx-auto flex items-center gap-4 bg-white/5 p-2 rounded-2xl border border-white/10">
-            <input
-              type="text"
-              placeholder="Add an official caption..."
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
-              autoFocus
-            />
-            <button 
-              onClick={handleFinalSend}
-              disabled={isUploading}
-              className="bg-blue-600 hover:bg-blue-500 text-white p-4 rounded-xl transition-all shadow-lg shadow-blue-900/20"
-            >
-              {isUploading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
-              ) : (
-                <BsCheckCircleFill size={20} />
-              )}
-            </button>
-          </div>
-        </div>
+    <div className="p-6 bg-slate-900/90 backdrop-blur-xl border-t border-white/5">
+      <div className="max-w-4xl mx-auto flex items-center gap-4 bg-white/5 p-2 rounded-2xl border border-white/10">
+        <input
+          type="text"
+          placeholder="Add an official caption..."
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
+          autoFocus
+        />
+        <button 
+          onClick={handleFinalSend}
+          disabled={isUploading}
+          className="bg-blue-600 hover:bg-blue-500 text-white p-4 rounded-xl transition-all shadow-lg shadow-blue-900/20"
+        >
+          {isUploading ? (
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+          ) : (
+            <BsCheckCircleFill size={20} />
+          )}
+        </button>
       </div>
-    )}
+    </div>
+  </div>
+)}
 
 <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
   {/* HIDDEN INPUTS */}

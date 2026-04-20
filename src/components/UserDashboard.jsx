@@ -718,56 +718,68 @@ const handleFinalSend = async () => {
   {/* This empty div is what the useRef targets to keep the chat scrolled down */}
   <div ref={messagesEndRef} className="h-4 shrink-0" />
 </main>
-{/* --- INSERT WHATSAPP PREVIEW HERE --- */}
-        {previewUrl && (
-          <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
-            {/* Header */}
-            <div className="p-4 flex justify-between items-center text-white">
-              <button 
-                onClick={() => { setPreviewUrl(null); setSelectedFile(null); }} 
-                className="p-2 hover:bg-white/10 rounded-full transition-colors"
-              >
-                <BsChevronLeft size={24} />
-              </button>
-              <span className="font-bold uppercase tracking-widest text-[10px]">Preview Media</span>
-              <div className="w-10" /> 
-            </div>
+{/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
+{previewUrl && (
+  <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
+    {/* Header */}
+    <div className="p-4 flex justify-between items-center text-white">
+      <button 
+        onClick={() => { 
+          setPreviewUrl(null); 
+          setPreviewFile(null); // Ensure this matches your state name
+        }} 
+        className="p-2 hover:bg-white/10 rounded-full transition-colors"
+      >
+        <BsChevronLeft size={24} />
+      </button>
+      <span className="font-bold uppercase tracking-widest text-[10px]">Preview Media</span>
+      <div className="w-10" /> 
+    </div>
 
-            {/* Image Preview Container */}
-            <div className="flex-1 flex items-center justify-center p-4">
-              <img 
-                src={previewUrl} 
-                alt="Preview" 
-                className="max-h-full max-w-full object-contain rounded-lg shadow-2xl" 
-              />
-            </div>
+    {/* Dynamic Media Preview Container */}
+    <div className="flex-1 flex items-center justify-center p-4">
+      {previewFile?.type?.startsWith('video/') ? (
+        <video 
+          src={previewUrl} 
+          controls 
+          autoPlay 
+          className="max-h-full max-w-full rounded-lg shadow-2xl bg-black"
+        />
+      ) : (
+        <img 
+          src={previewUrl} 
+          alt="Preview" 
+          className="max-h-full max-w-full object-contain rounded-lg shadow-2xl" 
+        />
+      )}
+    </div>
 
-            {/* Caption Input Area */}
-            <div className="p-4 bg-black/40 backdrop-blur-md">
-              <div className="max-w-4xl mx-auto flex items-end gap-3 bg-white/10 p-2 rounded-2xl border border-white/20">
-                <input
-                  type="text"
-                  placeholder="Add a caption..."
-                  value={caption}
-                  onChange={(e) => setCaption(e.target.value)}
-                  className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
-                  autoFocus
-                />
-                <button 
-                  onClick={handleFinalSend}
-                  disabled={isUploading}
-                  className="bg-blue-600 text-white p-4 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg"
-                >
-                  {isUploading ? (
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
-                  ) : (
-                    <BsSendFill size={20} />
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+    {/* Caption Input Area */}
+    <div className="p-4 bg-black/40 backdrop-blur-md">
+      <div className="max-w-4xl mx-auto flex items-end gap-3 bg-white/10 p-2 rounded-2xl border border-white/20">
+        <input
+          type="text"
+          placeholder="Add a caption..."
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
+          autoFocus
+        />
+        <button 
+          onClick={handleFinalSend}
+          disabled={isUploading}
+          className="bg-blue-600 text-white p-4 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg"
+        >
+          {isUploading ? (
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+          ) : (
+            <BsSendFill size={20} />
+          )}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
 <footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3 z-20 border-t border-gray-200 pb-safe">
   {/* Hidden Inputs for File and Camera */}
