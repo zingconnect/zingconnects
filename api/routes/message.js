@@ -41,7 +41,7 @@ const generateSignedUrl = async (key) => {
     return null;
   }
 };
-// --- 1. GET CHAT HISTORY ---
+// --- UPDATED: GET CHAT HISTORY WITH PAGINATION ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
   try {
     const myId = req.user.id;
@@ -51,22 +51,31 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid User ID" });
     }
 
+    // 1. Get 'limit' from query params (e.g., ?limit=30), default to 20 for speed
+    const limit = parseInt(req.query.limit) || 20;
+
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    }).sort({ createdAt: 1 }).lean(); 
+    })
+    .sort({ createdAt: -1 }) // 2. Get the NEWEST messages first
+    .limit(limit)            // 3. Only take the most recent chunk
+    .lean(); 
 
-    // Generate signed URLs for all media messages
-    const signedMessages = await Promise.all(messages.map(async (m) => {
+    const displayMessages = messages.reverse();
+
+    const signedMessages = await Promise.all(displayMessages.map(async (m) => {
       if (m.fileUrl && (m.fileType === 'image' || m.fileType === 'video')) {
         
-        if (m.fileUrl.includes('idrivee2.com/')) {
-          m.fileUrl = m.fileUrl.split('idrivee2.com/').pop().split('/').slice(1).join('/');
+        let fileKey = m.fileUrl;
+        if (fileKey.includes('idrivee2.com/')) {
+          fileKey = fileKey.split('idrivee2.com/').pop().split('/').slice(1).join('/');
         }
 
-        m.fileUrl = await generateSignedUrl(m.fileUrl);
+        // Generate the temporary secure link
+        m.fileUrl = await generateSignedUrl(fileKey);
       }
       return m;
     }));
@@ -77,6 +86,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error loading chat history" });
   }
 });
+
 // --- 2. SEND TEXT MESSAGE ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {

@@ -1127,22 +1127,46 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 4. GET CHAT MESSAGES ---
+// --- UPDATED: GET CHAT MESSAGES WITH PAGINATION & SPEED ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
+    
+    // 1. ADD PAGINATION: Get 'limit' from query, default to 20
+    const limit = parseInt(req.query.limit) || 20;
 
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    }).sort({ createdAt: 1 });
+    })
+    .sort({ createdAt: -1 }) // 2. GET NEWEST FIRST
+    .limit(limit)            // 3. ONLY GET THE LATEST 20
+    .lean();
 
-    res.json({ success: true, messages });
+    const chronologicalMessages = messages.reverse();
+
+    const signedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
+      if (m.fileUrl) {
+        let fileKey = m.fileUrl;
+        if (fileKey.startsWith('http')) {
+          const urlParts = fileKey.split('idrivee2.com/');
+          if (urlParts.length > 1) {
+            const pathParts = urlParts[1].split('/');
+            fileKey = pathParts.slice(1).join('/'); 
+          }
+        }
+        m.fileUrl = await getPrivateUrl(fileKey);
+      }
+      return m;
+    }));
+
+    res.json({ success: true, messages: signedMessages });
   } catch (err) {
+    console.error("Chat Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });

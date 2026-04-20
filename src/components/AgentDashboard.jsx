@@ -39,6 +39,10 @@ export const AgentDashboard = () => {
   const [showSidebar, setShowSidebar] = useState(true);
   const [fullscreenImage, setFullscreenImage] = useState(null);
 const [fullscreenVideo, setFullscreenVideo] = useState(null);
+const [limit, setLimit] = useState(30); // Start with 30 messages
+const [connectionStatus, setConnectionStatus] = useState('connected'); 
+const scrollRef = useRef(null);
+const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -95,6 +99,19 @@ const [caption, setCaption] = useState("");          // The text to send with th
       return <BsCheck className="text-gray-400" size={16} />;
   }
 };
+
+useEffect(() => {
+  const handleOnline = () => setConnectionStatus('connected');
+  const handleOffline = () => setConnectionStatus('offline');
+
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
+
+  return () => {
+    window.removeEventListener('online', handleOnline);
+    window.removeEventListener('offline', handleOffline);
+  };
+}, []);
 
   // --- INITIAL FETCH & SCRIPT LOAD ---
   useEffect(() => {
@@ -373,19 +390,23 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
-const handleSelectUser = async (user) => {
+  const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
-  setMessages([]); // Clear the state so the screen doesn't show the previous user's chat
+    setMessages([]); 
   setSelectedUser(user);
+  setLimit(30); // Always reset to 30 when switching to a new user
+
   try {
     const token = localStorage.getItem('zingToken');
     if (!token) return;
-    const response = await fetch(`/api/messages/${user._id}`, {
+    const response = await fetch(`/api/messages/${user._id}?limit=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
     if (response.ok) {
-            const data = await response.json();
+      setConnectionStatus('connected');
+      
+      const data = await response.json();
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
       }
@@ -395,13 +416,14 @@ const handleSelectUser = async (user) => {
       }).catch(err => console.error("Mark read background error:", err));
       
     } else {
+      setConnectionStatus('connecting');
       console.error("Server returned an error while fetching messages");
     }
   } catch (err) {
+    setConnectionStatus('connecting');
     console.error("Failed to load chat history:", err);
   }
 };
-
 // Add this inside the AgentDashboard component
 useEffect(() => {
   const params = new URLSearchParams(window.location.search);
@@ -429,6 +451,22 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
 }, []);
+
+useEffect(() => {
+  if (scrollRef.current) {
+    if (isInitialLoad) {
+      // First time opening the chat? Go to bottom.
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      setIsInitialLoad(false);
+    } else {
+      // Logic: Only snap to bottom if the user is already near the bottom
+      const isNearBottom = scrollRef.current.scrollHeight - scrollRef.current.scrollTop <= scrollRef.current.clientHeight + 100;
+      if (isNearBottom) {
+        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+      }
+    }
+  }
+}, [messages]);
 
 // --- REAL-TIME UPDATES (POLLING) ---
 useEffect(() => {
@@ -625,6 +663,24 @@ const handleSendMessage = async (e) => {
 
   return (
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
+
+      {/* --- 1. ADD CONNECTION STATUS BAR HERE --- */}
+{(connectionStatus === 'offline' || connectionStatus === 'connecting') && (
+  <div className={`fixed top-0 left-0 w-full z-[50000] py-1.5 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-300 ${
+    connectionStatus === 'offline' ? 'bg-[#ea0038]' : 'bg-[#ffb300]'
+  }`}>
+    <div className="flex items-center gap-2 text-white">
+      {connectionStatus === 'offline' ? (
+        <span className="text-[10px] font-black uppercase tracking-widest">Not Connected</span>
+      ) : (
+        <div className="flex items-center gap-2">
+          <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          <span className="text-[10px] font-black uppercase tracking-widest">Connecting to Secure Node...</span>
+        </div>
+      )}
+    </div>
+  </div>
+)}
       
     {showSuccessOverlay && (
       <div className="fixed inset-0 z-[20000] bg-blue-600 flex flex-col items-center justify-center text-white p-6">
@@ -868,14 +924,31 @@ const handleSendMessage = async (e) => {
             <BsThreeDotsVertical className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
           </div>
         </header>
-          <div className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
+          <div 
+  ref={scrollRef} // Attach your scrollRef here
+  className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col"
+>
+  
+  {/* 1. LOAD MORE BUTTON (Placed at the very top) */}
+  {messages.length >= limit && (
+    <div className="flex justify-center py-6">
+      <button 
+        onClick={() => setLimit(prev => prev + 30)}
+        className="text-[10px] font-black uppercase tracking-[0.2em] bg-white border border-gray-200 text-gray-400 px-6 py-2.5 rounded-full hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm active:scale-95"
+      >
+        ↑ Load Older Messages
+      </button>
+    </div>
+  )}
+
+  {/* 2. EXISTING MESSAGE MAPPING */}
   {messages.map((m) => (
-  <div 
-    key={m._id || m.id} 
-    className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
-      m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-    }`}
-  >
+    <div 
+      key={m._id || m.id} 
+      className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
+        m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+      }`}
+    >
     {/* 1. Handle Media Content (Image or Video) */}
     {(m.fileType === 'image' || m.fileType === 'video') && (
       <div className="relative mb-1.5 mt-0.5 group">
