@@ -34,7 +34,7 @@ export const UserDashboard = () => {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
-  const notificationSound = new Audio('/sounds/notification.mp3');
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const lastNotifiedId = useRef(null);
   
   // Onboarding & Photo State
@@ -163,7 +163,7 @@ useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token || !agent?._id) return;
 
-  const fetchMessages = async () => {
+ const fetchMessages = async () => {
     try {
       const response = await fetch(`/api/messages/${agent._id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -174,36 +174,41 @@ useEffect(() => {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
 
-        // 1. ALERT LOGIC
+        // --- MODIFIED ALERT LOGIC ---
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
           lastMsg.status !== 'seen' && 
-          lastMsg._id !== lastNotifiedId.current
+          lastMsg._id !== lastNotifiedId.current // Check the REF, not state
         ) {
+          // 1. Update the Ref immediately so the next poll (in 5s) doesn't trigger again
           lastNotifiedId.current = lastMsg._id;
 
-          // Sound (will work as long as user has tapped the screen once)
-          notificationSound.currentTime = 0;
-          notificationSound.play().catch(() => console.log("Audio blocked: User must interact first"));
+          // 2. Play Sound using .current (Referencing the stable Audio object)
+          if (notificationSound.current) {
+            notificationSound.current.currentTime = 0;
+            notificationSound.current.play().catch(e => console.log("Audio blocked: Need user interaction"));
+          }
 
+          // 3. Browser Notification
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName}`, {
               body: lastMsg.text || "Sent a file",
               icon: agent.photoUrl || '/favicon.ico',
-              tag: 'zing-user-msg' // Prevents multiple notification banners
+              tag: 'zing-msg' // 'tag' groups notifications so you don't get 10 popups
             });
           }
 
+          // 4. Mark as Read in DB
           fetch(`/api/messages/mark-read/${agent._id}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
 
-        // 2. STATE UPDATE: Only update if there is actually a new message
-        // This prevents the mobile keyboard from flickering/closing during polling
+        // --- STATE UPDATE ---
         setMessages(prev => {
+          // Only update if the message count changed to prevent keyboard flickering
           if (prev.length !== incomingMessages.length) {
             return incomingMessages;
           }
@@ -214,7 +219,7 @@ useEffect(() => {
       console.error("Polling error:", err);
     }
   };
-
+  
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);

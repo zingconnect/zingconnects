@@ -38,11 +38,11 @@ export const AgentDashboard = () => {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
-  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);  
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
+  const lastNotifiedId = useRef(null);
 
-const notificationSound = new Audio('/sounds/notification.mp3');
-const lastNotifiedId = useRef(null);
-  // --- PLANS CONFIGURATION ---
+
   const plans = [
     {
       tier: 'BASIC',
