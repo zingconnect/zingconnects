@@ -976,29 +976,30 @@ router.get('/my-users', authenticateToken, async (req, res) => {
 });
 
 // POST: Save User Push Subscription
-router.post('/save-subscription', async (req, res) => {
+router.post('/save-subscription', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id; // From your auth middleware
-    const subscription = req.body;
+    const userId = req.user.id; 
+    const { subscription } = req.body; // Destructure to get the actual object
 
     await User.findByIdAndUpdate(userId, { pushSubscription: subscription });
     
     res.status(200).json({ success: true, message: 'User subscription saved.' });
   } catch (err) {
+    console.error("User Sub Error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST: Save Agent Push Subscription
-router.post('/api/agents/save-subscription', async (req, res) => {
+router.post('/agent/save-subscription', authenticateToken, async (req, res) => {
   try {
-    const agentId = req.agent.id; // From your agent auth middleware
-    const subscription = req.body;
+    const agentId = req.user.id; // Use req.user.id to match your middleware
+    const { subscription } = req.body;
 
     await Agent.findByIdAndUpdate(agentId, { pushSubscription: subscription });
     
     res.status(200).json({ success: true, message: 'Agent subscription saved.' });
   } catch (err) {
+    console.error("Agent Sub Error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -1239,6 +1239,34 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   }
 });
 
+// --- SAVE PUSH SUBSCRIPTION (FOR BOTH AGENT & USER) ---
+app.post('/api/save-subscription', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { subscription } = req.body;
+    const userId = req.user.id;
+    const role = req.user.role; // 'agent' or 'user'
+
+    // Determine target model based on role
+    const Model = role === 'agent' ? Agent : User;
+
+    const updated = await Model.findByIdAndUpdate(
+      userId, 
+      { pushSubscription: subscription },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Account not found" });
+    }
+
+    res.json({ success: true, message: `${role} subscription saved.` });
+  } catch (err) {
+    console.error("SUBSCRIPTION ERROR:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 export default app;
