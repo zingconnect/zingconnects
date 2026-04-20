@@ -1238,35 +1238,38 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Error fetching dashboard" });
   }
 });
-
-// --- SAVE PUSH SUBSCRIPTION (FOR BOTH AGENT & USER) ---
 app.post('/api/save-subscription', authenticateToken, async (req, res) => {
   try {
-    await connectToDatabase();
-    const { subscription } = req.body;
+    await connectToDatabase();    
+    const subscription = req.body.subscription || req.body;
     const userId = req.user.id;
-    const role = req.user.role; // 'agent' or 'user'
 
-    // Determine target model based on role
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ success: false, message: "Invalid subscription data" });
+    }
+    let role = req.user.role;
+    if (!role) {
+      const isAgent = await Agent.exists({ _id: userId });
+      role = isAgent ? 'agent' : 'user';
+    }
     const Model = role === 'agent' ? Agent : User;
-
     const updated = await Model.findByIdAndUpdate(
-      userId, 
+      userId,
       { pushSubscription: subscription },
       { new: true }
     );
-
     if (!updated) {
-      return res.status(404).json({ success: false, message: "Account not found" });
+      return res.status(404).json({ success: false, message: "User/Agent not found" });
     }
 
-    res.json({ success: true, message: `${role} subscription saved.` });
+    console.log(`[Push Success] Subscription saved for ${role}: ${userId}`);
+    res.json({ success: true });
+
   } catch (err) {
-    console.error("SUBSCRIPTION ERROR:", err);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    console.error("PUSH SAVE ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
-
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 export default app;
