@@ -19,6 +19,9 @@ import {
   BsTelephoneXFill
 } from 'react-icons/bs';
 
+window.global = window;
+window.process = { env: {} };
+
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -29,6 +32,8 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
+
+const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentDashboard = () => {
   const navigate = useNavigate();
@@ -68,7 +73,6 @@ const [isUploading, setIsUploading] = useState(false);
 const [previewFile, setPreviewFile] = useState(null); // The actual file object
 const [previewUrl, setPreviewUrl] = useState(null);   // The local blob for <img> src
 const [caption, setCaption] = useState("");          // The text to send with the image
-const socket = io(import.meta.env.VITE_API_URL);
 
   const plans = [
     {
@@ -198,22 +202,23 @@ const handleAcceptCall = async () => {
   }
 };
 const handleEndCall = () => {
-  // 1. Identify who to notify
   const targetId = activeCaller?.fromId || selectedUser?._id;
-    if (targetId) {
+  if (targetId) {
     socket.emit("end-call", { to: targetId });
   }
   if (connectionRef.current) {
     connectionRef.current.destroy(); 
     connectionRef.current = null;
   }
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-    stream.getTracks().forEach(track => track.stop());
-  }).catch(err => console.log("Stream already closed"));
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+      stream.getTracks().forEach(track => track.stop());
+    })
+    .catch(() => {}); // Silently fail if no stream exists
+
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCaller(null);
-    console.log("Call ended and hardware released.");
 };
 
 useEffect(() => {
@@ -1414,7 +1419,7 @@ const handleSendMessage = async (e) => {
       {/* User/Agent Avatar */}
       <div className="w-32 h-32 rounded-full border-4 border-blue-500/30 p-1">
         <img 
-          src={agent?.photoUrl || "/default-avatar.png"} 
+          src={agentData?.photoUrl || "/default-avatar.png"} 
           className="w-full h-full rounded-full object-cover" 
           alt="Caller"
         />
