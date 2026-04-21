@@ -41,6 +41,7 @@ const generateSignedUrl = async (key) => {
     return null;
   }
 };
+
 // --- UPDATED: GET CHAT HISTORY WITH PAGINATION ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
   try {
@@ -105,22 +106,23 @@ router.post('/send', authenticateToken, async (req, res) => {
     });
 
     await newMessage.save();
-
-    // Mobile Push Trigger
-    try {
-      const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
-      const receiver = await TargetModel.findById(receiverId);
-      if (receiver && receiver.pushSubscription) {
-        const payload = JSON.stringify({
-          title: `New Message from ${req.user.firstName || 'Zing'}`,
-          body: text,
-          data: {
-            url: finalReceiverModel === 'Agent' ? `/agent/dashboard?userId=${req.user.id}` : '/user/dashboard'
-          }
-        });
-        webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
-      }
-    } catch (pushErr) { console.error("Push Error:", pushErr); }
+try {
+  const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
+  const receiver = await TargetModel.findById(receiverId);
+  
+  if (receiver && receiver.pushSubscription) {
+    const payload = JSON.stringify({
+      title: `New Message from ${req.user.firstName || 'Zing'}`,
+      body: text,
+      data: { url: finalReceiverModel === 'Agent' ? `/agent/dashboard?userId=${req.user.id}` : '/user/dashboard' }
+    });
+    await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+    newMessage.notificationSent = true; // Update the local object for the response
+  }
+} catch (pushErr) { 
+  console.error("Push Error:", pushErr); 
+}
 
     res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
@@ -130,7 +132,6 @@ router.post('/send', authenticateToken, async (req, res) => {
 // --- 3. UPLOAD MEDIA (IMAGE/VIDEO) ---
 router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
-    // UPDATED: Added 'text' to destructuring
     const { receiverId, text } = req.body; 
     
     if (!req.file) return res.status(400).json({ success: false, message: "No file provided" });
@@ -140,7 +141,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     const fileExtension = req.file.originalname.split('.').pop();
     const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
 
-    // Upload to iDrive
+    // 1. Upload to iDrive
     const parallelUploads3 = new Upload({
       client: s3Client,
       params: {
@@ -152,9 +153,12 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     });
     await parallelUploads3.done();
 
+    // 2. Generate temporary URL for the immediate frontend response
     const signedUrlForFrontend = await generateSignedUrl(fileName);
 
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
+    
+    // 3. Create and Save the Message
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
@@ -163,35 +167,44 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       text: text || "", 
       fileUrl: fileName, 
       fileType: detectedType,
-      status: 'sent'
+      status: 'sent',
+      notificationSent: false // Default to false initially
     });
 
     await newMessage.save();
 
+    // 4. Handle Push Notification & Update Flag
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
     try {
       const TargetModel = receiverModel === 'Agent' ? Agent : User;
       const receiver = await TargetModel.findById(receiverId);
+      
       if (receiver && receiver.pushSubscription) {
         const payload = JSON.stringify({
           title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
           body: text ? text : (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
           data: { url: receiverModel === 'Agent' ? `/agent/dashboard?userId=${req.user.id}` : '/user/dashboard' }
         });
-        webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
+        await webpush.sendNotification(receiver.pushSubscription, payload);
+                await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+        responseData.notificationSent = true; 
+        console.log(`[Push] Notification sent successfully to ${receiverModel}: ${receiverId}`);
       }
-    } catch (pErr) { console.error("Push Error:", pErr); }
+    } catch (pErr) { 
+      console.error("Push delivery failed, notificationSent will stay false:", pErr.message); 
+    }
 
+    // 5. Final Response
     res.status(201).json({ success: true, message: responseData });
 
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
-    // Best practice: send the error message to the frontend during debugging
     res.status(500).json({ success: false, error: err.message, message: "Upload failed" });
   }
 });
+
 // --- 4. MARK AS READ ---
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {

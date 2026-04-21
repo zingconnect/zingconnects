@@ -535,9 +535,30 @@ const handleFileUpload = (e) => {
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
 
+  const tempId = Date.now().toString();
+  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+  const savedFile = previewFile; // Keep a reference for resending
+  const savedCaption = caption;
+
+  // Optimistic UI for Media
+  const pendingMedia = {
+    _id: tempId,
+    senderId: userData._id,
+    text: savedCaption,
+    fileUrl: previewUrl, // Use the local blob URL for preview
+    fileType: detectedType,
+    status: 'sending',
+    createdAt: new Date().toISOString(),
+    isTemp: true,
+    originalFile: savedFile // Store file in object for resending
+  };
+
+  setMessages(prev => [...prev, pendingMedia]);
+  setPreviewUrl(null); // Close the preview overlay
+  setPreviewFile(null);
+
   setIsUploading(true);
   const token = localStorage.getItem('userToken'); 
-  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
 
   try {
     const urlResponse = await fetch('/api/messages/get-upload-url', {
@@ -546,28 +567,18 @@ const handleFinalSend = async () => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}` 
       },
-      body: JSON.stringify({ 
-        fileName: previewFile.name, 
-        fileType: previewFile.type 
-      })
+      body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
     });
 
     const urlData = await urlResponse.json();
-    if (!urlData.success || !urlData.uploadUrl) {
-      throw new Error(urlData.message || "Could not get upload permission");
-    }
+    if (!urlData.success) throw new Error("Upload permission failed");
 
-    const { uploadUrl, key } = urlData;
-
-    // --- STEP 2: DIRECT UPLOAD TO STORAGE ---
-    // Uploading directly to iDrive/S3 bypassing Vercel
-    const uploadResult = await fetch(uploadUrl, {
+    await fetch(urlData.uploadUrl, {
       method: 'PUT',
-      body: previewFile,
-      headers: { 'Content-Type': previewFile.type }
+      body: savedFile,
+      headers: { 'Content-Type': savedFile.type }
     });
 
-    if (!uploadResult.ok) throw new Error("Media storage upload failed");
     const confirmResponse = await fetch('/api/messages/confirm-upload', {
       method: 'POST',
       headers: { 
@@ -576,29 +587,20 @@ const handleFinalSend = async () => {
       },
       body: JSON.stringify({
         receiverId: agent._id,
-        text: caption.trim(),
-        fileUrl: key, 
+        text: savedCaption.trim(),
+        fileUrl: urlData.key, 
         fileType: detectedType
       })
     });
 
     const data = await confirmResponse.json();
-    
     if (data.success) {
-      // 1. Add new message to the list
-      setMessages(prev => [...prev, data.message]);
-      
-      // 2. IMPORTANT: Clean up memory and UI
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-      setPreviewFile(null);
-      setCaption("");
+      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
     } else {
-      alert(data.error || "Upload failed");
+      throw new Error();
     }
   } catch (err) {
-    console.error("Critical Upload Error:", err);
-    alert(err.message || "System error during upload. Please check your connection.");
+    setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
   } finally {
     setIsUploading(false);
   }
@@ -666,36 +668,66 @@ const handleStartCall = async () => {
   }
 };
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !agent?._id) return;
-    
-    const textToSend = newMessage;
-    setNewMessage(''); 
+ const handleSendMessage = async (e) => {
+  e.preventDefault();
+  if (!newMessage.trim() || !agent?._id) return;
+  
+  const textToSend = newMessage;
+  const tempId = Date.now().toString(); // Temporary ID for UI tracking
+  setNewMessage(''); 
 
-    try {
-      const token = localStorage.getItem('userToken');
-      const response = await fetch('/api/messages/send', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          receiverId: agent._id,
-          text: textToSend,
-          fileType: 'text'
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        setMessages(prev => [...prev, data.message]);
-      }
-    } catch (err) {
-      console.error("Message failed to send:", err);
-    }
+  const pendingMessage = {
+    _id: tempId,
+    senderId: userData._id,
+    text: textToSend,
+    status: 'sending', // Custom status for the UI
+    createdAt: new Date().toISOString(),
+    isTemp: true
   };
+  setMessages(prev => [...prev, pendingMessage]);
+
+  try {
+    const token = localStorage.getItem('userToken');
+    const response = await fetch('/api/messages/send', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        receiverId: agent._id,
+        text: textToSend,
+        fileType: 'text'
+      })
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+    } else {
+      throw new Error("Failed to save");
+    }
+  } catch (err) {
+    console.error("Message failed to send:", err);
+    setMessages(prev => prev.map(m => 
+      m._id === tempId ? { ...m, status: 'failed' } : m
+    ));
+  }
+};
+
+const handleResend = (msg) => {
+  setMessages(prev => prev.filter(m => m._id !== msg._id));
+  if (msg.fileType === 'image' || msg.fileType === 'video') {
+    // Re-set the preview states and trigger the media flow
+    setPreviewFile(msg.originalFile);
+    setPreviewUrl(msg.fileUrl);
+    setCaption(msg.text);
+  } else {
+    // Directly re-send text
+    setNewMessage(msg.text);
+    // You can manually call your send logic here
+  }
+};
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">
@@ -917,92 +949,117 @@ const handleStartCall = async () => {
     </p>
   </div>
 
- {/* 3. Message List */}
-{messages.map((m) => (
-  <div 
-    key={m._id || m.id} 
-    className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 ${
-      m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-    }`}
-  >
-    {/* Media Handling */}
-    {(m.fileType === 'image' || m.fileType === 'video') && (
-      <div className="relative mb-2 mt-1 group">
-        {m.fileType === 'image' ? (
-          <>
-            <img 
-              src={m.fileUrl} 
-              alt="attachment" 
-              onClick={() => setFullscreenImage(m.fileUrl)} 
-              className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
-              onError={(e) => {
-                e.target.onerror = null;
-                e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
-              }}
-            />
-            {/* Quick Download Overlay for User Dashboard */}
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
-              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-              title="Download Image"
-            >
-              <BsDownload size={14} />
-            </button>
-          </>
-        ) : (
-          <div className="relative">
-            <video 
-              className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
-              onClick={() => setFullscreenVideo(m.fileUrl)}
-            >
-              <source src={m.fileUrl} type="video/mp4" />
-            </video>
+{/* 3. Message List */}
+{messages.map((m) => {
+  // Safe key generation for messages that don't have a DB _id yet
+  const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
 
-            {/* Play Indicator Overlay */}
-            <div 
-              className="absolute inset-0 flex items-center justify-center pointer-events-none"
-              onClick={() => setFullscreenVideo(m.fileUrl)}
-            >
-              <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
-                <BsPlayFill size={30} />
+  return (
+    <div 
+      key={msgKey} 
+      className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col ${
+        m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+      } mb-3`}
+    >
+      {/* Media Handling (Image/Video) */}
+      {(m.fileType === 'image' || m.fileType === 'video') && (
+        <div className="relative mb-2 mt-1 group">
+          {m.fileType === 'image' ? (
+            <>
+              <img 
+                src={m.fileUrl} 
+                alt="attachment" 
+                onClick={() => setFullscreenImage(m.fileUrl)} 
+                className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+                }}
+              />
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
+                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+              >
+                <BsDownload size={14} />
+              </button>
+            </>
+          ) : (
+            <div className="relative">
+              <video 
+                className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
+                onClick={() => setFullscreenVideo(m.fileUrl)}
+              >
+                <source src={m.fileUrl} type="video/mp4" />
+              </video>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
+                  <BsPlayFill size={30} />
+                </div>
               </div>
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
+                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
+              >
+                <BsDownload size={14} />
+              </button>
             </div>
+          )}
+        </div>
+      )}
 
-            {/* Quick Download Overlay for Video */}
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
-              className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
-              title="Download Video"
-            >
-              <BsDownload size={14} />
-            </button>
+      {/* Text Content (Caption) */}
+      {m.text && (
+        <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+          {m.text}
+        </p>
+      )}
+
+      {/* Time / Status Bar */}
+      <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
+        <span className="text-[9px] text-gray-400 font-bold uppercase">
+          {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
+
+        {/* WhatsApp Reliability Logic: Only show for User messages */}
+        {m.senderModel === 'User' && (
+          <div className="flex items-center ml-1">
+            
+            {/* 1. SENDING STATE (Network Active) */}
+            {m.status === 'sending' && (
+              <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+            )}
+
+            {/* 2. FAILED STATE (Bad Network) */}
+            {m.status === 'failed' && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleResend(m); }}
+                className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
+              >
+                <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
+                <BsPlusLg className="rotate-45" size={10} />
+              </button>
+            )}
+
+            {/* 3. SUCCESS STATE (Checkmarks) */}
+            {(!m.status || m.status === 'sent' || m.status === 'seen') && (
+              <div className="flex items-center">
+                {m.status === 'seen' ? (
+                  <BsCheckAll className="text-blue-500" size={16} title="Read" />
+                ) : (
+                  <BsCheckAll className="text-gray-400" size={16} title="Sent" />
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
-    )}
-
-    {/* Text Content (Caption) */}
-    {m.text && (
-      <p className={`text-[12px] md:text-[14px] leading-relaxed pr-10 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
-        {m.text}
-      </p>
-    )}
-
-    {/* Time / Status Bar */}
-    <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
-      <span className="text-[9px] text-gray-400 font-bold uppercase">
-        {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </span>
-      {/* Note: Users usually don't see status ticks in this specific app logic, 
-          but you can add them here if your backend tracks User-sent message status */}
     </div>
-  </div>
-))}
+  );
+})}
 
-
-  {/* 4. THE FIX: Scroll Anchor */}
-  {/* This empty div is what the useRef targets to keep the chat scrolled down */}
-  <div ref={messagesEndRef} className="h-4 shrink-0" />
+{/* 4. THE FIX: Scroll Anchor */}
+{/* Increased height to ensure the keyboard doesn't hide the last message */}
+<div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
 {previewUrl && !showOnboarding && (

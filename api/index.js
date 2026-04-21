@@ -1249,7 +1249,6 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to save subscription" });
   }
 });
-
 // --- 5. SEND MESSAGE ROUTE (WITH PUSH) ---
 app.post('/api/messages/send', authenticateToken, async (req, res) => {
   try {
@@ -1262,11 +1261,10 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
       receiverModel,
-      text
+      text,
+      notificationSent: false // Ensure it starts as false
     });
     await newMessage.save();
-
-    // 2. Trigger Mobile Push Notification
     try {
       const TargetModel = receiverModel === 'Agent' ? Agent : User;
       const receiver = await TargetModel.findById(receiverId);
@@ -1279,15 +1277,14 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
             url: receiverModel === 'Agent' ? '/agent-dashboard' : '/user-dashboard'
           }
         });
-
-        // Fire the notification
-        webpush.sendNotification(receiver.pushSubscription, payload)
-          .catch(e => console.log("Push delivery failed (likely expired)"));
+        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+        newMessage.notificationSent = true;
+        console.log(`[Push] Notification sent and logged for message: ${newMessage._id}`);
       }
     } catch (pushErr) {
-      console.error("Push logic error:", pushErr);
+      console.error("Push delivery failed, flag remains false:", pushErr.message);
     }
-
     res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
     console.error("SEND MESSAGE ERROR:", err);
@@ -1372,20 +1369,22 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
   }
 });
 
+// --- 6. UPLOAD MEDIA ROUTE (WITH PUSH) ---
 app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 1. UPDATE: Destructure 'text' from req.body
+    // 1. Destructure 'text' (the caption) from the frontend
     const { receiverId, text } = req.body; 
 
-    if (!req.file) return res.status(400).json({ success: false, message: "No file" });
+    if (!req.file) return res.status(400).json({ success: false, message: "No file provided" });
 
     const mimeType = req.file.mimetype;
     const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
     const fileExtension = req.file.originalname.split('.').pop();
     const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
 
+    // 2. Execute Upload to iDrive
     const parallelUploads3 = new Upload({
       client: s3Client,
       params: {
@@ -1395,28 +1394,51 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
         ContentType: mimeType,
       },
     });
-
     await parallelUploads3.done();
 
-    // 2. UPDATE: Pass 'text' to the new Message constructor
+    const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
+
+    // 3. Save Message to Database
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiverId,
-      receiverModel: req.user.role === 'agent' ? 'User' : 'Agent',
-      text: text || "", // <--- Use the text from the frontend or default to empty
+      receiverModel: receiverModel,
+      text: text || "", 
       fileUrl: fileName, 
       fileType: detectedType,
-      status: 'sent'
+      status: 'sent',
+      notificationSent: false // Default to false
     });
 
     await newMessage.save();
-
-    // Generate a working link for the immediate frontend response
     const responseData = newMessage.toObject();
     responseData.fileUrl = await getPrivateUrl(fileName);
+    try {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      const receiver = await TargetModel.findById(receiverId);
 
+      if (receiver && receiver.pushSubscription) {
+        const payload = JSON.stringify({
+          title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
+          body: text ? text : (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
+          data: {
+            url: receiverModel === 'Agent' ? '/agent-dashboard' : '/user-dashboard'
+          }
+        });
+        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+        responseData.notificationSent = true; 
+        
+        console.log(`[Push] Media notification sent for message: ${newMessage._id}`);
+      }
+    } catch (pushErr) {
+      console.error("Media Push delivery failed:", pushErr.message);
+    }
+
+    // 6. Final Response
     res.status(201).json({ success: true, message: responseData });
+
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
     res.status(500).json({ success: false, message: "Upload failed" });
