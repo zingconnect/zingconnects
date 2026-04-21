@@ -11,7 +11,9 @@ import {
   BsGearFill,
   BsArrowRight,
   BsCameraFill,
-  BsMicFill,      
+  BsMicFill,   
+  BsVolumeUpFill, // Added for Speaker
+  BsMicMuteFill,   
   BsPaperclip,
   BsDownload,    // Now properly imported
   BsPlayFill     // Now properly imported
@@ -43,6 +45,7 @@ const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
+  const [localStream, setLocalStream] = useState(null);
   
   // Media & Upload State (FIXED NAMES)
   const [previewFile, setPreviewFile] = useState(null); 
@@ -121,7 +124,6 @@ useEffect(() => {
   };
 }, [userData?._id, callStatus]); // Add callStatus to dependencies
 
-
 useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return;
@@ -176,17 +178,10 @@ useEffect(() => {
 }, [callStatus, activeCall]);
 
 useEffect(() => {
-  const remoteAudio = document.getElementById('remoteAudio'); // Your <audio> tag for the call
-  if (remoteAudio) {
-    // If "Speaker" is on, we ensure volume is 100%
-    remoteAudio.volume = isSpeakerOn ? 1.0 : 0.5;
-  }
-}, [isSpeakerOn]);
-
-useEffect(() => {
-  const remoteMedia = document.getElementById('remoteAudioElement'); 
+  const remoteMedia = document.getElementById('remoteAudio'); 
+  
   if (remoteMedia) {
-    remoteMedia.volume = isSpeakerOn ? 1.0 : 0.3; // 100% for speaker, 30% for "earpiece"
+    remoteMedia.volume = isSpeakerOn ? 1.0 : 0.3; 
   }
 }, [isSpeakerOn]);
 
@@ -315,8 +310,8 @@ useEffect(() => {
         
         if (response.ok) {
           setAgent(data.agent); 
-          setUser(data.user);
-          if (!data.user.isProfileComplete) {
+        setUser(data.user);
+            if (!data.user.isProfileComplete) {
             setShowOnboarding(true);
           }
         }
@@ -841,7 +836,7 @@ const handleStartCall = async () => {
 
             <div onClick={() => setShowProfilePanel(true)} className="flex flex-col cursor-pointer hover:bg-black/5 p-1 rounded transition-colors overflow-hidden">
               <h1 className="text-[13px] md:text-[15px] font-bold text-gray-800 leading-tight truncate">
-                {agent ? `${agent.firstName} ${agent.lastName}` : 'Verified Agent'}
+{agent?.firstName ? `${agent.firstName} ${agent.lastName}` : 'Loading Agent...'}
               </h1>
               <p className={`text-[9px] md:text-[10px] font-bold uppercase tracking-tighter ${agentStatus.isOnline ? 'text-green-600' : 'text-gray-500'}`}>
                 {agentStatus.label}
