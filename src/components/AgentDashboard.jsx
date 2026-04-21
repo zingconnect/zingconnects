@@ -843,12 +843,37 @@ useEffect(() => {
   }
 }, []);
 
+const handleResend = async (failedMsg) => {
+  setMessages(prev => prev.filter(m => (m._id || m.id) !== (failedMsg._id || failedMsg.id)));
+    if (failedMsg.fileUrl) {
+    setPreviewFile(failedMsg.file); // Assuming you saved the file object
+    setPreviewUrl(failedMsg.fileUrl);
+    setCaption(failedMsg.text);
+  } else {
+    setNewMessage(failedMsg.text);
+  }
+};
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
-  if (!newMessage.trim() || !selectedUser) return;
+  
+  // 1. Basic validation
+  if (!newMessage.trim() || !selectedUser || isUploading) return;
 
   const textToSend = newMessage;
-  setNewMessage(''); 
+  const tempId = Date.now().toString(); // Temporary ID for the UI key
+  setNewMessage(''); // Clear input immediately for speed
+
+  // 2. Create the Optimistic Message (Shows up instantly)
+  const optimisticMsg = {
+    _id: tempId,
+    text: textToSend,
+    senderModel: 'Agent',
+    status: 'sending', // Triggers the spinner in our UI
+    createdAt: new Date().toISOString(),
+    fileType: 'text'
+  };
+  setMessages(prev => [...prev, optimisticMsg]);
 
   try {
     const token = localStorage.getItem('agentToken');
@@ -861,18 +886,26 @@ const handleSendMessage = async (e) => {
       body: JSON.stringify({
         receiverId: selectedUser._id,
         text: textToSend,
-        fileType: 'text' // Explicitly set as text
+        fileType: 'text'
       })
     });
 
     const data = await response.json();
 
     if (data.success) {
-      // The server response now includes status: 'sent' and fileType: 'text'
-      setMessages(prev => [...prev, data.message]);
+      setMessages(prev => 
+        prev.map(msg => msg._id === tempId ? data.message : msg)
+      );
+    } else {
+      setMessages(prev => 
+        prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg)
+      );
     }
   } catch (err) {
     console.error("Message failed to send:", err);
+    setMessages(prev => 
+      prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg)
+    );
   }
 };
 
@@ -1154,41 +1187,95 @@ const handleSendMessage = async (e) => {
         </div>
       </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col">
-        {messages.length >= limit && (
-          <div className="flex justify-center py-6">
-            <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase tracking-[0.2em] bg-white border border-gray-200 text-gray-400 px-6 py-2.5 rounded-full hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm active:scale-95">
-              ↑ Load Older Messages
-            </button>
+     <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col bg-[#e5ddd5]">
+  {messages.length >= limit && (
+    <div className="flex justify-center py-6">
+      <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase tracking-[0.2em] bg-white border border-gray-200 text-gray-400 px-6 py-2.5 rounded-full hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm active:scale-95">
+        ↑ Load Older Messages
+      </button>
+    </div>
+  )}
+
+       {messages.map((m) => {
+    const isMe = m.senderModel === 'Agent';
+    // Use a robust key to prevent React errors during optimistic updates
+    const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
+
+    return (
+      <div 
+        key={msgKey} 
+        className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 flex flex-col ${
+          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+        } mb-1`}
+      >
+        {/* Media Handling */}
+        {(m.fileType === 'image' || m.fileType === 'video') && (
+          <div className="relative mb-1.5 mt-0.5 group">
+            {m.fileType === 'image' ? (
+              <>
+                <img src={m.fileUrl} alt="attachment" onClick={() => setFullscreenImage(m.fileUrl)} className="rounded-lg bg-gray-100 object-cover w-full max-w-[280px] max-h-[320px] md:max-w-[400px] md:max-h-[500px] cursor-pointer transition-opacity hover:opacity-95" />
+                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"><BsDownload size={14} /></button>
+              </>
+            ) : (
+              <div className="relative">
+                <video className="rounded-lg w-full max-w-[280px] md:max-w-[400px] max-h-[500px] bg-black shadow-inner cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}><source src={m.fileUrl} type="video/mp4" /></video>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm"><BsPlayFill size={30} /></div></div>
+                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"><BsDownload size={14} /></button>
+              </div>
+            )}
           </div>
         )}
 
-        {messages.map((m) => (
-          <div key={m._id || m.id} className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${m.senderModel === 'Agent' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'}`}>
-            {(m.fileType === 'image' || m.fileType === 'video') && (
-              <div className="relative mb-1.5 mt-0.5 group">
-                {m.fileType === 'image' ? (
-                  <>
-                    <img src={m.fileUrl} alt="attachment" onClick={() => setFullscreenImage(m.fileUrl)} className="rounded-lg bg-gray-100 object-cover w-full max-w-[280px] max-h-[320px] md:max-w-[400px] md:max-h-[500px] cursor-pointer transition-opacity hover:opacity-95" />
-                    <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"><BsDownload size={14} /></button>
-                  </>
-                ) : (
-                  <div className="relative">
-                    <video className="rounded-lg w-full max-w-[280px] md:max-w-[400px] max-h-[500px] bg-black shadow-inner cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}><source src={m.fileUrl} type="video/mp4" /></video>
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm"><BsPlayFill size={30} /></div></div>
-                    <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"><BsDownload size={14} /></button>
-                  </div>
-                )}
-              </div>
-            )}
-            {m.text && <p className={`text-[13px] md:text-[15px] text-[#303030] leading-relaxed break-words ${m.fileType ? 'px-1 pb-1 pt-1' : 'pr-8'}`}>{m.text}</p>}
-            <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
-              <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              {m.senderModel === 'Agent' && getStatusIcon(m.status)}
+        {/* Text Content */}
+        {m.text && (
+          <p className={`text-[13px] md:text-[15px] text-[#303030] leading-relaxed break-words ${m.fileType ? 'px-1 pb-1 pt-1' : 'pr-8'}`}>
+            {m.text}
+          </p>
+        )}
+
+        {/* Time / Status Bar - REPLACED OLD STATUS ICON LOGIC */}
+        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[65px]">
+          <span className="text-[9px] text-gray-400 font-bold uppercase">
+            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+
+          {isMe && (
+            <div className="flex items-center ml-1">
+              {/* 1. SENDING: Dynamic Spinner */}
+              {m.status === 'sending' && (
+                <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+              )}
+
+              {/* 2. FAILED: Retry Button */}
+              {m.status === 'failed' && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleResend(m); }}
+                  className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
+                >
+                  <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
+                  <BsPlusLg className="rotate-45" size={10} />
+                </button>
+              )}
+
+              {/* 3. SUCCESS: WhatsApp Style Ticks */}
+              {(!m.status || m.status === 'sent' || m.status === 'seen') && (
+                <div className="flex items-center">
+                  {m.status === 'seen' ? (
+                    <BsCheckAll className="text-blue-500" size={16} />
+                  ) : (
+                    <BsCheckAll className="text-gray-400" size={16} />
+                  )}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )}
+        </div>
       </div>
+    );
+  })}
+  {/* IMPORTANT: Ensure this scroll anchor exists for smooth scrolling */}
+  <div className="h-10 shrink-0 w-full clear-both" />
+</div>
 
       <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
         <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
