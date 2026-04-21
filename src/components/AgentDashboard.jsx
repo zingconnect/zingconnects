@@ -9,6 +9,7 @@ import {
   BsSearch, 
   BsThreeDotsVertical, 
   BsCheckAll,
+  BsCheck,
   BsPersonCircle,
   BsChevronLeft,
   BsShieldLockFill,
@@ -121,17 +122,20 @@ const [caption, setCaption] = useState("");          // The text to send with th
 };
 useEffect(() => {
   const ringtone = ringtoneRef.current;
-  ringtone.pause();
-  ringtone.currentTime = 0;
 
-  if (callStatus === 'ringing') {
-    console.log("Outgoing call: Visual indicators active.");
+  if (callStatus === 'ringing' && isIncomingCall) {
+    ringtone.loop = true;
+    ringtone.play().catch(err => console.warn("Audio autoplay blocked by browser"));
+  } else {
+    ringtone.pause();
+    ringtone.currentTime = 0;
   }
+
   return () => {
     ringtone.pause();
     ringtone.currentTime = 0;
   };
-}, [callStatus]);
+}, [callStatus, isIncomingCall]);
 
 useEffect(() => {
   if (socket && agentData?._id) {
@@ -211,8 +215,8 @@ const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
 
   try {
-    const token = localStorage.getItem('zingToken'); // Ensure this is the correct key
-    
+const token = localStorage.getItem('agentToken');
+
     // 1. REGISTER THE CALL IN THE DATABASE FIRST
     const res = await fetch('/api/calls/start', {
       method: 'POST',
