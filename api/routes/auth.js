@@ -37,9 +37,11 @@ export const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, decodedUser) => {
     if (err) return res.status(403).json({ message: "Session Expired" });
-    req.user = user;
+        console.log("DECODED JWT:", decodedUser);
+
+    req.user = decodedUser;
     next();
   });
 };

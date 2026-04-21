@@ -211,22 +211,48 @@ const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
 
   try {
+    const token = localStorage.getItem('zingToken'); // Ensure this is the correct key
+    
+    // 1. REGISTER THE CALL IN THE DATABASE FIRST
+    const res = await fetch('/api/calls/start', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        receiverId: targetUserId,
+        receiverModel: 'User' // Agents call Users
+      })
+    });
+
+    const dbCall = await res.json();
+
+    if (!res.ok) {
+      console.error("DB Call Error:", dbCall.error);
+      alert("Could not start call: " + (dbCall.message || "Server Error"));
+      return;
+    }
     setCallStatus('ringing');
     setIsIncomingCall(false);
+    
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     const peer = new Peer({
       initiator: true,
       trickle: false,
       stream: stream
     });
+
     peer.on('signal', (data) => {
       socket.emit("call-user", {
         userToCall: targetUserId,
-        signalData: data, // This is the WebRTC handshake
+        signalData: data,
         fromId: agentData._id,
-        fromName: `${agentData.firstName} ${agentData.lastName}`
+        fromName: `${agentData.firstName} ${agentData.lastName}`,
+        callId: dbCall.callId // Pass the ID created in DB
       });
     });
+
     peer.on('stream', (remoteStream) => {
       const audio = document.createElement('audio');
       audio.srcObject = remoteStream;
@@ -235,7 +261,7 @@ const handleStartCall = async (targetUserId) => {
 
     connectionRef.current = peer;
   } catch (err) {
-    console.error("Mic access denied:", err);
+    console.error("Call initialization failed:", err);
     setCallStatus('idle');
   }
 };

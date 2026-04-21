@@ -534,7 +534,15 @@ const handleDownload = async (url, type) => {
 
 const handleStartCall = async () => {
   if (!agent?._id) return;
-  const token = localStorage.getItem('userToken');
+  
+  // 1. Double check which key you actually use for Users! 
+  // If it's 'zingToken' for everyone, change this:
+  const token = localStorage.getItem('userToken') || localStorage.getItem('zingToken');
+
+  if (!token) {
+    alert("Please log in to make a call.");
+    return;
+  }
 
   try {
     const res = await fetch('/api/calls/start', {
@@ -549,11 +557,10 @@ const handleStartCall = async () => {
       })
     });
 
-    // GUARD: If server returns 500, stop and log the text error
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error("Call Start Failed:", errorText);
-      alert("Line Busy: The encryption server is temporarily unavailable.");
+      const errorData = await res.json();
+      console.error("Backend Validation Error:", errorData);
+      alert(`Call failed: ${errorData.error || "Server Error"}`);
       return;
     }
 
@@ -561,6 +568,13 @@ const handleStartCall = async () => {
     if (data.success) {
       setCallStatus('ringing'); 
       setActiveCall({ callId: data.callId });
+      
+      socket.emit("call-user", {
+        userToCall: agent._id,
+        fromId: userData._id, // make sure you have user data in state
+        fromName: userData.firstName,
+        callId: data.callId
+      });
     }
   } catch (err) {
     console.error("Network Error:", err);

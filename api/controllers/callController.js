@@ -2,17 +2,20 @@ import Call from '../models/Call.js';
 // ADD THIS IMPORT - Adjust the path if your db logic is elsewhere
 import { connectToDatabase } from '../index.js'; 
 
-// @desc    Initiate a new call
-// @route   POST /api/calls/start
 export const startCall = async (req, res) => {
   try {
     await connectToDatabase();
     const { receiverId, receiverModel } = req.body;
+    if (!req.user) {
+      return res.status(401).json({ message: "User context missing from request" });
+    }
+    const callerId = req.user._id || req.user.id || req.user.userId;
 
-    if (!receiverId) return res.status(400).json({ message: "Receiver ID required" });
-
+    if (!callerId) {
+      return res.status(400).json({ message: "Token does not contain a valid User ID" });
+    }
     const newCall = new Call({
-      caller: req.user._id, // Set by authenticateToken middleware
+      caller: callerId, // Use the extracted ID
       callerModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiver: receiverId,
       receiverModel: receiverModel || 'Agent', 
@@ -22,6 +25,7 @@ export const startCall = async (req, res) => {
     await newCall.save();
     res.status(201).json({ success: true, callId: newCall._id });
   } catch (error) {
+    console.error("Call Start Error:", error);
     res.status(500).json({ message: "Failed to start call", error: error.message });
   }
 };
