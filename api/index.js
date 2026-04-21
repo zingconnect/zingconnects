@@ -130,21 +130,27 @@ const authenticateToken = (req, res, next) => {
 
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
+
   socket.on("join-main-room", (userId) => {
     socket.join(userId);
-    console.log(`User ${userId} joined their private room`);
+    console.log(`User ${userId} joined their private room: ${socket.id}`);
   });
-  socket.on("call-user", ({ userToCall, signalData, fromId, fromName }) => {
+  socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
+    console.log(`Forwarding call from ${fromName} to ${userToCall}`);
+    
     io.to(userToCall).emit("incoming-call", { 
       signal: signalData, 
       fromId, 
-      fromName 
+      fromName,
+      callId // CRITICAL: This links the socket event to the DB record
     });
   });
 
   socket.on("answer-call", (data) => {
+    // data.to is the ID of the person who started the call
     io.to(data.to).emit("call-accepted", data.signal);
   });
+
   socket.on("end-call", ({ to }) => {
     io.to(to).emit("call-ended");
   });
