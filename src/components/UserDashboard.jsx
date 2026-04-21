@@ -94,35 +94,35 @@ const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
     }
   };
 
-  useEffect(() => {
+useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return;
 
-const checkIncomingCalls = async () => {
-  try {
-    const response = await fetch('/api/calls/check-incoming', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!response.ok) {
-      return; 
-    }
-
-    const data = await response.json();
-    if (data.hasIncomingCall && callStatus === 'idle') {
-      setActiveCall({
-        callId: data.callId,
-        callerData: data.callerData // Matches your controller: { fromName, photoUrl }
+  const checkIncomingCalls = async () => {
+    try {
+      const response = await fetch('/api/calls/check-incoming', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      setCallStatus('ringing');
-    } 
-    else if (!data.hasIncomingCall && (callStatus === 'ringing' || callStatus === 'connecting')) {
-      setCallStatus('idle');
-      setActiveCall(null);
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.hasIncomingCall) {
+        if (callStatus === 'idle') {
+          setActiveCall({
+            callId: data.callId,
+            callerName: data.callerData.fromName,
+            callerPhoto: data.callerData.photoUrl
+          });
+          setCallStatus('ringing');
+        }
+      } 
+      else if (!data.hasIncomingCall && (callStatus === 'ringing' || callStatus === 'connecting')) {
+        setCallStatus('idle');
+        setActiveCall(null);
+      }
+    } catch (err) {
+      console.warn("Polling interrupted...");
     }
-  } catch (err) {
-    console.warn("Polling interrupted...");
-  }
-};
+  };
 
   const callInterval = setInterval(checkIncomingCalls, 3000); 
   return () => clearInterval(callInterval);
@@ -167,18 +167,17 @@ const handleAcceptCall = async () => {
 
 const handleEndCall = async () => {
   const token = localStorage.getItem('userToken');
+  setCallStatus('idle'); // Set UI to idle immediately for responsiveness
+  setActiveCall(null);
+  
   try {
     await fetch('/api/calls/end', {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify({ callId: activeCall?.callId })
+      }
     });
-    
-    setCallStatus('idle');
-    setActiveCall(null);
   } catch (err) {
     console.error("Failed to end call", err);
   }
@@ -1146,53 +1145,54 @@ const handleStartCall = async () => {
       {/* Avatar with Pulsing Effect */}
       <div className="relative">
         <div className="w-32 h-32 rounded-full border-4 border-blue-500/30 p-1">
-          <img 
-            src={agent?.photoUrl || "/default-agent.png"} 
-            className="w-full h-full rounded-full object-cover"
-            alt="Agent"
-          />
+         <img 
+  src={activeCall?.callerData?.photoUrl || agent?.photoUrl || "/default-agent.png"} 
+  className="w-full h-full rounded-full object-cover"
+  alt="Caller"
+/>
         </div>
         {callStatus === 'ringing' && (
           <div className="absolute -inset-4 border-2 border-blue-500/20 rounded-full animate-ping"></div>
         )}
       </div>
 
-      <div className="text-center">
-        <h2 className="text-2xl font-bold">{agent?.firstName} {agent?.lastName}</h2>
-        <p className="text-blue-400 font-black uppercase tracking-widest text-[10px] mt-2 italic">
-          {/* DYNAMIC STATUS TEXT */}
-          {callStatus === 'ringing' && (
-            activeCall?.callerData ? "Incoming Secure Call..." : "Requesting Secure Line..."
-          )}
-          {callStatus === 'connected' && "Line Encrypted"}
-        </p>
-      </div>
+     <div className="text-center">
+  <h2 className="text-2xl font-bold">
+    {/* Use the name from the incoming call if it exists, otherwise show the agent's name */}
+    {activeCall?.callerData?.fromName || `${agent?.firstName} ${agent?.lastName}`}
+  </h2>
+  <p className="text-blue-400 font-black uppercase tracking-widest text-[10px] mt-2 italic">
+    {callStatus === 'ringing' && (
+      activeCall?.callerData ? "Incoming Secure Call" : "Calling Agent..."
+    )}
+    {callStatus === 'connected' && "Line Encrypted"}
+  </p>
+</div>
 
-      {/* Action Buttons */}
-      <div className="flex items-center gap-10 mt-10">
-        {callStatus === 'ringing' ? (
-          <>
-            {/* If there is callerData, show Accept/Decline. If not, only show End (Cancel). */}
-            {activeCall?.callerData ? (
-              <>
-                <button onClick={handleEndCall} className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:scale-110 transition-transform">
-                  <BsTelephoneFill className="rotate-[135deg]" size={24} />
-                </button>
-                <button onClick={handleAcceptCall} className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:scale-110 transition-transform">
-                  <BsTelephoneFill size={24} />
-                </button>
-              </>
-            ) : (
-              /* OUTGOING VIEW: Only show a "Cancel" button while dialing */
-              <div className="flex flex-col items-center gap-4">
-                <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/40">
-                  <BsTelephoneFill className="rotate-[135deg]" size={30} />
-                </button>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Cancel Call</span>
-              </div>
-            )}
-          </>
-        ) : (
+     <div className="flex items-center gap-10 mt-10">
+  {callStatus === 'ringing' ? (
+    <>
+      {/* CASE A: Someone is calling the USER (Incoming) */}
+      {activeCall?.callerData ? (
+        <>
+          <button onClick={handleEndCall} className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-lg shadow-red-500/20">
+            <BsTelephoneFill className="rotate-[135deg]" size={24} />
+          </button>
+          <button onClick={handleAcceptCall} className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:scale-110 transition-transform shadow-lg shadow-green-500/20">
+            <BsTelephoneFill size={24} />
+          </button>
+        </>
+      ) : (
+        /* CASE B: USER is calling the Agent (Outgoing) */
+        <div className="flex flex-col items-center gap-4">
+          <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/40 active:scale-90 transition-all">
+            <BsTelephoneFill className="rotate-[135deg]" size={30} />
+          </button>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Cancel Request</span>
+        </div>
+      )}
+    </>
+  ) : (
           /* CONNECTED VIEW (Same as before) */
           <>
             <button onClick={() => setIsSpeakerOn(!isSpeakerOn)} className={`w-12 h-12 rounded-full flex items-center justify-center ${isSpeakerOn ? 'bg-white text-black' : 'bg-white/10'}`}>

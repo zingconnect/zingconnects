@@ -1461,21 +1461,56 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
   }
 });
 
-// Check for incoming calls (Polling)
+
+// 1. Unified Start Call (Supports User -> Agent AND Agent -> User)
+app.post('/api/calls/start', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { receiverId, receiverModel } = req.body;
+    
+    // Safety: Ensure we have the caller's ID from the token
+    const callerId = req.user.id || req.user._id || req.user.userId;
+    if (!callerId) return res.status(401).json({ message: "Auth Error" });
+
+    // Determine roles dynamically
+    const callerModel = req.user.role === 'agent' ? 'Agent' : 'User';
+    // If receiverModel isn't sent, we assume the opposite of the caller
+    const finalReceiverModel = receiverModel || (callerModel === 'Agent' ? 'User' : 'Agent');
+
+    // Create the call record
+    const newCall = new Call({
+      caller: callerId,
+      callerModel: callerModel,
+      receiver: receiverId,
+      receiverModel: finalReceiverModel,
+      status: 'ringing'
+    });
+
+    await newCall.save();
+    res.status(201).json({ success: true, callId: newCall._id });
+  } catch (err) {
+    console.error("Start Call Error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Unified Check Incoming (Works for both Users and Agents)
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    // Find a call where the current user is the receiver and it's still ringing
+    const myId = req.user.id || req.user._id || req.user.userId;
+
+    // Look for any ringing call where I am the receiver
+    // .populate works because Call schema uses refPath for dynamic modeling
     const incoming = await Call.findOne({ 
-      receiver: req.user.id, 
+      receiver: myId, 
       status: 'ringing' 
     }).populate('caller', 'firstName lastName photoUrl');
 
     if (!incoming) return res.json({ hasIncomingCall: false });
 
-    // Handle signed URL if the caller's photo is stored in IDrive/S3
-    let photo = incoming.caller.photoUrl;
+    // Handle private image URLs for the UI
+    let photo = incoming.caller?.photoUrl;
     if (photo && !photo.startsWith('http')) {
       photo = await getPrivateUrl(photo);
     }
@@ -1484,46 +1519,46 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
       hasIncomingCall: true,
       callId: incoming._id,
       callerData: {
-        fromName: `${incoming.caller.firstName} ${incoming.caller.lastName}`,
+        fromName: `${incoming.caller?.firstName} ${incoming.caller?.lastName}`,
         photoUrl: photo,
-        callerId: incoming.caller._id
+        callerId: incoming.caller?._id
       }
     });
   } catch (err) {
-    console.error("Check Incoming Call Error:", err);
-    res.status(500).json({ success: false, message: "Error checking line" });
+    res.status(500).json({ success: false, message: "Line check failed" });
   }
 });
 
-// Accept an incoming call
+// 3. Unified Accept Call
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    // Find the ringing call for THIS user
+    const myId = req.user.id || req.user._id || req.user.userId;
+
+    // Find the call where I am the receiver and connect it
     const call = await Call.findOneAndUpdate(
-      { receiver: req.user.id, status: 'ringing' }, 
+      { receiver: myId, status: 'ringing' }, 
       { status: 'connected', startTime: Date.now() }, 
-      { new: true, sort: { createdAt: -1 } } // Get the most recent one
+      { new: true, sort: { createdAt: -1 } }
     );
 
-    if (!call) return res.status(404).json({ message: "No active ringing call found" });
-
+    if (!call) return res.status(404).json({ message: "No ringing call found" });
     res.json({ success: true, call });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// End/Decline/Cancel a call
+// 4. Unified End/Cancel Call (Ends call if you are either the Caller OR Receiver)
 app.post('/api/calls/end', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    // Find any call where this user is the caller OR receiver that is NOT ended
+    const myId = req.user.id || req.user._id || req.user.userId;
+
+    // Find the active call associated with my ID in either slot
     const call = await Call.findOneAndUpdate(
       { 
-        $or: [{ caller: req.user.id }, { receiver: req.user.id }],
+        $or: [{ caller: myId }, { receiver: myId }],
         status: { $in: ['ringing', 'connected'] }
       },
       { status: 'ended', endTime: Date.now() },
@@ -1533,27 +1568,6 @@ app.post('/api/calls/end', authenticateToken, async (req, res) => {
     res.json({ success: true, message: "Call terminated" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// Add this to your backend call controller/routes
-app.post('/api/calls/start', authenticateToken, async (req, res) => {
-  try {
-    await connectToDatabase();
-    const { receiverId, receiverModel } = req.body;
-
-    const newCall = new Call({
-      caller: req.user.id,
-      callerModel: req.user.role === 'agent' ? 'Agent' : 'User',
-      receiver: receiverId,
-      receiverModel: receiverModel,
-      status: 'ringing'
-    });
-
-    await newCall.save();
-    res.status(201).json({ success: true, callId: newCall._id });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
   }
 });
 
