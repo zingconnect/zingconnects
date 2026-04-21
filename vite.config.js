@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { resolve } from 'path' // You might need to install @types/node
 
 export default defineConfig({
   plugins: [
@@ -10,9 +9,15 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      // This redirects 'crypto' imports to the browser-safe version
-      crypto: 'crypto-browserify',
-      stream: 'stream-browserify',
+      // If Vite accidentally sees these imports, tell it to ignore them
+      "crypto": "crypto-browserify",
+    },
+  },
+  build: {
+    rollupOptions: {
+      // This tells Rollup (Vercel's bundler) that these are external 
+      // and shouldn't be bundled into the frontend javascript
+      external: ['crypto', 'fs', 'path', 'os', 'dotenv', 'mongoose'],
     },
   },
   define: {

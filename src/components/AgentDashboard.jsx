@@ -4,7 +4,6 @@ import { io } from 'socket.io-client';
 import Peer from 'simple-peer/simplepeer.min.js'; // Using the minified version is more stable in Vite
 import { Buffer } from 'buffer'; // Add this import here too
 
-
 import { 
   BsSearch, 
   BsThreeDotsVertical, 
