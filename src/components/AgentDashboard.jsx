@@ -1032,16 +1032,20 @@ const handleSendMessage = async (e) => {
     >
       <div className="relative shrink-0">
         <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
-       <img 
+      <img 
   src={user.photoUrl} 
   alt={`${user.firstName} ${user.lastName}`} 
   className="w-full h-full object-cover"
   crossOrigin="anonymous" 
   referrerPolicy="no-referrer-when-downgrade"
+  loading="lazy" 
+  decoding="async" 
   onError={(e) => {
     console.warn(`S3 Load failed for ${user.email}, switching to fallback.`);
     e.target.onerror = null; // Prevents infinite loops
-    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.firstName)}+${encodeURIComponent(user.lastName)}&background=random&color=fff`;
+    // Cleanly encoded name for the fallback API
+    const fallbackName = encodeURIComponent(`${user.firstName} ${user.lastName}`);
+    e.target.src = `https://ui-avatars.com/api/?name=${fallbackName}&background=random&color=fff`;
   }} 
 />
         </div>
@@ -1099,13 +1103,16 @@ const handleSendMessage = async (e) => {
             <BsChevronLeft size={18} />
           </button>
           
-          <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
-           <img 
+          <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white bg-gray-200 shrink-0 shadow-sm">
+          <img 
   src={selectedUser.photoUrl} 
   alt="Profile" 
   className="w-full h-full object-cover" 
   crossOrigin="anonymous" 
   referrerPolicy="no-referrer-when-downgrade"
+  loading="lazy"      // Only loads when it's about to enter the screen
+  decoding="async"    // Prevents the image decoding from blocking the UI thread
+  // ---------------------------
   onError={(e) => {
     e.target.onerror = null; 
     const name = encodeURIComponent(`${selectedUser.firstName} ${selectedUser.lastName}`);
