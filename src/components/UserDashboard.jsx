@@ -517,6 +517,35 @@ const handleDownload = async (url, type) => {
   }
 };
 
+// --- ADD THIS TO YOUR CALL HANDLERS ---
+const handleStartCall = async () => {
+  if (!agent?._id) return;
+  const token = localStorage.getItem('userToken');
+
+  try {
+    const res = await fetch('/api/calls/start', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({ 
+        receiverId: agent._id,
+        receiverModel: 'Agent' // Crucial so the server knows who is being called
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      setCallStatus('ringing'); // Move to ringing state (Outgoing)
+      setActiveCall({ callId: data.callId });
+    }
+  } catch (err) {
+    console.error("Failed to initiate call:", err);
+    alert("Encryption line busy. Please try again.");
+  }
+};
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !agent?._id) return;
@@ -721,10 +750,14 @@ const handleDownload = async (url, type) => {
             </div>
           </div>
 
-          <div className="flex items-center gap-5 md:gap-8 text-gray-500 pr-1">
-            <BsTelephoneFill className="cursor-pointer hover:text-gray-700 transition-colors" size={16} />
-            <BsGearFill className="cursor-pointer hover:text-gray-700 transition-colors" size={18} />
-          </div>
+        <div className="flex items-center gap-5 md:gap-8 text-gray-500 pr-1">
+  <BsTelephoneFill 
+    className="cursor-pointer hover:text-blue-600 transition-colors active:scale-90" 
+    size={16} 
+    onClick={handleStartCall} // <--- Added this
+  />
+  <BsGearFill className="cursor-pointer hover:text-gray-700 transition-colors" size={18} />
+</div>
         </header>
 
         <main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
@@ -1082,7 +1115,6 @@ const handleDownload = async (url, type) => {
     </p>
   </div>
 )}
-
 {/* --- CALL OVERLAY --- */}
 {callStatus !== 'idle' && (
   <div className="fixed inset-0 z-[50000] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white">
@@ -1105,7 +1137,10 @@ const handleDownload = async (url, type) => {
       <div className="text-center">
         <h2 className="text-2xl font-bold">{agent?.firstName} {agent?.lastName}</h2>
         <p className="text-blue-400 font-black uppercase tracking-widest text-[10px] mt-2 italic">
-          {callStatus === 'ringing' && "Incoming Secure Call..."}
+          {/* DYNAMIC STATUS TEXT */}
+          {callStatus === 'ringing' && (
+            activeCall?.callerData ? "Incoming Secure Call..." : "Requesting Secure Line..."
+          )}
           {callStatus === 'connected' && "Line Encrypted"}
         </p>
       </div>
@@ -1114,26 +1149,35 @@ const handleDownload = async (url, type) => {
       <div className="flex items-center gap-10 mt-10">
         {callStatus === 'ringing' ? (
           <>
-            {/* Decline */}
-            <button onClick={handleEndCall} className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:scale-110 transition-transform">
-              <BsTelephoneFill className="rotate-[135deg]" size={24} />
-            </button>
-            {/* Accept */}
-            <button onClick={handleAcceptCall} className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:scale-110 transition-transform">
-              <BsTelephoneFill size={24} />
-            </button>
+            {/* If there is callerData, show Accept/Decline. If not, only show End (Cancel). */}
+            {activeCall?.callerData ? (
+              <>
+                <button onClick={handleEndCall} className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:scale-110 transition-transform">
+                  <BsTelephoneFill className="rotate-[135deg]" size={24} />
+                </button>
+                <button onClick={handleAcceptCall} className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:scale-110 transition-transform">
+                  <BsTelephoneFill size={24} />
+                </button>
+              </>
+            ) : (
+              /* OUTGOING VIEW: Only show a "Cancel" button while dialing */
+              <div className="flex flex-col items-center gap-4">
+                <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/40">
+                  <BsTelephoneFill className="rotate-[135deg]" size={30} />
+                </button>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Cancel Call</span>
+              </div>
+            )}
           </>
         ) : (
+          /* CONNECTED VIEW (Same as before) */
           <>
-            {/* Connected Controls: Speaker, End, Mute */}
             <button onClick={() => setIsSpeakerOn(!isSpeakerOn)} className={`w-12 h-12 rounded-full flex items-center justify-center ${isSpeakerOn ? 'bg-white text-black' : 'bg-white/10'}`}>
               <BsPlayFill className="rotate-90" size={20} />
             </button>
-            
             <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/50">
               <BsTelephoneFill className="rotate-[135deg]" size={30} />
             </button>
-
             <button onClick={() => setIsMuted(!isMuted)} className={`w-12 h-12 rounded-full flex items-center justify-center ${isMuted ? 'bg-red-500' : 'bg-white/10'}`}>
               <BsMicFill size={20} />
             </button>

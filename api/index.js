@@ -1536,6 +1536,27 @@ app.post('/api/calls/end', authenticateToken, async (req, res) => {
   }
 });
 
+// Add this to your backend call controller/routes
+app.post('/api/calls/start', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { receiverId, receiverModel } = req.body;
+
+    const newCall = new Call({
+      caller: req.user.id,
+      callerModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      receiver: receiverId,
+      receiverModel: receiverModel,
+      status: 'ringing'
+    });
+
+    await newCall.save();
+    res.status(201).json({ success: true, callId: newCall._id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
