@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import { motion, useAnimation } from "framer-motion";
+import { useDrag } from "@use-gesture/react";
+import { BsReplyFill } from "react-icons/bs";
 import { 
   BsTelephoneFill, 
   BsPlusLg, 
@@ -56,6 +59,7 @@ const [userData, setUserData] = useState(null);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('online');
+  const [replyingTo, setReplyingTo] = useState(null);
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [formData, setFormData] = useState({
@@ -397,19 +401,22 @@ useEffect(() => {
 
 const handleFileChange = (e) => {
   const file = e.target.files[0];
-  if (file) {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    const localUrl = URL.createObjectURL(file);
-    
-    setPreviewUrl(localUrl);
-
-    if (showOnboarding) {
-      setOnboardingFile(file); // Correctly targets profile update
-    } else {
-      setPreviewFile(file);    // Targets chat messaging
-      setCaption(""); 
-    }
+  if (!file) return;
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
   }
+
+  const url = URL.createObjectURL(file);
+  
+  if (showOnboarding) {
+    setPreviewUrl(url); 
+    setFormData(prev => ({ ...prev, profileImage: file }));
+  } else {
+    setPreviewFile(file); // Stores the actual File object for S3 upload
+    setPreviewUrl(url);   // Triggers the Fullscreen WhatsApp-style preview
+    setCaption("");       // Reset caption so previous message text doesn't persist
+  }
+  e.target.value = ""; 
 };
 
 const handleSendWithPreview = async () => {
@@ -490,16 +497,25 @@ const handleProfileSubmit = async (e) => {
   }
 };
 
- const unlockAudio = () => {
+const unlockAudio = () => {
   if (notificationSound.current) {
     notificationSound.current.play()
       .then(() => {
         notificationSound.current.pause();
         notificationSound.current.currentTime = 0;
-        setHasInteracted(true); // <--- ADD THIS to hide the overlay
-        console.log("Audio unlocked for iOS");
+        setHasInteracted(true); 
+        if (socket && agent?._id) {
+          socket.emit("join-private-room", agent._id);
+          console.log("Socket room joined after audio unlock");
+        }
+        console.log("Audio and Socket session unlocked successfully");
       })
-      .catch(e => console.error("Unlock failed", e));
+      .catch(p => {
+        console.error("Audio unlock failed. User gesture required:", p);
+      });
+  } else {
+    // Fallback if the ref isn't loaded yet
+    setHasInteracted(true);
   }
 };
 const handleFileUpload = (e) => {
@@ -697,7 +713,8 @@ const handleStartCall = async () => {
       body: JSON.stringify({
         receiverId: agent._id,
         text: textToSend,
-        fileType: 'text'
+        fileType: 'text',
+        replyToId: replyingTo?._id 
       })
     });
 
@@ -728,6 +745,50 @@ const handleResend = (msg) => {
     // You can manually call your send logic here
   }
 };
+
+const MessageBubble = ({ m, isMe, onReply, children }) => {
+  const controls = useAnimation();
+
+  // Handle Swipe logic
+  const bind = useDrag(({ active, movement: [x], last }) => {
+    // Only allow swiping to the right (positive x)
+    const xMovement = Math.min(Math.max(0, x), 100); 
+
+    if (active) {
+      controls.set({ x: xMovement });
+    }
+
+    if (last) {
+      if (xMovement > 60) {
+        onReply(m);
+        if (window.navigator.vibrate) window.navigator.vibrate(10);
+      }
+      controls.start({ x: 0, transition: { type: "spring", stiffness: 300, damping: 30 } });
+    }
+  }, { axis: 'x' });
+
+  return (
+    <div className="relative group">
+      {/* The Hidden Reply Icon */}
+      <div className="absolute left-[-40px] inset-y-0 flex items-center opacity-0 group-active:opacity-100 transition-opacity">
+        <div className="bg-gray-200 p-2 rounded-full">
+          <BsReplyFill className="text-gray-600" size={18} />
+        </div>
+      </div>
+
+      <motion.div 
+        {...bind()} 
+        animate={controls}
+        className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
+          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+        } mb-1`}
+      >
+        {children}
+      </motion.div>
+    </div>
+  );
+};
+
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">
@@ -1124,70 +1185,124 @@ const handleResend = (msg) => {
   </div>
 )}
 
-<footer className="shrink-0 min-h-[65px] md:min-h-[75px] bg-[#f0f2f5] px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3 z-20 border-t border-gray-200 pb-safe">
-  {/* Hidden Inputs for File and Camera */}
-  <input 
-    type="file" 
-    ref={fileInputRef} 
-    onChange={handleFileUpload} 
-    accept="image/*,video/*" 
-    className="hidden" 
-  />
-  <input 
-    type="file" 
-    ref={cameraInputRef} 
-    onChange={handleFileUpload} 
-    accept="image/*,video/*" 
-    capture="environment" 
-    className="hidden" 
-  />
+<footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
+  {/* --- REPLY PREVIEW PANEL --- */}
+  {replyingTo && (
+    <div className="px-2 md:px-6 pt-2">
+      <div className="bg-white/60 backdrop-blur-sm rounded-t-2xl border-l-4 border-blue-600 flex items-center justify-between overflow-hidden shadow-sm animate-in slide-in-from-bottom-2 duration-200">
+        <div className="p-3 flex-1 min-w-0">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-600 truncate">
+              Replying to {replyingTo.senderModel === 'User' ? 'You' : `${agent?.firstName || 'Agent'}`}
+            </p>
+          </div>
+          <p className="text-[13px] text-slate-600 truncate mt-0.5 leading-tight">
+            {replyingTo.fileType === 'image' ? (
+              <span className="flex items-center gap-1"><BsCameraFill size={12}/> Photo</span>
+            ) : replyingTo.fileType === 'video' ? (
+              <span className="flex items-center gap-1"><BsPlayFill size={14}/> Video</span>
+            ) : (
+              replyingTo.text
+            )}
+          </p>
+        </div>
 
-  <div className="flex gap-1 md:gap-2 text-gray-500">
-    {/* Attachment Button */}
-    <button 
-      onClick={() => fileInputRef.current.click()} 
-      disabled={isUploading}
-      className="p-2 hover:bg-black/5 rounded-full transition-colors"
-    >
-      <BsPaperclip size={22} />
-    </button>
+        {/* Thumbnail Preview if the replied message is Media */}
+        {replyingTo.fileUrl && (
+          <div className="w-12 h-12 bg-gray-200">
+            {replyingTo.fileType === 'image' ? (
+              <img src={replyingTo.fileUrl} className="w-full h-full object-cover opacity-80" alt="reply-thumb" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-slate-800 text-white">
+                <BsPlayFill size={20} />
+              </div>
+            )}
+          </div>
+        )}
 
-    {/* Camera Button */}
-    <button 
-      onClick={() => cameraInputRef.current.click()} 
-      disabled={isUploading}
-      className="p-2 hover:bg-black/5 rounded-full transition-colors"
-    >
-      <BsCameraFill size={22} />
-    </button>
-  </div>
-  
-  <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+        {/* Cancel Reply Button */}
+        <button 
+          onClick={() => setReplyingTo(null)}
+          className="p-3 text-slate-400 hover:text-blue-600 transition-colors"
+        >
+          <BsPlusLg className="rotate-45" size={18} />
+        </button>
+      </div>
+    </div>
+  )}
+
+  {/* --- MAIN INPUT CONTROLS --- */}
+  <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
+    {/* Hidden Inputs for File and Camera */}
     <input 
-      value={newMessage} 
-      onChange={(e) => setNewMessage(e.target.value)} 
-      disabled={isUploading}
-      placeholder={isUploading ? "Uploading file..." : "Type your secure message"} 
-      className="w-full bg-white px-4 py-2.5 md:py-3 rounded-full text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20" 
+      type="file" 
+      ref={fileInputRef} 
+      onChange={handleFileUpload} 
+      accept="image/*,video/*" 
+      className="hidden" 
     />
-    
-    {/* Voice/Send Toggle */}
-    {newMessage.trim() ? (
-      <button 
-        type="submit" 
-        className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
-      >
-        <BsSendFill size={16} className="ml-0.5" />
-      </button>
-    ) : (
+    <input 
+      type="file" 
+      ref={cameraInputRef} 
+      onChange={handleFileUpload} 
+      accept="image/*,video/*" 
+      capture="environment" 
+      className="hidden" 
+    />
+
+    <div className="flex gap-1 md:gap-2 text-gray-500">
+      {/* Attachment Button */}
       <button 
         type="button"
-        className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-white text-gray-500 border border-gray-100 flex items-center justify-center hover:text-blue-600"
+        onClick={() => fileInputRef.current.click()} 
+        disabled={isUploading}
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
       >
-        <BsMicFill size={20} />
+        <BsPaperclip size={22} />
       </button>
-    )}
-  </form>
+
+      {/* Camera Button */}
+      <button 
+        type="button"
+        onClick={() => cameraInputRef.current.click()} 
+        disabled={isUploading}
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
+      >
+        <BsCameraFill size={22} />
+      </button>
+    </div>
+    
+    <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+      <div className="flex-1 relative flex items-center">
+        <input 
+          value={newMessage} 
+          onChange={(e) => setNewMessage(e.target.value)} 
+          disabled={isUploading}
+          placeholder={isUploading ? "Uploading file..." : (replyingTo ? "Write a reply..." : "Type your secure message")} 
+          className={`w-full bg-white px-4 py-2.5 md:py-3 text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20 transition-all ${
+            replyingTo ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-full'
+          }`}
+        />
+      </div>
+      
+      {/* Voice/Send Toggle */}
+      {newMessage.trim() ? (
+        <button 
+          type="submit" 
+          className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform shrink-0"
+        >
+          <BsSendFill size={16} className="ml-0.5" />
+        </button>
+      ) : (
+        <button 
+          type="button"
+          className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-white text-gray-500 border border-gray-100 flex items-center justify-center hover:text-blue-600 transition-colors shrink-0"
+        >
+          <BsMicFill size={20} />
+        </button>
+      )}
+    </form>
+  </div>
 </footer>
       </div>
 
@@ -1337,10 +1452,11 @@ const handleResend = (msg) => {
         <h2 className="text-2xl font-bold">
           {activeCall?.callerData?.fromName || `${agent?.firstName} ${agent?.lastName}`}
         </h2>
-        <p className="text-blue-400 font-black uppercase tracking-widest text-[10px] mt-2 italic">
-          {callStatus === 'ringing' && (activeCall?.callerData ? "Incoming Secure Call" : "Calling Agent...")}
-          {callStatus === 'connected' && "Line Encrypted"}
-        </p>
+       <p className="text-blue-400 font-black uppercase tracking-widest text-[10px] mt-2 italic">
+  {callStatus === 'ringing' && (activeCall?.callerData ? "Incoming Secure Call" : "Calling Agent...")}
+  {callStatus === 'connected' && "Line Encrypted"}
+  {callStatus === 'busy' && "Agent is currently on another call"} 
+</p>
       </div>
 
       <div className="flex items-center gap-6 md:gap-10 mt-10">
