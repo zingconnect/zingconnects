@@ -113,10 +113,14 @@ const authenticateToken = (req, res, next) => {
 
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
-  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-    if (err) return res.status(403).json({ message: "Invalid Token" });
-    
-    req.user = decoded; 
+ jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+    if (err) {
+        console.log("AUTH FAIL - Error:", err.message, "Secret exists:", !!process.env.JWT_SECRET);
+        return res.status(403).json({ message: "Invalid Token" });
+    }
+    console.log("AUTH SUCCESS - Role:", decoded.role, "ID:", decoded.id || decoded._id);
+
+    req.user = decoded;
 
     // Update activity timestamp if the user is an agent
     // We don't 'await' this so we don't slow down the response

@@ -1,3 +1,4 @@
+import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
@@ -13,6 +14,8 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../index.js';
 import { agentSchema } from '../models/Agent.js';
 import User from '../models/User.js'; 
+
+dotenv.config();
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -38,8 +41,10 @@ export const authenticateToken = (req, res, next) => {
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
   jwt.verify(token, process.env.JWT_SECRET, (err, decodedUser) => {
-    if (err) return res.status(403).json({ message: "Session Expired" });
-        console.log("DECODED JWT:", decodedUser);
+    if (err) {
+        console.error("JWT ERROR REASON:", err.message); 
+        return res.status(403).json({ message: "Session Expired" });
+    }
 
     req.user = decodedUser;
     next();

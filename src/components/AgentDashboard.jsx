@@ -173,7 +173,7 @@ useEffect(() => {
     if (callStatus !== 'idle') return;
 
     try {
-      const response = await fetch('/api/calls/agent/check-incoming', {
+      const response = await fetch('/api/calls/check-incoming', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
