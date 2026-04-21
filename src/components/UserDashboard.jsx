@@ -393,7 +393,6 @@ useEffect(() => {
 
   const agentStatus = getStatusInfo(agent);
 
-  // --- HANDLERS ---
   const handlePhotoClick = () => fileInputRef.current.click();
 
 const handleFileChange = (e) => {
@@ -445,11 +444,16 @@ const handleProfileSubmit = async (e) => {
   const token = localStorage.getItem('userToken');
   const data = new FormData();
   
-  // CRITICAL: We only use the onboardingFile here
-  if (onboardingFile) {
-    data.append('photo', onboardingFile);
+  // FAIL-SAFE: Check both potential file states to ensure 'photo' isn't empty
+  const fileToUpload = onboardingFile || previewFile;
+
+  if (fileToUpload) {
+    // This MUST match the backend upload.single('photo')
+    data.append('photo', fileToUpload);
+    console.log("Appending file to upload:", fileToUpload.name);
+  } else {
+    console.warn("No file detected in onboardingFile or previewFile state.");
   }
-  
   data.append('firstName', formData.firstName);
   data.append('lastName', formData.lastName);
   data.append('dob', formData.dob);
@@ -460,14 +464,26 @@ const handleProfileSubmit = async (e) => {
   try {
     const res = await fetch('/api/users/update-user-onboarding', {
       method: 'PUT',
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 
+        'Authorization': `Bearer ${token}` 
+      },
       body: data
     });
 
+    const result = await res.json();
+
     if (res.ok) {
+      if (setUserData) setUserData(result.user);
+      
+      // 2. Clear UI states
       setShowOnboarding(false);
-      setOnboardingFile(null); // Clear it
-      setPreviewUrl(null);     // Clear preview
+      setOnboardingFile(null);
+      setPreviewFile(null);
+      setPreviewUrl(null);
+      
+      console.log("Profile updated successfully:", result.user.photoUrl);
+    } else {
+      console.error("Server update failed:", result.message);
     }
   } catch (err) {
     console.error("Profile initialization failed:", err);

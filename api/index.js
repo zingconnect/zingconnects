@@ -805,10 +805,9 @@ app.get('/api/users/my-session', async (req, res) => {
 
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
+    // Ensure DB connection
     await connectToDatabase();
     const { firstName, lastName, dob, gender, city, state } = req.body;
-    
-    // 1. Initialize the update object
     const updateData = {
       firstName,
       lastName,
@@ -820,42 +819,51 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       isVerified: true
     };
 
-    // 2. Handle the file upload and URL construction
     if (req.file) {
       const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
       const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
       
       const uploadParams = {
-        Bucket: process.env.IDRIVE_BUCKET_NAME || "zingconnect",
+        Bucket: process.env.IDRIVE_BUCKET_NAME,
         Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
+
       await s3Client.send(new PutObjectCommand(uploadParams));
-      const endpoint = "https://s3.us-west-2.idrivee2.com"; // Match your bucket region
-      const bucket = process.env.IDRIVE_BUCKET_NAME ;
-            updateData.photoUrl = `${endpoint}/${bucket}/${fileKey}`; 
+
+      updateData.photoUrl = fileKey; 
       
-      console.log(`[Storage] Full URL assigned to updateData: ${updateData.photoUrl}`);
+      console.log(`[Storage] Photo uploaded for user: ${req.user.id} with key: ${fileKey}`);
     }
-  const updatedUser = await User.findByIdAndUpdate(
+    const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
-      { $set: updateData }, // Use $set to ensure all fields are explicitly updated
-      { new: true, runValidators: true }
+      updateData,
+      { new: true }
     );
 
     if (!updatedUser) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res.status(404).json({ 
+        success: false, 
+        message: "User account not found" 
+      });
     }
 
-    res.json({ success: true, user: updatedUser });
+    // 5. Final Response
+    res.json({ 
+      success: true, 
+      message: "Onboarding complete", 
+      user: updatedUser 
+    });
 
   } catch (err) {
     console.error("CRITICAL ONBOARDING ERROR:", err);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error during profile update" 
+    });
   }
 });
-
 
 app.get('/api/agents/:slug', async (req, res) => {
   try {
