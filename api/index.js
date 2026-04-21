@@ -824,7 +824,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
       
       const uploadParams = {
-        Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+        Bucket: process.env.IDRIVE_BUCKET_NAME,
         Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
@@ -832,9 +832,11 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
 
       await s3Client.send(new PutObjectCommand(uploadParams));
 
-      updateData.photoUrl = fileKey; 
-      
-      console.log(`[Storage] Photo uploaded for user: ${req.user.id} with key: ${fileKey}`);
+      const endpoint = process.env.IDRIVE_ENDPOINT;
+const bucket = process.env.IDRIVE_BUCKET_NAME;
+updateData.photoUrl = `${endpoint}/${bucket}/${fileKey}`;
+
+console.log(`[Storage] Public URL generated: ${updateData.photoUrl}`);
     }
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
@@ -895,7 +897,7 @@ app.get('/api/agents/:slug', async (req, res) => {
         console.log("Generating signed URL for:", fileKey);
 
         const getCommand = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+          Bucket: process.env.IDRIVE_BUCKET_NAME,
           Key: fileKey,
         });
 
