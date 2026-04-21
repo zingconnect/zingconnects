@@ -173,17 +173,24 @@ useEffect(() => {
 
 useEffect(() => {
   if (socket && agentData?._id) {
-        socket.emit("join-main-room", agentData._id);
+    socket.emit("join-main-room", agentData._id);
 
-    // Listen for Incoming Calls
     socket.on("incoming-call", (data) => {
+      socket.emit("confirm-ringing", { to: data.fromId });
       setActiveCaller(data); 
       setIsIncomingCall(true);
       setCallStatus('ringing');
     });
+    socket.on("user-is-ringing", () => {
+      if (callStatus === 'calling') {
+        setCallStatus('ringing');
+      }
+    });
+
     socket.on("call-accepted", () => {
       setCallStatus('connected');
     });
+
     socket.on("call-ended", () => {
       if (connectionRef.current) connectionRef.current.destroy();
       setCallStatus('idle');
@@ -193,11 +200,12 @@ useEffect(() => {
 
     return () => {
       socket.off("incoming-call");
+      socket.off("user-is-ringing");
       socket.off("call-accepted");
       socket.off("call-ended");
     };
   }
-}, [agentData, socket]);
+}, [agentData, socket, callStatus]);
 
 useEffect(() => {
   const token = localStorage.getItem('agentToken');
@@ -253,9 +261,12 @@ const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
 
   try {
-const token = localStorage.getItem('agentToken');
+    const token = localStorage.getItem('agentToken');
+    
+    // Set status to CALLING initially (Network is connecting)
+    setCallStatus('calling'); 
+    setIsIncomingCall(false);
 
-    // 1. REGISTER THE CALL IN THE DATABASE FIRST
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: {
@@ -264,20 +275,13 @@ const token = localStorage.getItem('agentToken');
       },
       body: JSON.stringify({
         receiverId: targetUserId,
-        receiverModel: 'User' // Agents call Users
+        receiverModel: 'User'
       })
     });
 
     const dbCall = await res.json();
+    if (!res.ok) throw new Error(dbCall.message);
 
-    if (!res.ok) {
-      console.error("DB Call Error:", dbCall.error);
-      alert("Could not start call: " + (dbCall.message || "Server Error"));
-      return;
-    }
-    setCallStatus('ringing');
-    setIsIncomingCall(false);
-    
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     const peer = new Peer({
       initiator: true,
@@ -291,7 +295,7 @@ const token = localStorage.getItem('agentToken');
         signalData: data,
         fromId: agentData._id,
         fromName: `${agentData.firstName} ${agentData.lastName}`,
-        callId: dbCall.callId // Pass the ID created in DB
+        callId: dbCall.callId
       });
     });
 
@@ -305,6 +309,7 @@ const token = localStorage.getItem('agentToken');
   } catch (err) {
     console.error("Call initialization failed:", err);
     setCallStatus('idle');
+    alert("Call failed: " + err.message);
   }
 };
 
@@ -708,20 +713,32 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
-  if (scrollRef.current) {
+  // 1. Reset initial load flag whenever the user changes
+  setIsInitialLoad(true);
+}, [selectedUser?._id]);
+
+useEffect(() => {
+  const container = scrollRef.current;
+  if (!container) return;
+
+  requestAnimationFrame(() => {
     if (isInitialLoad) {
-      // First time opening the chat? Go to bottom.
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      container.scrollTop = container.scrollHeight;
       setIsInitialLoad(false);
     } else {
-      // Logic: Only snap to bottom if the user is already near the bottom
-      const isNearBottom = scrollRef.current.scrollHeight - scrollRef.current.scrollTop <= scrollRef.current.clientHeight + 100;
+      const threshold = 150; // Increased threshold for better UX
+      const isNearBottom = 
+        container.scrollHeight - container.scrollTop <= container.clientHeight + threshold;
+
       if (isNearBottom) {
-        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        container.scrollTo({ 
+          top: container.scrollHeight, 
+          behavior: 'smooth' 
+        });
       }
     }
-  }
-}, [messages]);
+  });
+}, [messages, isInitialLoad]); // Added isInitialLoad to deps
 
 // --- REAL-TIME UPDATES (POLLING) ---
 useEffect(() => {
@@ -1309,6 +1326,7 @@ const handleSendMessage = async (e) => {
   })}
   {/* IMPORTANT: Ensure this scroll anchor exists for smooth scrolling */}
   <div className="h-10 shrink-0 w-full clear-both" />
+  <div ref={messagesEndRef} />
 </div>
 
       <footer className="min-h-[60px] bg-[#f0f2f5] px-2 md:px-4 py-2 flex items-center gap-2 z-10 border-t border-gray-200">
