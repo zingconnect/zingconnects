@@ -342,7 +342,7 @@ useEffect(() => {
     document.body.appendChild(script);
 
     const fetchInitialData = async () => {
-      const token = localStorage.getItem('zingToken');
+      const token = localStorage.getItem('agentToken');
       if (!token) return navigate('/');
 
       try {
@@ -400,7 +400,7 @@ useEffect(() => {
       return;
     }
     setPaymentProcessing(true);
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     const activePlan = plans.find(p => p.tier === selectedPlan);
 
     if (!activePlan) {
@@ -530,7 +530,7 @@ const handleFinalSend = async () => {
   setIsUploading(true);
 
   try {
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
 
     // --- STEP 1: GET THE UPLOAD PERMISSION (PRESIGNED URL) ---
@@ -604,7 +604,7 @@ const handleFinalSend = async () => {
 
   const handleLogout = () => {
     const currentSlug = agentData.slug;
-    localStorage.removeItem('zingToken');
+    localStorage.removeItem('agentToken');
     if (currentSlug) {
       window.location.href = `/${currentSlug}`;
     } else {
@@ -618,7 +618,7 @@ const handleFinalSend = async () => {
   setLimit(30); // Always reset to 30 when switching to a new user
 
   try {
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     if (!token) return;
     const response = await fetch(`/api/messages/${user._id}?limit=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -663,7 +663,7 @@ useEffect(() => {
 // Add this to your Agent Dashboard
 useEffect(() => {
   const heartBeat = setInterval(async () => {
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     await fetch('/api/agents/heartbeat', { 
       method: 'POST', 
       headers: { 'Authorization': `Bearer ${token}` } 
@@ -694,7 +694,7 @@ useEffect(() => {
   if (!isSubscribed) return;
 
   const refreshData = async () => {
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     if (!token) return;
 
     try {
@@ -746,8 +746,8 @@ useEffect(() => {
         });
       }
 
-      // We use zingToken here because that is what your AgentDashboard uses
-      const token = localStorage.getItem('zingToken');
+      // We use agentToken here because that is what your AgentDashboard uses
+      const token = localStorage.getItem('agentToken');
       if (!token) return;
 
       // Sync with backend
@@ -780,7 +780,7 @@ useEffect(() => {
   if (!isSubscribed || !selectedUser?._id) return;
 
   const refreshMessages = async () => {
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     if (!token) return;
 
     try {
@@ -851,7 +851,7 @@ const handleSendMessage = async (e) => {
   setNewMessage(''); 
 
   try {
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     const response = await fetch('/api/messages/send', {
       method: 'POST',
       headers: { 

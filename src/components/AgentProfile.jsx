@@ -42,7 +42,7 @@ export const AgentProfile = () => {
 
   useEffect(() => {
   const fetchProfile = async () => {
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
     if (!token) return navigate('/');
 
     try {
@@ -63,7 +63,7 @@ export const AgentProfile = () => {
     } catch (err) {
       console.error("Profile Fetch Error:", err);
       if (err.message === "Failed to load profile") {
-         localStorage.removeItem('zingToken');
+         localStorage.removeItem('agentToken');
          navigate('/');
       }
     } finally {
@@ -81,7 +81,7 @@ export const AgentProfile = () => {
     }
 
     setIsSaving(true);
-    const token = localStorage.getItem('zingToken');
+    const token = localStorage.getItem('agentToken');
 
     try {
       const response = await fetch(`/api/agents/update-profile`, {

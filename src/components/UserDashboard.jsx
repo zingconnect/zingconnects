@@ -593,18 +593,13 @@ const handleDownload = async (url, type) => {
 
 const handleStartCall = async () => {
   if (!agent?._id) return;
-  console.log("Checking socket instance:", socket); 
-
-  if (typeof socket === 'undefined' || !socket) {
-    console.error("Socket is not initialized. Check your imports.");
-    return;
-  }
-
-  const token = localStorage.getItem('userToken') || localStorage.getItem('zingToken');
+  const token = localStorage.getItem('userToken'); 
+  
   if (!token) {
     alert("Please log in to make a call.");
     return;
   }
+
   try {
     const res = await fetch('/api/calls/start', {
       method: 'POST',
@@ -614,7 +609,7 @@ const handleStartCall = async () => {
       },
       body: JSON.stringify({ 
         receiverId: agent._id,
-        receiverModel: 'Agent' 
+        receiverModel: 'Agent' // Users call Agents
       })
     });
     if (!res.ok) {

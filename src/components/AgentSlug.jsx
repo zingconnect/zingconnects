@@ -120,7 +120,7 @@ export const AgentSlug = () => {
           localStorage.removeItem('rememberedAgentEmail');
         }
 
-        localStorage.setItem('zingToken', data.token);
+        localStorage.setItem('agentToken', data.token);
         localStorage.setItem('agentSlug', data.slug);
         localStorage.setItem('isSubscribed', data.isSubscribed); 
         localStorage.setItem('agentPlan', data.plan);
