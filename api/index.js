@@ -838,8 +838,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       
       console.log(`[Storage] Full URL assigned to updateData: ${updateData.photoUrl}`);
     }
-
-=    const updatedUser = await User.findByIdAndUpdate(
+  const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
       { $set: updateData }, // Use $set to ensure all fields are explicitly updated
       { new: true, runValidators: true }
