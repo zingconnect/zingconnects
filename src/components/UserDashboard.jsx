@@ -403,16 +403,16 @@ const handleFileChange = (e) => {
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
-        if (showOnboarding) {
-      setOnboardingFile(file);
-    } else {
-      // Otherwise, it's a chat message
-      setSelectedFile(file);
-    }
 
     const localUrl = URL.createObjectURL(file);
-    setPreviewUrl(localUrl);    
-    setCaption(""); 
+    setPreviewUrl(localUrl);
+
+    if (showOnboarding) {
+      setOnboardingFile(file);
+    } else {
+      setPreviewFile(file); 
+      setCaption(""); 
+    }
   }
 };
 
@@ -448,8 +448,10 @@ const handleProfileSubmit = async (e) => {
   const token = localStorage.getItem('userToken');
   const data = new FormData();
   
-  // Use onboardingFile here!
-  if (onboardingFile) data.append('photo', onboardingFile);
+  // CRITICAL: We only use the onboardingFile here
+  if (onboardingFile) {
+    data.append('photo', onboardingFile);
+  }
   
   data.append('firstName', formData.firstName);
   data.append('lastName', formData.lastName);
@@ -464,12 +466,14 @@ const handleProfileSubmit = async (e) => {
       headers: { 'Authorization': `Bearer ${token}` },
       body: data
     });
+
     if (res.ok) {
-        setShowOnboarding(false);
-        setOnboardingFile(null); // Clear after success
+      setShowOnboarding(false);
+      setOnboardingFile(null); // Clear it
+      setPreviewUrl(null);     // Clear preview
     }
   } catch (err) {
-    console.error("Update failed", err);
+    console.error("Profile initialization failed:", err);
   }
 };
 
@@ -764,14 +768,36 @@ const handleStartCall = async () => {
               <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-[0.15em]">Secure verification required</p>
             </div>
 
-            <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
-              <div className="flex flex-col items-center mb-4">
-                <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
-                <div onClick={handlePhotoClick} className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden">
-                   {previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <BsCameraFill size={20} />}
-                   {!previewUrl && <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>}
-                </div>
-              </div>
+           <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
+        <div className="flex flex-col items-center mb-4">
+          {/* FIX: This input now uses the updated handleFileChange 
+              which checks 'showOnboarding' to decide where to save the file.
+          */}
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept="image/*" 
+            className="hidden" 
+          />
+          <div 
+            onClick={handlePhotoClick} 
+            className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden"
+          >
+             {/* Uses previewUrl for visual feedback without triggering the chat preview overlay */}
+             {previewUrl ? (
+               <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+             ) : (
+               <BsCameraFill size={20} />
+             )}
+             
+             {!previewUrl && (
+               <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">
+                 Add Photo
+               </span>
+             )}
+          </div>
+        </div>
 
               <div className="grid grid-cols-2 gap-2 md:gap-4">
                 <div className="space-y-1">
