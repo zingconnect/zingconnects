@@ -56,7 +56,7 @@ export const agentSchema = new mongoose.Schema({
     enum: ['active', 'suspended', 'pending'], 
     default: 'pending' 
   },
-  
+  currentSessionId: { type: String, default: null },
   subscriptionDate: { type: Date },
   subscriptionAmount: { type: Number, default: 0 }, 
   expiryDate: { type: Date }, 

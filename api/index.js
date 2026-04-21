@@ -7,6 +7,7 @@ import path from 'path'; // <--- Kept this one
 import fs from 'fs';   // <--- Kept this one
 import jwt from 'jsonwebtoken'; 
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import Flutterwave from 'flutterwave-node-v3';
@@ -125,45 +126,56 @@ const authenticateToken = (req, res, next) => {
 
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
- jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
     if (err) {
-        console.log("AUTH FAIL - Error:", err.message, "Secret exists:", !!process.env.JWT_SECRET);
-        return res.status(403).json({ message: "Invalid Token" });
+      return res.status(403).json({ message: "Invalid Token" });
     }
-    console.log("AUTH SUCCESS - Role:", decoded.role, "ID:", decoded.id || decoded._id);
-
-    req.user = decoded;
-
-    // Update activity timestamp if the user is an agent
-    // We don't 'await' this so we don't slow down the response
     if (decoded.role === 'agent') {
-      Agent.findByIdAndUpdate(decoded.id, { lastActive: new Date() }).exec();
+      try {
+        const agent = await Agent.findById(decoded.id).select('currentSessionId lastActive');
+
+        if (!agent || agent.currentSessionId !== decoded.sessionId) {
+          console.log(`AUTH FAIL - Session Mismatch for Agent: ${decoded.id}`);
+          return res.status(401).json({ 
+            success: false, 
+            message: "Account logged in from another device.",
+            forceLogout: true // Signal for frontend to clear storage
+          });
+        }
+        agent.lastActive = new Date();
+        await agent.save();
+
+      } catch (dbErr) {
+        return res.status(500).json({ message: "Internal Auth Error" });
+      }
     }
 
+    // 3. Attach user to request and move forward
+    req.user = decoded;
     next();
   });
 };
+// Store the io instance globally or attach to app
+let ioInstance; 
 
 io.on("connection", (socket) => {
-  console.log("A user connected:", socket.id);
-
+  console.log("Connection established:", socket.id);
   socket.on("join-main-room", (userId) => {
     socket.join(userId);
-    console.log(`User ${userId} joined their private room: ${socket.id}`);
+    console.log(`Agent ${userId} is now reachable in private room.`);
+  });
+  socket.on("request-force-logout", (userId) => {
+    socket.to(userId).emit("force-logout", {
+      message: "Session terminated by server request."
+    });
   });
   socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
-    console.log(`Forwarding call from ${fromName} to ${userToCall}`);
-    
     io.to(userToCall).emit("incoming-call", { 
-      signal: signalData, 
-      fromId, 
-      fromName,
-      callId // CRITICAL: This links the socket event to the DB record
+      signal: signalData, fromId, fromName, callId 
     });
   });
 
   socket.on("answer-call", (data) => {
-    // data.to is the ID of the person who started the call
     io.to(data.to).emit("call-accepted", data.signal);
   });
 
@@ -172,7 +184,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("User disconnected");
+    console.log("A session disconnected:", socket.id);
   });
 });
 
@@ -452,64 +464,46 @@ app.post('/api/agents/verify-otp', async (req, res) => {
 });
 
 
+// --- Updated Login Route ---
 app.post('/api/agents/login', async (req, res) => {
   try {
     await connectToDatabase();
-    
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Email and password required" });
-    }
 
-    // 1. Find agent and explicitly include password
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('+password');
     
-    if (!agent) {
+    if (!agent || !(await bcrypt.compare(password, agent.password))) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
+    const newSessionId = crypto.randomBytes(16).toString('hex');
+        agent.currentSessionId = newSessionId;
+    await agent.save();
 
-    if (agent.isVerified === false) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Account not verified. Please check your email for the OTP code.",
-        needsVerification: true // Helpful hint for the frontend
-      });
-    }
-
-    // 3. Compare Password
-    const isMatch = await bcrypt.compare(password, agent.password);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
-    }
-
-    // 4. JWT Generation
     const token = jwt.sign(
       { 
         id: agent._id, 
         slug: agent.slug, 
-        role: 'agent' 
+        role: 'agent',
+        sessionId: newSessionId // 👈 Embed this in the token
       }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
-    // 5. Final Payload
     res.json({ 
       success: true, 
       token, 
       slug: agent.slug,
-      isSubscribed: Boolean(agent.isSubscribed), 
-      plan: agent.plan || "BASIC",          
       message: "Agent Verified" 
     });
 
   } catch (err) {
-    console.error("Agent Login Error:", err);
     res.status(500).json({ success: false, message: "Server login error" });
   }
 });
+
 app.get('/api/agents/profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

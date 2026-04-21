@@ -120,6 +120,40 @@ const [caption, setCaption] = useState("");          // The text to send with th
       return <BsCheck className="text-gray-400" size={16} />;
   }
 };
+
+useEffect(() => {
+  if (socket) {
+    socket.on('force-logout', (data) => {
+      console.warn(data.message);
+      
+      const savedData = localStorage.getItem('agentToken');
+      let slug = "";
+      
+      if (savedData) {
+        try {
+          const parsed = JSON.parse(savedData);
+          slug = parsed.slug || "";
+        } catch (e) {
+          console.error("Could not parse agent data for redirect");
+        }
+      }
+
+      localStorage.removeItem('token');
+      localStorage.removeItem('agentToken');
+            alert(data.message);
+            if (slug) {
+        window.location.href = `/login/${slug}?reason=dual_login`;
+      } else {
+        window.location.href = '/login?reason=dual_login';
+      }
+    });
+  }
+
+  return () => {
+    if (socket) socket.off('force-logout');
+  };
+}, [socket]);
+
 useEffect(() => {
   const ringtone = ringtoneRef.current;
 

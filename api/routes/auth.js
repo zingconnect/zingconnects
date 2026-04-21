@@ -8,6 +8,7 @@ import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -39,11 +40,25 @@ export const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ message: "Access Denied" });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, decodedUser) => {
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decodedUser) => {
     if (err) {
-        console.error("JWT ERROR REASON:", err.message); 
-        return res.status(403).json({ message: "Session Expired" });
+      console.error("JWT ERROR REASON:", err.message); 
+      return res.status(403).json({ message: "Session Expired" });
+    }
+    if (decodedUser.role === 'agent') {
+      try {
+        const AgentModel = getAgentModel();
+        const agent = await AgentModel.findById(decodedUser.id).select('currentSessionId');
+        if (!agent || agent.currentSessionId !== decodedUser.sessionId) {
+          return res.status(401).json({ 
+            success: false, 
+            message: "You have been logged out because a new login was detected on another device.",
+            forceLogout: true // Hint for frontend to clear localStorage
+          });
+        }
+      } catch (dbErr) {
+        return res.status(500).json({ message: "Internal Auth Error" });
+      }
     }
 
     req.user = decodedUser;
@@ -343,25 +358,35 @@ const AgentModel = getAgentModel();
 // --- 3. AGENT LOGIN ---
 router.post('/login', async (req, res) => {
   try {
-const AgentModel = getAgentModel();
+    const AgentModel = getAgentModel();
     const { email, password } = req.body;
+
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('+password');
     
     if (!agent) return res.status(401).json({ success: false, message: "Invalid credentials" });
     
-    // Check if verified
     if (!agent.isVerified) return res.status(403).json({ success: false, message: "Please verify your email first" });
 
     const isMatch = await bcrypt.compare(password, agent.password);
     if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
+    const newSessionId = crypto.randomUUID();
+        agent.currentSessionId = newSessionId;
+    await agent.save();
+
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug, role: 'agent' }, 
+      { 
+        id: agent._id, 
+        slug: agent.slug, 
+        role: 'agent',
+        sessionId: newSessionId 
+      }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
+
     res.json({ 
       success: true, 
       token, 
@@ -372,6 +397,7 @@ const AgentModel = getAgentModel();
     });
 
   } catch (err) {
+    console.error("Login Error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
