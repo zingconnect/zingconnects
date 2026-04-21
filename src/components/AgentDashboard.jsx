@@ -1032,17 +1032,18 @@ const handleSendMessage = async (e) => {
     >
       <div className="relative shrink-0">
         <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
-          <img 
-            src={user.photoUrl} 
-            alt="User" 
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              // If the S3 URL fails, this replaces it with a clean UI-Avatar
-              console.warn(`S3 Load failed for ${user.email}, switching to fallback.`);
-              e.target.onerror = null; // Prevents infinite loops
-              e.target.src = `https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}&background=random&color=fff`;
-            }} 
-          />
+       <img 
+  src={user.photoUrl} 
+  alt={`${user.firstName} ${user.lastName}`} 
+  className="w-full h-full object-cover"
+  crossOrigin="anonymous" 
+  referrerPolicy="no-referrer-when-downgrade"
+  onError={(e) => {
+    console.warn(`S3 Load failed for ${user.email}, switching to fallback.`);
+    e.target.onerror = null; // Prevents infinite loops
+    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.firstName)}+${encodeURIComponent(user.lastName)}&background=random&color=fff`;
+  }} 
+/>
         </div>
         
         {/* Status indicator */}
@@ -1099,15 +1100,18 @@ const handleSendMessage = async (e) => {
           </button>
           
           <div className="w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border border-gray-200 bg-white shrink-0 shadow-sm">
-            <img 
-              src={selectedUser.photoUrl} 
-              alt="Profile" 
-              className="w-full h-full object-cover" 
-              onError={(e) => {
-                e.target.onerror = null; 
-                e.target.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}+${selectedUser.lastName}&background=random&color=fff`;
-              }}
-            />
+           <img 
+  src={selectedUser.photoUrl} 
+  alt="Profile" 
+  className="w-full h-full object-cover" 
+  crossOrigin="anonymous" 
+  referrerPolicy="no-referrer-when-downgrade"
+  onError={(e) => {
+    e.target.onerror = null; 
+    const name = encodeURIComponent(`${selectedUser.firstName} ${selectedUser.lastName}`);
+    e.target.src = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff`;
+  }}
+/>
           </div>
 
           <div className="overflow-hidden flex flex-col justify-center">
