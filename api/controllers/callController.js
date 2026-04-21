@@ -1,10 +1,36 @@
 import Call from '../models/Call.js';
+// ADD THIS IMPORT - Adjust the path if your db logic is elsewhere
+import { connectToDatabase } from '../index.js'; 
+
+// @desc    Initiate a new call
+// @route   POST /api/calls/start
+export const startCall = async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { receiverId, receiverModel } = req.body;
+
+    if (!receiverId) return res.status(400).json({ message: "Receiver ID required" });
+
+    const newCall = new Call({
+      caller: req.user._id, // Set by authenticateToken middleware
+      callerModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      receiver: receiverId,
+      receiverModel: receiverModel || 'Agent', 
+      status: 'ringing'
+    });
+
+    await newCall.save();
+    res.status(201).json({ success: true, callId: newCall._id });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to start call", error: error.message });
+  }
+};
 
 // @desc    Check for incoming calls (Polling)
-// @route   GET /api/calls/check-incoming
 export const checkIncomingCall = async (req, res) => {
   try {
-    // We use the ID attached by your authenticate middleware
+    await connectToDatabase(); 
+
     const incoming = await Call.findOne({ 
       receiver: req.user._id, 
       status: 'ringing' 
@@ -26,9 +52,9 @@ export const checkIncomingCall = async (req, res) => {
 };
 
 // @desc    Accept an incoming call
-// @route   POST /api/calls/accept
 export const acceptCall = async (req, res) => {
   try {
+    await connectToDatabase(); // Added for Vercel safety
     const { callId } = req.body;
     if (!callId) return res.status(400).json({ message: "callId is required" });
 
@@ -45,9 +71,9 @@ export const acceptCall = async (req, res) => {
 };
 
 // @desc    End/Decline/Cancel call
-// @route   POST /api/calls/end
 export const endCall = async (req, res) => {
   try {
+    await connectToDatabase(); // Added for Vercel safety
     const { callId } = req.body;
     if (!callId) return res.status(400).json({ message: "callId is required" });
 
