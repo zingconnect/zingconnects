@@ -7,17 +7,29 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  resolve: {
-    alias: {
-      // If Vite accidentally sees these imports, tell it to ignore them
-      "crypto": "crypto-browserify",
-    },
-  },
   build: {
     rollupOptions: {
-      // This tells Rollup (Vercel's bundler) that these are external 
-      // and shouldn't be bundled into the frontend javascript
-      external: ['crypto', 'fs', 'path', 'os', 'dotenv', 'mongoose'],
+      // THIS IS THE FIX: It tells the bundler that these modules are 
+      // "External" and should not be bundled into your React app.
+      external: [
+        'crypto',
+        'fs',
+        'path',
+        'os',
+        'dotenv',
+        'bcryptjs',
+        'mongoose',
+        'jsonwebtoken',
+        'nodemailer',
+        'express',
+        'multer'
+      ],
+    },
+  },
+  resolve: {
+    alias: {
+      // Keeps simple-peer happy in your AgentDashboard
+      buffer: 'buffer',
     },
   },
   define: {
