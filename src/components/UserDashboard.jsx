@@ -37,7 +37,7 @@ export const UserDashboard = () => {
 
   // --- STATE ---
   const [agent, setAgent] = useState(null);
-  const [user, setUser] = useState(null);
+const [userData, setUserData] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -103,10 +103,12 @@ useEffect(() => {
     console.log("Call received via socket:", data);
     if (callStatus === 'idle') {
       setCallStatus('ringing');
-      setActiveCall({
+     setActiveCall({
         callId: data.callId,
         callerName: data.fromName,
-        signal: data.signal // Critical for the WebRTC handshake
+        fromId: data.fromId, // Add this so you know who to send the "Accept" signal to
+        signal: data.signal,
+        callerData: data    // CRITICAL: This is what triggers the ringtone!
       });
     } else {
       socket.emit("end-call", { to: data.fromId });
@@ -157,9 +159,6 @@ useEffect(() => {
 useEffect(() => {
   const audio = ringtoneRef.current;
   audio.loop = true;
-
-  // Logic: Only ring if we are the RECEIVER (callerData exists)
-  // If we are the SENDER, callerData is usually null/empty in the initial state
   if (callStatus === 'ringing' && activeCall?.callerData) {
     audio.play().catch(err => {
       console.log("Audio play blocked until interaction. This is normal browser behavior.");
