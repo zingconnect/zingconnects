@@ -27,23 +27,8 @@ import callRoutes from './routes/callRoutes.js';
 dotenv.config();
 
 const app = express();
-
-const corsOptions = {
-  origin: "https://zingconnect.vercel.app",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true,
-  optionsSuccessStatus: 200
-};
-
-app.use(cors(corsOptions));
+app.use(cors());
 app.use(express.json());
-
-const server = http.createServer(app);
-
-// --- 2. UNIFIED SOCKET.IO CORS ---
-const io = new Server(server, {
-  cors: corsOptions
-});
 
 
 app.use('/api/calls', callRoutes);
@@ -69,22 +54,16 @@ webpush.setVapidDetails(
   process.env.VITE_PRIVATE_KEY
 );
 
+
 const getPrivateUrl = async (fileKey) => {
   try {
     if (!fileKey) return null;
-
-    let actualKey = fileKey;
-        if (fileKey.startsWith('http')) {
-      const parts = fileKey.split('.com/');
-      actualKey = parts.length > 1 ? parts[1] : fileKey;
-            actualKey = actualKey.split('?')[0];
-    }
+    if (fileKey.startsWith('http')) return fileKey;
 
     const command = new GetObjectCommand({
       Bucket: process.env.IDRIVE_BUCKET_NAME,
-      Key: actualKey,
+      Key: fileKey,
     });
-
     return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
   } catch (err) {
     console.error("Signing error:", err);
