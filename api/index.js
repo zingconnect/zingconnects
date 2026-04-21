@@ -1499,20 +1499,19 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const { callId } = req.body;
-
-    if (!callId) return res.status(400).json({ message: "Missing callId" });
-
-    const call = await Call.findByIdAndUpdate(
-      callId, 
+    
+    // Find the ringing call for THIS user
+    const call = await Call.findOneAndUpdate(
+      { receiver: req.user.id, status: 'ringing' }, 
       { status: 'connected', startTime: Date.now() }, 
-      { new: true }
+      { new: true, sort: { createdAt: -1 } } // Get the most recent one
     );
+
+    if (!call) return res.status(404).json({ message: "No active ringing call found" });
 
     res.json({ success: true, call });
   } catch (err) {
-    console.error("Accept Call Error:", err);
-    res.status(500).json({ success: false, message: "Failed to connect call" });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -1520,19 +1519,20 @@ app.post('/api/calls/accept', authenticateToken, async (req, res) => {
 app.post('/api/calls/end', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const { callId } = req.body;
+    
+    // Find any call where this user is the caller OR receiver that is NOT ended
+    const call = await Call.findOneAndUpdate(
+      { 
+        $or: [{ caller: req.user.id }, { receiver: req.user.id }],
+        status: { $in: ['ringing', 'connected'] }
+      },
+      { status: 'ended', endTime: Date.now() },
+      { new: true, sort: { createdAt: -1 } }
+    );
 
-    if (!callId) return res.status(400).json({ message: "Missing callId" });
-
-    await Call.findByIdAndUpdate(callId, { 
-      status: 'ended', 
-      endTime: Date.now() 
-    });
-
-    res.json({ success: true, message: "Call ended successfully" });
+    res.json({ success: true, message: "Call terminated" });
   } catch (err) {
-    console.error("End Call Error:", err);
-    res.status(500).json({ success: false, message: "Error terminating call" });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

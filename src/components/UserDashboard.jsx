@@ -98,25 +98,31 @@ const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
   const token = localStorage.getItem('userToken');
   if (!token) return;
 
-  const checkIncomingCalls = async () => {
-    try {
-      const response = await fetch('/api/calls/check-incoming', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();
-
-      if (data.hasIncomingCall && callStatus === 'idle') {
-        setActiveCall(data.callData);
-        setCallStatus('ringing');
-      } else if (!data.hasIncomingCall && callStatus === 'ringing') {
-        // Agent hung up before we answered
-        setCallStatus('idle');
-        setActiveCall(null);
-      }
-    } catch (err) {
-      console.error("Call poll error:", err);
+const checkIncomingCalls = async () => {
+  try {
+    const response = await fetch('/api/calls/check-incoming', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) {
+      return; 
     }
-  };
+
+    const data = await response.json();
+    if (data.hasIncomingCall && callStatus === 'idle') {
+      setActiveCall({
+        callId: data.callId,
+        callerData: data.callerData // Matches your controller: { fromName, photoUrl }
+      });
+      setCallStatus('ringing');
+    } 
+    else if (!data.hasIncomingCall && (callStatus === 'ringing' || callStatus === 'connecting')) {
+      setCallStatus('idle');
+      setActiveCall(null);
+    }
+  } catch (err) {
+    console.warn("Polling interrupted...");
+  }
+};
 
   const callInterval = setInterval(checkIncomingCalls, 3000); 
   return () => clearInterval(callInterval);
@@ -144,11 +150,16 @@ useEffect(() => {
 const handleAcceptCall = async () => {
   const token = localStorage.getItem('userToken');
   try {
-    await fetch('/api/calls/accept', {
+    const res = await fetch('/api/calls/accept', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json' // Added content-type
+      },
+      body: JSON.stringify({ callId: activeCall?.callId }) 
     });
-    setCallStatus('connected');
+    
+    if (res.ok) setCallStatus('connected');
   } catch (err) {
     console.error("Failed to accept call", err);
   }
@@ -159,8 +170,13 @@ const handleEndCall = async () => {
   try {
     await fetch('/api/calls/end', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({ callId: activeCall?.callId })
     });
+    
     setCallStatus('idle');
     setActiveCall(null);
   } catch (err) {
@@ -517,7 +533,6 @@ const handleDownload = async (url, type) => {
   }
 };
 
-// --- ADD THIS TO YOUR CALL HANDLERS ---
 const handleStartCall = async () => {
   if (!agent?._id) return;
   const token = localStorage.getItem('userToken');
@@ -531,18 +546,26 @@ const handleStartCall = async () => {
       },
       body: JSON.stringify({ 
         receiverId: agent._id,
-        receiverModel: 'Agent' // Crucial so the server knows who is being called
+        receiverModel: 'Agent' 
       })
     });
 
+    // GUARD: If server returns 500, stop and log the text error
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error("Call Start Failed:", errorText);
+      alert("Line Busy: The encryption server is temporarily unavailable.");
+      return;
+    }
+
     const data = await res.json();
     if (data.success) {
-      setCallStatus('ringing'); // Move to ringing state (Outgoing)
+      setCallStatus('ringing'); 
       setActiveCall({ callId: data.callId });
     }
   } catch (err) {
-    console.error("Failed to initiate call:", err);
-    alert("Encryption line busy. Please try again.");
+    console.error("Network Error:", err);
+    alert("Connection failed. Please check your signal.");
   }
 };
 
