@@ -398,19 +398,16 @@ useEffect(() => {
 
 const handleFileChange = (e) => {
   const file = e.target.files[0];
-  
   if (file) {
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
-
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
     const localUrl = URL.createObjectURL(file);
+    
     setPreviewUrl(localUrl);
 
     if (showOnboarding) {
-      setOnboardingFile(file);
+      setOnboardingFile(file); // Correctly targets profile update
     } else {
-      setPreviewFile(file); 
+      setPreviewFile(file);    // Targets chat messaging
       setCaption(""); 
     }
   }
@@ -992,8 +989,8 @@ const handleStartCall = async () => {
   <div ref={messagesEndRef} className="h-4 shrink-0" />
 </main>
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
-{previewUrl && (
-  <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
+{previewUrl && !showOnboarding && (
+    <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
     {/* Header */}
     <div className="p-4 flex justify-between items-center text-white">
       <button 
