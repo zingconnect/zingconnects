@@ -302,25 +302,26 @@ useEffect(() => {
     if (!token) return navigate('/');
 
     const fetchUserSession = async () => {
-      try {
-        const response = await fetch('/api/users/my-session', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        
-        if (response.ok) {
-          setAgent(data.agent); 
-        setUser(data.user);
-            if (!data.user.isProfileComplete) {
-            setShowOnboarding(true);
-          }
-        }
-      } catch (err) {
-        console.error("Session fetch error:", err);
-      } finally {
-        setLoading(false);
+  try {
+    const response = await fetch('/api/users/my-session', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json();
+    
+    if (response.ok) {
+      setAgent(data.agent); 
+      setUserData(data.user); 
+      
+      if (!data.user.isProfileComplete) {
+        setShowOnboarding(true);
       }
-    };
+    }
+  } catch (err) {
+    console.error("Session fetch error:", err);
+  } finally {
+    setLoading(false);
+  }
+};
 
     fetchUserSession();
     const interval = setInterval(fetchUserSession, 30000); 
