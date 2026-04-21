@@ -46,6 +46,7 @@ const [userData, setUserData] = useState(null);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [localStream, setLocalStream] = useState(null);
+  const [onboardingFile, setOnboardingFile] = useState(null);
   
   // Media & Upload State (FIXED NAMES)
   const [previewFile, setPreviewFile] = useState(null); 
@@ -402,7 +403,13 @@ const handleFileChange = (e) => {
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
-    setSelectedFile(file);
+        if (showOnboarding) {
+      setOnboardingFile(file);
+    } else {
+      // Otherwise, it's a chat message
+      setSelectedFile(file);
+    }
+
     const localUrl = URL.createObjectURL(file);
     setPreviewUrl(localUrl);    
     setCaption(""); 
@@ -436,29 +443,35 @@ const handleSendWithPreview = async () => {
     setIsUploading(false);
   }
 };
-  const handleProfileSubmit = async (e) => {
-    e.preventDefault();
-    const token = localStorage.getItem('userToken');
-    const data = new FormData();
-    if (selectedFile) data.append('photo', selectedFile);
-    data.append('firstName', formData.firstName);
-    data.append('lastName', formData.lastName);
-    data.append('dob', formData.dob);
-    data.append('gender', formData.gender);
-    data.append('city', formData.city);
-    data.append('state', formData.state);
+const handleProfileSubmit = async (e) => {
+  e.preventDefault();
+  const token = localStorage.getItem('userToken');
+  const data = new FormData();
+  
+  // Use onboardingFile here!
+  if (onboardingFile) data.append('photo', onboardingFile);
+  
+  data.append('firstName', formData.firstName);
+  data.append('lastName', formData.lastName);
+  data.append('dob', formData.dob);
+  data.append('gender', formData.gender);
+  data.append('city', formData.city);
+  data.append('state', formData.state);
 
-    try {
-      const res = await fetch('/api/users/update-user-onboarding', {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: data
-      });
-      if (res.ok) setShowOnboarding(false);
-    } catch (err) {
-      console.error("Update failed", err);
+  try {
+    const res = await fetch('/api/users/update-user-onboarding', {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: data
+    });
+    if (res.ok) {
+        setShowOnboarding(false);
+        setOnboardingFile(null); // Clear after success
     }
-  };
+  } catch (err) {
+    console.error("Update failed", err);
+  }
+};
 
  const unlockAudio = () => {
   if (notificationSound.current) {

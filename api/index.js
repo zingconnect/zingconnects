@@ -39,8 +39,6 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 const server = http.createServer(app);
-
-// --- 2. UNIFIED SOCKET.IO CORS ---
 const io = new Server(server, {
   cors: corsOptions
 });
