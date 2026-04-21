@@ -245,16 +245,16 @@ export const AgentSlug = () => {
               <div className="w-24 h-24 md:w-44 md:h-44 rounded-[2rem] md:rounded-[3rem] bg-white border-[4px] md:border-[6px] border-white shadow-lg overflow-hidden flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
                 {agentData.photoUrl ? (
                   <img 
-                    src={agentData.photoUrl} 
-                    alt={fullName} 
-                    className="w-full h-full object-cover"
-                    crossOrigin="anonymous"
-                    referrerPolicy="no-referrer-when-downgrade"
-                    onError={(e) => {
-                      e.target.onerror = null;
-                      e.target.src = `https://ui-avatars.com/api/?name=${fullName}&background=0e3791&color=fff`;
-                    }}
-                  />
+  src={agentData.photoUrl} 
+  alt={fullName} 
+  className="w-full h-full object-cover"
+  crossOrigin="anonymous" 
+  referrerPolicy="no-referrer-when-downgrade"
+  onError={(e) => {
+    e.target.onerror = null; 
+    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&background=0e3791&color=fff`;
+  }}
+/>
                 ) : (
                   <span className="text-2xl md:text-4xl font-black text-blue-100">
                     {agentData?.firstName?.[0]}{agentData?.lastName?.[0]}
