@@ -166,11 +166,10 @@ useEffect(() => {
 }, [agentData, socket]);
 
 useEffect(() => {
-  const token = localStorage.getItem('agentToken'); // Or your agent's specific token key
+  const token = localStorage.getItem('agentToken');
   if (!token) return;
 
   const checkForIncomingCalls = async () => {
-    // We only check if the agent isn't already in a call
     if (callStatus !== 'idle') return;
 
     try {
@@ -181,8 +180,13 @@ useEffect(() => {
 
       if (data.hasIncomingCall) {
         setIsIncomingCall(true);
-        setActiveCaller(data.callerData); // Data about the user calling
+        setActiveCaller(data.callerData);
         setCallStatus('ringing');
+        
+        // SAFE PLAY: Access .current
+        if (ringtoneRef.current) {
+          ringtoneRef.current.play().catch(e => console.warn("Autoplay blocked"));
+        }
       }
     } catch (err) {
       console.error("Error checking for user calls:", err);
@@ -195,8 +199,8 @@ useEffect(() => {
 
 useEffect(() => {
   const ringtone = ringtoneRef.current;
-  
-  // Only play sound if the Agent is RECEIVING a call
+  if (!ringtone) return; // Guard clause
+
   if (callStatus === 'ringing' && isIncomingCall) {
     ringtone.loop = true;
     ringtone.play().catch(err => console.log("Audio blocked:", err));
