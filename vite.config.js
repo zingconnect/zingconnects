@@ -8,37 +8,28 @@ export default defineConfig({
     tailwindcss(),
   ],
   build: {
-    // Increase limit for your large AgentDashboard
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
-      // THIS TELLS VERCEL: "If you see these names, ignore them. They are for the backend."
+      // These MUST be externalized so the browser build ignores them
       external: [
-        'crypto',
-        'fs',
-        'path',
-        'os',
-        'dotenv',
-        'bcryptjs',
-        'mongoose',
-        'jsonwebtoken',
-        'nodemailer',
-        'express',
-        'multer',
-        'flutterwave-node-v3',
-        '@aws-sdk/client-s3',
-        '@aws-sdk/s3-request-presigner'
+        'crypto', 'fs', 'path', 'os', 'dotenv', 
+        'bcryptjs', 'mongoose', 'jsonwebtoken', 
+        'nodemailer', 'express', 'multer', 
+        'flutterwave-node-v3', 'web-push',
+        '@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner'
       ],
     },
   },
   resolve: {
     alias: {
-      // Redirects any 'crypto' calls in frontend libs to the browser version
+      // This maps Node modules to browser-safe versions
       crypto: 'crypto-browserify',
-      buffer: 'buffer',
       stream: 'stream-browserify',
+      buffer: 'buffer',
     },
   },
   define: {
+    // This supports the manual polyfills you added to AgentDashboard
     global: 'window',
     'process.env': {},
   },

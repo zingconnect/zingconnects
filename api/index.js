@@ -7,6 +7,7 @@ import path from 'path'; // <--- Kept this one
 import fs from 'fs';   // <--- Kept this one
 import jwt from 'jsonwebtoken'; 
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import Flutterwave from 'flutterwave-node-v3';
