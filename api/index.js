@@ -1570,41 +1570,53 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
   }
 });
 
-// 2. Unified Check Incoming (Works for both Users and Agents)
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const myId = req.user.id || req.user._id || req.user.userId;
-
-    // Look for any ringing call where I am the receiver
-    // .populate works because Call schema uses refPath for dynamic modeling
+        const rawId = req.user.id || req.user._id || req.user.userId;
+    
+    if (!rawId) {
+      console.error(" Auth Error: No User ID found in token.");
+      return res.status(401).json({ hasIncomingCall: false, message: "Unauthorized" });
+    }
+    const myObjectId = new mongoose.Types.ObjectId(rawId);
     const incoming = await Call.findOne({ 
-      receiver: myId, 
+      receiver: myObjectId, 
       status: 'ringing' 
-    }).populate('caller', 'firstName lastName photoUrl');
+    })
+    .sort({ createdAt: -1 }) // Get the most recent call first
+    .populate('caller', 'firstName lastName photoUrl');
+    console.log(`📞 Checking calls for: ${rawId} | Found: ${incoming ? 'YES' : 'NO'}`);
 
-    if (!incoming) return res.json({ hasIncomingCall: false });
-
-    // Handle private image URLs for the UI
-    let photo = incoming.caller?.photoUrl;
-    if (photo && !photo.startsWith('http')) {
-      photo = await getPrivateUrl(photo);
+    if (!incoming) {
+      return res.json({ hasIncomingCall: false });
     }
 
+    let photo = incoming.caller?.photoUrl || null;
+    if (photo && !photo.startsWith('http')) {
+      try {
+        photo = await getPrivateUrl(photo);
+      } catch (err) {
+        console.error("Photo URL signing failed:", err);
+      }
+    }
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       callerData: {
-        fromName: `${incoming.caller?.firstName} ${incoming.caller?.lastName}`,
+        fromName: incoming.caller 
+          ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
+          : "Unknown Caller",
         photoUrl: photo,
-        callerId: incoming.caller?._id
+        callerId: incoming.caller?._id || incoming.caller // Fallback if populate fails
       }
     });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: "Line check failed" });
+    console.error("🚨 Critical Line Check Error:", err);
+    res.status(500).json({ hasIncomingCall: false, message: "Internal server error" });
   }
 });
-
 // 3. Unified Accept Call
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
