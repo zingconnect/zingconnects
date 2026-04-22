@@ -65,6 +65,7 @@ const [activeCaller, setActiveCaller] = useState(null);
 const [isMuted, setIsMuted] = useState(false);
 const [isSpeakerOn, setIsSpeakerOn] = useState(false);
 const connectionRef = useRef();
+const messagesEndRef = useRef(null);
 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -233,6 +234,12 @@ useEffect(() => {
       console.error("Error checking for user calls:", err);
     }
   };
+
+  useEffect(() => {
+  if (messagesEndRef.current) {
+    messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+  }
+}, [messages]); // This triggers every time the 'messages' array updates
 
   const interval = setInterval(checkForIncomingCalls, 3000);
   return () => clearInterval(interval);
