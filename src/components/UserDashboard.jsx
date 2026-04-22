@@ -105,77 +105,94 @@ export const UserDashboard = () => {
   };
 
 useEffect(() => {
-  if (userData?._id) {
-    socket.emit("join-main-room", userData._id);
-    console.log("User joined private socket room:", userData._id);
-  }
+  // 1. Ensure socket and user ID exist
+  if (!socket || !userData?._id) return;
+
+  // 2. Join the private room using the User's ID
+  socket.emit("join-main-room", userData._id);
+  console.log("DEBUG: 🏠 User joined socket room:", userData._id);
 
   const handleIncomingCall = (data) => {
-    // Only accept if we aren't already in a call
+    console.log("DEBUG: 🚨 Incoming Socket Call Signal Received:", data);
+    
+    // Only trigger if we aren't already in a call or already ringing
     if (callStatus === 'idle') {
-      console.log("🚨 Socket incoming call:", data);
       setCallStatus('ringing');
       setActiveCall({
         callId: data.callId,
         callerName: data.fromName,
         fromId: data.fromId,
-        // Crucial: This object makes your 'isIncomingCall' constant work
+        // This object is what 'isIncomingCall' constant checks
         callerData: {
           fromName: data.fromName,
           photoUrl: data.photoUrl,
           callerId: data.fromId
         }
       });
-    } else if (callStatus === 'ringing' && activeCall?.callId !== data.callId) {
-       socket.emit("end-call", { to: data.fromId });
+      console.log("DEBUG: ✅ UI set to RINGING via Socket");
+    } else {
+      console.log("DEBUG: ⏳ Busy - ignoring second call signal");
     }
   };
 
+  // Listen for the signal
   socket.on("incoming-call", handleIncomingCall);
+
+  // Cleanup listeners
   return () => {
     socket.off("incoming-call", handleIncomingCall);
   };
-}, [userData?._id, callStatus, activeCall?.callId]);
+}, [userData?._id, socket, callStatus]); 
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
-  if (!token) return;
+  if (!token) {
+    console.log("DEBUG: ⚠️ No userToken found for polling");
+    return;
+  }
 
   const checkIncomingCalls = async () => {
     try {
       const response = await fetch('/api/calls/check-incoming', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Cache-Control': 'no-cache' // Force fresh data
+        }
       });
-      if (!response.ok) return;
       
+      if (!response.ok) return;
       const data = await response.json();
 
       if (data.hasIncomingCall) {
-        if (callStatus === 'idle' || (activeCall && activeCall.callId !== data.callId)) {
-          console.log("📞 Polling detected call:", data.callId);
-          
+        console.log("DEBUG: 🔍 Polling check - Incoming Call Found:", data.callId);
+                if (callStatus === 'idle' || (activeCall && activeCall.callId !== data.callId)) {
           setActiveCall({
             callId: data.callId,
             callerName: data.callerData.fromName,
             callerPhoto: data.callerData.photoUrl,
-            callerData: data.callerData // Matches the socket structure
+            callerData: data.callerData 
           });
           setCallStatus('ringing');
+          console.log("DEBUG: ✅ UI set to RINGING via Polling");
         }
       } 
       else if (!data.hasIncomingCall && (callStatus === 'ringing' || callStatus === 'connecting')) {
-        console.log("📴 Call cancelled by sender (detected via polling)");
+        console.log("DEBUG: 📴 Polling check - No call active in DB. Resetting UI.");
         setCallStatus('idle');
         setActiveCall(null);
       }
     } catch (err) {
-      console.warn("Polling background check failed.");
+      console.warn("DEBUG: ❌ Polling check failed:", err.message);
     }
   };
 
+  // Run immediately then every 3 seconds
+  checkIncomingCalls(); 
   const callInterval = setInterval(checkIncomingCalls, 3000); 
+  
   return () => clearInterval(callInterval);
 }, [callStatus, activeCall?.callId]);
+
 
 useEffect(() => {
   const audio = ringtoneRef.current;

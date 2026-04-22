@@ -171,40 +171,42 @@ useEffect(() => {
 }, [callStatus, isIncomingCall]);
 
 useEffect(() => {
-  if (socket && agentData?._id) {
-    socket.emit("join-main-room", agentData._id);
-    socket.on("incoming-call", (data) => {
-      console.log("Incoming call from:", data.fromName);
-      socket.emit("confirm-ringing", { to: data.fromId });
-      setActiveCaller(data); 
-      setIsIncomingCall(true);
-      setCallStatus('ringing'); // This triggers the ringtone and overlay
-    });
-    socket.on("user-is-ringing", () => {
-      console.log("Remote user device is now ringing");
-      if (callStatus === 'calling') {
-        setCallStatus('ringing'); // Switches UI from "Calling..." to "Ringing..."
-      }
-    });
-    socket.on("call-accepted", (signal) => {
-      console.log("Call accepted by remote user");
-      if (connectionRef.current && signal) {
-        connectionRef.current.signal(signal);
-      }
-      setCallStatus('connected');
-    });
-    socket.on("call-ended", () => {
-      handleEndCall(); // Use your existing cleanup function
-    });
+  if (!socket || !agentData?._id) return;
+  socket.emit("join-main-room", agentData._id);
+  console.log("Agent joined room:", agentData._id);
+  const onIncoming = (data) => {
+    console.log("Incoming call:", data.fromName);
+    socket.emit("confirm-ringing", { to: data.fromId });
+    setActiveCaller(data); 
+    setIsIncomingCall(true);
+    setCallStatus('ringing');
+  };
 
-    return () => {
-      socket.off("incoming-call");
-      socket.off("user-is-ringing");
-      socket.off("call-accepted");
-      socket.off("call-ended");
-    };
-  }
-}, [agentData, socket, callStatus]); // Added callStatus to dependencies
+  const onUserRinging = () => {
+    setCallStatus(current => current === 'connecting' ? 'ringing' : current);
+  };
+
+  const onAccepted = (signal) => {
+    if (connectionRef.current && signal) {
+      connectionRef.current.signal(signal);
+    }
+    setCallStatus('connected');
+  };
+
+  // 3. Register listeners
+  socket.on("incoming-call", onIncoming);
+  socket.on("user-is-ringing", onUserRinging);
+  socket.on("call-accepted", onAccepted);
+  socket.on("call-ended", handleEndCall);
+
+  // 4. Cleanup
+  return () => {
+    socket.off("incoming-call", onIncoming);
+    socket.off("user-is-ringing", onUserRinging);
+    socket.off("call-accepted", onAccepted);
+    socket.off("call-ended", handleEndCall);
+  };
+}, [agentData?._id, socket]); // REMOVED callStatus to keep listeners stable
 
 useEffect(() => {
   const token = localStorage.getItem('agentToken');
