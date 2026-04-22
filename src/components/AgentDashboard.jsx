@@ -16,11 +16,10 @@ import {
   BsCheckCircleFill,
   BsDownload, 
   BsPlayFill, 
-  BsTelephoneFill, 
-  BsTelephoneXFill,
-  BsMicMuteFill // Added this to prevent crash on call screen
+  BsTelephoneFill,    // Ensure this is here
+  BsTelephoneXFill,   // Ensure this is here
+  BsMicMuteFill       // Ensure this is here
 } from 'react-icons/bs';
-
 
 // --- POLYFILLS MUST BE FIRST ---
 window.global = window;
@@ -44,6 +43,15 @@ export const AgentDashboard = () => {
   const navigate = useNavigate();
   
   // --- STATE ---
+  const messagesEndRef = useRef(null);
+  const connectionRef = useRef();
+  const scrollRef = useRef(null);
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
+  const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
+  const lastNotifiedId = useRef(null);
+const fileInputRef = useRef(null);
+const cameraInputRef = useRef(null);
+
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
   const [selectedUser, setSelectedUser] = useState(null);
@@ -54,7 +62,6 @@ export const AgentDashboard = () => {
   const [fullscreenImage, setFullscreenImage] = useState(null);
 const [fullscreenVideo, setFullscreenVideo] = useState(null);
 const [limit, setLimit] = useState(30); // Start with 30 messages
-const scrollRef = useRef(null);
 const [isInitialLoad, setIsInitialLoad] = useState(true);
 const [connectionStatus, setConnectionStatus] = useState('online');
 
@@ -64,21 +71,13 @@ const [isIncomingCall, setIsIncomingCall] = useState(false);
 const [activeCaller, setActiveCaller] = useState(null);
 const [isMuted, setIsMuted] = useState(false);
 const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-const connectionRef = useRef();
-const messagesEndRef = useRef(null);
 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);  
-  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
-  const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
-  const lastNotifiedId = useRef(null);
-const fileInputRef = useRef(null);
-const cameraInputRef = useRef(null);
 const [isUploading, setIsUploading] = useState(false);
-
 const [previewFile, setPreviewFile] = useState(null); // The actual file object
 const [previewUrl, setPreviewUrl] = useState(null);   // The local blob for <img> src
 const [caption, setCaption] = useState("");          // The text to send with the image
@@ -235,15 +234,15 @@ useEffect(() => {
     }
   };
 
-  useEffect(() => {
-  if (messagesEndRef.current) {
-    messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-  }
-}, [messages]); // This triggers every time the 'messages' array updates
-
   const interval = setInterval(checkForIncomingCalls, 3000);
   return () => clearInterval(interval);
 }, [callStatus]);
+
+ useEffect(() => {
+  if (messagesEndRef.current) {
+    messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+  }
+}, [messages]); 
 
 useEffect(() => {
   const ringtone = ringtoneRef.current;
