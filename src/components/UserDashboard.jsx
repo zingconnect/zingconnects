@@ -109,25 +109,33 @@ useEffect(() => {
     socket.emit("join-main-room", userData._id);
     console.log("User joined private socket room:", userData._id);
   }
- const handleIncomingCall = (data) => {
-  if (callStatus === 'idle') {
-    setCallStatus('ringing');
-    setActiveCall({
-      callId: data.callId,
-      callerName: data.fromName,
-      fromId: data.fromId,
-      callerData: data // This flags 'isIncomingCall' as true
-    });
-  } else {
-    socket.emit("end-call", { to: data.fromId });
-  }
-};
+
+  const handleIncomingCall = (data) => {
+    // Only accept if we aren't already in a call
+    if (callStatus === 'idle') {
+      console.log("🚨 Socket incoming call:", data);
+      setCallStatus('ringing');
+      setActiveCall({
+        callId: data.callId,
+        callerName: data.fromName,
+        fromId: data.fromId,
+        // Crucial: This object makes your 'isIncomingCall' constant work
+        callerData: {
+          fromName: data.fromName,
+          photoUrl: data.photoUrl,
+          callerId: data.fromId
+        }
+      });
+    } else if (callStatus === 'ringing' && activeCall?.callId !== data.callId) {
+       socket.emit("end-call", { to: data.fromId });
+    }
+  };
 
   socket.on("incoming-call", handleIncomingCall);
   return () => {
     socket.off("incoming-call", handleIncomingCall);
   };
-}, [userData?._id, callStatus]); // Add callStatus to dependencies
+}, [userData?._id, callStatus, activeCall?.callId]);
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
@@ -139,29 +147,35 @@ useEffect(() => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!response.ok) return;
+      
       const data = await response.json();
+
       if (data.hasIncomingCall) {
-        if (callStatus === 'idle') {
+        if (callStatus === 'idle' || (activeCall && activeCall.callId !== data.callId)) {
+          console.log("📞 Polling detected call:", data.callId);
+          
           setActiveCall({
             callId: data.callId,
             callerName: data.callerData.fromName,
-            callerPhoto: data.callerData.photoUrl
+            callerPhoto: data.callerData.photoUrl,
+            callerData: data.callerData // Matches the socket structure
           });
           setCallStatus('ringing');
         }
       } 
       else if (!data.hasIncomingCall && (callStatus === 'ringing' || callStatus === 'connecting')) {
+        console.log("📴 Call cancelled by sender (detected via polling)");
         setCallStatus('idle');
         setActiveCall(null);
       }
     } catch (err) {
-      console.warn("Polling interrupted...");
+      console.warn("Polling background check failed.");
     }
   };
 
   const callInterval = setInterval(checkIncomingCalls, 3000); 
   return () => clearInterval(callInterval);
-}, [callStatus]);
+}, [callStatus, activeCall?.callId]);
 
 useEffect(() => {
   const audio = ringtoneRef.current;
