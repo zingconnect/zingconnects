@@ -1582,72 +1582,70 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 1. ROBUST ID EXTRACTION
-    // We check every possible key the middleware might have attached
+    // 1. EXTRACT ID
     const rawId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
     
     console.log("-----------------------------------------");
-    console.log("API DEBUG: Token ID is:", rawId);
+    console.log("API DEBUG: Authenticated User ID:", rawId);
 
     if (!rawId) {
-      return res.status(401).json({ hasIncomingCall: false, message: "No ID found in token" });
+      return res.status(401).json({ hasIncomingCall: false, message: "Unauthorized" });
     }
 
-    // 2. EXPLICIT CASTING TO OBJECTID
-    const userObjectId = new mongoose.Types.ObjectId(rawId);
-
-    // 3. TARGETED SEARCH
-    // We strictly look for calls where the current user is the RECEIVER 
-    // and the receiverModel is specifically 'User'
+    // 2. SEARCH WITH DUAL-TYPE MATCHING
+    // We search for 'ringing' calls. We check both the ObjectId and String 
+    // versions to bypass any Mongoose casting quirks on Vercel.
     const incoming = await Call.findOne({ 
-      receiver: userObjectId, 
-      receiverModel: 'User', // Matches your CallSchema enum
-      status: 'ringing' 
+      $or: [
+        { receiver: rawId }, 
+        { receiver: new mongoose.Types.ObjectId(rawId) }
+      ],
+      status: 'ringing'
     })
-    .sort({ createdAt: -1 }) // Get the most recent call
-    .populate({
-      path: 'caller',
-      select: 'firstName lastName photoUrl'
-    });
+    .sort({ createdAt: -1 })
+    .populate('caller', 'firstName lastName photoUrl');
 
-    // 4. HEADER FIX (Crucial for Vercel/Chrome 304 issues)
+    // 3. FORCE FRESH DATA (Bypass Browser/Vercel Cache)
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
     if (!incoming) {
-      console.log("API DEBUG: Result -> No 'ringing' call found for this User ID.");
+      console.log(`API DEBUG: No 'ringing' call found for: ${rawId}`);
       return res.json({ hasIncomingCall: false });
     }
+    if (incoming.receiverModel !== 'User') {
+      console.warn(`API DEBUG: Model mismatch! Found ${incoming.receiverModel} instead of User`);
+    }
 
-    console.log("API DEBUG: Result -> ✅ MATCH FOUND. Call ID:", incoming._id);
+    console.log("API DEBUG: ✅ MATCH FOUND! Processing caller data...");
 
-    // 5. SIGN PHOTO URL (S3 Handling)
+    // 5. SIGN S3 PHOTO URL
     let photo = incoming.caller?.photoUrl || null;
     if (photo && !photo.startsWith('http')) {
       try {
         photo = await getPrivateUrl(photo);
       } catch (e) { 
-        console.error("API DEBUG: S3 Signing Error:", e); 
+        console.error("API DEBUG: S3 Photo Signing Failed:", e); 
       }
     }
 
-    // 6. FINAL RESPONSE
+    // 6. SUCCESS RESPONSE
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       callerData: {
         fromName: incoming.caller 
           ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
-          : "System Caller",
+          : "Secure Caller",
         photoUrl: photo,
         callerId: incoming.caller?._id || incoming.caller
       }
     });
 
   } catch (err) {
-    console.error("API DEBUG: ❌ CRASH IN CHECK-INCOMING:", err);
-    res.status(500).json({ hasIncomingCall: false, error: err.message });
+    console.error("🚨 API CRITICAL ERROR:", err);
+    res.status(500).json({ hasIncomingCall: false, error: "Internal Server Error" });
   }
 });
 
