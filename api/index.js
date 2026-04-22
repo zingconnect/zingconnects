@@ -1582,19 +1582,10 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 1. EXTRACT ID
-    const rawId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
-    
-    console.log("-----------------------------------------");
-    console.log("API DEBUG: Authenticated User ID:", rawId);
+    const rawId = req.user?._id || req.user?.id || req.user?.userId;
+    if (!rawId) return res.status(401).json({ hasIncomingCall: false });
 
-    if (!rawId) {
-      return res.status(401).json({ hasIncomingCall: false, message: "Unauthorized" });
-    }
-
-    // 2. SEARCH WITH DUAL-TYPE MATCHING
-    // We search for 'ringing' calls. We check both the ObjectId and String 
-    // versions to bypass any Mongoose casting quirks on Vercel.
+    // 1. DUAL-TYPE MATCHING
     const incoming = await Call.findOne({ 
       $or: [
         { receiver: rawId }, 
@@ -1603,49 +1594,36 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
       status: 'ringing'
     })
     .sort({ createdAt: -1 })
+    // Use 'path' and 'refPath' logic if your schema supports it, 
+    // otherwise Mongoose will use the 'callerModel' field to populate correctly.
     .populate('caller', 'firstName lastName photoUrl');
 
-    // 3. FORCE FRESH DATA (Bypass Browser/Vercel Cache)
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
 
-    if (!incoming) {
-      console.log(`API DEBUG: No 'ringing' call found for: ${rawId}`);
-      return res.json({ hasIncomingCall: false });
-    }
-    if (incoming.receiverModel !== 'User') {
-      console.warn(`API DEBUG: Model mismatch! Found ${incoming.receiverModel} instead of User`);
-    }
+    if (!incoming) return res.json({ hasIncomingCall: false });
 
-    console.log("API DEBUG: ✅ MATCH FOUND! Processing caller data...");
-
-    // 5. SIGN S3 PHOTO URL
+    // 2. SIGN S3 PHOTO URL
     let photo = incoming.caller?.photoUrl || null;
     if (photo && !photo.startsWith('http')) {
-      try {
-        photo = await getPrivateUrl(photo);
-      } catch (e) { 
-        console.error("API DEBUG: S3 Photo Signing Failed:", e); 
-      }
+      try { photo = await getPrivateUrl(photo); } catch (e) { }
     }
 
-    // 6. SUCCESS RESPONSE
+    // 3. SUCCESS RESPONSE (Works for both Agent and User)
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       callerData: {
         fromName: incoming.caller 
           ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
-          : "Secure Caller",
+          : "Incoming Call",
         photoUrl: photo,
         callerId: incoming.caller?._id || incoming.caller
       }
     });
 
   } catch (err) {
-    console.error("🚨 API CRITICAL ERROR:", err);
-    res.status(500).json({ hasIncomingCall: false, error: "Internal Server Error" });
+    console.error("🚨 API ERROR:", err);
+    res.status(500).json({ hasIncomingCall: false });
   }
 });
 

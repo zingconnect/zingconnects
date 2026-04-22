@@ -209,7 +209,7 @@ useEffect(() => {
 }, [agentData?._id, socket]); // REMOVED callStatus to keep listeners stable
 
 useEffect(() => {
-  const token = localStorage.getItem('agentToken');
+  const token = localStorage.getItem('agentToken'); // Verify this key name matches your login
   if (!token) return;
 
   const checkForIncomingCalls = async () => {
@@ -222,13 +222,14 @@ useEffect(() => {
       const data = await response.json();
 
       if (data.hasIncomingCall) {
+        console.log("DEBUG: 🔔 Incoming call detected for Agent!");
         setIsIncomingCall(true);
-        setActiveCaller(data.callerData);
+        setActiveCaller(data.callerData); 
+        setActiveCall({ callId: data.callId }); // Ensure callId is stored for handleAccept
         setCallStatus('ringing');
         
-        // SAFE PLAY: Access .current
         if (ringtoneRef.current) {
-          ringtoneRef.current.play().catch(e => console.warn("Autoplay blocked"));
+          ringtoneRef.current.play().catch(e => console.warn("Audio blocked"));
         }
       }
     } catch (err) {
@@ -238,7 +239,7 @@ useEffect(() => {
 
   const interval = setInterval(checkForIncomingCalls, 3000);
   return () => clearInterval(interval);
-}, [callStatus]);
+}, [callStatus]); // Re-starts polling only when we go back to 'idle'
 
  useEffect(() => {
   if (messagesEndRef.current) {
