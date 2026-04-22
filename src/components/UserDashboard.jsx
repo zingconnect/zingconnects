@@ -39,11 +39,10 @@ export const UserDashboard = () => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const isIncomingCall = activeCall?.callerData ? true : false;
 
-  // --- STATE ---
+  // 1. FIRST: Define ALL your states (move the call states up here)
   const [agent, setAgent] = useState(null);
-const [userData, setUserData] = useState(null);
+  const [userData, setUserData] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -51,18 +50,22 @@ const [userData, setUserData] = useState(null);
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [localStream, setLocalStream] = useState(null);
   const [onboardingFile, setOnboardingFile] = useState(null);
-  
-  // Media & Upload State (FIXED NAMES)
-  const [previewFile, setPreviewFile] = useState(null); 
-  const [previewUrl, setPreviewUrl] = useState(null); // Added this to stop the "not defined" error
+  const [previewFile, setPreviewFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [caption, setCaption] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('online');
   const [replyingTo, setReplyingTo] = useState(null);
-
   const [showOnboarding, setShowOnboarding] = useState(false);
+  
+  // MOVE THESE UP:
+  const [callStatus, setCallStatus] = useState('idle'); 
+  const [activeCall, setActiveCall] = useState(null); // Now initialized!
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -71,12 +74,10 @@ const [userData, setUserData] = useState(null);
     city: '',
     state: ''
   });
-  // --- CALL STATE ---
-const [callStatus, setCallStatus] = useState('idle'); // idle, ringing, connecting, connected
-const [activeCall, setActiveCall] = useState(null);
-const [isMuted, setIsMuted] = useState(false);
-const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
+  const isIncomingCall = activeCall?.callerData ? true : false;
+  console.log("Current connection:", connectionStatus);
+  console.log("Is there an incoming call?", isIncomingCall);
+  const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const lastNotifiedId = useRef(null);
 
