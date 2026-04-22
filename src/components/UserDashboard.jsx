@@ -105,53 +105,38 @@ export const UserDashboard = () => {
   };
 
 useEffect(() => {
-  // 1. Ensure socket and user ID exist
   if (!socket || !userData?._id) return;
 
-  // 2. Join the private room using the User's ID
+  // IMPORTANT: Ensure this matches the ID the Agent is using to call you
   socket.emit("join-main-room", userData._id);
-  console.log("DEBUG: 🏠 User joined socket room:", userData._id);
+  console.log("DEBUG: 🏠 Socket Room Joined:", userData._id);
 
   const handleIncomingCall = (data) => {
-    console.log("DEBUG: 🚨 Incoming Socket Call Signal Received:", data);
+    console.log("DEBUG: 🚨 Socket Signal Received:", data);
     
-    // Only trigger if we aren't already in a call or already ringing
+    // Prevent the "Drop Back" by ignoring signals if already in a call
     if (callStatus === 'idle') {
-      setCallStatus('ringing');
       setActiveCall({
         callId: data.callId,
-        callerName: data.fromName,
         fromId: data.fromId,
-        // This object is what 'isIncomingCall' constant checks
         callerData: {
           fromName: data.fromName,
           photoUrl: data.photoUrl,
           callerId: data.fromId
         }
       });
-      console.log("DEBUG: ✅ UI set to RINGING via Socket");
-    } else {
-      console.log("DEBUG: ⏳ Busy - ignoring second call signal");
+      setCallStatus('ringing');
     }
   };
 
-  // Listen for the signal
   socket.on("incoming-call", handleIncomingCall);
-
-  // Cleanup listeners
-  return () => {
-    socket.off("incoming-call", handleIncomingCall);
-  };
-}, [userData?._id, socket, callStatus]); 
+  return () => socket.off("incoming-call");
+}, [userData?._id, callStatus]); // Keep callStatus so it knows if it's idle
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
-  if (!token) {
-    console.log("DEBUG: ⚠️ No userToken found for polling");
-    return;
-  }
+  if (!token) return;
 
-  // A "Lock" to prevent overlapping requests if the API takes > 3s to respond
   let isFetching = false;
 
   const checkIncomingCalls = async () => {
@@ -162,23 +147,18 @@ useEffect(() => {
       const response = await fetch('/api/calls/check-incoming', {
         headers: { 
           'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
+          'Cache-Control': 'no-cache'
         }
       });
       
-      if (!response.ok) {
-        // If 401, the token might be expired
-        if (response.status === 401) console.error("DEBUG: Token invalid or expired");
-        return;
-      }
-
+      if (!response.ok) return;
       const data = await response.json();
 
       if (data.hasIncomingCall) {
-        // Only update if we aren't already ringing for THIS specific call
-        if (callStatus !== 'ringing' && callStatus !== 'connected') {
-          console.log("DEBUG: 🔍 Incoming Call Found:", data.callId);
+        // Only set if we are IDLE. This prevents polling from "overwriting" 
+        // the Socket's active call data.
+        if (callStatus === 'idle') {
+          console.log("DEBUG: 🔍 Polling found call:", data.callId);
           setActiveCall({
             callId: data.callId,
             callerName: data.callerData.fromName,
@@ -186,13 +166,13 @@ useEffect(() => {
             callerData: data.callerData 
           });
           setCallStatus('ringing');
-          console.log("DEBUG: ✅ UI set to RINGING");
         }
       } 
       else {
-        // If the API says false, but our UI is ringing, the caller hung up
-        if (callStatus === 'ringing' || callStatus === 'connecting') {
-          console.log("DEBUG: 📴 Caller hung up. Resetting UI.");
+        // CRITICAL FIX: Only reset to idle if we are ringing but the 
+        // DATABASE says the call no longer exists (meaning Agent hung up).
+        if (callStatus === 'ringing') {
+          console.log("DEBUG: 📴 Call no longer in DB. Resetting.");
           setCallStatus('idle');
           setActiveCall(null);
         }
@@ -204,17 +184,10 @@ useEffect(() => {
     }
   };
 
-  // Run initial check
-  checkIncomingCalls(); 
-
-  // Poll every 3 seconds
   const callInterval = setInterval(checkIncomingCalls, 3000); 
-  
-  return () => {
-    console.log("DEBUG: Cleaning up polling interval");
-    clearInterval(callInterval);
-  };
-}, [callStatus]); // Only re-run if callStatus changes (e.g., from idle to ringing)
+  return () => clearInterval(callInterval);
+  // Remove callStatus from dependencies to stop the interval from restarting constantly
+}, []);
 
 
 useEffect(() => {
@@ -696,12 +669,9 @@ const handleDownload = async (url, type) => {
 const handleStartCall = async () => {
   if (!agent?._id) return;
   const token = localStorage.getItem('userToken'); 
-  
-  if (!token) {
-    alert("Please log in to make a call.");
-    return;
-  }
 
+  setCallStatus('ringing'); // Move this up for instant UI feedback
+  
   try {
     const res = await fetch('/api/calls/start', {
       method: 'POST',
@@ -711,30 +681,26 @@ const handleStartCall = async () => {
       },
       body: JSON.stringify({ 
         receiverId: agent._id,
-        receiverModel: 'Agent' // Users call Agents
+        receiverModel: 'Agent' 
       })
     });
-    if (!res.ok) {
-      const errorData = await res.json();
-      console.error("Backend Validation Error:", errorData);
-      alert(`Call failed: ${errorData.error || "Server Error"}`);
-      return;
-    }
+    
     const data = await res.json();
-  if (data.success) {
-    setCallStatus('ringing'); 
-    setActiveCall({ callId: data.callId });
-        socket.emit("call-user", {
-      userToCall: agent._id, // This matches the 'userId' the agent joined with
-      fromId: userData?._id,
-      fromName: `${userData?.firstName} ${userData?.lastName}`,
-      callId: data.callId,
-      signalData: null // If you aren't doing Peer-to-Peer yet, keep this null
-    });
+    if (data.success) {
+      setActiveCall({ callId: data.callId });
+      socket.emit("call-user", {
+        userToCall: agent._id,
+        fromId: userData?._id,
+        fromName: `${userData?.firstName} ${userData?.lastName}`,
+        callId: data.callId
+      });
+    } else {
+      setCallStatus('idle'); // Revert if failed
+      alert("Agent is busy or offline.");
     }
   } catch (err) {
+    setCallStatus('idle');
     console.error("Network Error:", err);
-    alert("Connection failed. Please check your signal.");
   }
 };
 
