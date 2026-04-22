@@ -748,10 +748,7 @@ const handleResend = (msg) => {
 
 const MessageBubble = ({ m, isMe, onReply, children }) => {
   const controls = useAnimation();
-
-  // Handle Swipe logic
   const bind = useDrag(({ active, movement: [x], last }) => {
-    // Only allow swiping to the right (positive x)
     const xMovement = Math.min(Math.max(0, x), 100); 
 
     if (active) {

@@ -8,9 +8,8 @@ export default defineConfig({
     tailwindcss(),
   ],
   build: {
+    chunkSizeWarningLimit: 2000, // Stops the 500kb warning
     rollupOptions: {
-      // THIS IS THE FIX: It tells the bundler that these modules are 
-      // "External" and should not be bundled into your React app.
       external: [
         'crypto',
         'fs',
@@ -23,13 +22,15 @@ export default defineConfig({
         'nodemailer',
         'express',
         'multer'
+        // Add 'framer-motion' here ONLY if you don't want to run 'npm install framer-motion'
       ],
     },
   },
   resolve: {
     alias: {
-      // Keeps simple-peer happy in your AgentDashboard
       buffer: 'buffer',
+      // If you still have crypto-browserify installed, add this too:
+      crypto: 'crypto-browserify', 
     },
   },
   define: {
