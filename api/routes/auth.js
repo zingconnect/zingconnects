@@ -56,9 +56,14 @@ export const authenticateToken = (req, res, next) => {
             forceLogout: true // Hint for frontend to clear localStorage
           });
         }
-      } catch (dbErr) {
-        return res.status(500).json({ message: "Internal Auth Error" });
-      }
+    } catch (dbErr) {
+  // Update this temporarily to see the real error message in the browser
+  return res.status(500).json({ 
+    message: "Internal Auth Error", 
+    details: dbErr.message,
+    stack: dbErr.stack 
+  });
+}
     }
 
     req.user = decodedUser;
@@ -291,7 +296,7 @@ router.post('/verify-otp', async (req, res) => {
     await connectToDatabase();
     
 const AgentModel = getAgentModel();
-
+if (!AgentModel) throw new Error("Agent Model not initialized");
     if (!email || !otp) {
       return res.status(400).json({ 
         success: false, 
@@ -359,6 +364,7 @@ const AgentModel = getAgentModel();
 router.post('/login', async (req, res) => {
   try {
     const AgentModel = getAgentModel();
+    if (!AgentModel) throw new Error("Agent Model not initialized");
     const { email, password } = req.body;
 
     const agent = await AgentModel.findOne({ 
@@ -408,10 +414,9 @@ router.get('/profile', authenticateToken, async (req, res) => {
     
     // Ensure the model is retrieved correctly using your helper
     const AgentModel = getAgentModel();
+if (!AgentModel) throw new Error("Agent Model not initialized");
 
-    // 1. Update presence and fetch data
-    // Changed { new: true } to { returnDocument: 'after' } to fix Mongoose warning
-    let agent = await AgentModel.findByIdAndUpdate(
+let agent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
       { lastActive: new Date() }, 
       { returnDocument: 'after' } 

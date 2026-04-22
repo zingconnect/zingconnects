@@ -145,9 +145,10 @@ const authenticateToken = (req, res, next) => {
         agent.lastActive = new Date();
         await agent.save();
 
-      } catch (dbErr) {
-        return res.status(500).json({ message: "Internal Auth Error" });
-      }
+     } catch (dbErr) {
+  console.error("DATABASE AUTH ERROR:", dbErr); // <--- Add this!
+  return res.status(500).json({ message: "Internal Auth Error", error: dbErr.message });
+}
     }
 
     // 3. Attach user to request and move forward
