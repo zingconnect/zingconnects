@@ -1650,6 +1650,40 @@ const handleSendMessage = async (e) => {
     <p className="text-[10px] font-black uppercase tracking-widest text-white/40">Cancel Call</p>
   </div>
 )}
+
+// Add this inside your return() at the very top level
+{callStatus === 'ringing' && isIncomingCall && (
+  <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4">
+    <div className="bg-[#1f2c33] w-full max-w-md rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center justify-between animate-in slide-in-from-top duration-300">
+      <div className="flex items-center gap-3">
+        <img 
+          src={activeCaller?.photoUrl || '/default-avatar.png'} 
+          className="w-12 h-12 rounded-full object-cover border-2 border-green-500"
+          alt="caller"
+        />
+        <div>
+          <h3 className="text-white font-bold text-sm">{activeCaller?.fromName}</h3>
+          <p className="text-gray-400 text-xs animate-pulse">Incoming voice call...</p>
+        </div>
+      </div>
+      
+      <div className="flex gap-2">
+        <button 
+          onClick={handleEndCall}
+          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+        >
+          Decline
+        </button>
+        <button 
+          onClick={handleAcceptCall}
+          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+        >
+          Answer
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 };

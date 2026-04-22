@@ -34,6 +34,33 @@ function urlBase64ToUint8Array(base64String) {
 }
 const socket = io(import.meta.env.VITE_API_URL);
 
+const CallStatusMessage = ({ status, time }) => (
+  <div className="flex justify-center my-4 w-full z-10">
+    <div className="bg-[#1f2c33] rounded-xl px-4 py-3 flex items-center gap-3 min-w-[220px] border border-white/10 shadow-xl">
+      <div className="bg-slate-700 p-2 rounded-full">
+        <BsTelephoneFill className="text-green-500" size={16} />
+      </div>
+      <div className="flex-1">
+        <h4 className="text-white text-[13px] font-semibold">Voice call</h4>
+        <div className="text-gray-400 text-[11px] capitalize flex items-center gap-1.5">
+          {status === 'ringing' ? (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+              </span>
+              <span>Ringing...</span>
+            </>
+          ) : (
+            <span className={status === 'missed' ? 'text-red-400' : ''}>{status}</span>
+          )}
+        </div>
+      </div>
+      <span className="text-[10px] text-gray-500 mt-auto ml-2">{time}</span>
+    </div>
+  </div>
+);
+
 export const UserDashboard = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -226,6 +253,13 @@ const toggleMute = () => {
 
 const handleAcceptCall = async () => {
   const token = localStorage.getItem('userToken');
+  
+  // 1. Immediate UI/UX Feedback
+  if (ringtoneRef.current) {
+    ringtoneRef.current.pause();
+    ringtoneRef.current.currentTime = 0;
+  }
+  
   try {
     const res = await fetch('/api/calls/accept', {
       method: 'POST',
@@ -238,15 +272,24 @@ const handleAcceptCall = async () => {
     
     if (res.ok) {
       setCallStatus('connected');
-            socket.emit("answer-call", {
-        to: activeCall.fromId, // This is the agent's ID
-        signal: null // If you're using WebRTC, put your signal data here
+      setIsIncomingCall(false); // Hide the "Drop Modal" once answered
+      setMessages(prev => prev.map(m => 
+        m.fileType === 'voice_call' && m.status === 'ringing' 
+          ? { ...m, status: 'connected' } 
+          : m
+      ));
+      socket.emit("answer-call", {
+        to: activeCaller?.fromId, // Use the activeCaller state we set earlier
+        callId: activeCall?.callId,
+        signal: null // Replace with your WebRTC signal data if using peer-to-peer
       });
     }
   } catch (err) {
     console.error("Failed to accept call", err);
+    setCallStatus('idle');
   }
 };
+
 const handleEndCall = async () => {
   const token = localStorage.getItem('userToken');
   setCallStatus('idle'); // Set UI to idle immediately for responsiveness
@@ -1019,10 +1062,21 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </p>
   </div>
 
+
 {/* 3. Message List */}
 {messages.map((m) => {
   // Safe key generation for messages that don't have a DB _id yet
   const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
+
+  if (m.fileType === 'voice_call') {
+    return (
+      <CallStatusMessage 
+        key={msgKey}
+        status={m.status} // 'ringing', 'missed', 'ended'
+        time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      />
+    );
+  }
 
   return (
     <div 
@@ -1193,6 +1247,8 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   </div>
 )}
+
+
 
 <footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
   {/* --- REPLY PREVIEW PANEL --- */}
@@ -1551,6 +1607,40 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
            <p className="text-[8px] font-bold tracking-[0.2em] text-white/40 uppercase">Secure Node Protocol v4.2</p>
         </div>
       )}
+    </div>
+  </div>
+)}
+
+// Add this inside your return() at the very top level
+{callStatus === 'ringing' && isIncomingCall && (
+  <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4">
+    <div className="bg-[#1f2c33] w-full max-w-md rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center justify-between animate-in slide-in-from-top duration-300">
+      <div className="flex items-center gap-3">
+        <img 
+          src={activeCaller?.photoUrl || '/default-avatar.png'} 
+          className="w-12 h-12 rounded-full object-cover border-2 border-green-500"
+          alt="caller"
+        />
+        <div>
+          <h3 className="text-white font-bold text-sm">{activeCaller?.fromName}</h3>
+          <p className="text-gray-400 text-xs animate-pulse">Incoming voice call...</p>
+        </div>
+      </div>
+      
+      <div className="flex gap-2">
+        <button 
+          onClick={handleEndCall}
+          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+        >
+          Decline
+        </button>
+        <button 
+          onClick={handleAcceptCall}
+          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+        >
+          Answer
+        </button>
+      </div>
     </div>
   </div>
 )}
