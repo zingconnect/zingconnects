@@ -88,6 +88,13 @@ export const AgentSlug = () => {
         localStorage.setItem('userToken', data.token);
         localStorage.setItem('userEmail', userEmail);
         alert("Verification Successful. Opening User Dashboard...");
+
+        localStorage.setItem('userToken', data.token);
+  
+  // 🔍 ADD THIS DEBUG LINE
+  const decoded = JSON.parse(atob(data.token.split('.')[1]));
+  console.log("DEBUG: Handshake successful. Logged in User ID:", decoded.id || decoded._id);
+  
         navigate('/user/dashboard');
       } else {
         alert(data.message || "Connection failed.");

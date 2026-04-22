@@ -1581,46 +1581,76 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    console.log("DEBUG: Full req.user object:", JSON.stringify(req.user));
-    const rawId = req.user.id || req.user._id || req.user.userId;
-    console.log("DEBUG: extracted rawId:", rawId);
+    
+    // 1. ROBUST ID EXTRACTION
+    // We check every possible key the middleware might have attached
+    const rawId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
+    
+    console.log("-----------------------------------------");
+    console.log("API DEBUG: Token ID is:", rawId);
 
     if (!rawId) {
-      return res.status(401).json({ hasIncomingCall: false, message: "Token missing ID" });
+      return res.status(401).json({ hasIncomingCall: false, message: "No ID found in token" });
     }
-    const myObjectId = new mongoose.Types.ObjectId(rawId);
-    const allCallsForMe = await Call.find({ receiver: myObjectId });
-    console.log(`DEBUG: Total calls found for this ID in DB: ${allCallsForMe.length}`);
 
+    // 2. EXPLICIT CASTING TO OBJECTID
+    const userObjectId = new mongoose.Types.ObjectId(rawId);
+
+    // 3. TARGETED SEARCH
+    // We strictly look for calls where the current user is the RECEIVER 
+    // and the receiverModel is specifically 'User'
     const incoming = await Call.findOne({ 
-      receiver: myObjectId, 
+      receiver: userObjectId, 
+      receiverModel: 'User', // Matches your CallSchema enum
       status: 'ringing' 
     })
-    .sort({ createdAt: -1 })
-    .populate('caller', 'firstName lastName photoUrl');
+    .sort({ createdAt: -1 }) // Get the most recent call
+    .populate({
+      path: 'caller',
+      select: 'firstName lastName photoUrl'
+    });
+
+    // 4. HEADER FIX (Crucial for Vercel/Chrome 304 issues)
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     if (!incoming) {
-      console.log("DEBUG: No 'ringing' call found for ID:", rawId);
+      console.log("API DEBUG: Result -> No 'ringing' call found for this User ID.");
       return res.json({ hasIncomingCall: false });
     }
 
-    console.log("DEBUG: ✅ SUCCESS! Call found:", incoming._id);
+    console.log("API DEBUG: Result -> ✅ MATCH FOUND. Call ID:", incoming._id);
 
+    // 5. SIGN PHOTO URL (S3 Handling)
+    let photo = incoming.caller?.photoUrl || null;
+    if (photo && !photo.startsWith('http')) {
+      try {
+        photo = await getPrivateUrl(photo);
+      } catch (e) { 
+        console.error("API DEBUG: S3 Signing Error:", e); 
+      }
+    }
+
+    // 6. FINAL RESPONSE
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       callerData: {
-        fromName: incoming.caller ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() : "Agent",
-        photoUrl: incoming.caller?.photoUrl || null,
-        callerId: incoming.caller?._id
+        fromName: incoming.caller 
+          ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
+          : "System Caller",
+        photoUrl: photo,
+        callerId: incoming.caller?._id || incoming.caller
       }
     });
 
   } catch (err) {
-    console.error("🚨 API CRASH:", err);
-    res.status(500).json({ hasIncomingCall: false });
+    console.error("API DEBUG: ❌ CRASH IN CHECK-INCOMING:", err);
+    res.status(500).json({ hasIncomingCall: false, error: err.message });
   }
 });
+
 // 3. Unified Accept Call
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
