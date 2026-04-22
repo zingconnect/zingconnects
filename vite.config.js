@@ -8,8 +8,10 @@ export default defineConfig({
     tailwindcss(),
   ],
   build: {
-    chunkSizeWarningLimit: 2000, // Stops the 500kb warning
+    // Increase limit for your large AgentDashboard
+    chunkSizeWarningLimit: 2000,
     rollupOptions: {
+      // THIS TELLS VERCEL: "If you see these names, ignore them. They are for the backend."
       external: [
         'crypto',
         'fs',
@@ -21,16 +23,19 @@ export default defineConfig({
         'jsonwebtoken',
         'nodemailer',
         'express',
-        'multer'
-        // Add 'framer-motion' here ONLY if you don't want to run 'npm install framer-motion'
+        'multer',
+        'flutterwave-node-v3',
+        '@aws-sdk/client-s3',
+        '@aws-sdk/s3-request-presigner'
       ],
     },
   },
   resolve: {
     alias: {
+      // Redirects any 'crypto' calls in frontend libs to the browser version
+      crypto: 'crypto-browserify',
       buffer: 'buffer',
-      // If you still have crypto-browserify installed, add this too:
-      crypto: 'crypto-browserify', 
+      stream: 'stream-browserify',
     },
   },
   define: {
