@@ -107,14 +107,12 @@ export const UserDashboard = () => {
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
-  // IMPORTANT: Ensure this matches the ID the Agent is using to call you
   socket.emit("join-main-room", userData._id);
-  console.log("DEBUG: 🏠 Socket Room Joined:", userData._id);
 
   const handleIncomingCall = (data) => {
-    console.log("DEBUG: 🚨 Socket Signal Received:", data);
+    // 1. WhatsApp Logic: If we receive the signal, we tell the sender we are 'ringing'
+    socket.emit("confirm-ringing", { to: data.fromId });
     
-    // Prevent the "Drop Back" by ignoring signals if already in a call
     if (callStatus === 'idle') {
       setActiveCall({
         callId: data.callId,
@@ -129,85 +127,79 @@ useEffect(() => {
     }
   };
 
+  const handleCallEnded = () => {
+    setCallStatus('idle');
+    setActiveCall(null);
+  };
+
   socket.on("incoming-call", handleIncomingCall);
-  return () => socket.off("incoming-call");
-}, [userData?._id, callStatus]); // Keep callStatus so it knows if it's idle
+  socket.on("call-ended", handleCallEnded);
+  
+  return () => {
+    socket.off("incoming-call", handleIncomingCall);
+    socket.off("call-ended", handleCallEnded);
+  };
+}, [userData?._id, callStatus, socket]);
+
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return;
 
-  let isFetching = false;
-
-  const checkIncomingCalls = async () => {
-    if (isFetching) return;
-    isFetching = true;
+  const checkCalls = async () => {
+    // If we are already in a conversation, don't poll
+    if (callStatus === 'connected') return;
 
     try {
       const response = await fetch('/api/calls/check-incoming', {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache'
-        }
+        headers: { 'Authorization': `Bearer ${token}`, 'Cache-Control': 'no-cache' }
       });
-      
-      if (!response.ok) return;
       const data = await response.json();
 
       if (data.hasIncomingCall) {
-        // Only set if we are IDLE. This prevents polling from "overwriting" 
-        // the Socket's active call data.
+        // If we were IDLE, we just discovered a new call
         if (callStatus === 'idle') {
-          console.log("DEBUG: 🔍 Polling found call:", data.callId);
           setActiveCall({
             callId: data.callId,
-            callerName: data.callerData.fromName,
-            callerPhoto: data.callerData.photoUrl,
-            callerData: data.callerData 
+            callerData: data.callerData,
+            fromId: data.callerData.callerId
           });
           setCallStatus('ringing');
+          socket.emit("confirm-ringing", { to: data.callerData.callerId });
         }
-      } 
-      else {
-        // CRITICAL FIX: Only reset to idle if we are ringing but the 
-        // DATABASE says the call no longer exists (meaning Agent hung up).
+      } else {
+        // If the DB says no call, but we are ringing, the caller cancelled
         if (callStatus === 'ringing') {
-          console.log("DEBUG: 📴 Call no longer in DB. Resetting.");
           setCallStatus('idle');
           setActiveCall(null);
         }
       }
     } catch (err) {
-      console.warn("DEBUG: ❌ Polling failed:", err.message);
-    } finally {
-      isFetching = false;
+      console.warn("Polling error:", err);
     }
   };
 
-  const callInterval = setInterval(checkIncomingCalls, 3000); 
-  return () => clearInterval(callInterval);
-  // Remove callStatus from dependencies to stop the interval from restarting constantly
-}, []);
-
+  const interval = setInterval(checkCalls, 3000);
+  return () => clearInterval(interval);
+}, [callStatus, socket]);
 
 useEffect(() => {
   const audio = ringtoneRef.current;
-  audio.loop = true;
-  if (callStatus === 'ringing' && activeCall?.callerData) {
-    audio.play().catch(err => {
-      console.log("Audio play blocked until interaction. This is normal browser behavior.");
-    });
+  
+  if (callStatus === 'ringing' && isIncomingCall) {
+    audio.loop = true;
+    audio.play().catch(() => {});
   } else {
-    // Stop audio for Connected, Idle, or Outgoing Ringing
     audio.pause();
     audio.currentTime = 0;
   }
-
+    if (callStatus === 'calling') {
+  }
   return () => {
     audio.pause();
     audio.currentTime = 0;
   };
-}, [callStatus, activeCall]);
+}, [callStatus, isIncomingCall]);
 
 useEffect(() => {
   const remoteMedia = document.getElementById('remoteAudio'); 
@@ -669,8 +661,7 @@ const handleDownload = async (url, type) => {
 const handleStartCall = async () => {
   if (!agent?._id) return;
   const token = localStorage.getItem('userToken'); 
-
-  setCallStatus('ringing'); // Move this up for instant UI feedback
+  setCallStatus('calling'); 
   
   try {
     const res = await fetch('/api/calls/start', {
@@ -688,21 +679,22 @@ const handleStartCall = async () => {
     const data = await res.json();
     if (data.success) {
       setActiveCall({ callId: data.callId });
-      socket.emit("call-user", {
+            socket.emit("call-user", {
         userToCall: agent._id,
         fromId: userData?._id,
         fromName: `${userData?.firstName} ${userData?.lastName}`,
         callId: data.callId
       });
     } else {
-      setCallStatus('idle'); // Revert if failed
-      alert("Agent is busy or offline.");
+      setCallStatus('idle');
+      alert("Agent is unavailable.");
     }
   } catch (err) {
     setCallStatus('idle');
     console.error("Network Error:", err);
   }
 };
+
 
  const handleSendMessage = async (e) => {
   e.preventDefault();

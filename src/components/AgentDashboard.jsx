@@ -173,9 +173,9 @@ useEffect(() => {
 useEffect(() => {
   if (!socket || !agentData?._id) return;
   socket.emit("join-main-room", agentData._id);
-  console.log("Agent joined room:", agentData._id);
+
   const onIncoming = (data) => {
-    console.log("Incoming call:", data.fromName);
+    // When an incoming call is detected via Socket
     socket.emit("confirm-ringing", { to: data.fromId });
     setActiveCaller(data); 
     setIsIncomingCall(true);
@@ -183,63 +183,65 @@ useEffect(() => {
   };
 
   const onUserRinging = () => {
-    setCallStatus(current => current === 'connecting' ? 'ringing' : current);
+    // WHATSAPP LOGIC: Update UI from "Calling..." to "Ringing..." 
+    // when the receiver's socket confirms receipt
+    setCallStatus(current => current === 'calling' ? 'ringing' : current);
   };
 
-  const onAccepted = (signal) => {
-    if (connectionRef.current && signal) {
-      connectionRef.current.signal(signal);
-    }
-    setCallStatus('connected');
-  };
-
-  // 3. Register listeners
   socket.on("incoming-call", onIncoming);
   socket.on("user-is-ringing", onUserRinging);
-  socket.on("call-accepted", onAccepted);
+  socket.on("call-accepted", (signal) => {
+    if (connectionRef.current && signal) connectionRef.current.signal(signal);
+    setCallStatus('connected');
+  });
   socket.on("call-ended", handleEndCall);
 
-  // 4. Cleanup
   return () => {
     socket.off("incoming-call", onIncoming);
     socket.off("user-is-ringing", onUserRinging);
-    socket.off("call-accepted", onAccepted);
+    socket.off("call-accepted");
     socket.off("call-ended", handleEndCall);
   };
-}, [agentData?._id, socket]); // REMOVED callStatus to keep listeners stable
+}, [agentData?._id, socket]);
 
 useEffect(() => {
-  const token = localStorage.getItem('agentToken'); // Verify this key name matches your login
+  const token = localStorage.getItem('agentToken');
   if (!token) return;
 
-  const checkForIncomingCalls = async () => {
-    if (callStatus !== 'idle') return;
-
-    try {
-      const response = await fetch('/api/calls/check-incoming', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();
-
-      if (data.hasIncomingCall) {
-        console.log("DEBUG: 🔔 Incoming call detected for Agent!");
-        setIsIncomingCall(true);
-        setActiveCaller(data.callerData); 
-        setActiveCall({ callId: data.callId }); // Ensure callId is stored for handleAccept
-        setCallStatus('ringing');
-        
-        if (ringtoneRef.current) {
-          ringtoneRef.current.play().catch(e => console.warn("Audio blocked"));
+  const syncCallStatus = async () => {
+    // Case A: Waiting for Incoming Calls
+    if (callStatus === 'idle') {
+      try {
+        const response = await fetch('/api/calls/check-incoming', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (data.hasIncomingCall) {
+          setIsIncomingCall(true);
+          setActiveCaller(data.callerData); 
+          setActiveCall({ callId: data.callId });
+          setCallStatus('ringing'); // Receiver moves straight to ringing
         }
-      }
-    } catch (err) {
-      console.error("Error checking for user calls:", err);
+      } catch (err) { console.error("Poll Error:", err); }
+    }
+
+    // Case B: WhatsApp Logic - Watch if our Outgoing 'calling' becomes 'ringing'
+    if (callStatus === 'calling' && activeCall?.callId) {
+      try {
+        const response = await fetch(`/api/calls/status/${activeCall.callId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (data.status === 'ringing') {
+          setCallStatus('ringing'); // Promote UI to "Ringing..."
+        }
+      } catch (err) { console.warn("Status check failed"); }
     }
   };
 
-  const interval = setInterval(checkForIncomingCalls, 3000);
+  const interval = setInterval(syncCallStatus, 3000);
   return () => clearInterval(interval);
-}, [callStatus]); // Re-starts polling only when we go back to 'idle'
+}, [callStatus, activeCall?.callId]);
 
  useEffect(() => {
   if (messagesEndRef.current) {
@@ -249,20 +251,18 @@ useEffect(() => {
 
 useEffect(() => {
   const ringtone = ringtoneRef.current;
-  if (!ringtone) return; // Guard clause
+  if (!ringtone) return;
 
   if (callStatus === 'ringing' && isIncomingCall) {
     ringtone.loop = true;
-    ringtone.play().catch(err => console.log("Audio blocked:", err));
-  } else {
+    ringtone.play().catch(err => console.log("Audio blocked", err));
+  } 
+  else if (callStatus === 'calling') {
+  }
+  else {
     ringtone.pause();
     ringtone.currentTime = 0;
   }
-
-  return () => {
-    ringtone.pause();
-    ringtone.currentTime = 0;
-  };
 }, [callStatus, isIncomingCall]);
 
 const handleStartCall = async (targetUserId) => {
@@ -1389,23 +1389,30 @@ const handleSendMessage = async (e) => {
           </h2>
 
           <div className="flex flex-col items-center gap-3 mt-4">
-            <div className="flex items-center gap-2">
-<span className={`w-2 h-2 rounded-full ${
+           <div className="flex items-center gap-2">
+  <span className={`w-2 h-2 rounded-full transition-all duration-500 ${
     callStatus === 'connected' 
       ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' 
-      : (callStatus === 'ringing' || callStatus === 'connecting')
-        ? 'bg-blue-400 animate-ping shadow-[0_0_8px_#60a5fa]' 
-        : 'bg-slate-500 animate-pulse'
+      : callStatus === 'connecting'
+        ? 'bg-yellow-400 animate-spin shadow-[0_0_8px_#fbbf24]' // Spinning during handshake
+      : callStatus === 'ringing'
+        ? 'bg-blue-400 animate-ping shadow-[0_0_8px_#60a5fa]'   // Pinging when user's phone is active
+      : callStatus === 'calling'
+        ? 'bg-slate-400 animate-pulse'                         // Soft pulse while searching network
+        : 'bg-slate-500'
   }`}></span>
 
   <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
-    {/* Agent sees 'Ringing...' while waiting for the User to pick up */}
+    {/* Phase 1: Agent has clicked call, waiting for backend/network response */}
+    {callStatus === 'calling' && "Calling..."}
+
+    {/* Phase 2: User's device has acknowledged the call (Handshake complete) */}
     {callStatus === 'ringing' && "Ringing..."}
     
-    {/* Brief state while WebRTC handshakes take place */}
+    {/* Phase 3: User clicked 'Answer', WebRTC is negotiating the stream */}
     {callStatus === 'connecting' && "Securing Line..."}
     
-    {/* Final active state */}
+    {/* Phase 4: Active voice conversation */}
     {callStatus === 'connected' && "Line Encrypted"}
   </p>
 </div>

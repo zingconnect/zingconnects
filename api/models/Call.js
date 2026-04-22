@@ -26,11 +26,10 @@ const callSchema = new mongoose.Schema({
     required: true,
     enum: ['User', 'Agent']
   },
-
-  status: {
+status: {
     type: String,
-    enum: ['ringing', 'connecting', 'connected', 'ended', 'missed'],
-    default: 'ringing'
+    enum: ['calling', 'ringing', 'connected', 'ended', 'missed', 'declined'],
+    default: 'calling' // Starts at 'calling'
   },
   startTime: { type: Date },
   endTime: { type: Date },

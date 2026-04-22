@@ -1547,30 +1547,28 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     const callerId = req.user.id || req.user._id || req.user.userId;
     if (!callerId) return res.status(401).json({ message: "Auth Error" });
 
-    // 1. IMPORTANT: Cast IDs to ObjectId to ensure the 'check-incoming' query can find them
     const callerObjectId = new mongoose.Types.ObjectId(callerId);
     const receiverObjectId = new mongoose.Types.ObjectId(receiverId);
 
     const callerModel = req.user.role === 'agent' ? 'Agent' : 'User';
     const finalReceiverModel = receiverModel || (callerModel === 'Agent' ? 'User' : 'Agent');
-    console.log(`🚀 Starting call: Caller(${callerId}) -> Receiver(${receiverId})`);
 
     const newCall = new Call({
       caller: callerObjectId,
       callerModel: callerModel,
-      receiver: receiverObjectId, // Use the casted ObjectId
+      receiver: receiverObjectId,
       receiverModel: finalReceiverModel,
-      status: 'ringing' // CHANGED FROM 'calling' TO 'ringing' TO MATCH YOUR CHECK-INCOMING API
+      status: 'calling' // PHASE 1: Initial network attempt
     });
 
     await newCall.save();
     
-    console.log(`✅ Call created successfully with status 'ringing'. ID: ${newCall._id}`);
+    console.log(`🚀 Call Initiated: ${callerId} -> ${receiverId} (Status: CALLING)`);
     
     res.status(201).json({ 
       success: true, 
       callId: newCall._id,
-      status: 'ringing'
+      status: 'calling'
     });
   } catch (err) {
     console.error("❌ Start Call Error:", err);
@@ -1581,48 +1579,36 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
     const rawId = req.user?._id || req.user?.id || req.user?.userId;
     if (!rawId) return res.status(401).json({ hasIncomingCall: false });
 
-    // 1. DUAL-TYPE MATCHING
-    const incoming = await Call.findOne({ 
-      $or: [
-        { receiver: rawId }, 
-        { receiver: new mongoose.Types.ObjectId(rawId) }
-      ],
-      status: 'ringing'
-    })
-    .sort({ createdAt: -1 })
-    // Use 'path' and 'refPath' logic if your schema supports it, 
-    // otherwise Mongoose will use the 'callerModel' field to populate correctly.
-    .populate('caller', 'firstName lastName photoUrl');
-
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    // Look for calls that are EITHER 'calling' or 'ringing'
+    let incoming = await Call.findOne({ 
+      $or: [{ receiver: rawId }, { receiver: new mongoose.Types.ObjectId(rawId) }],
+      status: { $in: ['calling', 'ringing'] } 
+    }).sort({ createdAt: -1 }).populate('caller', 'firstName lastName photoUrl');
 
     if (!incoming) return res.json({ hasIncomingCall: false });
 
-    // 2. SIGN S3 PHOTO URL
-    let photo = incoming.caller?.photoUrl || null;
-    if (photo && !photo.startsWith('http')) {
-      try { photo = await getPrivateUrl(photo); } catch (e) { }
+    // WHATSAPP LOGIC: If we found a 'calling' record, it means the receiver's device 
+    // just "discovered" the call. We now move it to 'ringing'.
+    if (incoming.status === 'calling') {
+      incoming.status = 'ringing';
+      await incoming.save();
+      console.log(`🔔 Call ${incoming._id} status updated: CALLING -> RINGING`);
     }
 
-    // 3. SUCCESS RESPONSE (Works for both Agent and User)
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
+      status: incoming.status, // Will now return 'ringing' to the receiver
       callerData: {
-        fromName: incoming.caller 
-          ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
-          : "Incoming Call",
-        photoUrl: photo,
-        callerId: incoming.caller?._id || incoming.caller
+        fromName: incoming.caller ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() : "Secure Caller",
+        photoUrl: incoming.caller?.photoUrl || null,
+        callerId: incoming.caller?._id
       }
     });
-
   } catch (err) {
-    console.error("🚨 API ERROR:", err);
     res.status(500).json({ hasIncomingCall: false });
   }
 });
