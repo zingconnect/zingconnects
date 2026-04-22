@@ -1582,29 +1582,21 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 1. EXTRACT AND LOG THE RAW ID FROM TOKEN
+    // LOG EVERYTHING ABOUT THE USER FROM THE TOKEN
+    console.log("DEBUG: Full req.user object:", JSON.stringify(req.user));
+    
     const rawId = req.user.id || req.user._id || req.user.userId;
-    console.log("-----------------------------------------");
-    console.log("DEBUG: check-incoming request started");
-    console.log("DEBUG: rawId from token:", rawId);
+    console.log("DEBUG: extracted rawId:", rawId);
 
     if (!rawId) {
-      console.error("DEBUG: ❌ Auth Error - No ID found in req.user");
-      return res.status(401).json({ hasIncomingCall: false, message: "Unauthorized" });
+      return res.status(401).json({ hasIncomingCall: false, message: "Token missing ID" });
     }
 
-    // 2. CONVERT TO OBJECTID
-    let myObjectId;
-    try {
-      myObjectId = new mongoose.Types.ObjectId(rawId);
-      console.log("DEBUG: Casted to ObjectId:", myObjectId);
-    } catch (err) {
-      console.error("DEBUG: ❌ Failed to cast rawId to ObjectId:", rawId);
-      return res.status(400).json({ hasIncomingCall: false, message: "Invalid ID format" });
-    }
+    const myObjectId = new mongoose.Types.ObjectId(rawId);
 
-    // 3. SEARCH DATABASE
-    // We search for the newest 'ringing' call assigned to this receiver
+    const allCallsForMe = await Call.find({ receiver: myObjectId });
+    console.log(`DEBUG: Total calls found for this ID in DB: ${allCallsForMe.length}`);
+
     const incoming = await Call.findOne({ 
       receiver: myObjectId, 
       status: 'ringing' 
@@ -1612,44 +1604,29 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     .sort({ createdAt: -1 })
     .populate('caller', 'firstName lastName photoUrl');
 
-    console.log(`DEBUG: Database Search Finished | Found: ${incoming ? 'YES ✅' : 'NO ❌'}`);
-
-    // 4. PREVENT CACHING (Crucial to fix the 304 Not Modified error)
+    // PREVENT CACHE
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
 
     if (!incoming) {
+      console.log("DEBUG: No 'ringing' call found for ID:", rawId);
       return res.json({ hasIncomingCall: false });
     }
 
-    // 5. HANDLE PHOTO LOGIC
-    let photo = incoming.caller?.photoUrl || null;
-    if (photo && !photo.startsWith('http')) {
-      try {
-        photo = await getPrivateUrl(photo);
-      } catch (err) {
-        console.error("DEBUG: S3 URL signing failed:", err);
-      }
-    }
+    console.log("DEBUG: ✅ SUCCESS! Call found:", incoming._id);
 
-    // 6. RETURN FINAL SUCCESS RESPONSE
-    console.log("DEBUG: Sending success response to frontend for Call ID:", incoming._id);
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       callerData: {
-        fromName: incoming.caller 
-          ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
-          : "Unknown Caller",
-        photoUrl: photo,
-        callerId: incoming.caller?._id || incoming.caller 
+        fromName: incoming.caller ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() : "Agent",
+        photoUrl: incoming.caller?.photoUrl || null,
+        callerId: incoming.caller?._id
       }
     });
 
   } catch (err) {
-    console.error("🚨 DEBUG: Critical Line Check Error:", err);
-    res.status(500).json({ hasIncomingCall: false, message: "Internal server error" });
+    console.error("🚨 API CRASH:", err);
+    res.status(500).json({ hasIncomingCall: false });
   }
 });
 // 3. Unified Accept Call
