@@ -1614,22 +1614,56 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
 });
 
 // 3. Unified Accept Call
+// 3. Unified Accept Call (Optimized for Speed)
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
+    
+    // Standardize the ID from the token
     const myId = req.user.id || req.user._id || req.user.userId;
 
-    // Find the call where I am the receiver and connect it
+    /**
+     * FIX: We look for BOTH 'ringing' and 'calling'. 
+     * This ensures that if the receiver clicks "Accept" before the 
+     * status update to 'ringing' completes, the call still connects.
+     */
     const call = await Call.findOneAndUpdate(
-      { receiver: myId, status: 'ringing' }, 
-      { status: 'connected', startTime: Date.now() }, 
-      { new: true, sort: { createdAt: -1 } }
-    );
+      { 
+        receiver: myId, 
+        status: { $in: ['calling', 'ringing'] } 
+      }, 
+      { 
+        status: 'connected', 
+        startTime: Date.now() 
+      }, 
+      { 
+        new: true, 
+        sort: { createdAt: -1 } // Always grab the most recent attempt
+      }
+    ).populate('caller', 'firstName lastName photoUrl');
 
-    if (!call) return res.status(404).json({ message: "No ringing call found" });
-    res.json({ success: true, call });
+    if (!call) {
+      console.log(`❌ Accept Failed: No active call for user ${myId}`);
+      return res.status(404).json({ 
+        success: false, 
+        message: "No active call attempt found." 
+      });
+    }
+
+    console.log(`✅ Call Connected: ${call._id} (Receiver: ${myId})`);
+
+    res.json({ 
+      success: true, 
+      call 
+    });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error("Accept Call Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error during call acceptance.",
+      error: err.message 
+    });
   }
 });
 
@@ -1677,4 +1711,9 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
+const PORT = process.env.PORT || 5000;
+
+server.listen(PORT, () => {
+  console.log(`--- SERVER ACTIVE ON PORT ${PORT} ---`);
+});
 export default app;

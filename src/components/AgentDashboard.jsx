@@ -313,29 +313,63 @@ const handleStartCall = async (targetUserId) => {
 
 const handleAcceptCall = async () => {
   try {
+    // 1. UI Transition to "Securing Line..."
     setCallStatus('connecting');
+
+    // 2. Capture Agent's Audio
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    
+    // Store local stream so we can toggle Mute/Speaker later
+    userStreamRef.current = stream; 
+
     const peer = new Peer({
       initiator: false,
       trickle: false,
-      stream: stream
+      stream: stream,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }, // Essential for connecting over different networks
+          { urls: 'stun:global.stun.twilio.com:3478' }
+        ]
+      }
     });
+
+    // 3. Signal back to the User (Handshake)
     peer.on('signal', (data) => {
       socket.emit("answer-call", { 
         to: activeCaller.fromId, 
         signal: data 
       });
     });
+
+    // 4. Handle the incoming Voice Stream
     peer.on('stream', (remoteStream) => {
+      // Create a hidden audio element
       const audio = document.createElement('audio');
+      audio.id = 'remoteAudio';
       audio.srcObject = remoteStream;
-      audio.play();
+            audio.muted = false; 
+      
+      remoteStreamRef.current = remoteStream; // Save for later reference
+      
+      audio.play().then(() => {
+        setCallStatus('connected'); // Only set connected once audio is flowing
+        startTimer(); // Trigger your 00:05 counter
+      }).catch(e => console.error("Audio play blocked:", e));
     });
     peer.signal(activeCaller.signal); 
+    
     connectionRef.current = peer;
-    setCallStatus('connected');
+    peer.on('close', () => handleEndCall());
+    peer.on('error', (err) => {
+      console.error("Peer Error:", err);
+      handleEndCall();
+    });
+
   } catch (err) {
-    console.error("Failed to accept call:", err);
+    console.error("Access Denied to Microphone:", err);
+    setCallStatus('idle');
+    alert("Please allow microphone access to answer calls.");
   }
 };
 
@@ -361,6 +395,23 @@ const handleEndCall = () => {
     ringtoneRef.current.currentTime = 0;
   }
 };
+
+useEffect(() => {
+  if (userStreamRef.current) {
+    userStreamRef.current.getAudioTracks().forEach(track => {
+      track.enabled = !isMuted;
+    });
+  }
+}, [isMuted]);
+
+useEffect(() => {
+  const remoteAudio = document.getElementById('remoteAudio');
+  if (remoteAudio) {
+    // If "Speaker" is off, we lower volume to simulate earpiece, 
+    // or keep at 1 for loud speaker.
+    remoteAudio.volume = isSpeakerOn ? 1.0 : 0.3; 
+  }
+}, [isSpeakerOn]);
 
 useEffect(() => {
   const handleOnline = () => setConnectionStatus('connected');
@@ -1351,6 +1402,30 @@ const handleSendMessage = async (e) => {
       <p className="text-[10px] font-bold uppercase tracking-widest">Secure Terminal</p>
     </div>
   )}
+
+{/* --- IN-CHAT CALL STATUS BAR --- */}
+{callStatus !== 'idle' && (
+  <div className={`h-12 flex items-center justify-between px-6 z-20 transition-all duration-300 ${
+    callStatus === 'connected' ? 'bg-[#06d755] text-white' : 'bg-blue-600 text-white'
+  }`}>
+    <div className="flex items-center gap-3">
+      <div className="flex gap-1">
+        <span className="w-1 h-1 bg-white rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+        <span className="w-1 h-1 bg-white rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+        <span className="w-1 h-1 bg-white rounded-full animate-bounce"></span>
+      </div>
+      <span className="text-[10px] font-black uppercase tracking-widest">
+        {callStatus === 'connected' ? 'Call in Progress' : 'Attempting Secure Link...'}
+      </span>
+    </div>
+    <div className="flex items-center gap-4">
+       <span className="text-xs font-mono opacity-80">00:05</span>
+       <button onClick={() => setFullscreenCall(true)} className="text-[9px] font-black border border-white/30 px-2 py-1 rounded hover:bg-white/10 uppercase">
+         Expand
+       </button>
+    </div>
+  </div>
+)}
 
   {/* --- ACTIVE CALL OVERLAY --- */}
   {callStatus !== 'idle' && (

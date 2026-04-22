@@ -66,6 +66,7 @@ export const UserDashboard = () => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const connectionRef = useRef(null);
 
   // 1. FIRST: Define ALL your states (move the call states up here)
   const [agent, setAgent] = useState(null);
@@ -137,28 +138,40 @@ useEffect(() => {
   socket.emit("join-main-room", userData._id);
 
   const handleIncomingCall = (data) => {
-    // 1. WhatsApp Logic: If we receive the signal, we tell the sender we are 'ringing'
+    // 1. Check if user is already in a call
+    if (callStatus !== 'idle') {
+      // Send busy signal back to the person calling you
+      socket.emit("user-busy", { 
+        to: data.fromId, 
+        callId: data.callId 
+      });
+      return; 
+    }
+
+    // 2. We are free! Confirm ringing to the sender
     socket.emit("confirm-ringing", { to: data.fromId });
     
-    if (callStatus === 'idle') {
-      setActiveCall({
-        callId: data.callId,
-        fromId: data.fromId,
-        callerData: {
-          fromName: data.fromName,
-          photoUrl: data.photoUrl,
-          callerId: data.fromId
-        }
-      });
-      setCallStatus('ringing');
-    }
+    // 3. Set up the call UI
+    setActiveCall({
+      callId: data.callId,
+      fromId: data.fromId,
+      callerData: {
+        fromName: data.fromName,
+        photoUrl: data.photoUrl,
+        callerId: data.fromId
+      }
+    });
+    setCallStatus('ringing');
+    
+    // 4. Play Ringtone (WhatsApp uses a looping sound here)
+    // ringtone.current.play();
   };
 
   const handleCallEnded = () => {
     setCallStatus('idle');
     setActiveCall(null);
+    // ringtone.current.stop();
   };
-
   socket.on("incoming-call", handleIncomingCall);
   socket.on("call-ended", handleCallEnded);
   
@@ -166,7 +179,7 @@ useEffect(() => {
     socket.off("incoming-call", handleIncomingCall);
     socket.off("call-ended", handleCallEnded);
   };
-}, [userData?._id, callStatus, socket]);
+}, [socket, userData?._id, callStatus]); 
 
 
 useEffect(() => {
@@ -254,36 +267,58 @@ const toggleMute = () => {
 const handleAcceptCall = async () => {
   const token = localStorage.getItem('userToken');
   
-  // 1. Immediate UI/UX Feedback
   if (ringtoneRef.current) {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
   }
   
   try {
-    const res = await fetch('/api/calls/accept', {
+    setCallStatus('connecting');
+
+    // Get User's Microphone
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    setLocalStream(stream);
+
+    // Initialize Peer (User is the Receiver, so initiator: false)
+    const peer = new Peer({
+      initiator: false,
+      trickle: false,
+      stream: stream
+    });
+
+    peer.on('signal', (data) => {
+      // Send the "answer" signal back to the Agent via Socket
+      socket.emit("answer-call", {
+        to: activeCall.fromId,
+        callId: activeCall.callId,
+        signal: data 
+      });
+    });
+
+    peer.on('stream', (remoteStream) => {
+      // Play the Agent's voice
+      const audio = document.createElement('audio');
+      audio.id = 'remoteAudio';
+      audio.srcObject = remoteStream;
+      audio.play();
+    });
+
+    // CRITICAL: Feed the Agent's initial signal into the peer
+    peer.signal(activeCall.signal);
+    connectionRef.current = peer;
+
+    // Notify API that call is officially answered
+    await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ callId: activeCall?.callId }) 
+      body: JSON.stringify({ callId: activeCall.callId }) 
     });
-    
-    if (res.ok) {
-      setCallStatus('connected');
-      setIsIncomingCall(false); // Hide the "Drop Modal" once answered
-      setMessages(prev => prev.map(m => 
-        m.fileType === 'voice_call' && m.status === 'ringing' 
-          ? { ...m, status: 'connected' } 
-          : m
-      ));
-      socket.emit("answer-call", {
-        to: activeCaller?.fromId, // Use the activeCaller state we set earlier
-        callId: activeCall?.callId,
-        signal: null // Replace with your WebRTC signal data if using peer-to-peer
-      });
-    }
+
+    setCallStatus('connected');
+
   } catch (err) {
     console.error("Failed to accept call", err);
     setCallStatus('idle');
@@ -510,25 +545,21 @@ const handleSendWithPreview = async () => {
 };
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
+  setIsUploading(true); 
   const token = localStorage.getItem('userToken');
   const data = new FormData();
-  
-  // FAIL-SAFE: Check both potential file states to ensure 'photo' isn't empty
   const fileToUpload = onboardingFile || previewFile;
-
   if (fileToUpload) {
-    // This MUST match the backend upload.single('photo')
     data.append('photo', fileToUpload);
     console.log("Appending file to upload:", fileToUpload.name);
   } else {
-    console.warn("No file detected in onboardingFile or previewFile state.");
+    console.warn("No file detected. Proceeding with text data only.");
   }
-  data.append('firstName', formData.firstName);
-  data.append('lastName', formData.lastName);
-  data.append('dob', formData.dob);
-  data.append('gender', formData.gender);
-  data.append('city', formData.city);
-  data.append('state', formData.state);
+  Object.keys(formData).forEach(key => {
+    if (formData[key]) {
+      data.append(key, formData[key]);
+    }
+  });
 
   try {
     const res = await fetch('/api/users/update-user-onboarding', {
@@ -542,9 +573,11 @@ const handleProfileSubmit = async (e) => {
     const result = await res.json();
 
     if (res.ok) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+
       if (setUserData) setUserData(result.user);
       
-      // 2. Clear UI states
+      // 4. Success Reset
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);
@@ -553,9 +586,14 @@ const handleProfileSubmit = async (e) => {
       console.log("Profile updated successfully:", result.user.photoUrl);
     } else {
       console.error("Server update failed:", result.message);
+      alert(result.message || "Initialization failed. Please check the form.");
     }
   } catch (err) {
     console.error("Profile initialization failed:", err);
+    alert("Network error. Please check your connection.");
+  } finally {
+    // 5. Always release the loading state regardless of outcome
+    setIsUploading(false);
   }
 };
 
@@ -702,10 +740,21 @@ const handleDownload = async (url, type) => {
 };
 
 const handleStartCall = async () => {
-  if (!agent?._id) return;
-  const token = localStorage.getItem('userToken'); 
+  if (!agent?._id || !userData?._id) return;
+  
+  const token = localStorage.getItem('userToken');
+  
+  // 1. UI Feedback: Immediately show the calling overlay
   setCallStatus('calling'); 
   
+  // 2. Local Timeout: If no response in 30s, cancel the UI state
+  const callTimeout = setTimeout(() => {
+    if (callStatus === 'calling' || callStatus === 'ringing') {
+      setCallStatus('idle');
+      // socket.emit("cancel-call", { to: agent._id }); // Optional: tell server to stop ringing
+    }
+  }, 30000);
+
   try {
     const res = await fetch('/api/calls/start', {
       method: 'POST',
@@ -720,21 +769,38 @@ const handleStartCall = async () => {
     });
     
     const data = await res.json();
+
     if (data.success) {
-      setActiveCall({ callId: data.callId });
-            socket.emit("call-user", {
+      // 3. Update activeCall with full details for the UI Overlay
+      setActiveCall({ 
+        callId: data.callId,
+        fromId: userData._id,
+        callerData: {
+          fromName: `${agent.firstName} ${agent.lastName}`,
+          photoUrl: agent.photoUrl
+        }
+      });
+
+      // 4. Signal the Agent via Sockets
+      socket.emit("call-user", {
         userToCall: agent._id,
-        fromId: userData?._id,
-        fromName: `${userData?.firstName} ${userData?.lastName}`,
+        fromId: userData._id,
+        fromName: `${userData.firstName} ${userData.lastName}`,
+        photoUrl: userData.photoUrl, // CRITICAL: So the agent sees who is calling
         callId: data.callId
       });
+
     } else {
+      clearTimeout(callTimeout);
       setCallStatus('idle');
-      alert("Agent is unavailable.");
+      // Check if data.message contains "busy" from your backend logic
+      alert(data.message || "Agent is currently on another call.");
     }
   } catch (err) {
+    clearTimeout(callTimeout);
     setCallStatus('idle');
-    console.error("Network Error:", err);
+    console.error("Call Initiation Error:", err);
+    alert("Connection failed. Check your network.");
   }
 };
 
@@ -1610,39 +1676,105 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   </div>
 )}
-
+{/* --- INCOMING CALL BANNER (Heads-up Notification) --- */}
 {callStatus === 'ringing' && isIncomingCall && (
-  <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4">
-    <div className="bg-[#1f2c33] w-full max-w-md rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center justify-between animate-in slide-in-from-top duration-300">
+  <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4 pointer-events-none">
+    <div className="bg-[#1f2c33] w-full max-w-md rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center justify-between animate-in slide-in-from-top duration-300 pointer-events-auto">
       <div className="flex items-center gap-3">
-        <img 
-          src={activeCaller?.photoUrl || '/default-avatar.png'} 
-          className="w-12 h-12 rounded-full object-cover border-2 border-green-500"
-          alt="caller"
-        />
-        <div>
-          <h3 className="text-white font-bold text-sm">{activeCaller?.fromName}</h3>
-          <p className="text-gray-400 text-xs animate-pulse">Incoming voice call...</p>
+        <div className="relative">
+          <img 
+            src={activeCall?.callerData?.photoUrl || agent?.photoUrl || '/default-avatar.png'} 
+            className="w-12 h-12 rounded-full object-cover border-2 border-green-500"
+            alt="caller"
+          />
+          <span className="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-[#1f2c33] animate-pulse" />
+        </div>
+        <div className="overflow-hidden">
+          <h3 className="text-white font-bold text-sm truncate">
+            {activeCall?.callerData?.fromName || agent?.firstName}
+          </h3>
+          <p className="text-gray-400 text-[11px] font-medium animate-pulse">Incoming secure call...</p>
         </div>
       </div>
       
-      <div className="flex gap-2">
+      <div className="flex gap-2 ml-4">
         <button 
           onClick={handleEndCall}
-          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+          className="bg-red-500 hover:bg-red-600 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90"
+          title="Decline"
         >
-          Decline
+          <BsTelephoneFill className="rotate-[135deg]" size={16} />
         </button>
         <button 
           onClick={handleAcceptCall}
-          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+          className="bg-green-500 hover:bg-green-600 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 shadow-lg shadow-green-500/20"
+          title="Answer"
         >
-          Answer
+          <BsTelephoneFill size={16} />
         </button>
       </div>
     </div>
   </div>
 )}
+
+
+{/* --- FULLSCREEN CALL INTERFACE (Active/Outgoing) --- */}
+{(callStatus === 'calling' || callStatus === 'connected') && (
+  <div className="fixed inset-0 z-[10000] bg-[#0b141a] flex flex-col items-center justify-between py-20 animate-in fade-in zoom-in duration-300">
+    {/* Caller Identity */}
+    <div className="flex flex-col items-center gap-6 mt-10">
+      <div className="relative">
+        <div className="w-32 h-32 rounded-full border-2 border-white/10 overflow-hidden shadow-2xl">
+          <img 
+            src={activeCall?.callerData?.photoUrl || agent?.photoUrl} 
+            className="w-full h-full object-cover" 
+            alt="Identity"
+          />
+        </div>
+        {callStatus === 'calling' && (
+          <div className="absolute inset-0 w-full h-full border-4 border-blue-500 rounded-full animate-ping opacity-20" />
+        )}
+      </div>
+
+      <div className="text-center space-y-2">
+        <h2 className="text-white text-3xl font-light">
+          {activeCall?.callerData?.fromName || agent?.firstName}
+        </h2>
+        <p className={`text-sm font-bold uppercase tracking-[0.3em] ${callStatus === 'connected' ? 'text-green-400' : 'text-gray-400'}`}>
+          {callStatus === 'calling' ? 'Calling...' : '00:05'}
+        </p>
+      </div>
+    </div>
+
+    {/* Call Controls */}
+    <div className="flex flex-col items-center gap-12 mb-10 w-full px-10">
+      <div className="flex items-center justify-around w-full max-w-xs text-white/60">
+        <button className="flex flex-col items-center gap-2 hover:text-white transition-colors">
+          <div className="p-4 rounded-full bg-white/5"><BsVolumeUpFill size={24}/></div>
+          <span className="text-[10px] font-bold uppercase">Speaker</span>
+        </button>
+        <button className="flex flex-col items-center gap-2 hover:text-white transition-colors">
+          <div className="p-4 rounded-full bg-white/5"><BsMicFill size={24}/></div>
+          <span className="text-[10px] font-bold uppercase">Mute</span>
+        </button>
+      </div>
+
+      <button 
+        onClick={handleEndCall} 
+        className="bg-red-500 w-20 h-20 rounded-full text-white flex items-center justify-center shadow-2xl shadow-red-500/40 hover:bg-red-600 transition-all active:scale-90"
+      >
+        <BsTelephoneFill className="rotate-[135deg]" size={32}/>
+      </button>
+    </div>
+
+    {/* Encryption Badge */}
+    <div className="flex items-center gap-2 text-white/30">
+      <BsShieldLockFill size={12} />
+      <span className="text-[9px] font-bold uppercase tracking-widest">End-to-End Encrypted</span>
+    </div>
+  </div>
+)}
+
     </div>
   );
 };
