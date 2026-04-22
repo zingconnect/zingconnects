@@ -36,10 +36,18 @@ const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 };
 
-export const authenticateToken = (req, res, next) => {
+export const authenticateToken = async (req, res, next) => { // 1. Added async here
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ message: "Access Denied" });
+  try {
+    await connectToDatabase(); 
+  } catch (connErr) {
+    return res.status(500).json({ 
+      message: "Database Connection Failed", 
+      details: connErr.message 
+    });
+  }
   jwt.verify(token, process.env.JWT_SECRET, async (err, decodedUser) => {
     if (err) {
       console.error("JWT ERROR REASON:", err.message); 
@@ -48,29 +56,28 @@ export const authenticateToken = (req, res, next) => {
     if (decodedUser.role === 'agent') {
       try {
         const AgentModel = getAgentModel();
+        // 3. This will now run instantly because connection is established above
         const agent = await AgentModel.findById(decodedUser.id).select('currentSessionId');
+        
         if (!agent || agent.currentSessionId !== decodedUser.sessionId) {
           return res.status(401).json({ 
             success: false, 
             message: "You have been logged out because a new login was detected on another device.",
-            forceLogout: true // Hint for frontend to clear localStorage
+            forceLogout: true 
           });
         }
-    } catch (dbErr) {
-  // Update this temporarily to see the real error message in the browser
-  return res.status(500).json({ 
-    message: "Internal Auth Error", 
-    details: dbErr.message,
-    stack: dbErr.stack 
-  });
-}
+      } catch (dbErr) {
+        return res.status(500).json({ 
+          message: "Internal Auth Error", 
+          details: dbErr.message 
+        });
+      }
     }
 
     req.user = decodedUser;
     next();
   });
 };
-
 // --- IDRIVE E2 CONFIG ---
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
