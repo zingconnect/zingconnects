@@ -45,6 +45,7 @@ export const AgentDashboard = () => {
   // --- STATE ---
   const messagesEndRef = useRef(null);
   const connectionRef = useRef();
+  const userStreamRef = useRef();
   const scrollRef = useRef(null);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
   const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
@@ -271,11 +272,23 @@ const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
   const token = localStorage.getItem('agentToken');
 
-  // PHASE 1: Initial network request
+  // 1. UI FEEDBACK: Immediately show "Calling..." in the chat thread
   setCallStatus('calling');
   setIsIncomingCall(false);
 
+  const tempCallMsg = {
+    _id: `temp-call-${Date.now()}`,
+    senderModel: 'Agent',
+    fileType: 'voice_call',
+    status: 'calling', // Matches the status logic in CallStatusMessage
+    createdAt: new Date().toISOString(),
+  };
+  
+  // Update local message state to show the center bubble
+  setMessages(prev => [...prev, tempCallMsg]);
+
   try {
+    // 2. NETWORK: Register call in DB
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: {
@@ -291,23 +304,50 @@ const handleStartCall = async (targetUserId) => {
     const dbCall = await res.json();
     if (!res.ok) throw new Error(dbCall.message);
 
-    // Save the call ID so the polling/socket knows which call to track
-    setActiveCall({ callId: dbCall.callId });
+    setActiveCall({ callId: dbCall.callId, toId: targetUserId });
 
-    // Emit socket to wake up the User's dashboard
-    socket.emit("call-user", {
-      userToCall: targetUserId,
-      fromId: agentData._id,
-      fromName: `${agentData.firstName} ${agentData.lastName}`,
-      callId: dbCall.callId
+    // 3. MEDIA: Access Mic and save to REF
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    
+    // FIX: This prevents the 'ReferenceError' by giving the ref a value
+    userStreamRef.current = stream; 
+
+    // 4. WEBRTC: Setup Peer connection
+    const peer = new Peer({
+      initiator: true,
+      trickle: false,
+      stream: stream,
     });
 
-    // WebRTC Setup...
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // ... rest of your Peer logic
+    peer.on('signal', (data) => {
+      // Send the 'signalData' (handshake) to the user via Socket
+      socket.emit("call-user", {
+        userToCall: targetUserId,
+        fromId: agentData._id,
+        fromName: `${agentData.firstName} ${agentData.lastName}`,
+        callId: dbCall.callId,
+        signalData: data 
+      });
+    });
+
+    peer.on('stream', (remoteStream) => {
+      // Play the user's audio when they pick up
+      const audio = new Audio();
+      audio.srcObject = remoteStream;
+      audio.play();
+    });
+
+    // Save the peer connection to ref for hangup logic
+    connectionRef.current = peer;
+
   } catch (err) {
     console.error("Call failed:", err);
     setCallStatus('idle');
+    
+    // UI Cleanup: Remove the call bubble if mic access fails
+    setMessages(prev => prev.filter(m => m._id !== tempCallMsg._id));
+    
+    alert("Microphone access is required to make calls.");
   }
 };
 
@@ -374,22 +414,35 @@ const handleAcceptCall = async () => {
 };
 
 const handleEndCall = () => {
-  const targetId = activeCaller?.fromId || selectedUser?._id;
+  const targetId = activeCall?.toId || activeCaller?.fromId || selectedUser?._id;
+  
+  // 1. Notify the other party via Socket
   if (targetId && socket) {
     socket.emit("end-call", { to: targetId });
   }
   
+  if (userStreamRef.current) {
+    userStreamRef.current.getTracks().forEach(track => track.stop());
+    userStreamRef.current = null; // Clear the reference
+  }
+
   if (connectionRef.current) {
     connectionRef.current.destroy();
     connectionRef.current = null;
   }
+  setMessages(prev => prev.map(m => 
+    m.fileType === 'voice_call' && (m.status === 'calling' || m.status === 'connected' || m.status === 'ringing')
+      ? { ...m, status: 'call ended' } 
+      : m
+  ));
 
-  // Reset all states
+  // 5. Reset UI States
   setCallStatus('idle');
   setIsIncomingCall(false);
+  setActiveCall(null);
   setActiveCaller(null);
   
-  // Stop the ringtone if it's still playing
+  // 6. Stop Ringtone
   if (ringtoneRef.current) {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
