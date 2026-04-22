@@ -1390,21 +1390,24 @@ const handleSendMessage = async (e) => {
           <div className="flex flex-col items-center gap-3 mt-4">
             <div className="flex items-center gap-2">
 <span className={`w-2 h-2 rounded-full ${
-  callStatus === 'connected' 
-    ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' 
-    : callStatus === 'ringing'
-      ? 'bg-blue-400 animate-ping shadow-[0_0_8px_#60a5fa]' // Ping for ringing
-      : 'bg-slate-500 animate-pulse' // Gray for calling/connecting
-}`}></span>
-             <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
-  {callStatus === 'calling' && "Calling..."} 
-  
-  {callStatus === 'ringing' && (isIncomingCall ? "Incoming Call..." : "Ringing...")}
-  
-  {callStatus === 'connecting' && "Establishing Connection..."}
-  {callStatus === 'connected' && "Line Encrypted"}
-</p>
-            </div>
+    callStatus === 'connected' 
+      ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' 
+      : (callStatus === 'ringing' || callStatus === 'connecting')
+        ? 'bg-blue-400 animate-ping shadow-[0_0_8px_#60a5fa]' 
+        : 'bg-slate-500 animate-pulse'
+  }`}></span>
+
+  <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
+    {/* Agent sees 'Ringing...' while waiting for the User to pick up */}
+    {callStatus === 'ringing' && "Ringing..."}
+    
+    {/* Brief state while WebRTC handshakes take place */}
+    {callStatus === 'connecting' && "Securing Line..."}
+    
+    {/* Final active state */}
+    {callStatus === 'connected' && "Line Encrypted"}
+  </p>
+</div>
             {callStatus === 'connected' && <span className="text-white/40 font-mono text-xs tracking-widest">00:05</span>}
           </div>
         </div>

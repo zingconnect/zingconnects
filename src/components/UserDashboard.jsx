@@ -151,21 +151,34 @@ useEffect(() => {
     return;
   }
 
+  // A "Lock" to prevent overlapping requests if the API takes > 3s to respond
+  let isFetching = false;
+
   const checkIncomingCalls = async () => {
+    if (isFetching) return;
+    isFetching = true;
+
     try {
       const response = await fetch('/api/calls/check-incoming', {
         headers: { 
           'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache' // Force fresh data
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
         }
       });
       
-      if (!response.ok) return;
+      if (!response.ok) {
+        // If 401, the token might be expired
+        if (response.status === 401) console.error("DEBUG: Token invalid or expired");
+        return;
+      }
+
       const data = await response.json();
 
       if (data.hasIncomingCall) {
-        console.log("DEBUG: 🔍 Polling check - Incoming Call Found:", data.callId);
-                if (callStatus === 'idle' || (activeCall && activeCall.callId !== data.callId)) {
+        // Only update if we aren't already ringing for THIS specific call
+        if (callStatus !== 'ringing' && callStatus !== 'connected') {
+          console.log("DEBUG: 🔍 Incoming Call Found:", data.callId);
           setActiveCall({
             callId: data.callId,
             callerName: data.callerData.fromName,
@@ -173,25 +186,35 @@ useEffect(() => {
             callerData: data.callerData 
           });
           setCallStatus('ringing');
-          console.log("DEBUG: ✅ UI set to RINGING via Polling");
+          console.log("DEBUG: ✅ UI set to RINGING");
         }
       } 
-      else if (!data.hasIncomingCall && (callStatus === 'ringing' || callStatus === 'connecting')) {
-        console.log("DEBUG: 📴 Polling check - No call active in DB. Resetting UI.");
-        setCallStatus('idle');
-        setActiveCall(null);
+      else {
+        // If the API says false, but our UI is ringing, the caller hung up
+        if (callStatus === 'ringing' || callStatus === 'connecting') {
+          console.log("DEBUG: 📴 Caller hung up. Resetting UI.");
+          setCallStatus('idle');
+          setActiveCall(null);
+        }
       }
     } catch (err) {
-      console.warn("DEBUG: ❌ Polling check failed:", err.message);
+      console.warn("DEBUG: ❌ Polling failed:", err.message);
+    } finally {
+      isFetching = false;
     }
   };
 
-  // Run immediately then every 3 seconds
+  // Run initial check
   checkIncomingCalls(); 
+
+  // Poll every 3 seconds
   const callInterval = setInterval(checkIncomingCalls, 3000); 
   
-  return () => clearInterval(callInterval);
-}, [callStatus, activeCall?.callId]);
+  return () => {
+    console.log("DEBUG: Cleaning up polling interval");
+    clearInterval(callInterval);
+  };
+}, [callStatus]); // Only re-run if callStatus changes (e.g., from idle to ringing)
 
 
 useEffect(() => {
