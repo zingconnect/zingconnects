@@ -155,36 +155,73 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-// Store the io instance globally or attach to app
+
 let ioInstance; 
 
 io.on("connection", (socket) => {
-  console.log("Connection established:", socket.id);
+  console.log("Socket Connected:", socket.id);
+
+  /**
+   * 1. Room Management
+   * Every user (Agent or User) joins a room named after their Database ID.
+   * This allows us to target them specifically using io.to(userId).
+   */
   socket.on("join-main-room", (userId) => {
     socket.join(userId);
-    console.log(`Agent ${userId} is now reachable in private room.`);
+    console.log(`Connection ${socket.id} joined room: ${userId}`);
   });
+
+  /**
+   * 2. Initiate Call (WhatsApp: "Calling...")
+   * Triggered by either the Agent or User when clicking the Call button.
+   */
+  socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
+    // Relay the signal to the target user/agent
+    io.to(userToCall).emit("incoming-call", { 
+      signal: signalData, 
+      fromId, 
+      fromName, 
+      callId 
+    });
+  });
+
+  /**
+   * 3. Acknowledge Receipt (WhatsApp: "Ringing...")
+   * Triggered automatically by the Receiver's device as soon as it gets 'incoming-call'.
+   */
+  socket.on("confirm-ringing", ({ to }) => {
+    // 'to' is the ID of the person who started the call
+    io.to(to).emit("user-is-ringing");
+  });
+
+  /**
+   * 4. Answer Call
+   * Triggered when the Receiver clicks the green 'Accept' button.
+   */
+  socket.on("answer-call", (data) => {
+    // data.to is the Caller's ID
+    io.to(data.to).emit("call-accepted", data.signal);
+  });
+
+  /**
+   * 5. End/Reject Call
+   * Triggered by either side to stop the ringing or hang up an active call.
+   */
+  socket.on("end-call", ({ to }) => {
+    io.to(to).emit("call-ended");
+  });
+
+  /**
+   * 6. Force Logout (Management)
+   */
   socket.on("request-force-logout", (userId) => {
     socket.to(userId).emit("force-logout", {
       message: "Session terminated by server request."
     });
   });
-  socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
-    io.to(userToCall).emit("incoming-call", { 
-      signal: signalData, fromId, fromName, callId 
-    });
-  });
-
-  socket.on("answer-call", (data) => {
-    io.to(data.to).emit("call-accepted", data.signal);
-  });
-
-  socket.on("end-call", ({ to }) => {
-    io.to(to).emit("call-ended");
-  });
 
   socket.on("disconnect", () => {
-    console.log("A session disconnected:", socket.id);
+    console.log("Socket disconnected:", socket.id);
   });
 });
 
@@ -1521,7 +1558,7 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
       callerModel: callerModel,
       receiver: receiverId,
       receiverModel: finalReceiverModel,
-      status: 'ringing'
+      status: 'calling'
     });
 
     await newCall.save();

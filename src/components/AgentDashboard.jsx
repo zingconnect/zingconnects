@@ -173,28 +173,28 @@ useEffect(() => {
 useEffect(() => {
   if (socket && agentData?._id) {
     socket.emit("join-main-room", agentData._id);
-
     socket.on("incoming-call", (data) => {
+      console.log("Incoming call from:", data.fromName);
       socket.emit("confirm-ringing", { to: data.fromId });
       setActiveCaller(data); 
       setIsIncomingCall(true);
-      setCallStatus('ringing');
+      setCallStatus('ringing'); // This triggers the ringtone and overlay
     });
     socket.on("user-is-ringing", () => {
+      console.log("Remote user device is now ringing");
       if (callStatus === 'calling') {
-        setCallStatus('ringing');
+        setCallStatus('ringing'); // Switches UI from "Calling..." to "Ringing..."
       }
     });
-
-    socket.on("call-accepted", () => {
+    socket.on("call-accepted", (signal) => {
+      console.log("Call accepted by remote user");
+      if (connectionRef.current && signal) {
+        connectionRef.current.signal(signal);
+      }
       setCallStatus('connected');
     });
-
     socket.on("call-ended", () => {
-      if (connectionRef.current) connectionRef.current.destroy();
-      setCallStatus('idle');
-      setIsIncomingCall(false);
-      setActiveCaller(null);
+      handleEndCall(); // Use your existing cleanup function
     });
 
     return () => {
@@ -204,7 +204,7 @@ useEffect(() => {
       socket.off("call-ended");
     };
   }
-}, [agentData, socket, callStatus]);
+}, [agentData, socket, callStatus]); // Added callStatus to dependencies
 
 useEffect(() => {
   const token = localStorage.getItem('agentToken');
@@ -345,24 +345,28 @@ const handleAcceptCall = async () => {
     console.error("Failed to accept call:", err);
   }
 };
+
 const handleEndCall = () => {
   const targetId = activeCaller?.fromId || selectedUser?._id;
-  if (targetId) {
+  if (targetId && socket) {
     socket.emit("end-call", { to: targetId });
   }
+  
   if (connectionRef.current) {
-    connectionRef.current.destroy(); 
+    connectionRef.current.destroy();
     connectionRef.current = null;
   }
-  navigator.mediaDevices.getUserMedia({ audio: true })
-    .then(stream => {
-      stream.getTracks().forEach(track => track.stop());
-    })
-    .catch(() => {}); // Silently fail if no stream exists
 
+  // Reset all states
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCaller(null);
+  
+  // Stop the ringtone if it's still playing
+  if (ringtoneRef.current) {
+    ringtoneRef.current.pause();
+    ringtoneRef.current.currentTime = 0;
+  }
 };
 
 useEffect(() => {
@@ -1383,14 +1387,21 @@ const handleSendMessage = async (e) => {
 
           <div className="flex flex-col items-center gap-3 mt-4">
             <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${
-                callStatus === 'connected' ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' : 'bg-blue-500 animate-bounce shadow-[0_0_8px_#3b82f6]'
-              }`}></span>
-              <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
-                {callStatus === 'ringing' && "Ringing Source..."}
-                {callStatus === 'connecting' && "Establishing Connection..."}
-                {callStatus === 'connected' && "Line Encrypted"}
-              </p>
+<span className={`w-2 h-2 rounded-full ${
+  callStatus === 'connected' 
+    ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' 
+    : callStatus === 'ringing'
+      ? 'bg-blue-400 animate-ping shadow-[0_0_8px_#60a5fa]' // Ping for ringing
+      : 'bg-slate-500 animate-pulse' // Gray for calling/connecting
+}`}></span>
+             <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
+  {callStatus === 'calling' && "Calling..."} 
+  
+  {callStatus === 'ringing' && (isIncomingCall ? "Incoming Call..." : "Ringing...")}
+  
+  {callStatus === 'connecting' && "Establishing Connection..."}
+  {callStatus === 'connected' && "Line Encrypted"}
+</p>
             </div>
             {callStatus === 'connected' && <span className="text-white/40 font-mono text-xs tracking-widest">00:05</span>}
           </div>
@@ -1405,7 +1416,9 @@ const handleSendMessage = async (e) => {
                 <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95">
                   <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
                 </button>
-                <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">Decline</span>
+              <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">
+  {callStatus === 'connected' ? 'End Call' : 'Cancel'}
+</span>
               </div>
               {/* Accept */}
               <div className="flex flex-col items-center gap-2">
