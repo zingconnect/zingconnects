@@ -65,7 +65,7 @@ const [limit, setLimit] = useState(30); // Start with 30 messages
 const [isInitialLoad, setIsInitialLoad] = useState(true);
 const [connectionStatus, setConnectionStatus] = useState('online');
 
-// Add these to your component states
+const [activeCall, setActiveCall] = useState(null);
 const [callStatus, setCallStatus] = useState('idle'); // idle, ringing, connecting, connected, ended
 const [isIncomingCall, setIsIncomingCall] = useState(false);
 const [activeCaller, setActiveCaller] = useState(null);
@@ -170,22 +170,25 @@ useEffect(() => {
   };
 }, [callStatus, isIncomingCall]);
 
+// --- EFFECT: Socket Listeners ---
 useEffect(() => {
   if (!socket || !agentData?._id) return;
   socket.emit("join-main-room", agentData._id);
 
   const onIncoming = (data) => {
-    // When an incoming call is detected via Socket
+    // Handshake: Tell the sender we are ringing
     socket.emit("confirm-ringing", { to: data.fromId });
-    setActiveCaller(data); 
-    setIsIncomingCall(true);
-    setCallStatus('ringing');
+    
+    if (callStatus === 'idle') {
+      setActiveCaller(data);
+      setActiveCall({ callId: data.callId }); 
+      setIsIncomingCall(true);
+      setCallStatus('ringing');
+    }
   };
-
   const onUserRinging = () => {
-    // WHATSAPP LOGIC: Update UI from "Calling..." to "Ringing..." 
-    // when the receiver's socket confirms receipt
-    setCallStatus(current => current === 'calling' ? 'ringing' : current);
+    // WHATSAPP LOGIC: Change "Calling..." to "Ringing..."
+    setCallStatus(prev => (prev === 'calling' ? 'ringing' : prev));
   };
 
   socket.on("incoming-call", onIncoming);
@@ -197,10 +200,10 @@ useEffect(() => {
   socket.on("call-ended", handleEndCall);
 
   return () => {
-    socket.off("incoming-call", onIncoming);
-    socket.off("user-is-ringing", onUserRinging);
+    socket.off("incoming-call");
+    socket.off("user-is-ringing");
     socket.off("call-accepted");
-    socket.off("call-ended", handleEndCall);
+    socket.off("call-ended");
   };
 }, [agentData?._id, socket]);
 
@@ -208,40 +211,39 @@ useEffect(() => {
   const token = localStorage.getItem('agentToken');
   if (!token) return;
 
-  const syncCallStatus = async () => {
-    // Case A: Waiting for Incoming Calls
-    if (callStatus === 'idle') {
-      try {
-        const response = await fetch('/api/calls/check-incoming', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (data.hasIncomingCall) {
-          setIsIncomingCall(true);
-          setActiveCaller(data.callerData); 
-          setActiveCall({ callId: data.callId });
-          setCallStatus('ringing'); // Receiver moves straight to ringing
-        }
-      } catch (err) { console.error("Poll Error:", err); }
-    }
-
-    // Case B: WhatsApp Logic - Watch if our Outgoing 'calling' becomes 'ringing'
+  const syncStatus = async () => {
+    // Only poll for status if we are currently trying to reach someone
     if (callStatus === 'calling' && activeCall?.callId) {
       try {
-        const response = await fetch(`/api/calls/status/${activeCall.callId}`, {
+        const res = await fetch(`/api/calls/status/${activeCall.callId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        const data = await response.json();
-        if (data.status === 'ringing') {
-          setCallStatus('ringing'); // Promote UI to "Ringing..."
+        const data = await res.json();
+        if (data.status === 'ringing') setCallStatus('ringing');
+      } catch (e) { console.warn("Status poll failed"); }
+    }
+
+    // Standard Incoming Call Check
+    if (callStatus === 'idle') {
+      try {
+        const res = await fetch('/api/calls/check-incoming', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.hasIncomingCall) {
+          setActiveCaller(data.callerData);
+          setActiveCall({ callId: data.callId });
+          setIsIncomingCall(true);
+          setCallStatus('ringing');
         }
-      } catch (err) { console.warn("Status check failed"); }
+      } catch (e) { console.error(e); }
     }
   };
 
-  const interval = setInterval(syncCallStatus, 3000);
+  const interval = setInterval(syncStatus, 3000);
   return () => clearInterval(interval);
 }, [callStatus, activeCall?.callId]);
+
 
  useEffect(() => {
   if (messagesEndRef.current) {
@@ -267,14 +269,13 @@ useEffect(() => {
 
 const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
+  const token = localStorage.getItem('agentToken');
+
+  // PHASE 1: Initial network request
+  setCallStatus('calling');
+  setIsIncomingCall(false);
 
   try {
-    const token = localStorage.getItem('agentToken');
-    
-    // Set status to CALLING initially (Network is connecting)
-    setCallStatus('calling'); 
-    setIsIncomingCall(false);
-
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: {
@@ -290,34 +291,23 @@ const handleStartCall = async (targetUserId) => {
     const dbCall = await res.json();
     if (!res.ok) throw new Error(dbCall.message);
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream: stream
+    // Save the call ID so the polling/socket knows which call to track
+    setActiveCall({ callId: dbCall.callId });
+
+    // Emit socket to wake up the User's dashboard
+    socket.emit("call-user", {
+      userToCall: targetUserId,
+      fromId: agentData._id,
+      fromName: `${agentData.firstName} ${agentData.lastName}`,
+      callId: dbCall.callId
     });
 
-    peer.on('signal', (data) => {
-      socket.emit("call-user", {
-        userToCall: targetUserId,
-        signalData: data,
-        fromId: agentData._id,
-        fromName: `${agentData.firstName} ${agentData.lastName}`,
-        callId: dbCall.callId
-      });
-    });
-
-    peer.on('stream', (remoteStream) => {
-      const audio = document.createElement('audio');
-      audio.srcObject = remoteStream;
-      audio.play();
-    });
-
-    connectionRef.current = peer;
+    // WebRTC Setup...
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // ... rest of your Peer logic
   } catch (err) {
-    console.error("Call initialization failed:", err);
+    console.error("Call failed:", err);
     setCallStatus('idle');
-    alert("Call failed: " + err.message);
   }
 };
 
