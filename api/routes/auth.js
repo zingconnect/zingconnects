@@ -8,7 +8,6 @@ import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
 import path from 'path';
 import fs from 'fs';
-import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
