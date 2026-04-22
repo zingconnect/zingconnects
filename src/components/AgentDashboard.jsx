@@ -1651,7 +1651,6 @@ const handleSendMessage = async (e) => {
   </div>
 )}
 
-// Add this inside your return() at the very top level
 {callStatus === 'ringing' && isIncomingCall && (
   <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4">
     <div className="bg-[#1f2c33] w-full max-w-md rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center justify-between animate-in slide-in-from-top duration-300">
