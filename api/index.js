@@ -1581,19 +1581,14 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    // LOG EVERYTHING ABOUT THE USER FROM THE TOKEN
     console.log("DEBUG: Full req.user object:", JSON.stringify(req.user));
-    
     const rawId = req.user.id || req.user._id || req.user.userId;
     console.log("DEBUG: extracted rawId:", rawId);
 
     if (!rawId) {
       return res.status(401).json({ hasIncomingCall: false, message: "Token missing ID" });
     }
-
     const myObjectId = new mongoose.Types.ObjectId(rawId);
-
     const allCallsForMe = await Call.find({ receiver: myObjectId });
     console.log(`DEBUG: Total calls found for this ID in DB: ${allCallsForMe.length}`);
 
@@ -1603,10 +1598,7 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     })
     .sort({ createdAt: -1 })
     .populate('caller', 'firstName lastName photoUrl');
-
-    // PREVENT CACHE
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-
     if (!incoming) {
       console.log("DEBUG: No 'ringing' call found for ID:", rawId);
       return res.json({ hasIncomingCall: false });
