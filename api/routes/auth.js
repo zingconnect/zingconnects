@@ -863,12 +863,13 @@ const AgentModel = getAgentModel();
 
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
-    const { firstName, lastName, dob, gender, city, state } = req.body;
+    const { firstName, lastName, dob, gender, city, state, phone } = req.body;
     
     const updateData = {
       firstName,
       lastName,
       dob,
+      phone,
       gender,
       city,
       state,

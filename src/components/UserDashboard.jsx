@@ -17,6 +17,8 @@ import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
 import { BsReplyFill } from "react-icons/bs";
+import PhoneInput from 'react-phone-input-2';
+import 'react-phone-input-2/lib/style.css';
 import { 
   BsTelephoneFill, 
   BsPlusLg, 
@@ -116,6 +118,7 @@ export const UserDashboard = () => {
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
+    phone:'',
     dob: '',
     gender: '',
     city: '',
@@ -632,18 +635,26 @@ const handleSendWithPreview = async () => {
 };
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
+  
+  // Basic validation for the new phone field
+  if (!formData.phone || formData.phone.length < 10) {
+    alert("Please enter a valid phone number with country code.");
+    return;
+  }
+
   setIsUploading(true); 
   const token = localStorage.getItem('userToken');
   const data = new FormData();
+  
+  // 1. Handle File logic
   const fileToUpload = onboardingFile || previewFile;
   if (fileToUpload) {
     data.append('photo', fileToUpload);
-    console.log("Appending file to upload:", fileToUpload.name);
-  } else {
-    console.warn("No file detected. Proceeding with text data only.");
   }
+
+  // 2. Automatically appends firstName, lastName, phone, dob, gender, city, state
   Object.keys(formData).forEach(key => {
-    if (formData[key]) {
+    if (formData[key] !== undefined && formData[key] !== null) {
       data.append(key, formData[key]);
     }
   });
@@ -664,22 +675,20 @@ const handleProfileSubmit = async (e) => {
 
       if (setUserData) setUserData(result.user);
       
-      // 4. Success Reset
+      // 3. Success Reset
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);
       setPreviewUrl(null);
       
-      console.log("Profile updated successfully:", result.user.photoUrl);
+      console.log("Profile updated successfully. Phone saved:", result.user.phone);
     } else {
-      console.error("Server update failed:", result.message);
       alert(result.message || "Initialization failed. Please check the form.");
     }
   } catch (err) {
     console.error("Profile initialization failed:", err);
     alert("Network error. Please check your connection.");
   } finally {
-    // 5. Always release the loading state regardless of outcome
     setIsUploading(false);
   }
 };
@@ -1137,97 +1146,88 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       </aside>
 
 
-      {/* --- ONBOARDING OVERLAY --- */}
-      {showOnboarding && (
-        <div className="absolute inset-0 z-[100] bg-white flex flex-col items-center justify-center p-4 md:p-8 animate-in fade-in zoom-in duration-300">
-          <div className="w-full max-w-sm md:max-w-md space-y-4 md:space-y-6">
-            <div className="text-center space-y-1">
-              <h2 className="text-lg md:text-2xl font-black text-blue-900 uppercase leading-none">Initialize Profile</h2>
-              <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-[0.15em]">Secure verification required</p>
-            </div>
+    {/* --- ONBOARDING OVERLAY --- */}
+{showOnboarding && (
+  <div className="absolute inset-0 z-[100] bg-white flex flex-col items-center justify-center p-4 md:p-8 animate-in fade-in zoom-in duration-300">
+    <div className="w-full max-w-sm md:max-w-md space-y-4 md:space-y-6">
+      <div className="text-center space-y-1">
+        <h2 className="text-lg md:text-2xl font-black text-blue-900 uppercase leading-none">Initialize Profile</h2>
+        <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-[0.15em]">Secure verification required</p>
+      </div>
 
-           <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
+      <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
+        {/* Profile Photo Section remains same */}
         <div className="flex flex-col items-center mb-4">
-          {/* FIX: This input now uses the updated handleFileChange 
-              which checks 'showOnboarding' to decide where to save the file.
-          */}
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
-            accept="image/*" 
-            className="hidden" 
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+          <div onClick={handlePhotoClick} className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden">
+            {previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <BsCameraFill size={20} />}
+            {!previewUrl && <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>}
+          </div>
+        </div>
+
+        {/* First & Last Name */}
+        <div className="grid grid-cols-2 gap-2 md:gap-4">
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">First Name</label>
+            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="First" onChange={e => setFormData({...formData, firstName: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Last Name</label>
+            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="Last" onChange={e => setFormData({...formData, lastName: e.target.value})} />
+          </div>
+        </div>
+
+        {/* --- NEW: PHONE NUMBER FIELD --- */}
+        <div className="space-y-1">
+          <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Phone Number</label>
+          <PhoneInput
+            country={'ng'} // Default to Nigeria
+            value={formData.phone}
+            onChange={phone => setFormData({ ...formData, phone })}
+            containerClass="phone-container"
+            inputClass="!w-full !bg-gray-50 !border-gray-100 !h-auto !py-6 !rounded-xl !text-xs md:!text-sm !outline-none"
+            buttonClass="!bg-transparent !border-none !rounded-l-xl"
+            dropdownClass="!rounded-xl !shadow-xl"
+            placeholder="Enter phone number"
           />
-          <div 
-            onClick={handlePhotoClick} 
-            className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden"
-          >
-             {/* Uses previewUrl for visual feedback without triggering the chat preview overlay */}
-             {previewUrl ? (
-               <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
-             ) : (
-               <BsCameraFill size={20} />
-             )}
-             
-             {!previewUrl && (
-               <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">
-                 Add Photo
-               </span>
-             )}
+        </div>
+
+        {/* Date of Birth & Gender */}
+        <div className="grid grid-cols-2 gap-2 md:gap-4">
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Date of Birth</label>
+            <input required type="date" className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" onChange={e => setFormData({...formData, dob: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Gender</label>
+            <select required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none appearance-none" onChange={e => setFormData({...formData, gender: e.target.value})} value={formData.gender}>
+              <option value="" disabled>Select</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
           </div>
         </div>
 
-              <div className="grid grid-cols-2 gap-2 md:gap-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">First Name</label>
-                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="First" onChange={e => setFormData({...formData, firstName: e.target.value})} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Last Name</label>
-                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="Last" onChange={e => setFormData({...formData, lastName: e.target.value})} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 md:gap-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Date of Birth</label>
-                  <input required type="date" className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" onChange={e => setFormData({...formData, dob: e.target.value})} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Gender</label>
-                  <select 
-                    required 
-                    className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none appearance-none"
-                    onChange={e => setFormData({...formData, gender: e.target.value})}
-                    value={formData.gender}
-                  >
-                    <option value="" disabled>Select</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 md:gap-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">City</label>
-                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="City" onChange={e => setFormData({...formData, city: e.target.value})} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">State</label>
-                  <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="State" onChange={e => setFormData({...formData, state: e.target.value})} />
-                </div>
-              </div>
-
-              <button type="submit" className="w-full bg-blue-600 text-white p-3 md:p-4 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-100 mt-2">
-                Launch Dashboard
-              </button>
-            </form>
+        {/* City & State */}
+        <div className="grid grid-cols-2 gap-2 md:gap-4">
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">City</label>
+            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="City" onChange={e => setFormData({...formData, city: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">State</label>
+            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="State" onChange={e => setFormData({...formData, state: e.target.value})} />
           </div>
         </div>
-      )}
 
+        <button type="submit" className="w-full bg-blue-600 text-white p-3 md:p-4 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-100 mt-2">
+          Launch Dashboard
+        </button>
+      </form>
+    </div>
+  </div>
+)}
       {/* --- MAIN INTERFACE --- */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-[55px] md:h-[65px] bg-[#f0f2f5] px-3 md:px-6 flex justify-between items-center z-20 border-b border-gray-200 shadow-sm">

@@ -7,15 +7,15 @@ const plans = [
   {
     tier: 'BASIC',
     term: '1 Month',
-    price: '15',
+    price: '10,500', // Updated Price
     frequency: '/mo',
     popular: false,
-    features: ['Instant Link', 'Unlimited Chats', 'Dashboard'],
+    features: ['Instant Link', 'Unlimited Chats', '24/7 Support'],
   },
   {
     tier: 'GROWTH',
     term: '6 Months',
-    price: '45',
+    price: '55,500', // Updated Price
     frequency: '',
     popular: true,
     features: ['All Basic', 'Priority Routing', '24/7 Support'],
@@ -23,7 +23,7 @@ const plans = [
   {
     tier: 'PROFESSIONAL',
     term: '1 Year',
-    price: '110',
+    price: '120,000', // Updated Price
     frequency: '',
     popular: false,
     features: ['All Growth', 'Voice Changer', 'Analytics'],
@@ -54,7 +54,7 @@ const handleSelectPlan = () => {
         <span className="text-gray-400 font-bold tracking-wider text-[10px] mb-1">{plan.tier}</span>
         <span className="text-2xl md:text-3xl font-extrabold text-blue-950 mb-2">{plan.term}</span>
         <div className="flex items-end text-blue-950">
-          <span className="text-3xl md:text-5xl font-black tracking-tight">${plan.price}</span>
+          <span className="text-3xl md:text-5xl font-black tracking-tight">₦{plan.price}</span>
           {plan.frequency && <span className="text-sm md:text-lg font-medium text-gray-500 ml-1 mb-1">{plan.frequency}</span>}
         </div>
       </div>

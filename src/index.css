@@ -39,3 +39,15 @@ button {
   height: 100vh; /* Fallback */
   height: 100dvh; /* Dynamic viewport height for mobile */
 }
+
+/* Styling for the Phone Input to match your gray-50 theme */
+.phone-container .form-control {
+  width: 100% !important;
+  font-family: inherit !important;
+  border: 1px solid #f3f4f6 !important; /* gray-100 */
+}
+
+.phone-container .selected-flag {
+  background: transparent !important;
+  padding-left: 12px !important;
+}

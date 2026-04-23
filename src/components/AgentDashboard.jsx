@@ -83,32 +83,33 @@ const [previewFile, setPreviewFile] = useState(null); // The actual file object
 const [previewUrl, setPreviewUrl] = useState(null);   // The local blob for <img> src
 const [caption, setCaption] = useState("");          // The text to send with the image
 
-  const plans = [
-    {
-      tier: 'BASIC',
-      term: '1 Month',
-      price: 15,
-      frequency: '/mo',
-      popular: false,
-      features: ['Instant Link', 'Unlimited Chats', 'Dashboard'],
-    },
-    {
-      tier: 'GROWTH',
-      term: '6 Months',
-      price: 45,
-      frequency: '',
-      popular: true,
-      features: ['All Basic', 'Priority Routing', '24/7 Support'],
-    },
-    {
-      tier: 'PROFESSIONAL',
-      term: '1 Year',
-      price: 110,
-      frequency: '',
-      popular: false,
-      features: ['All Growth', 'Voice Changer', 'Analytics'],
-    },
-  ];
+ 
+const plans = [
+  {
+    tier: 'BASIC',
+    term: '1 Month',
+    price: '10,500', // Updated Price
+    frequency: '/mo',
+    popular: false,
+    features: ['Instant Link', 'Unlimited Chats', '24/7 Support'],
+  },
+  {
+    tier: 'GROWTH',
+    term: '6 Months',
+    price: '55,500', // Updated Price
+    frequency: '',
+    popular: true,
+    features: ['All Basic', 'Priority Routing', '24/7 Support'],
+  },
+  {
+    tier: 'PROFESSIONAL',
+    term: '1 Year',
+    price: '120,000', // Updated Price
+    frequency: '',
+    popular: false,
+    features: ['All Growth', 'Voice Changer', 'Analytics'],
+  },
+];
 
  const getStatusIcon = (status) => {
   switch (status) {
@@ -1194,7 +1195,7 @@ const handleSendMessage = async (e) => {
           Activation Successful!
         </h1>
         <p className="text-sm md:text-lg font-medium opacity-90 text-center max-w-xs mb-8">
-          Your <strong>{selectedPlan}</strong> plan ($ {plans.find(p => p.tier === selectedPlan)?.price}) has been activated. Your users can now connect to your secure node.
+          Your <strong>{selectedPlan}</strong> plan (₦ {plans.find(p => p.tier === selectedPlan)?.price}) has been activated. Your users can now connect to your secure node.
         </p>
         <div className="flex flex-col items-center gap-4 w-full max-w-xs">
           <button 
@@ -1248,7 +1249,7 @@ const handleSendMessage = async (e) => {
                         {selectedPlan === plan.tier && <BsCheckCircleFill className="text-blue-600" size={16} />}
                       </div>
                       <div className="text-xl md:text-2xl font-black text-gray-900 leading-none">
-                        ${plan.price}
+                        ₦{plan.price}
                         <span className="text-[10px] font-normal text-gray-400 ml-1">{plan.frequency}</span>
                       </div>
                       <p className="text-[10px] font-bold text-gray-400 uppercase mt-1 tracking-tight">{plan.term}</p>
@@ -1268,7 +1269,7 @@ const handleSendMessage = async (e) => {
                   <span className="text-xs md:text-sm font-bold uppercase tracking-wide">Summary & Checkout</span>
                 </div>
                 <p className="text-[11px] md:text-sm text-gray-500 mb-6 leading-relaxed">
-                  Activating <strong>{selectedPlan}</strong> access for <strong>${plans.find(p => p.tier === selectedPlan)?.price}</strong>. 
+                  Activating <strong>{selectedPlan}</strong> access for <strong>₦{plans.find(p => p.tier === selectedPlan)?.price}</strong>. 
                 </p>
                 <button 
                   disabled={paymentProcessing}

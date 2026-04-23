@@ -839,10 +839,12 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
   try {
     // Ensure DB connection
     await connectToDatabase();
-    const { firstName, lastName, dob, gender, city, state } = req.body;
+    const { firstName, lastName, dob, gender, city, state, phone } = req.body;
+
     const updateData = {
       firstName,
       lastName,
+      phone, // New field saved here
       dob,
       gender,
       city,
@@ -868,6 +870,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       
       console.log(`[Storage] Photo uploaded for user: ${req.user.id} with key: ${fileKey}`);
     }
+
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
       updateData,
@@ -880,8 +883,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
         message: "User account not found" 
       });
     }
-
-    // 5. Final Response
     res.json({ 
       success: true, 
       message: "Onboarding complete", 
@@ -1051,7 +1052,6 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
     rate: FIXED_RATE // Returning the static rate used
   });
 });
-
 // --- Payment Verification Route ---
 app.post('/api/subscriptions/verify', async (req, res) => {
   try {
@@ -1070,26 +1070,22 @@ app.post('/api/subscriptions/verify', async (req, res) => {
       return res.status(403).json({ message: "Session expired" });
     }
 
-    const { transaction_id, plan, usdAmount } = req.body;
+    // Now receiving ngnAmount directly from the client/frontend
+    const { transaction_id, plan, ngnAmount } = req.body;
 
     if (!transaction_id) {
       return res.status(400).json({ message: "Transaction ID is required" });
     }
 
-    // --- USE FIXED RATE FROM ENV ---
-    const currentRate = Number(process.env.USD_TO_NGN_RATE) || 1550;
-
+    // Verify transaction with Flutterwave
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
     
-    // Calculate expected amount based on your fixed rate
-    const expectedNaira = usdAmount * currentRate;
-    const margin = 0.98; // Allows for 2% variance just in case
-
+    // Strict Verification: Match status, currency, and the exact Naira price
     if (
       data.status === "successful" &&
       data.currency === "NGN" &&
-      data.amount >= (expectedNaira * margin)
+      Number(data.amount) >= Number(ngnAmount)
     ) {
       
       const now = new Date();
@@ -1110,31 +1106,30 @@ app.post('/api/subscriptions/verify', async (req, res) => {
             isSubscribed: true,
             plan: plan,
             subscriptionDate: now,
-            subscriptionAmount: usdAmount,
             expiryDate: expiry, 
             expiryNotificationSent: false,
             lastTransactionId: transaction_id,
             paymentDetails: {
               amountNgn: data.amount,
-              rateUsed: currentRate, // Log the fixed rate used at time of purchase
-              currency: "NGN"
+              currency: "NGN",
+              verifiedAt: now
             }
           }
         },
         { new: true }
       ).select('-password');
 
-      console.log(`Subscription ACTIVATED at FIXED RATE (${currentRate}) for: ${updatedAgent.email}`);
+      console.log(`Subscription ACTIVATED for: ${updatedAgent.email} | Amount: ₦${data.amount}`);
 
       return res.json({
         success: true,
-        message: "Payment verified at platform rate. Secure node activated.",
+        message: "Payment verified successfully. Secure node activated.",
         agent: updatedAgent
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: "Payment verification failed. Amount does not match platform rate."
+        message: "Payment verification failed. Invalid amount or currency."
       });
     }
 
@@ -1143,6 +1138,7 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -1687,14 +1683,14 @@ app.post('/api/calls/accept', authenticateToken, async (req, res) => {
     ).populate('caller', 'firstName lastName photoUrl');
 
     if (!call) {
-      console.log(`❌ Accept Failed: No active call for user ${myId}`);
+      console.log(`Accept Failed: No active call for user ${myId}`);
       return res.status(404).json({ 
         success: false, 
         message: "No active call attempt found." 
       });
     }
 
-    console.log(`✅ Call Connected: ${call._id} (Receiver: ${myId})`);
+    console.log(`Call Connected: ${call._id} (Receiver: ${myId})`);
 
     res.json({ 
       success: true, 

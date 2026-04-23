@@ -58,6 +58,10 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  phone: {
+    type: String,
+    trim: true
+  },
   lastActive: { 
     type: Date, 
     default: Date.now 
