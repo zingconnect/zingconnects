@@ -1185,7 +1185,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     Phone Number
   </label>
   <PhoneInput
-    country={'ng'}
+    country={'us'}
     value={formData.phone || ''} 
     onChange={phone => setFormData({ ...formData, phone })}
     containerClass="phone-container"
