@@ -320,13 +320,13 @@ const handleStartCall = async (targetUserId) => {
     });
 
     peer.on('signal', (data) => {
-      // Send the 'signalData' (handshake) to the user via Socket
+      console.log("Agent sending signal to User...");
       socket.emit("call-user", {
         userToCall: targetUserId,
         fromId: agentData._id,
         fromName: `${agentData.firstName} ${agentData.lastName}`,
         callId: dbCall.callId,
-        signalData: data 
+        signal: data 
       });
     });
 

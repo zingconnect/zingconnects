@@ -91,6 +91,7 @@ export const UserDashboard = () => {
   
   // MOVE THESE UP:
   const [callStatus, setCallStatus] = useState('idle'); 
+
   const [activeCall, setActiveCall] = useState(null); // Now initialized!
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
@@ -133,15 +134,24 @@ export const UserDashboard = () => {
     }
   };
 
+  const callStatusRef = useRef(callStatus);
+useEffect(() => {
+  callStatusRef.current = callStatus;
+}, [callStatus]);
+
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
+  // Join the room so the server knows where to send the signal
   socket.emit("join-main-room", userData._id);
+  console.log("✅ User joined room:", userData._id);
 
   const handleIncomingCall = (data) => {
-    // 1. Check if user is already in a call
-    if (callStatus !== 'idle') {
-      // Send busy signal back to the person calling you
+    console.log("📞 Incoming call payload received:", data);
+
+    // Use the REF to check status, so we don't need callStatus in the dependency array
+    if (callStatusRef.current !== 'idle') {
+      console.log("🚫 User busy, rejecting call");
       socket.emit("user-busy", { 
         to: data.fromId, 
         callId: data.callId 
@@ -149,14 +159,13 @@ useEffect(() => {
       return; 
     }
 
-    // 2. We are free! Confirm ringing to the sender
+    console.log("🔔 Ringing UI triggered");
     socket.emit("confirm-ringing", { to: data.fromId });
     
-    // 3. Set up the call UI
     setActiveCall({
       callId: data.callId,
       fromId: data.fromId,
-      signal: data.signal,
+      signal: data.signal || data.signalData, // Handle both naming conventions just in case
       callerData: {
         fromName: data.fromName,
         photoUrl: data.photoUrl,
@@ -164,16 +173,13 @@ useEffect(() => {
       }
     });
     setCallStatus('ringing');
-    
-    // 4. Play Ringtone (WhatsApp uses a looping sound here)
-    // ringtone.current.play();
   };
 
   const handleCallEnded = () => {
-    setCallStatus('idle');
-    setActiveCall(null);
-    // ringtone.current.stop();
+    console.log("📴 Call ended by remote peer");
+    handleEndCall(); // Use your cleanup function to stop tracks/refs
   };
+
   socket.on("incoming-call", handleIncomingCall);
   socket.on("call-ended", handleCallEnded);
   
@@ -181,8 +187,7 @@ useEffect(() => {
     socket.off("incoming-call", handleIncomingCall);
     socket.off("call-ended", handleCallEnded);
   };
-}, [socket, userData?._id, callStatus]); 
-
+}, [socket, userData?._id]); // Removed callStatus from here
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
@@ -769,18 +774,24 @@ const handleDownload = async (url, type) => {
 const handleStartCall = async () => {
   console.log("☎️ Start Call button clicked");
   
-  if (!agent?._id || !userData?._id) {
-    console.error("Missing IDs:", { agentId: agent?._id, userId: userData?._id });
+  // FIX: Check multiple possible ID locations (some backends use .id, some ._id)
+  // Also check if userData is actually loaded
+  const currentUserId = userData?._id || userData?.id;
+  const currentAgentId = agent?._id || agent?.id;
+
+  if (!currentAgentId || !currentUserId) {
+    console.error("❌ Missing IDs:", { agentId: currentAgentId, userId: currentUserId });
+    
+    // If it's undefined, it means your profile fetch hasn't finished yet.
+    alert("User profile is still loading. Please try again in a second.");
     return;
   }
   
   const token = localStorage.getItem('userToken');
-  
-  // 1. UI Feedback immediately
   setCallStatus('calling'); 
 
   try {
-    console.log("1. Fetching call initiation from API...");
+    console.log("1. Fetching call initiation...");
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
@@ -788,44 +799,37 @@ const handleStartCall = async () => {
         'Authorization': `Bearer ${token}` 
       },
       body: JSON.stringify({ 
-        receiverId: agent._id,
+        receiverId: currentAgentId, // Use the safe variable
         receiverModel: 'Agent' 
       })
     });
     
     const data = await res.json();
-    console.log("2. API Response:", data);
 
     if (data.success) {
       setActiveCall({ 
         callId: data.callId,
-        fromId: userData._id,
+        fromId: currentUserId, // Use the safe variable
         callerData: {
           fromName: `${agent.firstName} ${agent.lastName}`,
           photoUrl: agent.photoUrl
         }
       });
 
-      console.log("3. Requesting microphone access...");
-      // CRITICAL: Request microphone BEFORE initializing Peer
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setLocalStream(stream);
-      console.log("4. Microphone access granted ✅");
 
-      // Initialize Peer
       const peer = new Peer({
         initiator: true,
         trickle: false,
         stream: stream,
-        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } // Added Google STUN server for better connectivity
+        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
       });
 
-      // When the signal (WebRTC metadata) is ready, send it via Socket
       peer.on('signal', (signalData) => {
-        console.log("5. WebRTC Signal generated. Emitting 'call-user' to socket...");
         socket.emit("call-user", {
-          userToCall: agent._id,
-          fromId: userData._id,
+          userToCall: currentAgentId,
+          fromId: currentUserId,
           fromName: `${userData.firstName} ${userData.lastName}`,
           photoUrl: userData.photoUrl,
           callId: data.callId,
@@ -833,9 +837,7 @@ const handleStartCall = async () => {
         });
       });
 
-      // When the Agent sends their audio stream back
       peer.on('stream', (remoteStream) => {
-        console.log("6. 🎤 Remote audio stream received! Playing...");
         let audio = document.getElementById('remoteAudio');
         if (!audio) {
           audio = document.createElement('audio');
@@ -843,25 +845,18 @@ const handleStartCall = async () => {
           document.body.appendChild(audio);
         }
         audio.srcObject = remoteStream;
-        audio.play().catch(e => console.error("Audio play failed:", e));
-      });
-
-      peer.on('error', (err) => {
-        console.error("Peer connection error:", err);
-        handleEndCall();
+        audio.play().catch(e => console.error("Audio playback blocked:", e));
       });
 
       connectionRef.current = peer;
 
     } else {
-      console.warn("Call rejected by server:", data.message);
       setCallStatus('idle');
-      alert(data.message || "Agent is currently on another call.");
+      alert(data.message || "Agent is busy.");
     }
   } catch (err) {
-    console.error("❌ Call Initiation Error:", err);
+    console.error("❌ Call failed:", err);
     setCallStatus('idle');
-    alert("Could not start call. Please ensure you are on HTTPS and microphone is allowed.");
   }
 };
 
