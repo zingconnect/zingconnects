@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { Buffer } from 'buffer';
-// 3. NOW IMPORT PEER (It will now see window.Buffer correctly)
 import Peer from 'simple-peer';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
@@ -66,8 +65,6 @@ const CallStatusMessage = ({ status, time }) => (
 );
 export const UserDashboard = () => {
   const navigate = useNavigate();
-
-  // --- 1. REFS (Initialized with static values to avoid TDZ errors) ---
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -78,26 +75,16 @@ export const UserDashboard = () => {
   const userStreamRef = useRef(null); 
   const remoteStreamRef = useRef(null); 
   const lastNotifiedId = useRef(null);
-
-  /**
-   * CRITICAL FIX: 
-   * We initialize with 'idle' directly. 
-   * Do NOT use the variable callStatus here, as it is defined below this line.
-   */
   const callStatusRef = useRef('idle');
-
-  // --- 2. STATES ---
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
-
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
   const [hasInteracted, setHasInteracted] = useState(false);
 
-  // Call System States
   const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
   const [activeCaller, setActiveCaller] = useState(null); 
@@ -124,25 +111,19 @@ export const UserDashboard = () => {
     state: ''
   });
 
-  
-  // Keep the Ref in sync with state for socket listeners
-  useEffect(() => {
+    useEffect(() => {
     callStatusRef.current = callStatus;
   }, [callStatus]);
 
-  // Derived variable for UI logic
-  const isIncomingCall = 
-    callStatus === 'ringing' && 
-    activeCall?.fromId !== (userData?._id || userData?.id);
-
-  // Debugging Logs
+const isIncomingCall = 
+  callStatus === 'ringing' && 
+  activeCall?.fromId !== (userData?._id || userData?.id) &&
+  activeCall?.fromId !== undefined; // Extra check to prevent ghost ringing
   console.log("System Check:", {
     connection: connectionStatus,
     callStatus: callStatus,
     isIncoming: isIncomingCall
   });
-
-  // --- 4. HELPERS ---
   const getStatusInfo = (agentData) => {
     if (!agentData) return { isOnline: false, label: "Connecting..." };
     if (agentData.status === 'online') return { isOnline: true, label: "Online" };
@@ -171,7 +152,6 @@ useEffect(() => {
   socket.emit("join-main-room", userData._id);
 
   const handleIncomingCall = (data) => {
-    // Uses the Ref to check status without needing callStatus in the dependency array
     if (callStatusRef.current !== 'idle') {
       socket.emit("user-busy", { 
         to: data.fromId, 
@@ -179,11 +159,8 @@ useEffect(() => {
       });
       return; 
     }
-
-    socket.emit("confirm-ringing", { to: data.fromId });
-    
-    // Structure matches your HTML area: activeCall.callerData.fromName
-    setActiveCall({
+  socket.emit("confirm-ringing", { to: data.fromId });
+        setActiveCall({
       callId: data.callId,
       fromId: data.fromId,
       signal: data.signal || data.signalData, 
@@ -193,17 +170,13 @@ useEffect(() => {
         callerId: data.fromId
       }
     });
-    
     setCallStatus('ringing');
   };
-
   const handleCallEnded = () => {
     handleEndCall(); 
   };
-
   socket.on("incoming-call", handleIncomingCall);
   socket.on("call-ended", handleCallEnded);
-  
   return () => {
     socket.off("incoming-call", handleIncomingCall);
     socket.off("call-ended", handleCallEnded);
@@ -213,10 +186,8 @@ useEffect(() => {
 useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return;
-
   const checkCalls = async () => {
     if (callStatus !== 'idle') return; 
-
     try {
       const response = await fetch('/api/calls/check-incoming', {
         headers: { 
@@ -225,18 +196,13 @@ useEffect(() => {
         }
       });
       const data = await response.json();
-
       if (data.hasIncomingCall) {
         const callTime = new Date(data.createdAt).getTime();
         const now = Date.now();
         const ageInSeconds = (now - callTime) / 1000;
-
         if (ageInSeconds > 60) {
           return;
         }
-
-        // We only set activeCall and callStatus.
-        // Your constant 'isIncomingCall' will automatically turn true.
         setActiveCall({
           callId: data.callId,
           fromId: data.callerData?.callerId,
@@ -247,21 +213,18 @@ useEffect(() => {
             callerId: data.callerData?.callerId
           }
         });
-
         setCallStatus('ringing');
       }
     } catch (err) {
       console.warn("User Dashboard Polling error:", err);
     }
   };
-
   const interval = setInterval(checkCalls, 3000); 
   return () => clearInterval(interval);
 }, [callStatus, userData?._id]);
 
 useEffect(() => {
   const audio = ringtoneRef.current;
-  
   if (callStatus === 'ringing' && isIncomingCall) {
     audio.loop = true;
     audio.play().catch(() => {});
@@ -288,9 +251,7 @@ useEffect(() => {
 const toggleMute = () => {
   setIsMuted(prev => {
     const newState = !prev;
-    
-    // This is the part that actually cuts the microphone audio
-    if (localStream) {
+        if (localStream) {
       localStream.getAudioTracks().forEach(track => {
         track.enabled = !newState; 
       });
@@ -326,16 +287,13 @@ const handleAcceptCall = async () => {
       stream: stream,
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
-
     peer.on('signal', (data) => {
       const targetId = activeCall.fromId || activeCall.callerData?.callerId;
-      
       socket.emit("answer-call", {
         to: targetId,
         callId: activeCall.callId,
         signal: data 
       });
-
       fetch('/api/calls/update-signal', {
         method: 'PATCH',
         headers: { 
@@ -356,17 +314,21 @@ const handleAcceptCall = async () => {
       audio.srcObject = remoteStream;
       setCallStatus('connected');
     });
-    if (activeCall?.signal) {
-      const incomingSignal = typeof activeCall.signal === 'string' 
-        ? JSON.parse(activeCall.signal) 
-        : activeCall.signal;
-      setTimeout(() => {
-        if (peer && !peer.destroyed) {
-          console.log("Applying incoming signal...");
-          peer.signal(incomingSignal);
-        }
-      }, 100);
+if (activeCall?.signal) {
+  const incomingSignal = typeof activeCall.signal === 'string' 
+    ? JSON.parse(activeCall.signal) 
+    : activeCall.signal;
+  setTimeout(() => {
+    if (peer && !peer.destroyed) {
+      console.log("Applying incoming signal to peer engine...");
+      try {
+        peer.signal(incomingSignal);
+      } catch (e) {
+        console.error("Failed to apply signal:", e);
+      }
     }
+  }, 250); 
+}
     connectionRef.current = peer;
     peer.on('close', () => handleEndCall());
     peer.on('error', (err) => {
@@ -377,6 +339,10 @@ const handleAcceptCall = async () => {
   } catch (err) {
     console.error("Failed to accept call:", err);
     setCallStatus('idle');
+    setCallStatus('idle');
+setActiveCall(null);
+setActiveCaller(null); // Clear both state objects
+
     if (userStreamRef.current) {
       userStreamRef.current.getTracks().forEach(t => t.stop());
     }
@@ -396,8 +362,6 @@ const handleEndCall = async () => {
     });
     setLocalStream(null);
   }
-
-  // 2. REMOVE AUDIO ELEMENT
   const remoteAudio = document.getElementById('remoteAudio');
   if (remoteAudio) {
     remoteAudio.pause();
@@ -405,8 +369,6 @@ const handleEndCall = async () => {
     remoteAudio.remove();
     console.log("🔊 Remote audio element removed");
   }
-
-  // 3. DESTROY PEER CONNECTION
   if (connectionRef.current) {
     try {
       connectionRef.current.destroy();
@@ -416,13 +378,8 @@ const handleEndCall = async () => {
     connectionRef.current = null;
   }
 
-  // 4. RESET UI STATE
-  // Removing setIsIncomingCall(false) because it's a const, not state.
-  // setActiveCall(null) handles the UI reset automatically.
   setCallStatus('idle');
   setActiveCall(null);
-
-  // 5. NOTIFY REMOTE PEER & DATABASE
   try {
     const targetId = agent?._id || activeCall?.fromId;
     if (targetId) {
@@ -840,11 +797,9 @@ const handleDownload = async (url, type) => {
   }
 };
 const handleStartCall = async () => {
-  // 1. POLYFILL CHECK: Simple-peer MUST have Buffer to work
   if (typeof window !== 'undefined' && !window.Buffer) {
     window.Buffer = Buffer;
   }
-
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
@@ -853,8 +808,6 @@ const handleStartCall = async () => {
     alert("Profile data still loading. Please try again.");
     return;
   }
-
-  // 2. IMMEDIATE MIC REQUEST
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -869,7 +822,6 @@ const handleStartCall = async () => {
     alert("Call failed: Please ensure microphone permissions are granted in your browser settings.");
     return;
   }
-
   try {
     // 3. REGISTER CALL IN DATABASE
     const res = await fetch('/api/calls/start', {
@@ -908,33 +860,30 @@ const handleStartCall = async () => {
           config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
         });
 
-        peer.on('signal', async (signalData) => {
-          socket.emit("call-user", {
-            userToCall: currentAgentId,
-            fromId: currentUserId,
-            fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim(),
-            photoUrl: userData?.photoUrl,
-            callId: data.callId,
-            signal: signalData 
-          });
+      peer.on('signal', async (signalData) => {
+  socket.emit("call-user", {
+    userToCall: currentAgentId,
+    fromId: currentUserId,
+    fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim(),
+    photoUrl: userData?.photoUrl,
+    callId: data.callId,
+    signal: signalData 
+  });
 
-          try {
-            await fetch('/api/calls/update-signal', {
-              method: 'PATCH',
-              headers: { 
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json' 
-              },
-              body: JSON.stringify({ 
-                callId: data.callId, 
-                signal: signalData 
-              })
-            });
-          } catch (dbErr) {
-            console.error("Signal backup failed:", dbErr);
-          }
-        });
-
+  setCallStatus('ringing'); 
+  try {
+    await fetch('/api/calls/update-signal', {
+      method: 'PATCH',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({ callId: data.callId, signal: signalData })
+    });
+  } catch (dbErr) {
+    console.error("Signal backup failed:", dbErr);
+  }
+});
         peer.on('stream', (remoteStream) => {
           let audio = document.getElementById('remoteAudio');
           if (!audio) {
@@ -961,7 +910,6 @@ const handleStartCall = async () => {
         console.error("Failed to initialize Peer:", peerInitError);
         throw new Error("WEBRTC_INIT_FAILED");
       }
-
     } else {
       if (stream) stream.getTracks().forEach(t => t.stop());
       setCallStatus('idle');
@@ -1032,14 +980,11 @@ const handleStartCall = async () => {
 const handleResend = (msg) => {
   setMessages(prev => prev.filter(m => m._id !== msg._id));
   if (msg.fileType === 'image' || msg.fileType === 'video') {
-    // Re-set the preview states and trigger the media flow
     setPreviewFile(msg.originalFile);
     setPreviewUrl(msg.fileUrl);
     setCaption(msg.text);
   } else {
-    // Directly re-send text
     setNewMessage(msg.text);
-    // You can manually call your send logic here
   }
 };
 
