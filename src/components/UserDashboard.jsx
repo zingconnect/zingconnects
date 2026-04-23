@@ -16,8 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
-import { BsReplyFill } from "react-icons/bs";
-import PhoneInput from 'react-phone-input-2';
+import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import { 
   BsTelephoneFill, 
@@ -49,6 +48,7 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 const socket = io(import.meta.env.VITE_API_URL);
+const PhoneInput = ReactPhoneInput.default || ReactPhoneInput;
 
 const CallStatusMessage = ({ status, time }) => (
   <div className="flex justify-center my-4 w-full z-10">
@@ -84,6 +84,7 @@ export const UserDashboard = () => {
   const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   
+  
   const connectionRef = useRef(null);
   const userStreamRef = useRef(null); 
   const remoteStreamRef = useRef(null); 
@@ -114,11 +115,12 @@ export const UserDashboard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
+  
 
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    phone:'',
+    phone: '',
     dob: '',
     gender: '',
     city: '',
@@ -1177,20 +1179,23 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </div>
         </div>
 
-        {/* --- NEW: PHONE NUMBER FIELD --- */}
-        <div className="space-y-1">
-          <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Phone Number</label>
-          <PhoneInput
-            country={'ng'} // Default to Nigeria
-            value={formData.phone}
-            onChange={phone => setFormData({ ...formData, phone })}
-            containerClass="phone-container"
-            inputClass="!w-full !bg-gray-50 !border-gray-100 !h-auto !py-6 !rounded-xl !text-xs md:!text-sm !outline-none"
-            buttonClass="!bg-transparent !border-none !rounded-l-xl"
-            dropdownClass="!rounded-xl !shadow-xl"
-            placeholder="Enter phone number"
-          />
-        </div>
+       {/* --- NEW: PHONE NUMBER FIELD --- */}
+<div className="space-y-1">
+  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">
+    Phone Number
+  </label>
+  <PhoneInput
+    country={'ng'}
+    value={formData.phone || ''} 
+    onChange={phone => setFormData({ ...formData, phone })}
+    containerClass="phone-container"
+    inputClass="phone-input-field"
+    buttonClass="phone-dropdown-button"
+    placeholder="Enter phone number"
+    // Use search to find specific country codes easily
+    enableSearch={true} 
+  />
+</div>
 
         {/* Date of Birth & Gender */}
         <div className="grid grid-cols-2 gap-2 md:gap-4">

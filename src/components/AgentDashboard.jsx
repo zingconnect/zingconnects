@@ -649,8 +649,6 @@ useEffect(() => {
   }
 
   try {
-    // --- USD RATE FETCH REMOVED ---
-    // Convert the price string "25,000" to a number 25000
     const finalNairaAmount = Number(activePlan.price.replace(/,/g, ''));
 
     window.FlutterwaveCheckout({

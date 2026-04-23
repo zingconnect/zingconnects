@@ -40,14 +40,38 @@ button {
   height: 100dvh; /* Dynamic viewport height for mobile */
 }
 
-/* Styling for the Phone Input to match your gray-50 theme */
-.phone-container .form-control {
+/* Container width fix */
+.phone-container {
   width: 100% !important;
-  font-family: inherit !important;
+}
+
+/* Styling the actual input field */
+.phone-container .phone-input-field {
+  width: 100% !important;
+  height: 52px !important; /* Matches your p-4 approx */
+  background-color: #f9fafb !important; /* gray-50 */
   border: 1px solid #f3f4f6 !important; /* gray-100 */
+  border-radius: 0.75rem !important; /* rounded-xl */
+  font-size: 14px !important;
+  padding-left: 58px !important;
+  outline: none !important;
+}
+
+/* Styling the flag dropdown button */
+.phone-container .phone-dropdown-button {
+  background-color: transparent !important;
+  border: none !important;
+  border-radius: 0.75rem 0 0 0.75rem !important;
+  padding-left: 8px !important;
 }
 
 .phone-container .selected-flag {
   background: transparent !important;
-  padding-left: 12px !important;
+  width: 45px !important;
+}
+
+/* Hover effects */
+.phone-container .phone-input-field:focus {
+  border-color: #3b82f6 !important; /* blue-500 */
+  background-color: #ffffff !important;
 }
