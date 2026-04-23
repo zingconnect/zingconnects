@@ -232,11 +232,19 @@ useEffect(() => {
         });
         const data = await res.json();
         if (data.hasIncomingCall) {
-          setActiveCaller(data.callerData);
-          setActiveCall({ callId: data.callId });
-          setIsIncomingCall(true);
-          setCallStatus('ringing');
-        }
+  setActiveCaller({
+    ...data.callerData, 
+    signal: data.signal  
+  });
+  setActiveCall({ 
+    callId: data.callId, 
+    signal: data.signal, 
+    fromId: data.callerData.callerId 
+  });
+
+  setIsIncomingCall(true);
+  setCallStatus('ringing');
+}
       } catch (e) { console.error(e); }
     }
   };
@@ -353,51 +361,71 @@ const handleStartCall = async (targetUserId) => {
 
 const handleAcceptCall = async () => {
   try {
-    // 1. UI Transition to "Securing Line..."
     setCallStatus('connecting');
 
-    // 2. Capture Agent's Audio
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // 1. Tell Backend we accepted
+    // Since you flattened data, callId might be in activeCaller or activeCall
+    const callId = activeCaller.callId || activeCall.callId;
+
+    const acceptRes = await fetch('/api/calls/accept', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${localStorage.getItem('agentToken')}`, // Use agentToken if on Agent Dash
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({ callId })
+    });
     
-    // Store local stream so we can toggle Mute/Speaker later
+    // 2. Get Microphone
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     userStreamRef.current = stream; 
 
-    const peer = new Peer({
+    // 3. Initialize Peer
+    const PeerConstructor = Peer.default || Peer;
+    const peer = new PeerConstructor({
       initiator: false,
       trickle: false,
       stream: stream,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' }, // Essential for connecting over different networks
-          { urls: 'stun:global.stun.twilio.com:3478' }
-        ]
-      }
+      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-    // 3. Signal back to the User (Handshake)
-    peer.on('signal', (data) => {
+    // 4. Signal back to User
+    peer.on('signal', async (data) => {
+      // NOTE: We use activeCaller.callerId because that's what comes from check-incoming
       socket.emit("answer-call", { 
-        to: activeCaller.fromId, 
+        to: activeCaller.callerId || activeCaller.fromId, 
         signal: data 
+      });
+
+      await fetch('/api/calls/update-signal', {
+        method: 'PATCH',
+        headers: { 
+          'Authorization': `Bearer ${localStorage.getItem('agentToken')}`,
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ callId, signal: data })
       });
     });
 
-    // 4. Handle the incoming Voice Stream
     peer.on('stream', (remoteStream) => {
-      // Create a hidden audio element
-      const audio = document.createElement('audio');
-      audio.id = 'remoteAudio';
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        document.body.appendChild(audio);
+      }
       audio.srcObject = remoteStream;
-            audio.muted = false; 
-      
-      remoteStreamRef.current = remoteStream; // Save for later reference
-      
-      audio.play().then(() => {
-        setCallStatus('connected'); // Only set connected once audio is flowing
-        startTimer(); // Trigger your 00:05 counter
-      }).catch(e => console.error("Audio play blocked:", e));
+      audio.play()
+        .then(() => {
+          setCallStatus('connected');
+          // startTimer(); // Enable if you have a timer function
+        })
+        .catch(e => console.error("Audio play blocked:", e));
     });
-    peer.signal(activeCaller.signal); 
+    const incomingSignal = activeCaller.signal || activeCall.signal;
+    if (incomingSignal) {
+      peer.signal(incomingSignal);
+    }
     
     connectionRef.current = peer;
     peer.on('close', () => handleEndCall());
@@ -407,47 +435,57 @@ const handleAcceptCall = async () => {
     });
 
   } catch (err) {
-    console.error("Access Denied to Microphone:", err);
+    console.error("Call Acceptance Failed:", err);
     setCallStatus('idle');
-    alert("Please allow microphone access to answer calls.");
   }
 };
 
-const handleEndCall = () => {
-  const targetId = activeCall?.toId || activeCaller?.fromId || selectedUser?._id;
+const handleEndCall = async () => {
+  // Use the ID from whichever state is active
+  const callId = activeCall?.callId || activeCaller?.callId;
+  const targetId = activeCall?.toId || activeCaller?.fromId;
   
-  // 1. Notify the other party via Socket
+  // 1. Notify Backend (Essential for Polling/DB cleanup)
+  if (callId) {
+    fetch('/api/calls/end', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${localStorage.getItem('userToken')}`,
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({ callId })
+    }).catch(e => console.error("DB End Call failed:", e));
+  }
+
+  // 2. Notify Socket
   if (targetId && socket) {
     socket.emit("end-call", { to: targetId });
   }
   
+  // 3. Stop Media
   if (userStreamRef.current) {
     userStreamRef.current.getTracks().forEach(track => track.stop());
-    userStreamRef.current = null; // Clear the reference
+    userStreamRef.current = null;
   }
 
+  // 4. Cleanup Peer
   if (connectionRef.current) {
     connectionRef.current.destroy();
     connectionRef.current = null;
   }
-  setMessages(prev => prev.map(m => 
-    m.fileType === 'voice_call' && (m.status === 'calling' || m.status === 'connected' || m.status === 'ringing')
-      ? { ...m, status: 'call ended' } 
-      : m
-  ));
 
-  // 5. Reset UI States
+  // 5. Reset UI
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCall(null);
   setActiveCaller(null);
   
-  // 6. Stop Ringtone
   if (ringtoneRef.current) {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
   }
 };
+
 
 useEffect(() => {
   if (userStreamRef.current) {
