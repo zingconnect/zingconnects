@@ -633,87 +633,84 @@ useEffect(() => {
   }, [navigate]);
 
   const handlePayment = async () => {
-    if (!agentData || !agentData.email) {
-      alert("Profile data is still loading. Please wait a moment or refresh.");
-      return;
-    }
-    setPaymentProcessing(true);
-    const token = localStorage.getItem('agentToken');
-    const activePlan = plans.find(p => p.tier === selectedPlan);
+  if (!agentData || !agentData.email) {
+    alert("Profile data is still loading. Please wait a moment or refresh.");
+    return;
+  }
 
-    if (!activePlan) {
-      alert("Invalid plan selected");
-      setPaymentProcessing(false);
-      return;
-    }
+  setPaymentProcessing(true);
+  const token = localStorage.getItem('agentToken');
+  const activePlan = plans.find(p => p.tier === selectedPlan);
 
-    try {
-      const rateRes = await fetch(`/api/subscriptions/rate/${activePlan.price}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (!rateRes.ok) throw new Error("Could not fetch current exchange rate");
-      
-      const rateData = await rateRes.json();
-      const finalNairaAmount = rateData.ngn; 
+  if (!activePlan) {
+    alert("Invalid plan selected");
+    setPaymentProcessing(false);
+    return;
+  }
 
-      window.FlutterwaveCheckout({
-        public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
-        tx_ref: `ZING-${Date.now()}`,
-        amount: finalNairaAmount,
-        currency: "NGN",
-        payment_options: "card, account, transfer, ussd",
-        customer: {
-          email: agentData?.email,
-          name: `${agentData?.firstName} ${agentData?.lastName}`,
-        },
-        customizations: {
-          title: "ZingConnect",
-          description: `Activation for ${activePlan.tier} Plan ($${activePlan.price})`,
-          logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
-        },
-        callback: async (response) => {
-          try {
-            const verifyRes = await fetch('/api/subscriptions/verify', {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                transaction_id: response.transaction_id,
-                plan: activePlan.tier,
-                usdAmount: activePlan.price 
-              })
-            });
+  try {
+    // --- USD RATE FETCH REMOVED ---
+    // Convert the price string "25,000" to a number 25000
+    const finalNairaAmount = Number(activePlan.price.replace(/,/g, ''));
 
-            if (verifyRes.ok) {
-              setShowSuccessOverlay(true);
-              setTimeout(() => {
-                window.location.reload(); 
-              }, 4000);
-            } else {
-              const errData = await verifyRes.json();
-              alert(errData.message || "Verification failed");
-            }
-          } catch (err) {
-            console.error("Verification error:", err);
-            alert("Connection error during verification.");
-          } finally {
-            setPaymentProcessing(false);
+    window.FlutterwaveCheckout({
+      public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
+      tx_ref: `ZING-${Date.now()}`,
+      amount: finalNairaAmount,
+      currency: "NGN",
+      payment_options: "card, account, transfer, ussd",
+      customer: {
+        email: agentData?.email,
+        name: `${agentData?.firstName} ${agentData?.lastName}`,
+        phone_number: agentData?.phone, // Optional: added phone since we now collect it
+      },
+      customizations: {
+        title: "ZingConnect",
+        // Updated description to show Naira
+        description: `Activation for ${activePlan.tier} Plan (₦${activePlan.price})`,
+        logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
+      },
+      callback: async (response) => {
+        try {
+          const verifyRes = await fetch('/api/subscriptions/verify', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              transaction_id: response.transaction_id,
+              plan: activePlan.tier,
+              ngnAmount: finalNairaAmount // Changed from usdAmount to ngnAmount
+            })
+          });
+
+          if (verifyRes.ok) {
+            setShowSuccessOverlay(true);
+            setTimeout(() => {
+              window.location.reload(); 
+            }, 4000);
+          } else {
+            const errData = await verifyRes.json();
+            alert(errData.message || "Verification failed");
           }
-        },
-        onclose: () => {
+        } catch (err) {
+          console.error("Verification error:", err);
+          alert("Connection error during verification.");
+        } finally {
           setPaymentProcessing(false);
         }
-      });
-    } catch (err) {
-      console.error("Payment Initialization Error:", err);
-      alert("Failed to initialize payment. Please check your connection.");
-      setPaymentProcessing(false);
-    }
-  };
-  
+      },
+      onclose: () => {
+        setPaymentProcessing(false);
+      }
+    });
+  } catch (err) {
+    console.error("Payment Initialization Error:", err);
+    alert("Failed to initialize payment.");
+    setPaymentProcessing(false);
+  }
+};
 
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
