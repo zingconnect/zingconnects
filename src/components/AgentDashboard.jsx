@@ -1746,66 +1746,95 @@ const handleSendMessage = async (e) => {
     />
   </div>
 )}
-
 {/* --- MEDIA PREVIEW OVERLAY --- */}
 {previewUrl && (
-  <div className="fixed inset-0 z-[5000] bg-black flex flex-col animate-in fade-in zoom-in duration-200">
-    {/* Header */}
-    <div className="p-4 flex justify-between items-center bg-gray-900/80 backdrop-blur-md text-white">
+  <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col animate-in fade-in zoom-in duration-200">
+    {/* 1. Header: Close & Status */}
+    <div className="p-4 flex justify-between items-center bg-slate-900/90 backdrop-blur-md text-white border-b border-white/5">
       <button 
-        onClick={() => { setPreviewUrl(null); setPreviewFile(null); }}
-        className="p-2 hover:bg-white/10 rounded-full transition-colors"
+        type="button"
+        onClick={() => { 
+          if (previewUrl) URL.revokeObjectURL(previewUrl); 
+          setPreviewUrl(null); 
+          setPreviewFile(null); 
+        }}
+        className="p-2 hover:bg-white/10 rounded-full transition-colors active:scale-90"
       >
         <BsXLg size={24} />
       </button>
-      <span className="text-[10px] font-black uppercase tracking-[0.3em] italic opacity-70">
-        Ready to Send
-      </span>
-      <div className="w-10"></div>
+      
+      <div className="flex flex-col items-center">
+        <span className="text-[10px] font-black uppercase tracking-[0.4em] italic text-blue-400">
+          Media Preview
+        </span>
+        {previewFile && (
+          <span className="text-[9px] text-white/40 uppercase tracking-widest mt-1">
+            {(previewFile.size / (1024 * 1024)).toFixed(2)} MB • {previewFile.type.split('/')[1]}
+          </span>
+        )}
+      </div>
+
+      <div className="w-10"></div> {/* Spacer for symmetry */}
     </div>
 
-    {/* Media Container */}
+    {/* 2. Media Display: Video/Image Logic */}
     <div className="flex-1 flex items-center justify-center p-4 bg-[#0b141a]">
       {previewFile?.type.startsWith('video') ? (
-        <video src={previewUrl} controls className="max-w-full max-h-[70vh] rounded-lg shadow-2xl" autoPlay />
+        <video 
+          key={previewUrl} // Critical: Resets the player when a new file is picked
+          src={previewUrl} 
+          controls 
+          autoPlay 
+          muted // Prevents 'play()' errors in Chrome/Safari
+          playsInline 
+          className="max-w-full max-h-[70vh] rounded-2xl shadow-2xl border border-white/5"
+        />
       ) : (
-        <img src={previewUrl} className="max-w-full max-h-[70vh] rounded-lg shadow-2xl object-contain" alt="Preview" />
+        <img 
+          src={previewUrl} 
+          className="max-w-full max-h-[70vh] rounded-2xl shadow-2xl object-contain border border-white/5" 
+          alt="Preview" 
+        />
       )}
     </div>
 
-    {/* Bottom Control Bar */}
-    <div className="p-4 bg-[#f0f2f5] border-t border-gray-200">
-      <div className="max-w-4xl mx-auto flex items-center gap-3">
-        <div className="flex-1 bg-white rounded-xl border border-gray-300 px-4 py-3 flex items-center">
+    {/* 3. Footer: Caption & Send Button */}
+    <div className="p-6 bg-slate-900 border-t border-white/10">
+      <div className="max-w-4xl mx-auto flex items-center gap-4">
+        <div className="flex-1 bg-white/5 rounded-2xl border border-white/10 px-4 py-3 flex items-center focus-within:border-blue-500/50 transition-all">
           <input 
             type="text"
             value={caption}
             onChange={(e) => setCaption(e.target.value)}
             placeholder="Add a caption..."
-            className="w-full bg-transparent outline-none text-sm"
+            className="w-full bg-transparent outline-none text-white text-sm"
             autoFocus
           />
         </div>
         
         <button 
-          onClick={handleFinalSend} // This triggers your S3 upload logic
+          type="button"
+          onClick={handleFinalSend}
           disabled={isUploading}
-          className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 
-            ${isUploading ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'}`}
+          className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-2xl transition-all active:scale-95 
+            ${isUploading ? 'bg-slate-700 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20'}`}
         >
           {isUploading ? (
-            <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
           ) : (
-            <svg stroke="currentColor" fill="currentColor" viewBox="0 0 16 16" height="24" width="24" className="text-white">
+            <svg stroke="currentColor" fill="currentColor" viewBox="0 0 16 16" height="28" width="28" className="text-white">
               <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
             </svg>
           )}
         </button>
       </div>
+      
       {isUploading && (
-        <p className="text-center text-[10px] font-bold text-blue-600 uppercase tracking-widest mt-3 animate-pulse">
-          Uploading Securely...
-        </p>
+        <div className="text-center mt-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500 animate-pulse">
+            Securely Uploading...
+          </p>
+        </div>
       )}
     </div>
   </div>
