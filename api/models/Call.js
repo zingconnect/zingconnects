@@ -22,18 +22,16 @@ const callSchema = new mongoose.Schema({
     enum: ['User', 'Agent']
   },
   status: {
-    type: String,
-    enum: ['calling', 'ringing', 'connected', 'ended', 'missed', 'declined'],
-    default: 'calling'
-  },
-  // ADD THIS: Stores the WebRTC handshake data
+  type: String,
+  enum: ['calling', 'ringing', 'connected', 'ended', 'missed', 'declined'],
+  default: 'calling'
+},
+active: { 
+  type: Boolean, 
+  default: true // Ensure this is flipped to false on endCall
+},
   signal: { 
     type: Object 
-  },
-  // ADD THIS: Helpful for quick indexing of active calls
-  active: { 
-    type: Boolean, 
-    default: true 
   },
   startTime: { type: Date },
   endTime: { type: Date },

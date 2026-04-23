@@ -1575,41 +1575,67 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const rawId = req.user?._id || req.user?.id || req.user?.userId;
     if (!rawId) return res.status(401).json({ hasIncomingCall: false });
 
-    // Look for calls that are EITHER 'calling' or 'ringing'
+    /**
+     * 1. SEARCH CRITERIA
+     * We look for calls where status is 'calling' or 'ringing' AND active is true.
+     * Standardizing the ID check to handle both string and ObjectId formats.
+     */
     let incoming = await Call.findOne({ 
-      $or: [{ receiver: rawId }, { receiver: new mongoose.Types.ObjectId(rawId) }],
-      status: { $in: ['calling', 'ringing'] } 
-    }).sort({ createdAt: -1 }).populate('caller', 'firstName lastName photoUrl');
+      receiver: rawId,
+      status: { $in: ['calling', 'ringing'] },
+      active: true 
+    })
+    .sort({ createdAt: -1 })
+    .populate('caller', 'firstName lastName photoUrl');
 
     if (!incoming) return res.json({ hasIncomingCall: false });
 
-    // WHATSAPP LOGIC: If we found a 'calling' record, it means the receiver's device 
-    // just "discovered" the call. We now move it to 'ringing'.
+    /**
+     * 2. EXPIRATION CHECK (The "Ghost Call" Killer)
+     * If the call was created more than 60 seconds ago, it is likely stale.
+     * We mark it as 'missed' and 'active: false' so it never rings again.
+     */
+    const callStartTime = new Date(incoming.createdAt).getTime();
+    const now = Date.now();
+    const diffInSeconds = (now - callStartTime) / 1000;
+
+    if (diffInSeconds > 60) {
+      incoming.status = 'missed';
+      incoming.active = false;
+      await incoming.save();
+      console.log(`🧹 Stale call ${incoming._id} auto-ended (${diffInSeconds}s old)`);
+      return res.json({ hasIncomingCall: false });
+    }
     if (incoming.status === 'calling') {
       incoming.status = 'ringing';
       await incoming.save();
       console.log(`🔔 Call ${incoming._id} status updated: CALLING -> RINGING`);
     }
 
+    // 4. RETURN DATA
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       status: incoming.status, 
       signal: incoming.signal,
+      createdAt: incoming.createdAt, // Pass this so frontend can also verify age
       callerData: {
-        fromName: incoming.caller ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() : "Secure Caller",
+        fromName: incoming.caller 
+          ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
+          : "Secure Caller",
         photoUrl: incoming.caller?.photoUrl || null,
         callerId: incoming.caller?._id
       }
     });
+
   } catch (err) {
+    console.error("Check-Incoming Error:", err);
     res.status(500).json({ hasIncomingCall: false });
   }
 });

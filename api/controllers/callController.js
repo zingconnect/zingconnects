@@ -113,20 +113,40 @@ export const acceptCall = async (req, res) => {
     res.status(500).json({ message: "Error accepting call" });
   }
 };
-
 // @desc    End/Decline/Cancel call
 export const endCall = async (req, res) => {
   try {
     await connectToDatabase();
     const { callId } = req.body;
-    
-    await Call.findByIdAndUpdate(callId, { 
-      status: 'ended', 
-      endTime: Date.now() 
-    });
+    const myId = req.user.id || req.user._id || req.user.userId;
 
-    res.json({ success: true });
+    let call;
+
+    if (callId) {
+      // Direct update if we have the ID
+      call = await Call.findByIdAndUpdate(
+        callId, 
+        { status: 'ended', endTime: Date.now(), active: false },
+        { new: true }
+      );
+    } else {
+      // Fallback: Find the most recent active call for this user
+      call = await Call.findOneAndUpdate(
+        { 
+          $or: [{ caller: myId }, { receiver: myId }],
+          status: { $in: ['calling', 'ringing', 'connected'] }
+        },
+        { status: 'ended', endTime: Date.now(), active: false },
+        { new: true, sort: { createdAt: -1 } }
+      );
+    }
+
+    if (!call) {
+      return res.status(404).json({ success: false, message: "No active call found to end" });
+    }
+
+    res.json({ success: true, call });
   } catch (error) {
-    res.status(500).json({ message: "Error ending call" });
+    res.status(500).json({ message: "Error ending call", error: error.message });
   }
 };

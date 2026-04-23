@@ -213,7 +213,7 @@ useEffect(() => {
   if (!token) return;
 
   const syncStatus = async () => {
-    // Only poll for status if we are currently trying to reach someone
+    // 1. Outgoing Call Status Check
     if (callStatus === 'calling' && activeCall?.callId) {
       try {
         const res = await fetch(`/api/calls/status/${activeCall.callId}`, {
@@ -221,38 +221,60 @@ useEffect(() => {
         });
         const data = await res.json();
         if (data.status === 'ringing') setCallStatus('ringing');
-      } catch (e) { console.warn("Status poll failed"); }
+      } catch (e) { 
+        console.warn("Status poll failed"); 
+      }
     }
 
-    // Standard Incoming Call Check
+    // 2. Incoming Call Check (with Ghost Call Protection)
     if (callStatus === 'idle') {
       try {
         const res = await fetch('/api/calls/check-incoming', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
-        if (data.hasIncomingCall) {
-  setActiveCaller({
-    ...data.callerData, 
-    signal: data.signal  
-  });
-  setActiveCall({ 
-    callId: data.callId, 
-    signal: data.signal, 
-    fromId: data.callerData.callerId 
-  });
 
-  setIsIncomingCall(true);
-  setCallStatus('ringing');
-}
-      } catch (e) { console.error(e); }
+        if (data.hasIncomingCall) {
+          /**
+           * GHOST CALL PROTECTION:
+           * Compare current time vs when the call was created in DB.
+           * data.createdAt comes from your MongoDB document.
+           */
+          const callCreationTime = new Date(data.createdAt).getTime();
+          const currentTime = Date.now();
+          const secondsElapsed = (currentTime - callCreationTime) / 1000;
+
+          // If the call record is older than 60 seconds, ignore it.
+          if (secondsElapsed > 60) {
+            console.log(`System: Ignoring stale call from ${secondsElapsed}s ago.`);
+            return; 
+          }
+
+          // Spread callerData so that .photoUrl and .fromName are at the top level
+          setActiveCaller({
+            ...data.callerData, 
+            signal: data.signal  
+          });
+
+          // Save the ID and Signal for the Peer connection handshake
+          setActiveCall({ 
+            callId: data.callId, 
+            signal: data.signal, 
+            fromId: data.callerData.callerId 
+          });
+
+          setIsIncomingCall(true);
+          setCallStatus('ringing');
+        }
+      } catch (e) { 
+        console.error("Polling Error:", e); 
+      }
     }
   };
 
   const interval = setInterval(syncStatus, 3000);
   return () => clearInterval(interval);
 }, [callStatus, activeCall?.callId]);
-
 
  useEffect(() => {
   if (messagesEndRef.current) {
@@ -362,19 +384,21 @@ const handleStartCall = async (targetUserId) => {
 const handleAcceptCall = async () => {
   try {
     setCallStatus('connecting');
+    const token = localStorage.getItem('agentToken');
+    const callId = activeCaller?.callId || activeCall?.callId;
 
-    // 1. Tell Backend we accepted
-    // Since you flattened data, callId might be in activeCaller or activeCall
-    const callId = activeCaller.callId || activeCall.callId;
-
+    // 1. UPDATE DB: Tell Backend we accepted (Flip status to 'connected')
+    // This is critical to stop the 'ringing' status in the database
     const acceptRes = await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
-        'Authorization': `Bearer ${localStorage.getItem('agentToken')}`, // Use agentToken if on Agent Dash
+        'Authorization': `Bearer ${token}`, 
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({ callId })
     });
+
+    if (!acceptRes.ok) throw new Error("Failed to update call status in database");
     
     // 2. Get Microphone
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -391,16 +415,17 @@ const handleAcceptCall = async () => {
 
     // 4. Signal back to User
     peer.on('signal', async (data) => {
-      // NOTE: We use activeCaller.callerId because that's what comes from check-incoming
+      // Fast path: Socket
       socket.emit("answer-call", { 
         to: activeCaller.callerId || activeCaller.fromId, 
         signal: data 
       });
 
+      // Reliable path: Update the answer signal in DB
       await fetch('/api/calls/update-signal', {
         method: 'PATCH',
         headers: { 
-          'Authorization': `Bearer ${localStorage.getItem('agentToken')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json' 
         },
         body: JSON.stringify({ callId, signal: data })
@@ -418,13 +443,19 @@ const handleAcceptCall = async () => {
       audio.play()
         .then(() => {
           setCallStatus('connected');
-          // startTimer(); // Enable if you have a timer function
         })
         .catch(e => console.error("Audio play blocked:", e));
     });
+
+    // 5. Apply the Handshake Signal
     const incomingSignal = activeCaller.signal || activeCall.signal;
     if (incomingSignal) {
-      peer.signal(incomingSignal);
+      // Small timeout ensures the Peer object is fully initialized before signaling
+      setTimeout(() => {
+        if (peer && !peer.destroyed) {
+          peer.signal(incomingSignal);
+        }
+      }, 100);
     }
     
     connectionRef.current = peer;
@@ -437,52 +468,75 @@ const handleAcceptCall = async () => {
   } catch (err) {
     console.error("Call Acceptance Failed:", err);
     setCallStatus('idle');
+    alert("Could not connect. Please check microphone permissions.");
   }
 };
 
 const handleEndCall = async () => {
-  // Use the ID from whichever state is active
+  console.log("📴 Initiating call cleanup and database update...");
+
+  // 1. Identify IDs (Support both Agent and User dashboard naming)
   const callId = activeCall?.callId || activeCaller?.callId;
-  const targetId = activeCall?.toId || activeCaller?.fromId;
+  const targetId = activeCall?.fromId || activeCall?.toId || activeCaller?.callerId;
   
-  // 1. Notify Backend (Essential for Polling/DB cleanup)
-  if (callId) {
+  // Determine which token to use for the API call
+  const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+
+  // 2. Notify Backend (CRITICAL: This stops the 'Ringing' in the DB)
+  if (callId && token) {
     fetch('/api/calls/end', {
       method: 'POST',
       headers: { 
-        'Authorization': `Bearer ${localStorage.getItem('userToken')}`,
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({ callId })
-    }).catch(e => console.error("DB End Call failed:", e));
+    })
+    .then(() => console.log("✅ Database status updated to: ended"))
+    .catch(e => console.error("❌ DB End Call failed:", e));
   }
 
-  // 2. Notify Socket
+  // 3. Notify Socket (Immediate UI feedback for the other person)
   if (targetId && socket) {
     socket.emit("end-call", { to: targetId });
   }
   
-  // 3. Stop Media
+  // 4. Stop Hardware (Microphone)
   if (userStreamRef.current) {
-    userStreamRef.current.getTracks().forEach(track => track.stop());
+    userStreamRef.current.getTracks().forEach(track => {
+      track.stop();
+      console.log("🎤 Mic track stopped");
+    });
     userStreamRef.current = null;
   }
 
-  // 4. Cleanup Peer
+  // 5. Destroy Peer Connection
   if (connectionRef.current) {
-    connectionRef.current.destroy();
+    try {
+      connectionRef.current.destroy();
+    } catch (e) {
+      console.warn("Peer cleanup: already destroyed");
+    }
     connectionRef.current = null;
   }
 
-  // 5. Reset UI
+  // 6. Reset All UI State
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCall(null);
   setActiveCaller(null);
   
+  // 7. Stop Audio/Ringtones
   if (ringtoneRef.current) {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
+  }
+
+  const remoteAudio = document.getElementById('remoteAudio');
+  if (remoteAudio) {
+    remoteAudio.pause();
+    remoteAudio.srcObject = null;
+    remoteAudio.remove();
   }
 };
 
