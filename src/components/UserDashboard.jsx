@@ -80,6 +80,8 @@ export const UserDashboard = () => {
   const userStreamRef = useRef(null); 
   const remoteStreamRef = useRef(null); 
   const lastNotifiedId = useRef(null);
+  const callStatusRef = useRef(callStatus);
+
 
   // --- STATES ---
   // User & Agent Data
@@ -156,7 +158,6 @@ export const UserDashboard = () => {
     }
   };
 
-  const callStatusRef = useRef(callStatus);
 useEffect(() => {
   callStatusRef.current = callStatus;
 }, [callStatus]);
@@ -167,6 +168,7 @@ useEffect(() => {
   socket.emit("join-main-room", userData._id);
 
   const handleIncomingCall = (data) => {
+    // Uses the Ref to check status without needing callStatus in the dependency array
     if (callStatusRef.current !== 'idle') {
       socket.emit("user-busy", { 
         to: data.fromId, 
@@ -177,6 +179,7 @@ useEffect(() => {
 
     socket.emit("confirm-ringing", { to: data.fromId });
     
+    // Structure matches your HTML area: activeCall.callerData.fromName
     setActiveCall({
       callId: data.callId,
       fromId: data.fromId,
