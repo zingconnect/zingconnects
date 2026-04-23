@@ -77,14 +77,6 @@ const CallStatusMessage = ({ status, time }) => (
   </div>
 );
 
-export const UserProfile = () => {
-  return (
-    <div>
-      {/* Your Profile UI */}
-    </div>
-  );
-};
-
 export const UserDashboard = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);

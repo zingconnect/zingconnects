@@ -695,7 +695,6 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res) => {
   }
 });
 
-// 1. User Handshake (Email-only access) - [STAYS THE SAME]
 app.post('/api/users/handshake', async (req, res) => {
   try {
     await connectToDatabase();
@@ -1027,6 +1026,45 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
       message: "Internal server error during profile sync",
       error: err.message 
     });
+  }
+});
+
+// GET current user's full profile data
+app.get('/api/users/me', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    // Find user and exclude sensitive fields like password if they existed
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // IDrive / S3 Image Signing Logic for User Photo
+    let signedPhotoUrl = user.photoUrl;
+    if (user.photoUrl && user.photoUrl.includes('users/')) {
+      try {
+        const command = new GetObjectCommand({
+          Bucket: process.env.IDRIVE_BUCKET_NAME,
+          Key: user.photoUrl, // This is the fileKey we saved during onboarding
+        });
+        signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+      } catch (err) {
+        console.error("User photo signing failed:", err);
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      user: {
+        ...user.toObject(),
+        photoUrl: signedPhotoUrl
+      } 
+    });
+  } catch (err) {
+    console.error("Profile Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
