@@ -1,7 +1,19 @@
+import { Buffer } from 'buffer';
+if (typeof window !== 'undefined') {
+  window.Buffer = Buffer;
+  window.global = window;
+  window.process = {
+    env: { DEBUG: undefined },
+    version: '',
+    nextTick: (fn) => setTimeout(fn, 0),
+    listeners: () => [],
+    on: () => [],
+    removeListener: () => [],
+  };
+}
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { Buffer } from 'buffer';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
 import { BsReplyFill } from "react-icons/bs";

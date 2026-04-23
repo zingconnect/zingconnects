@@ -1,28 +1,32 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { nodePolyfills } from 'vite-plugin-node-polyfills' // <--- 1. Import this
 
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    nodePolyfills({ // <--- 2. Add this configuration
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+      protocolImports: true,
+    }),
   ],
   resolve: {
     alias: {
-      // Direct mapping to the browser-safe versions you installed
       stream: 'stream-browserify',
       buffer: 'buffer',
     },
   },
+  // We keep this as a secondary safety net
   define: {
-    // This is the "magic" that stops the 'reading call' error
-    global: 'window',
     'process.env': {},
-    'process.nextTick': '(function(fn) { setTimeout(fn, 0); })',
   },
   build: {
     chunkSizeWarningLimit: 2000,
-    // Removed the 'external' list. In a standard React SPA, 
-    // Vite handles tree-shaking automatically.
   },
 })
