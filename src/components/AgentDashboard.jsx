@@ -1744,6 +1744,70 @@ const handleSendMessage = async (e) => {
   </div>
 )}
 
+{/* --- MEDIA PREVIEW OVERLAY --- */}
+{previewUrl && (
+  <div className="fixed inset-0 z-[5000] bg-black flex flex-col animate-in fade-in zoom-in duration-200">
+    {/* Header */}
+    <div className="p-4 flex justify-between items-center bg-gray-900/80 backdrop-blur-md text-white">
+      <button 
+        onClick={() => { setPreviewUrl(null); setPreviewFile(null); }}
+        className="p-2 hover:bg-white/10 rounded-full transition-colors"
+      >
+        <BsXLg size={24} />
+      </button>
+      <span className="text-[10px] font-black uppercase tracking-[0.3em] italic opacity-70">
+        Ready to Send
+      </span>
+      <div className="w-10"></div>
+    </div>
+
+    {/* Media Container */}
+    <div className="flex-1 flex items-center justify-center p-4 bg-[#0b141a]">
+      {previewFile?.type.startsWith('video') ? (
+        <video src={previewUrl} controls className="max-w-full max-h-[70vh] rounded-lg shadow-2xl" autoPlay />
+      ) : (
+        <img src={previewUrl} className="max-w-full max-h-[70vh] rounded-lg shadow-2xl object-contain" alt="Preview" />
+      )}
+    </div>
+
+    {/* Bottom Control Bar */}
+    <div className="p-4 bg-[#f0f2f5] border-t border-gray-200">
+      <div className="max-w-4xl mx-auto flex items-center gap-3">
+        <div className="flex-1 bg-white rounded-xl border border-gray-300 px-4 py-3 flex items-center">
+          <input 
+            type="text"
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            placeholder="Add a caption..."
+            className="w-full bg-transparent outline-none text-sm"
+            autoFocus
+          />
+        </div>
+        
+        <button 
+          onClick={handleFinalSend} // This triggers your S3 upload logic
+          disabled={isUploading}
+          className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 
+            ${isUploading ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'}`}
+        >
+          {isUploading ? (
+            <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : (
+            <svg stroke="currentColor" fill="currentColor" viewBox="0 0 16 16" height="24" width="24" className="text-white">
+              <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
+            </svg>
+          )}
+        </button>
+      </div>
+      {isUploading && (
+        <p className="text-center text-[10px] font-bold text-blue-600 uppercase tracking-widest mt-3 animate-pulse">
+          Uploading Securely...
+        </p>
+      )}
+    </div>
+  </div>
+)}
+
 {callStatus !== 'idle' && (
   <div className="fixed inset-0 z-[2000] bg-slate-900 flex flex-col items-center justify-center text-white animate-in fade-in duration-300">
     <div className="flex flex-col items-center space-y-6">

@@ -1478,8 +1478,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   </div>
 )}
 
-
-
 <footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
   {/* --- REPLY PREVIEW PANEL --- */}
   {replyingTo && (
@@ -1502,7 +1500,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </p>
         </div>
 
-        {/* Thumbnail Preview if the replied message is Media */}
         {replyingTo.fileUrl && (
           <div className="w-12 h-12 bg-gray-200">
             {replyingTo.fileType === 'image' ? (
@@ -1515,7 +1512,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </div>
         )}
 
-        {/* Cancel Reply Button */}
         <button 
           onClick={() => setReplyingTo(null)}
           className="p-3 text-slate-400 hover:text-blue-600 transition-colors"
@@ -1528,7 +1524,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 
   {/* --- MAIN INPUT CONTROLS --- */}
   <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
-    {/* Hidden Inputs for File and Camera */}
     <input 
       type="file" 
       ref={fileInputRef} 
@@ -1546,7 +1541,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     />
 
     <div className="flex gap-1 md:gap-2 text-gray-500">
-      {/* Attachment Button */}
       <button 
         type="button"
         onClick={() => fileInputRef.current.click()} 
@@ -1556,7 +1550,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         <BsPaperclip size={22} />
       </button>
 
-      {/* Camera Button */}
       <button 
         type="button"
         onClick={() => cameraInputRef.current.click()} 
@@ -1580,22 +1573,18 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         />
       </div>
       
-      {/* Voice/Send Toggle */}
-      {newMessage.trim() ? (
-        <button 
-          type="submit" 
-          className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform shrink-0"
-        >
-          <BsSendFill size={16} className="ml-0.5" />
-        </button>
-      ) : (
-        <button 
-          type="button"
-          className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-white text-gray-500 border border-gray-100 flex items-center justify-center hover:text-blue-600 transition-colors shrink-0"
-        >
-          <BsMicFill size={20} />
-        </button>
-      )}
+      {/* ALWAYS SHOW SEND BUTTON, REMOVED MIC TOGGLE */}
+      <button 
+        type="submit" 
+        disabled={!newMessage.trim() && !isUploading}
+        className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${
+          newMessage.trim() 
+            ? "bg-blue-600 text-white" 
+            : "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"
+        }`}
+      >
+        <BsSendFill size={16} className="ml-0.5" />
+      </button>
     </form>
   </div>
 </footer>
