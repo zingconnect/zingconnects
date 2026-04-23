@@ -862,14 +862,10 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
-
       await s3Client.send(new PutObjectCommand(uploadParams));
-
       updateData.photoUrl = fileKey; 
-      
       console.log(`[Storage] Photo uploaded for user: ${req.user.id} with key: ${fileKey}`);
     }
-
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
       updateData,
@@ -887,7 +883,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       message: "Onboarding complete", 
       user: updatedUser 
     });
-
   } catch (err) {
     console.error("CRITICAL ONBOARDING ERROR:", err);
     res.status(500).json({ 
