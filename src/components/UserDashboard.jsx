@@ -209,7 +209,6 @@ useEffect(() => {
   if (!token) return;
 
   const checkCalls = async () => {
-    // Only poll if the UI isn't already busy with a call
     if (callStatus !== 'idle') return; 
 
     try {
@@ -222,35 +221,27 @@ useEffect(() => {
       const data = await response.json();
 
       if (data.hasIncomingCall) {
-        // 1. GHOST PROTECTION
         const callTime = new Date(data.createdAt).getTime();
         const now = Date.now();
         const ageInSeconds = (now - callTime) / 1000;
 
         if (ageInSeconds > 60) {
-          console.log(`User Dash: Ignoring stale call attempt (${ageInSeconds}s old)`);
           return;
         }
 
-        // 2. CONSOLIDATED STATE UPDATE
-        // We structure this to match exactly what your HTML expects:
-        // activeCall.callerData.fromName
-        const incomingCallData = {
+        // We only set activeCall and callStatus.
+        // Your constant 'isIncomingCall' will automatically turn true.
+        setActiveCall({
           callId: data.callId,
           fromId: data.callerData?.callerId,
           signal: data.signal,
           callerData: {
-            fromName: data.callerData?.fromName || data.callerData?.name || "Unknown Agent",
+            fromName: data.callerData?.fromName || "Secure Caller",
             photoUrl: data.callerData?.photoUrl,
             callerId: data.callerData?.callerId
           }
-        };
+        });
 
-        // If you chose NOT to define setActiveCaller, remove that line.
-        // If you DID define it, you can keep it, but setActiveCall is the one your HTML uses.
-        setActiveCall(incomingCallData); 
-        
-        setIsIncomingCall(true);
         setCallStatus('ringing');
       }
     } catch (err) {
@@ -260,7 +251,7 @@ useEffect(() => {
 
   const interval = setInterval(checkCalls, 3000); 
   return () => clearInterval(interval);
-}, [callStatus]); // Dependencies are correct
+}, [callStatus, userData?._id]);
 
 useEffect(() => {
   const audio = ringtoneRef.current;

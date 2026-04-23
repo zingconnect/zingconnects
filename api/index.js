@@ -1581,11 +1581,8 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     const rawId = req.user?._id || req.user?.id || req.user?.userId;
     if (!rawId) return res.status(401).json({ hasIncomingCall: false });
 
-    /**
-     * 1. SEARCH CRITERIA
-     * We look for calls where status is 'calling' or 'ringing' AND active is true.
-     * Standardizing the ID check to handle both string and ObjectId formats.
-     */
+    // We look for 'calling' or 'ringing'. This ensures the user sees the call 
+    // even if the status hasn't transitioned yet.
     let incoming = await Call.findOne({ 
       receiver: rawId,
       status: { $in: ['calling', 'ringing'] },
@@ -1596,35 +1593,31 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
 
     if (!incoming) return res.json({ hasIncomingCall: false });
 
-    /**
-     * 2. EXPIRATION CHECK (The "Ghost Call" Killer)
-     * If the call was created more than 60 seconds ago, it is likely stale.
-     * We mark it as 'missed' and 'active: false' so it never rings again.
-     */
     const callStartTime = new Date(incoming.createdAt).getTime();
     const now = Date.now();
     const diffInSeconds = (now - callStartTime) / 1000;
 
+    // Ghost Protection
     if (diffInSeconds > 60) {
       incoming.status = 'missed';
       incoming.active = false;
       await incoming.save();
-      console.log(`🧹 Stale call ${incoming._id} auto-ended (${diffInSeconds}s old)`);
       return res.json({ hasIncomingCall: false });
     }
+
+    // Auto-transition to ringing so the Agent knows the User's phone is active
     if (incoming.status === 'calling') {
       incoming.status = 'ringing';
       await incoming.save();
-      console.log(`🔔 Call ${incoming._id} status updated: CALLING -> RINGING`);
     }
 
-    // 4. RETURN DATA
+    // Standardized response to match Frontend: activeCall.callerData.fromName
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       status: incoming.status, 
-      signal: incoming.signal,
-      createdAt: incoming.createdAt, // Pass this so frontend can also verify age
+      signal: incoming.signal, // This MUST be present for WebRTC to connect
+      createdAt: incoming.createdAt,
       callerData: {
         fromName: incoming.caller 
           ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() 
