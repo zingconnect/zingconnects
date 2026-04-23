@@ -5,25 +5,26 @@ import {
   checkIncomingCall, 
   acceptCall, 
   endCall,
-  getCallStatus // <--- 1. Import this (you'll need to create it in your controller)
+  getCallStatus,
+  updateCallSignal // <--- Add this for WebRTC handshake
 } from '../controllers/callController.js';
 
 const router = express.Router();
 
-// --- PROTECTED ROUTES ---
-
+// 1. Initiation
 router.post('/start', authenticateToken, startCall); 
 
+// 2. Discovery (Polling for the Receiver)
 router.get('/check-incoming', authenticateToken, checkIncomingCall);
 
-/**
- * @route   GET /api/calls/status/:callId
- * @desc    Check if a specific call is still active, ringing, or ended
- */
-router.get('/status/:callId', authenticateToken, getCallStatus); // <--- 2. ADD THIS ROUTE
+// 3. Heartbeat (Checking if the call is still alive)
+router.get('/status/:callId', authenticateToken, getCallStatus); 
 
+// 4. Signaling (The "Audio Bridge")
+router.patch('/update-signal', authenticateToken, updateCallSignal);
+
+// 5. Connection & Cleanup
 router.post('/accept', authenticateToken, acceptCall);
-
 router.post('/end', authenticateToken, endCall);
 
 export default router;

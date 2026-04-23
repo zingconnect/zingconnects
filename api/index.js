@@ -1601,7 +1601,8 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
-      status: incoming.status, // Will now return 'ringing' to the receiver
+      status: incoming.status, 
+      signal: incoming.signal,
       callerData: {
         fromName: incoming.caller ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() : "Secure Caller",
         photoUrl: incoming.caller?.photoUrl || null,
@@ -1610,6 +1611,17 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ hasIncomingCall: false });
+  }
+});
+
+app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { callId, signal } = req.body;
+    await Call.findByIdAndUpdate(callId, { signal: signal });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false });
   }
 });
 

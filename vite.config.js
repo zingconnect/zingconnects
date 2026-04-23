@@ -7,30 +7,22 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  build: {
-    chunkSizeWarningLimit: 2000,
-    rollupOptions: {
-      // These MUST be externalized so the browser build ignores them
-      external: [
-        'crypto', 'fs', 'path', 'os', 'dotenv', 
-        'bcryptjs', 'mongoose', 'jsonwebtoken', 
-        'nodemailer', 'express', 'multer', 
-        'flutterwave-node-v3', 'web-push',
-        '@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner'
-      ],
-    },
-  },
   resolve: {
     alias: {
-      // This maps Node modules to browser-safe versions
-      crypto: 'crypto-browserify',
+      // Direct mapping to the browser-safe versions you installed
       stream: 'stream-browserify',
       buffer: 'buffer',
     },
   },
   define: {
-    // This supports the manual polyfills you added to AgentDashboard
+    // This is the "magic" that stops the 'reading call' error
     global: 'window',
     'process.env': {},
+    'process.nextTick': '(function(fn) { setTimeout(fn, 0); })',
+  },
+  build: {
+    chunkSizeWarningLimit: 2000,
+    // Removed the 'external' list. In a standard React SPA, 
+    // Vite handles tree-shaking automatically.
   },
 })

@@ -10,7 +10,6 @@ import User from '../models/User.js';
 import Agent from '../models/Agent.js';
 import { authenticateToken } from './auth.js';
 
-// 1. Initialize S3 Client locally to avoid "s3Client is not defined" 500 errors
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
   endpoint: process.env.IDRIVE_ENDPOINT,

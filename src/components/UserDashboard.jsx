@@ -2,12 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { Buffer } from 'buffer';
-
-if (typeof window !== 'undefined') {
-  window.Buffer = Buffer;
-  window.global = window; 
-}
-
 // 3. NOW IMPORT PEER (It will now see window.Buffer correctly)
 import Peer from 'simple-peer';
 import { motion, useAnimation } from "framer-motion";
@@ -797,8 +791,6 @@ const handleStartCall = async () => {
 
   if (!currentAgentId || !currentUserId) {
     console.error("❌ Missing IDs:", { agentId: currentAgentId, userId: currentUserId });
-    
-    // If it's undefined, it means your profile fetch hasn't finished yet.
     alert("User profile is still loading. Please try again in a second.");
     return;
   }
@@ -815,37 +807,37 @@ const handleStartCall = async () => {
         'Authorization': `Bearer ${token}` 
       },
       body: JSON.stringify({ 
-        receiverId: currentAgentId, // Use the safe variable
+        receiverId: currentAgentId,
         receiverModel: 'Agent' 
       })
     });
     
     const data = await res.json();
-    console.log("🚀 Initializing Peer with:", Peer);
 
     if (data.success) {
       setActiveCall({ 
         callId: data.callId,
-        fromId: currentUserId, // Use the safe variable
+        fromId: currentUserId,
         callerData: {
-          fromName: `${agent.firstName} ${agent.lastName}`,
-          photoUrl: agent.photoUrl
+          fromName: `${userData.firstName} ${userData.lastName}`,
+          photoUrl: userData.photoUrl
         }
       });
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setLocalStream(stream);
-    console.log("🚀 Initializing Peer with:", Peer);
 
-  const PeerConstructor = Peer.default || Peer;
-  const peer = new PeerConstructor({
-    initiator: true,
-    trickle: false,
-    stream: stream,
-    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-  });
+      const PeerConstructor = Peer.default || Peer;
+      const peer = new PeerConstructor({
+        initiator: true,
+        trickle: false,
+        stream: stream,
+        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+      });
 
-      peer.on('signal', (signalData) => {
+      // --- THE CRITICAL UPDATE IS HERE ---
+      peer.on('signal', async (signalData) => {
+        // 1. Send via Socket (Fast Path)
         socket.emit("call-user", {
           userToCall: currentAgentId,
           fromId: currentUserId,
@@ -854,6 +846,25 @@ const handleStartCall = async () => {
           callId: data.callId,
           signal: signalData 
         });
+
+        // 2. Save to Database (Reliable Backup Path)
+        // This prevents the "silent call" issue if the socket fails
+        try {
+          await fetch('/api/calls/update-signal', {
+            method: 'PATCH',
+            headers: { 
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ 
+              callId: data.callId, 
+              signal: signalData 
+            })
+          });
+          console.log("✅ WebRTC Signal backed up to database");
+        } catch (dbErr) {
+          console.error("❌ Signal backup failed:", dbErr);
+        }
       });
 
       peer.on('stream', (remoteStream) => {
@@ -878,6 +889,7 @@ const handleStartCall = async () => {
     setCallStatus('idle');
   }
 };
+
 
  const handleSendMessage = async (e) => {
   e.preventDefault();

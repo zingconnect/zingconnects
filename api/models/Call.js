@@ -1,39 +1,46 @@
 import mongoose from 'mongoose';
 
 const callSchema = new mongoose.Schema({
-  // The ID of the person starting the call
   caller: {
     type: mongoose.Schema.Types.ObjectId,
     required: true,
-    refPath: 'callerModel' // Looks at the callerModel field to know which collection to join
+    refPath: 'callerModel'
   },
-  // Tells Mongoose which collection the caller belongs to
   callerModel: {
     type: String,
     required: true,
     enum: ['User', 'Agent']
   },
-
-  // The ID of the person receiving the call
   receiver: {
     type: mongoose.Schema.Types.ObjectId,
     required: true,
     refPath: 'receiverModel'
   },
-  // Tells Mongoose which collection the receiver belongs to
   receiverModel: {
     type: String,
     required: true,
     enum: ['User', 'Agent']
   },
-status: {
+  status: {
     type: String,
     enum: ['calling', 'ringing', 'connected', 'ended', 'missed', 'declined'],
-    default: 'calling' // Starts at 'calling'
+    default: 'calling'
+  },
+  // ADD THIS: Stores the WebRTC handshake data
+  signal: { 
+    type: Object 
+  },
+  // ADD THIS: Helpful for quick indexing of active calls
+  active: { 
+    type: Boolean, 
+    default: true 
   },
   startTime: { type: Date },
   endTime: { type: Date },
 }, { timestamps: true });
+
+// Create an index to make the polling route extremely fast
+callSchema.index({ receiver: 1, status: 1 });
 
 const Call = mongoose.model('Call', callSchema);
 export default Call;
