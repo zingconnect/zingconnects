@@ -156,6 +156,7 @@ useEffect(() => {
     setActiveCall({
       callId: data.callId,
       fromId: data.fromId,
+      signal: data.signal,
       callerData: {
         fromName: data.fromName,
         photoUrl: data.photoUrl,
@@ -765,14 +766,21 @@ const handleDownload = async (url, type) => {
     console.error("Download failed:", err);
   }
 };
-
 const handleStartCall = async () => {
-  if (!agent?._id || !userData?._id) return;
+  console.log("☎️ Start Call button clicked");
+  
+  if (!agent?._id || !userData?._id) {
+    console.error("Missing IDs:", { agentId: agent?._id, userId: userData?._id });
+    return;
+  }
   
   const token = localStorage.getItem('userToken');
+  
+  // 1. UI Feedback immediately
   setCallStatus('calling'); 
 
   try {
+    console.log("1. Fetching call initiation from API...");
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
@@ -786,6 +794,7 @@ const handleStartCall = async () => {
     });
     
     const data = await res.json();
+    console.log("2. API Response:", data);
 
     if (data.success) {
       setActiveCall({ 
@@ -797,51 +806,62 @@ const handleStartCall = async () => {
         }
       });
 
-      // --- NEW WEBRTC LOGIC STARTS HERE ---
-      
-      // 1. Capture the Microphone
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("3. Requesting microphone access...");
+      // CRITICAL: Request microphone BEFORE initializing Peer
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       setLocalStream(stream);
+      console.log("4. Microphone access granted ✅");
 
-      // 2. Initialize Peer as the "Initiator"
+      // Initialize Peer
       const peer = new Peer({
         initiator: true,
         trickle: false,
-        stream: stream
+        stream: stream,
+        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } // Added Google STUN server for better connectivity
       });
 
-      // 3. When Peer generates a signal (audio metadata), send it via Sockets
+      // When the signal (WebRTC metadata) is ready, send it via Socket
       peer.on('signal', (signalData) => {
+        console.log("5. WebRTC Signal generated. Emitting 'call-user' to socket...");
         socket.emit("call-user", {
           userToCall: agent._id,
           fromId: userData._id,
           fromName: `${userData.firstName} ${userData.lastName}`,
           photoUrl: userData.photoUrl,
           callId: data.callId,
-          signal: signalData // <-- THE SIGNAL IS THE KEY
+          signal: signalData 
         });
       });
 
-      // 4. When the Agent's stream arrives, play it
+      // When the Agent sends their audio stream back
       peer.on('stream', (remoteStream) => {
-        const audio = document.createElement('audio');
+        console.log("6. 🎤 Remote audio stream received! Playing...");
+        let audio = document.getElementById('remoteAudio');
+        if (!audio) {
+          audio = document.createElement('audio');
+          audio.id = 'remoteAudio';
+          document.body.appendChild(audio);
+        }
         audio.srcObject = remoteStream;
-        audio.play();
+        audio.play().catch(e => console.error("Audio play failed:", e));
       });
 
-      // Store the connection in the ref so we can destroy it on hang-up
+      peer.on('error', (err) => {
+        console.error("Peer connection error:", err);
+        handleEndCall();
+      });
+
       connectionRef.current = peer;
 
-      // --- END WEBRTC LOGIC ---
-
     } else {
+      console.warn("Call rejected by server:", data.message);
       setCallStatus('idle');
       alert(data.message || "Agent is currently on another call.");
     }
   } catch (err) {
+    console.error("❌ Call Initiation Error:", err);
     setCallStatus('idle');
-    console.error("Call Initiation Error:", err);
-    alert("Microphone access denied or connection failed.");
+    alert("Could not start call. Please ensure you are on HTTPS and microphone is allowed.");
   }
 };
 
