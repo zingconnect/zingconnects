@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { Buffer } from 'buffer';
-import Peer from 'simple-peer';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
 import { BsReplyFill } from "react-icons/bs";
@@ -266,9 +265,13 @@ const handleAcceptCall = async () => {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
   }
+
   const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
+  
   try {
     setCallStatus('connecting');
+
+    // 1. Notify backend call is accepted
     await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
@@ -277,16 +280,23 @@ const handleAcceptCall = async () => {
       },
       body: JSON.stringify({ callId: activeCall.callId }) 
     });
+
+    // 2. Capture Microphone
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     userStreamRef.current = stream;
     setLocalStream(stream);
-    const PeerConstructor = Peer.default || Peer;
-    const peer = new PeerConstructor({
+
+    // --- CRITICAL FIX: DYNAMIC IMPORT ---
+    // Loads simple-peer only AFTER polyfills are ready
+    const { default: SimplePeer } = await import('simple-peer');
+
+    const peer = new SimplePeer({
       initiator: false, 
       trickle: false,
       stream: stream,
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
+
     peer.on('signal', (data) => {
       const targetId = activeCall.fromId || activeCall.callerData?.callerId;
       socket.emit("answer-call", {
@@ -294,6 +304,7 @@ const handleAcceptCall = async () => {
         callId: activeCall.callId,
         signal: data 
       });
+
       fetch('/api/calls/update-signal', {
         method: 'PATCH',
         headers: { 
@@ -303,6 +314,7 @@ const handleAcceptCall = async () => {
         body: JSON.stringify({ callId: activeCall.callId, signal: data })
       }).catch(e => console.warn("Signal backup failed", e));
     });
+
     peer.on('stream', (remoteStream) => {
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
@@ -314,22 +326,28 @@ const handleAcceptCall = async () => {
       audio.srcObject = remoteStream;
       setCallStatus('connected');
     });
-if (activeCall?.signal) {
-  const incomingSignal = typeof activeCall.signal === 'string' 
-    ? JSON.parse(activeCall.signal) 
-    : activeCall.signal;
-  setTimeout(() => {
-    if (peer && !peer.destroyed) {
-      console.log("Applying incoming signal to peer engine...");
-      try {
-        peer.signal(incomingSignal);
-      } catch (e) {
-        console.error("Failed to apply signal:", e);
-      }
+
+    // 3. APPLY INCOMING SIGNAL
+    if (activeCall?.signal) {
+      const incomingSignal = typeof activeCall.signal === 'string' 
+        ? JSON.parse(activeCall.signal) 
+        : activeCall.signal;
+        
+      // Small timeout ensures peer 'signal' listener is active
+      setTimeout(() => {
+        if (peer && !peer.destroyed) {
+          console.log("Applying incoming signal to peer engine...");
+          try {
+            peer.signal(incomingSignal);
+          } catch (e) {
+            console.error("Failed to apply signal:", e);
+          }
+        }
+      }, 250); 
     }
-  }, 250); 
-}
+
     connectionRef.current = peer;
+
     peer.on('close', () => handleEndCall());
     peer.on('error', (err) => {
       console.error("Peer Error:", err);
@@ -339,9 +357,8 @@ if (activeCall?.signal) {
   } catch (err) {
     console.error("Failed to accept call:", err);
     setCallStatus('idle');
-    setCallStatus('idle');
-setActiveCall(null);
-setActiveCaller(null); // Clear both state objects
+    setActiveCall(null);
+    setActiveCaller(null); 
 
     if (userStreamRef.current) {
       userStreamRef.current.getTracks().forEach(t => t.stop());
@@ -796,10 +813,13 @@ const handleDownload = async (url, type) => {
     console.error("Download failed:", err);
   }
 };
+
 const handleStartCall = async () => {
+  // 1. Ensure polyfills are locked in before doing anything
   if (typeof window !== 'undefined' && !window.Buffer) {
     window.Buffer = Buffer;
   }
+
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
@@ -808,38 +828,34 @@ const handleStartCall = async () => {
     alert("Profile data still loading. Please try again.");
     return;
   }
+
+  // 2. Get Media Stream first
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    
-    if (userStreamRef) {
-      userStreamRef.current = stream;
-    }
+    if (userStreamRef) userStreamRef.current = stream;
     setLocalStream(stream);
     setCallStatus('calling'); 
   } catch (err) {
     console.error("Mic Access Denied:", err);
-    alert("Call failed: Please ensure microphone permissions are granted in your browser settings.");
+    alert("Call failed: Please grant microphone permissions.");
     return;
   }
+
   try {
-    // 3. REGISTER CALL IN DATABASE
+    // 3. Register Call in DB
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}` 
       },
-      body: JSON.stringify({ 
-        receiverId: currentAgentId,
-        receiverModel: 'Agent' 
-      })
+      body: JSON.stringify({ receiverId: currentAgentId, receiverModel: 'Agent' })
     });
     
     const data = await res.json();
 
     if (data.success) {
-      // FIX: Ensure callerData is populated correctly for the UI
       setActiveCall({ 
         callId: data.callId,
         fromId: currentUserId,
@@ -850,40 +866,45 @@ const handleStartCall = async () => {
         }
       });
 
-      // 4. INITIALIZE WEBRTC PEER WITH SAFETY WRAPPER
+      // --- CRITICAL FIX: DYNAMIC IMPORT ---
+      // This waits for the function to run before loading Simple-Peer
+      const { default: SimplePeer } = await import('simple-peer');
+
       try {
-        const PeerConstructor = Peer.default || Peer;
-        const peer = new PeerConstructor({
+        const peer = new SimplePeer({
           initiator: true,
           trickle: false,
           stream: stream,
           config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
         });
 
-      peer.on('signal', async (signalData) => {
-  socket.emit("call-user", {
-    userToCall: currentAgentId,
-    fromId: currentUserId,
-    fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim(),
-    photoUrl: userData?.photoUrl,
-    callId: data.callId,
-    signal: signalData 
-  });
+        peer.on('signal', async (signalData) => {
+          socket.emit("call-user", {
+            userToCall: currentAgentId,
+            fromId: currentUserId,
+            fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim(),
+            photoUrl: userData?.photoUrl,
+            callId: data.callId,
+            signal: signalData 
+          });
 
-  setCallStatus('ringing'); 
-  try {
-    await fetch('/api/calls/update-signal', {
-      method: 'PATCH',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify({ callId: data.callId, signal: signalData })
-    });
-  } catch (dbErr) {
-    console.error("Signal backup failed:", dbErr);
-  }
-});
+          // Move UI to ringing state
+          setCallStatus('ringing'); 
+
+          try {
+            await fetch('/api/calls/update-signal', {
+              method: 'PATCH',
+              headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json' 
+              },
+              body: JSON.stringify({ callId: data.callId, signal: signalData })
+            });
+          } catch (dbErr) {
+            console.error("Signal backup failed:", dbErr);
+          }
+        });
+
         peer.on('stream', (remoteStream) => {
           let audio = document.getElementById('remoteAudio');
           if (!audio) {
@@ -896,9 +917,7 @@ const handleStartCall = async () => {
           setCallStatus('connected');
         });
 
-        if (connectionRef) {
-          connectionRef.current = peer;
-        }
+        if (connectionRef) connectionRef.current = peer;
 
         peer.on('close', () => handleEndCall());
         peer.on('error', (err) => {
