@@ -64,23 +64,47 @@ const CallStatusMessage = ({ status, time }) => (
     </div>
   </div>
 );
-
 export const UserDashboard = () => {
   const navigate = useNavigate();
+
+  // --- REFS ---
+  // UI & Media Refs
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
+  
+  // WebRTC & Connection Refs (Critical for avoiding ReferenceErrors)
   const connectionRef = useRef(null);
+  const userStreamRef = useRef(null); 
+  const remoteStreamRef = useRef(null); 
+  const lastNotifiedId = useRef(null);
 
-  // 1. FIRST: Define ALL your states (move the call states up here)
+  // --- STATES ---
+  // User & Agent Data
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [connectionStatus, setConnectionStatus] = useState('online');
+
+  // Messaging States
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [replyingTo, setReplyingTo] = useState(null);
   const [hasInteracted, setHasInteracted] = useState(false);
-  const [showProfilePanel, setShowProfilePanel] = useState(false);
+
+  // Call System States
+  const [callStatus, setCallStatus] = useState('idle'); // 'idle', 'ringing', 'calling', 'connecting', 'connected', 'busy'
+  const [activeCall, setActiveCall] = useState(null); 
+  const [activeCaller, setActiveCaller] = useState(null); 
   const [localStream, setLocalStream] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+
+  // File & UI Overlay States
+  const [showProfilePanel, setShowProfilePanel] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingFile, setOnboardingFile] = useState(null);
   const [previewFile, setPreviewFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -88,18 +112,8 @@ export const UserDashboard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState('online');
-  const [replyingTo, setReplyingTo] = useState(null);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  
-  // MOVE THESE UP:
-  const [callStatus, setCallStatus] = useState('idle'); 
 
-  const [activeCall, setActiveCall] = useState(null); 
-  const [activeCaller, setActiveCaller] = useState(null); 
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-
+  // Form State
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -108,12 +122,16 @@ export const UserDashboard = () => {
     city: '',
     state: ''
   });
-  const isIncomingCall = activeCall?.callerData ? true : false;
-  console.log("Current connection:", connectionStatus);
-  console.log("Is there an incoming call?", isIncomingCall);
-  const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
-  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
-  const lastNotifiedId = useRef(null);
+  const isIncomingCall = 
+    callStatus === 'ringing' && 
+    activeCall?.fromId !== (userData?._id || userData?.id);
+
+  // Debugging Logs
+  console.log("System Check:", {
+    connection: connectionStatus,
+    callStatus: callStatus,
+    isIncoming: isIncomingCall
+  });
 
   // --- HELPERS ---
   const getStatusInfo = (agentData) => {
@@ -146,16 +164,10 @@ useEffect(() => {
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
-  // Join the room so the server knows where to send the signal
   socket.emit("join-main-room", userData._id);
-  console.log("✅ User joined room:", userData._id);
 
   const handleIncomingCall = (data) => {
-    console.log("📞 Incoming call payload received:", data);
-
-    // Use the REF to check status, so we don't need callStatus in the dependency array
     if (callStatusRef.current !== 'idle') {
-      console.log("🚫 User busy, rejecting call");
       socket.emit("user-busy", { 
         to: data.fromId, 
         callId: data.callId 
@@ -163,25 +175,24 @@ useEffect(() => {
       return; 
     }
 
-    console.log("🔔 Ringing UI triggered");
     socket.emit("confirm-ringing", { to: data.fromId });
     
     setActiveCall({
       callId: data.callId,
       fromId: data.fromId,
-      signal: data.signal || data.signalData, // Handle both naming conventions just in case
+      signal: data.signal || data.signalData, 
       callerData: {
         fromName: data.fromName,
         photoUrl: data.photoUrl,
         callerId: data.fromId
       }
     });
+    
     setCallStatus('ringing');
   };
 
   const handleCallEnded = () => {
-    console.log("📴 Call ended by remote peer");
-    handleEndCall(); // Use your cleanup function to stop tracks/refs
+    handleEndCall(); 
   };
 
   socket.on("incoming-call", handleIncomingCall);
@@ -191,7 +202,7 @@ useEffect(() => {
     socket.off("incoming-call", handleIncomingCall);
     socket.off("call-ended", handleCallEnded);
   };
-}, [socket, userData?._id]); // Removed callStatus from here
+}, [socket, userData?._id]);
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
@@ -852,17 +863,12 @@ const handleDownload = async (url, type) => {
     console.error("Download failed:", err);
   }
 };
-
 const handleStartCall = async () => {
-  console.log("☎️ Start Call button clicked");
-  
-  // 1. Gather IDs and Token
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
 
   if (!currentAgentId || !currentUserId) {
-    console.error("❌ Missing IDs:", { agentId: currentAgentId, userId: currentUserId });
     alert("Profile data still loading. Please try again.");
     return;
   }
@@ -870,15 +876,13 @@ const handleStartCall = async () => {
   try {
     setCallStatus('calling'); 
 
-    // 2. GET MICROPHONE FIRST (CRITICAL FIX)
-    // We await this before even talking to the backend or initializing Peer.
-    // If this fails, the catch block resets the UI and we avoid the 'undefined' error.
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    userStreamRef.current = stream; // Using Ref for consistency
+    
+    if (userStreamRef) {
+      userStreamRef.current = stream;
+    }
     setLocalStream(stream);
 
-    // 3. Initialize Call in Database
-    console.log("1. Fetching call initiation...");
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
@@ -903,18 +907,15 @@ const handleStartCall = async () => {
         }
       });
 
-      // 4. Initialize Peer (Initiator)
       const PeerConstructor = Peer.default || Peer;
       const peer = new PeerConstructor({
         initiator: true,
         trickle: false,
-        stream: stream, // Now guaranteed to be defined
+        stream: stream,
         config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
       });
 
-      // 5. Handle Signaling
       peer.on('signal', async (signalData) => {
-        // Fast Path: Socket
         socket.emit("call-user", {
           userToCall: currentAgentId,
           fromId: currentUserId,
@@ -924,7 +925,6 @@ const handleStartCall = async () => {
           signal: signalData 
         });
 
-        // Backup Path: Database
         try {
           await fetch('/api/calls/update-signal', {
             method: 'PATCH',
@@ -937,13 +937,11 @@ const handleStartCall = async () => {
               signal: signalData 
             })
           });
-          console.log("✅ WebRTC Signal backed up to database");
         } catch (dbErr) {
-          console.error("❌ Signal backup failed:", dbErr);
+          console.error("Signal backup failed:", dbErr);
         }
       });
 
-      // 6. Handle Remote Audio
       peer.on('stream', (remoteStream) => {
         let audio = document.getElementById('remoteAudio');
         if (!audio) {
@@ -952,32 +950,25 @@ const handleStartCall = async () => {
           document.body.appendChild(audio);
         }
         audio.srcObject = remoteStream;
-        audio.play().catch(e => console.error("Audio playback blocked:", e));
-        
-        // Finalize UI
+        audio.play().catch(e => console.error("Playback error:", e));
         setCallStatus('connected');
       });
 
-      connectionRef.current = peer;
+      if (connectionRef) {
+        connectionRef.current = peer;
+      }
 
-      // Handle termination from peer side
       peer.on('close', () => handleEndCall());
-      peer.on('error', (err) => {
-        console.error("Peer Error:", err);
-        handleEndCall();
-      });
+      peer.on('error', () => handleEndCall());
 
     } else {
-      // If backend says no (e.g. agent busy)
       if (stream) stream.getTracks().forEach(t => t.stop());
       setCallStatus('idle');
       alert(data.message || "Agent is currently unavailable.");
     }
 
   } catch (err) {
-    console.error("❌ Call initialization failed:", err);
-    // Cleanup any tracks that started before the error
-    if (userStreamRef.current) {
+    if (userStreamRef?.current) {
       userStreamRef.current.getTracks().forEach(track => track.stop());
     }
     setCallStatus('idle');
