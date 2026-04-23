@@ -1166,7 +1166,6 @@ const handleSendMessage = async (e) => {
   return (
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
 
-      {/* --- 1. ADD CONNECTION STATUS BAR HERE --- */}
 {(connectionStatus === 'offline' || connectionStatus === 'connecting') && (
   <div className={`fixed top-0 left-0 w-full z-[50000] py-1.5 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-300 ${
     connectionStatus === 'offline' ? 'bg-[#ea0038]' : 'bg-[#ffb300]'
@@ -1299,8 +1298,6 @@ const handleSendMessage = async (e) => {
             <input placeholder="Search" className="bg-transparent text-xs w-full outline-none" />
           </div>
         </div>
-
-        {/* User list in sidebar */}
 {/* User list in sidebar */}
 <div className="flex-1 overflow-y-auto">
   {users.length > 0 ? users.map((user) => (
@@ -1393,7 +1390,6 @@ const handleSendMessage = async (e) => {
   referrerPolicy="no-referrer-when-downgrade"
   loading="lazy"      // Only loads when it's about to enter the screen
   decoding="async"    // Prevents the image decoding from blocking the UI thread
-  // ---------------------------
   onError={(e) => {
     e.target.onerror = null; 
     const name = encodeURIComponent(`${selectedUser.firstName} ${selectedUser.lastName}`);

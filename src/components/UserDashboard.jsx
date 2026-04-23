@@ -23,17 +23,19 @@ import {
   BsPlusLg, 
   BsSendFill, 
   BsCheckAll,
-  BsChevronLeft, // Kept this one
+  BsChevronLeft,
   BsShieldLockFill,
   BsGearFill,
   BsArrowRight,
   BsCameraFill,
   BsMicFill,   
-  BsVolumeUpFill, // Added for Speaker
+  BsVolumeUpFill,
   BsMicMuteFill,   
   BsPaperclip,
-  BsDownload,    // Now properly imported
-  BsPlayFill     // Now properly imported
+  BsDownload,
+  BsPlayFill,
+  BsXLg, // ADD THIS
+  BsX // ADD THIS AS BACKUP
 } from 'react-icons/bs';
 
 
@@ -116,6 +118,7 @@ export const UserDashboard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
+  const [showFullScreenCall, setShowFullScreenCall] = useState(false);
   
 
   const [formData, setFormData] = useState({
@@ -283,13 +286,10 @@ const handleAcceptCall = async () => {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
   }
-
   const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
-  
   try {
     setCallStatus('connecting');
-
-    // 1. Notify backend call is accepted
+    setShowFullScreenCall(true);
     await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
@@ -298,14 +298,9 @@ const handleAcceptCall = async () => {
       },
       body: JSON.stringify({ callId: activeCall.callId }) 
     });
-
-    // 2. Capture Microphone
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     userStreamRef.current = stream;
     setLocalStream(stream);
-
-    // --- CRITICAL FIX: DYNAMIC IMPORT ---
-    // Loads simple-peer only AFTER polyfills are ready
     const { default: SimplePeer } = await import('simple-peer');
 
     const peer = new SimplePeer({
@@ -415,6 +410,7 @@ const handleEndCall = async () => {
 
   setCallStatus('idle');
   setActiveCall(null);
+  setShowFullScreenCall(false);
   try {
     const targetId = agent?._id || activeCall?.fromId;
     if (targetId) {
@@ -840,11 +836,9 @@ const handleDownload = async (url, type) => {
 };
 
 const handleStartCall = async () => {
-  // 1. Ensure polyfills are locked in before doing anything
   if (typeof window !== 'undefined' && !window.Buffer) {
     window.Buffer = Buffer;
   }
-
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
@@ -853,22 +847,19 @@ const handleStartCall = async () => {
     alert("Profile data still loading. Please try again.");
     return;
   }
-
-  // 2. Get Media Stream first
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     if (userStreamRef) userStreamRef.current = stream;
     setLocalStream(stream);
     setCallStatus('calling'); 
+    setShowFullScreenCall(true);
   } catch (err) {
     console.error("Mic Access Denied:", err);
     alert("Call failed: Please grant microphone permissions.");
     return;
   }
-
   try {
-    // 3. Register Call in DB
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
@@ -877,9 +868,7 @@ const handleStartCall = async () => {
       },
       body: JSON.stringify({ receiverId: currentAgentId, receiverModel: 'Agent' })
     });
-    
     const data = await res.json();
-
     if (data.success) {
       setActiveCall({ 
         callId: data.callId,
@@ -891,11 +880,7 @@ photoUrl: userData?.photoUrl,
           callerId: currentUserId
         }
       });
-
-      // --- CRITICAL FIX: DYNAMIC IMPORT ---
-      // This waits for the function to run before loading Simple-Peer
       const { default: SimplePeer } = await import('simple-peer');
-
       try {
         const peer = new SimplePeer({
           initiator: true,
@@ -903,7 +888,6 @@ photoUrl: userData?.photoUrl,
           stream: stream,
           config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
         });
-
         peer.on('signal', async (signalData) => {
 socket.emit("call-user", {
   userToCall: currentAgentId,
@@ -913,10 +897,7 @@ socket.emit("call-user", {
   callId: data.callId,
   signal: signalData 
 });
-
-          // Move UI to ringing state
           setCallStatus('ringing'); 
-
           try {
             await fetch('/api/calls/update-signal', {
               method: 'PATCH',
@@ -1415,6 +1396,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 {/* Increased height to ensure the keyboard doesn't hide the last message */}
 <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
+
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
 {previewUrl && !showOnboarding && (
     <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
@@ -1422,6 +1404,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     <div className="p-4 flex justify-between items-center text-white">
       <button 
         onClick={() => { 
+          URL.revokeObjectURL(previewUrl);
           setPreviewUrl(null); 
           setPreviewFile(null); // Ensure this matches your state name
         }} 
@@ -1437,9 +1420,12 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     <div className="flex-1 flex items-center justify-center p-4">
       {previewFile?.type?.startsWith('video/') ? (
         <video 
+          key={previewUrl}
           src={previewUrl} 
           controls 
           autoPlay 
+          muted
+          playsInline
           className="max-h-full max-w-full rounded-lg shadow-2xl bg-black"
         />
       ) : (
@@ -1829,47 +1815,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   </div>
 )}
-{/* --- INCOMING CALL BANNER (Heads-up Notification) --- */}
-{callStatus === 'ringing' && isIncomingCall && !showFullScreenCall && (
-    <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4 pointer-events-none">
-    <div className="bg-[#1f2c33] w-full max-w-md rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center justify-between animate-in slide-in-from-top duration-300 pointer-events-auto">
-      <div className="flex items-center gap-3">
-        <div className="relative">
-          <img 
-            src={activeCall?.callerData?.photoUrl || agent?.photoUrl || '/default-avatar.png'} 
-            className="w-12 h-12 rounded-full object-cover border-2 border-green-500"
-            alt="caller"
-          />
-          <span className="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-[#1f2c33] animate-pulse" />
-        </div>
-        <div className="overflow-hidden">
-          <h3 className="text-white font-bold text-sm truncate">
-            {activeCall?.callerData?.fromName || agent?.firstName}
-          </h3>
-          <p className="text-gray-400 text-[11px] font-medium animate-pulse">Incoming secure call...</p>
-        </div>
-      </div>
-      
-      <div className="flex gap-2 ml-4">
-        <button 
-          onClick={handleEndCall}
-          className="bg-red-500 hover:bg-red-600 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90"
-          title="Decline"
-        >
-          <BsTelephoneFill className="rotate-[135deg]" size={16} />
-        </button>
-        <button 
-          onClick={handleAcceptCall}
-          className="bg-green-500 hover:bg-green-600 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 shadow-lg shadow-green-500/20"
-          title="Answer"
-        >
-          <BsTelephoneFill size={16} />
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
 
 {/* --- FULLSCREEN CALL INTERFACE (Active/Outgoing) --- */}
 {(callStatus === 'calling' || callStatus === 'connected') && (
