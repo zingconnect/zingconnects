@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import Peer from 'simple-peer';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
 import { BsReplyFill } from "react-icons/bs";
@@ -327,19 +328,45 @@ const handleAcceptCall = async () => {
 
 const handleEndCall = async () => {
   const token = localStorage.getItem('userToken');
-  setCallStatus('idle'); // Set UI to idle immediately for responsiveness
+
+  // 1. STOP THE HARDWARE (Microphone)
+  if (localStream) {
+    localStream.getTracks().forEach(track => {
+      track.stop(); // This physically turns off the microphone
+    });
+    setLocalStream(null);
+  }
+
+  // 2. DESTROY THE PEER CONNECTION
+  if (connectionRef.current) {
+    connectionRef.current.destroy(); // Properly closes the WebRTC bridge
+    connectionRef.current = null;
+  }
+
+  // 3. RESET UI IMMEDIATELY
+  setCallStatus('idle');
   setActiveCall(null);
-  
+  setIsIncomingCall(false); // If it was a banner notification, clear it
+
+  // 4. NOTIFY THE AGENT & DATABASE
   try {
+    // Notify Agent via Socket so their UI also closes immediately
+    if (agent?._id) {
+      socket.emit("end-call", { to: agent._id });
+    }
+
+    // Update DB
     await fetch('/api/calls/end', {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json' 
-      }
+      },
+      // Pass the callId so the server knows exactly which record to close
+      body: JSON.stringify({ callId: activeCall?.callId }) 
     });
   } catch (err) {
-    console.error("Failed to end call", err);
+    console.error("Failed to notify backend of call end", err);
   }
 };
 
@@ -743,17 +770,7 @@ const handleStartCall = async () => {
   if (!agent?._id || !userData?._id) return;
   
   const token = localStorage.getItem('userToken');
-  
-  // 1. UI Feedback: Immediately show the calling overlay
   setCallStatus('calling'); 
-  
-  // 2. Local Timeout: If no response in 30s, cancel the UI state
-  const callTimeout = setTimeout(() => {
-    if (callStatus === 'calling' || callStatus === 'ringing') {
-      setCallStatus('idle');
-      // socket.emit("cancel-call", { to: agent._id }); // Optional: tell server to stop ringing
-    }
-  }, 30000);
 
   try {
     const res = await fetch('/api/calls/start', {
@@ -771,7 +788,6 @@ const handleStartCall = async () => {
     const data = await res.json();
 
     if (data.success) {
-      // 3. Update activeCall with full details for the UI Overlay
       setActiveCall({ 
         callId: data.callId,
         fromId: userData._id,
@@ -781,29 +797,53 @@ const handleStartCall = async () => {
         }
       });
 
-      // 4. Signal the Agent via Sockets
-      socket.emit("call-user", {
-        userToCall: agent._id,
-        fromId: userData._id,
-        fromName: `${userData.firstName} ${userData.lastName}`,
-        photoUrl: userData.photoUrl, // CRITICAL: So the agent sees who is calling
-        callId: data.callId
+      // --- NEW WEBRTC LOGIC STARTS HERE ---
+      
+      // 1. Capture the Microphone
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setLocalStream(stream);
+
+      // 2. Initialize Peer as the "Initiator"
+      const peer = new Peer({
+        initiator: true,
+        trickle: false,
+        stream: stream
       });
 
+      // 3. When Peer generates a signal (audio metadata), send it via Sockets
+      peer.on('signal', (signalData) => {
+        socket.emit("call-user", {
+          userToCall: agent._id,
+          fromId: userData._id,
+          fromName: `${userData.firstName} ${userData.lastName}`,
+          photoUrl: userData.photoUrl,
+          callId: data.callId,
+          signal: signalData // <-- THE SIGNAL IS THE KEY
+        });
+      });
+
+      // 4. When the Agent's stream arrives, play it
+      peer.on('stream', (remoteStream) => {
+        const audio = document.createElement('audio');
+        audio.srcObject = remoteStream;
+        audio.play();
+      });
+
+      // Store the connection in the ref so we can destroy it on hang-up
+      connectionRef.current = peer;
+
+      // --- END WEBRTC LOGIC ---
+
     } else {
-      clearTimeout(callTimeout);
       setCallStatus('idle');
-      // Check if data.message contains "busy" from your backend logic
       alert(data.message || "Agent is currently on another call.");
     }
   } catch (err) {
-    clearTimeout(callTimeout);
     setCallStatus('idle');
     console.error("Call Initiation Error:", err);
-    alert("Connection failed. Check your network.");
+    alert("Microphone access denied or connection failed.");
   }
 };
-
 
  const handleSendMessage = async (e) => {
   e.preventDefault();

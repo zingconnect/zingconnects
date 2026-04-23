@@ -1,39 +1,29 @@
 import express from 'express';
-// FIXED: Changed 'authenticate' to 'authenticateToken' to match your auth.js export
 import { authenticateToken } from './auth.js'; 
 import { 
   startCall, 
   checkIncomingCall, 
   acceptCall, 
-  endCall 
+  endCall,
+  getCallStatus // <--- 1. Import this (you'll need to create it in your controller)
 } from '../controllers/callController.js';
 
 const router = express.Router();
 
 // --- PROTECTED ROUTES ---
 
-/**
- * @route   POST /api/calls/start
- * @desc    User or Agent initiates a secure call
- */
 router.post('/start', authenticateToken, startCall); 
 
-/**
- * @route   GET /api/calls/check-incoming
- * @desc    Polls for any ringing calls assigned to the current user
- */
 router.get('/check-incoming', authenticateToken, checkIncomingCall);
 
 /**
- * @route   POST /api/calls/accept
- * @desc    Updates call status to 'connected'
+ * @route   GET /api/calls/status/:callId
+ * @desc    Check if a specific call is still active, ringing, or ended
  */
+router.get('/status/:callId', authenticateToken, getCallStatus); // <--- 2. ADD THIS ROUTE
+
 router.post('/accept', authenticateToken, acceptCall);
 
-/**
- * @route   POST /api/calls/end
- * @desc    Ends an active call or declines an incoming one
- */
 router.post('/end', authenticateToken, endCall);
 
 export default router;

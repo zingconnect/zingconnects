@@ -30,6 +30,39 @@ export const startCall = async (req, res) => {
   }
 };
 
+// @desc    Get current status of a specific call (Stops the 404 error)
+export const getCallStatus = async (req, res) => {
+  try {
+    await connectToDatabase(); 
+    
+    // The ID comes from the URL parameter: /status/69e9b5...
+    const { callId } = req.params;
+
+    if (!callId) {
+      return res.status(400).json({ success: false, message: "Call ID is required" });
+    }
+
+    const call = await Call.findById(callId);
+
+    if (!call) {
+      // If the call record was deleted or doesn't exist
+      return res.status(404).json({ success: false, message: "Call not found" });
+    }
+
+    // Return the status so the frontend knows whether to stay in the call or close the overlay
+    res.json({ 
+      success: true, 
+      status: call.status,
+      // You can also send the duration if status is 'connected'
+      duration: call.startTime ? Math.floor((Date.now() - call.startTime) / 1000) : 0 
+    });
+
+  } catch (error) {
+    console.error("Poll Error:", error);
+    res.status(500).json({ success: false, message: "Error fetching status", error: error.message });
+  }
+};
+
 // @desc    Check for incoming calls (Polling)
 export const checkIncomingCall = async (req, res) => {
   try {
