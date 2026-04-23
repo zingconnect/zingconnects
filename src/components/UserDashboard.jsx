@@ -840,6 +840,11 @@ const handleDownload = async (url, type) => {
   }
 };
 const handleStartCall = async () => {
+  // 1. POLYFILL CHECK: Simple-peer MUST have Buffer to work
+  if (typeof window !== 'undefined' && !window.Buffer) {
+    window.Buffer = Buffer;
+  }
+
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
@@ -849,7 +854,7 @@ const handleStartCall = async () => {
     return;
   }
 
-  // 1. IMMEDIATE MIC REQUEST (Associates with the click event)
+  // 2. IMMEDIATE MIC REQUEST
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -858,15 +863,15 @@ const handleStartCall = async () => {
       userStreamRef.current = stream;
     }
     setLocalStream(stream);
-    setCallStatus('calling'); // Set status ONLY after mic is confirmed
+    setCallStatus('calling'); 
   } catch (err) {
     console.error("Mic Access Denied:", err);
     alert("Call failed: Please ensure microphone permissions are granted in your browser settings.");
-    return; // Stop here
+    return;
   }
 
   try {
-    // 2. REGISTER CALL IN DB
+    // 3. REGISTER CALL IN DATABASE
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
@@ -882,77 +887,82 @@ const handleStartCall = async () => {
     const data = await res.json();
 
     if (data.success) {
+      // FIX: Ensure callerData is populated correctly for the UI
       setActiveCall({ 
         callId: data.callId,
         fromId: currentUserId,
         callerData: {
-          fromName: `${userData.firstName} ${userData.lastName}`,
-          photoUrl: userData.photoUrl
+          fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim() || "User",
+          photoUrl: userData?.photoUrl || null,
+          callerId: currentUserId
         }
       });
 
-      // 3. INITIALIZE WEBRTC PEER
-      const PeerConstructor = Peer.default || Peer;
-      const peer = new PeerConstructor({
-        initiator: true,
-        trickle: false,
-        stream: stream,
-        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-      });
-
-      peer.on('signal', async (signalData) => {
-        // Send signal via Socket for instant notification
-        socket.emit("call-user", {
-          userToCall: currentAgentId,
-          fromId: currentUserId,
-          fromName: `${userData.firstName} ${userData.lastName}`,
-          photoUrl: userData.photoUrl,
-          callId: data.callId,
-          signal: signalData 
+      // 4. INITIALIZE WEBRTC PEER WITH SAFETY WRAPPER
+      try {
+        const PeerConstructor = Peer.default || Peer;
+        const peer = new PeerConstructor({
+          initiator: true,
+          trickle: false,
+          stream: stream,
+          config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
         });
 
-        // Backup signal to DB (Polling safety)
-        try {
-          await fetch('/api/calls/update-signal', {
-            method: 'PATCH',
-            headers: { 
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({ 
-              callId: data.callId, 
-              signal: signalData 
-            })
+        peer.on('signal', async (signalData) => {
+          socket.emit("call-user", {
+            userToCall: currentAgentId,
+            fromId: currentUserId,
+            fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim(),
+            photoUrl: userData?.photoUrl,
+            callId: data.callId,
+            signal: signalData 
           });
-        } catch (dbErr) {
-          console.error("Signal backup failed:", dbErr);
-        }
-      });
 
-      peer.on('stream', (remoteStream) => {
-        let audio = document.getElementById('remoteAudio');
-        if (!audio) {
-          audio = document.createElement('audio');
-          audio.id = 'remoteAudio';
-          audio.autoplay = true; // Auto-play
-          document.body.appendChild(audio);
-        }
-        audio.srcObject = remoteStream;
-        setCallStatus('connected');
-      });
+          try {
+            await fetch('/api/calls/update-signal', {
+              method: 'PATCH',
+              headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json' 
+              },
+              body: JSON.stringify({ 
+                callId: data.callId, 
+                signal: signalData 
+              })
+            });
+          } catch (dbErr) {
+            console.error("Signal backup failed:", dbErr);
+          }
+        });
 
-      if (connectionRef) {
-        connectionRef.current = peer;
+        peer.on('stream', (remoteStream) => {
+          let audio = document.getElementById('remoteAudio');
+          if (!audio) {
+            audio = document.createElement('audio');
+            audio.id = 'remoteAudio';
+            audio.autoplay = true; 
+            document.body.appendChild(audio);
+          }
+          audio.srcObject = remoteStream;
+          setCallStatus('connected');
+        });
+
+        if (connectionRef) {
+          connectionRef.current = peer;
+        }
+
+        peer.on('close', () => handleEndCall());
+        peer.on('error', (err) => {
+          console.error("Peer connection error:", err);
+          handleEndCall();
+        });
+
+      } catch (peerInitError) {
+        console.error("Failed to initialize Peer:", peerInitError);
+        throw new Error("WEBRTC_INIT_FAILED");
       }
 
-      peer.on('close', () => handleEndCall());
-      peer.on('error', (err) => {
-        console.error("Peer error:", err);
-        handleEndCall();
-      });
-
     } else {
-      // Agent busy or offline
       if (stream) stream.getTracks().forEach(t => t.stop());
       setCallStatus('idle');
       alert(data.message || "Agent is currently unavailable.");
@@ -962,7 +972,12 @@ const handleStartCall = async () => {
     console.error("General Call Error:", err);
     if (stream) stream.getTracks().forEach(track => track.stop());
     setCallStatus('idle');
-    alert("An unexpected error occurred. Please refresh and try again.");
+    
+    if (err.message === "WEBRTC_INIT_FAILED") {
+      alert("Connection engine failed. Please refresh your browser.");
+    } else {
+      alert("An unexpected error occurred. Please refresh and try again.");
+    }
   }
 };
 
