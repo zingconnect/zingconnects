@@ -197,32 +197,55 @@ useEffect(() => {
   if (!token) return;
 
   const checkCalls = async () => {
+    // Only poll if the UI isn't already busy with a call
     if (callStatus !== 'idle') return; 
 
     try {
       const response = await fetch('/api/calls/check-incoming', {
-        headers: { 'Authorization': `Bearer ${token}`, 'Cache-Control': 'no-cache' }
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Cache-Control': 'no-cache' 
+        }
       });
       const data = await response.json();
 
-      if (data.hasIncomingCall && callStatusRef.current === 'idle') {
-          setActiveCall({
-            callId: data.callId,
-            callerData: data.callerData,
-            fromId: data.callerData.callerId,
-            signal: data.signal // Ensure your backend includes the signal in the poll response
-          });
-          setCallStatus('ringing');
+      if (data.hasIncomingCall) {
+        /**
+         * 1. GHOST PROTECTION (Time Filter)
+         * data.createdAt must be returned by your updated backend.
+         */
+        const callTime = new Date(data.createdAt).getTime();
+        const now = Date.now();
+        const ageInSeconds = (now - callTime) / 1000;
+
+        // If the call is older than 60 seconds, it's a ghost record. Ignore it.
+        if (ageInSeconds > 60) {
+          console.log(`User Dash: Ignoring stale call attempt (${ageInSeconds}s old)`);
+          return;
+        }
+        setActiveCaller({
+          ...data.callerData,
+          signal: data.signal // Store signal here for easy access in handleAccept
+        });
+
+        setActiveCall({
+          callId: data.callId,
+          fromId: data.callerData.callerId,
+          signal: data.signal // Store here for WebRTC handshake
+        });
+
+        setIsIncomingCall(true);
+        setCallStatus('ringing');
       }
     } catch (err) {
-      console.warn("Polling error:", err);
+      console.warn("User Dashboard Polling error:", err);
     }
   };
 
-  const interval = setInterval(checkCalls, 5000); // 5s is safer for server load
+  // 3s interval is a good balance between responsiveness and server load
+  const interval = setInterval(checkCalls, 3000); 
   return () => clearInterval(interval);
-}, [callStatus]);
-
+}, [callStatus]); // Re-run if callStatus changes
 
 useEffect(() => {
   const audio = ringtoneRef.current;
@@ -786,19 +809,28 @@ const handleDownload = async (url, type) => {
 const handleStartCall = async () => {
   console.log("☎️ Start Call button clicked");
   
+  // 1. Gather IDs and Token
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
+  const token = localStorage.getItem('userToken');
 
   if (!currentAgentId || !currentUserId) {
     console.error("❌ Missing IDs:", { agentId: currentAgentId, userId: currentUserId });
-    alert("User profile is still loading. Please try again in a second.");
+    alert("Profile data still loading. Please try again.");
     return;
   }
-  
-  const token = localStorage.getItem('userToken');
-  setCallStatus('calling'); 
 
   try {
+    setCallStatus('calling'); 
+
+    // 2. GET MICROPHONE FIRST (CRITICAL FIX)
+    // We await this before even talking to the backend or initializing Peer.
+    // If this fails, the catch block resets the UI and we avoid the 'undefined' error.
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    userStreamRef.current = stream; // Using Ref for consistency
+    setLocalStream(stream);
+
+    // 3. Initialize Call in Database
     console.log("1. Fetching call initiation...");
     const res = await fetch('/api/calls/start', {
       method: 'POST',
@@ -824,20 +856,18 @@ const handleStartCall = async () => {
         }
       });
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setLocalStream(stream);
-
+      // 4. Initialize Peer (Initiator)
       const PeerConstructor = Peer.default || Peer;
       const peer = new PeerConstructor({
         initiator: true,
         trickle: false,
-        stream: stream,
+        stream: stream, // Now guaranteed to be defined
         config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
       });
 
-      // --- THE CRITICAL UPDATE IS HERE ---
+      // 5. Handle Signaling
       peer.on('signal', async (signalData) => {
-        // 1. Send via Socket (Fast Path)
+        // Fast Path: Socket
         socket.emit("call-user", {
           userToCall: currentAgentId,
           fromId: currentUserId,
@@ -847,8 +877,7 @@ const handleStartCall = async () => {
           signal: signalData 
         });
 
-        // 2. Save to Database (Reliable Backup Path)
-        // This prevents the "silent call" issue if the socket fails
+        // Backup Path: Database
         try {
           await fetch('/api/calls/update-signal', {
             method: 'PATCH',
@@ -867,6 +896,7 @@ const handleStartCall = async () => {
         }
       });
 
+      // 6. Handle Remote Audio
       peer.on('stream', (remoteStream) => {
         let audio = document.getElementById('remoteAudio');
         if (!audio) {
@@ -876,20 +906,37 @@ const handleStartCall = async () => {
         }
         audio.srcObject = remoteStream;
         audio.play().catch(e => console.error("Audio playback blocked:", e));
+        
+        // Finalize UI
+        setCallStatus('connected');
       });
 
       connectionRef.current = peer;
 
+      // Handle termination from peer side
+      peer.on('close', () => handleEndCall());
+      peer.on('error', (err) => {
+        console.error("Peer Error:", err);
+        handleEndCall();
+      });
+
     } else {
+      // If backend says no (e.g. agent busy)
+      if (stream) stream.getTracks().forEach(t => t.stop());
       setCallStatus('idle');
-      alert(data.message || "Agent is busy.");
+      alert(data.message || "Agent is currently unavailable.");
     }
+
   } catch (err) {
-    console.error("❌ Call failed:", err);
+    console.error("❌ Call initialization failed:", err);
+    // Cleanup any tracks that started before the error
+    if (userStreamRef.current) {
+      userStreamRef.current.getTracks().forEach(track => track.stop());
+    }
     setCallStatus('idle');
+    alert("Call failed: Please ensure microphone permissions are granted.");
   }
 };
-
 
  const handleSendMessage = async (e) => {
   e.preventDefault();
