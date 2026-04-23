@@ -1740,7 +1740,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       {/* 2. IDENTITY & ENCRYPTION STATUS */}
       <div className="text-center space-y-2">
         <h2 className="text-2xl md:text-3xl font-black tracking-tight">
-          {activeCall?.callerData?.fromName || `${agent?.firstName} ${agent?.lastName}`}
+      {activeCall?.callerData?.fromName || (isIncomingCall ? "Incoming User" : "Connecting...")}
         </h2>
         
         <div className="flex items-center justify-center gap-2">
@@ -1831,8 +1831,8 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   </div>
 )}
 {/* --- INCOMING CALL BANNER (Heads-up Notification) --- */}
-{callStatus === 'ringing' && isIncomingCall && (
-  <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4 pointer-events-none">
+{callStatus === 'ringing' && isIncomingCall && !showFullScreenCall && (
+    <div className="fixed top-4 left-0 right-0 z-[9999] flex justify-center px-4 pointer-events-none">
     <div className="bg-[#1f2c33] w-full max-w-md rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center justify-between animate-in slide-in-from-top duration-300 pointer-events-auto">
       <div className="flex items-center gap-3">
         <div className="relative">
