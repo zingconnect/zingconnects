@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import { Buffer } from 'buffer';
+
 import Peer from 'simple-peer';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
@@ -22,6 +24,8 @@ import {
   BsDownload,    // Now properly imported
   BsPlayFill     // Now properly imported
 } from 'react-icons/bs';
+
+window.Buffer = Buffer;
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -194,8 +198,7 @@ useEffect(() => {
   if (!token) return;
 
   const checkCalls = async () => {
-    // If we are already in a conversation, don't poll
-    if (callStatus === 'connected') return;
+    if (callStatus !== 'idle') return; 
 
     try {
       const response = await fetch('/api/calls/check-incoming', {
@@ -203,32 +206,24 @@ useEffect(() => {
       });
       const data = await response.json();
 
-      if (data.hasIncomingCall) {
-        // If we were IDLE, we just discovered a new call
-        if (callStatus === 'idle') {
+      if (data.hasIncomingCall && callStatusRef.current === 'idle') {
           setActiveCall({
             callId: data.callId,
             callerData: data.callerData,
-            fromId: data.callerData.callerId
+            fromId: data.callerData.callerId,
+            signal: data.signal // Ensure your backend includes the signal in the poll response
           });
           setCallStatus('ringing');
-          socket.emit("confirm-ringing", { to: data.callerData.callerId });
-        }
-      } else {
-        // If the DB says no call, but we are ringing, the caller cancelled
-        if (callStatus === 'ringing') {
-          setCallStatus('idle');
-          setActiveCall(null);
-        }
       }
     } catch (err) {
       console.warn("Polling error:", err);
     }
   };
 
-  const interval = setInterval(checkCalls, 3000);
+  const interval = setInterval(checkCalls, 5000); // 5s is safer for server load
   return () => clearInterval(interval);
-}, [callStatus, socket]);
+}, [callStatus]);
+
 
 useEffect(() => {
   const audio = ringtoneRef.current;
@@ -282,19 +277,18 @@ const handleAcceptCall = async () => {
   try {
     setCallStatus('connecting');
 
-    // Get User's Microphone
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     setLocalStream(stream);
 
-    // Initialize Peer (User is the Receiver, so initiator: false)
-    const peer = new Peer({
-      initiator: false,
+    // FIX: initiator must be FALSE for the person answering the call
+    const peer = new (Peer.default || Peer)({
+      initiator: false, 
       trickle: false,
-      stream: stream
+      stream: stream,
+      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
     peer.on('signal', (data) => {
-      // Send the "answer" signal back to the Agent via Socket
       socket.emit("answer-call", {
         to: activeCall.fromId,
         callId: activeCall.callId,
@@ -303,18 +297,20 @@ const handleAcceptCall = async () => {
     });
 
     peer.on('stream', (remoteStream) => {
-      // Play the Agent's voice
-      const audio = document.createElement('audio');
-      audio.id = 'remoteAudio';
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        document.body.appendChild(audio);
+      }
       audio.srcObject = remoteStream;
-      audio.play();
+      audio.play().catch(e => console.error("Playback failed:", e));
     });
 
-    // CRITICAL: Feed the Agent's initial signal into the peer
+    // Feed the caller's signal into the peer to start the handshake
     peer.signal(activeCall.signal);
     connectionRef.current = peer;
 
-    // Notify API that call is officially answered
     await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
@@ -334,45 +330,61 @@ const handleAcceptCall = async () => {
 
 const handleEndCall = async () => {
   const token = localStorage.getItem('userToken');
+  console.log("📴 Ending call and cleaning up resources...");
 
-  // 1. STOP THE HARDWARE (Microphone)
+  // 1. STOP HARDWARE (Microphone)
   if (localStream) {
     localStream.getTracks().forEach(track => {
-      track.stop(); // This physically turns off the microphone
+      track.stop();
+      console.log("🎤 Mic track stopped");
     });
     setLocalStream(null);
   }
 
-  // 2. DESTROY THE PEER CONNECTION
+  // 2. REMOVE AUDIO ELEMENT
+  const remoteAudio = document.getElementById('remoteAudio');
+  if (remoteAudio) {
+    remoteAudio.pause();
+    remoteAudio.srcObject = null;
+    remoteAudio.remove();
+    console.log("🔊 Remote audio element removed");
+  }
+
+  // 3. DESTROY PEER CONNECTION
   if (connectionRef.current) {
-    connectionRef.current.destroy(); // Properly closes the WebRTC bridge
+    try {
+      connectionRef.current.destroy();
+    } catch (e) {
+      console.warn("Peer already destroyed or failed to destroy cleanly");
+    }
     connectionRef.current = null;
   }
 
-  // 3. RESET UI IMMEDIATELY
+  // 4. RESET UI STATE
+  // Removing setIsIncomingCall(false) because it's a const, not state.
+  // setActiveCall(null) handles the UI reset automatically.
   setCallStatus('idle');
   setActiveCall(null);
-  setIsIncomingCall(false); // If it was a banner notification, clear it
 
-  // 4. NOTIFY THE AGENT & DATABASE
+  // 5. NOTIFY REMOTE PEER & DATABASE
   try {
-    // Notify Agent via Socket so their UI also closes immediately
-    if (agent?._id) {
-      socket.emit("end-call", { to: agent._id });
+    const targetId = agent?._id || activeCall?.fromId;
+    if (targetId) {
+      socket.emit("end-call", { to: targetId });
     }
 
-    // Update DB
-    await fetch('/api/calls/end', {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json' 
-      },
-      // Pass the callId so the server knows exactly which record to close
-      body: JSON.stringify({ callId: activeCall?.callId }) 
-    });
+    if (activeCall?.callId) {
+      await fetch('/api/calls/end', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ callId: activeCall.callId }) 
+      });
+    }
   } catch (err) {
-    console.error("Failed to notify backend of call end", err);
+    console.error("Failed to notify backend of call end:", err);
   }
 };
 
@@ -771,11 +783,10 @@ const handleDownload = async (url, type) => {
     console.error("Download failed:", err);
   }
 };
+
 const handleStartCall = async () => {
   console.log("☎️ Start Call button clicked");
   
-  // FIX: Check multiple possible ID locations (some backends use .id, some ._id)
-  // Also check if userData is actually loaded
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
 
@@ -819,12 +830,12 @@ const handleStartCall = async () => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setLocalStream(stream);
 
-      const peer = new Peer({
-        initiator: true,
-        trickle: false,
-        stream: stream,
-        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-      });
+     const peer = new (Peer.default || Peer)({
+  initiator: true, // true for StartCall, false for AcceptCall
+  trickle: false,
+  stream: stream,
+  config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+});
 
       peer.on('signal', (signalData) => {
         socket.emit("call-user", {
