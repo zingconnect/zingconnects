@@ -1626,7 +1626,6 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
 });
 
 // 3. Unified Accept Call
-// 3. Unified Accept Call (Optimized for Speed)
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

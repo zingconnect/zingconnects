@@ -1,21 +1,19 @@
 import Call from '../models/Call.js';
-// ADD THIS IMPORT - Adjust the path if your db logic is elsewhere
 import { connectToDatabase } from '../index.js'; 
 
+// @desc    Start a call initiation
 export const startCall = async (req, res) => {
   try {
     await connectToDatabase();
     const { receiverId, receiverModel } = req.body;
-    if (!req.user) {
-      return res.status(401).json({ message: "User context missing from request" });
-    }
+    
     const callerId = req.user._id || req.user.id || req.user.userId;
-
     if (!callerId) {
       return res.status(400).json({ message: "Token does not contain a valid User ID" });
     }
+
     const newCall = new Call({
-      caller: callerId, // Use the extracted ID
+      caller: callerId,
       callerModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiver: receiverId,
       receiverModel: receiverModel || 'Agent', 
@@ -30,36 +28,43 @@ export const startCall = async (req, res) => {
   }
 };
 
-// @desc    Get current status of a specific call (Stops the 404 error)
+// @desc    Update the WebRTC signal data (CRITICAL: Fixes the 500 error)
+export const updateCallSignal = async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { callId, signal } = req.body;
+
+    if (!callId || !signal) {
+      return res.status(400).json({ success: false, message: "Missing callId or signal data" });
+    }
+
+    await Call.findByIdAndUpdate(callId, { signal: signal });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Update Signal Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get current status of a specific call
 export const getCallStatus = async (req, res) => {
   try {
     await connectToDatabase(); 
-    
-    // The ID comes from the URL parameter: /status/69e9b5...
     const { callId } = req.params;
 
-    if (!callId) {
-      return res.status(400).json({ success: false, message: "Call ID is required" });
-    }
-
     const call = await Call.findById(callId);
-
     if (!call) {
-      // If the call record was deleted or doesn't exist
       return res.status(404).json({ success: false, message: "Call not found" });
     }
 
-    // Return the status so the frontend knows whether to stay in the call or close the overlay
     res.json({ 
       success: true, 
       status: call.status,
-      // You can also send the duration if status is 'connected'
+      signal: call.signal, // Also provide the signal here as a backup
       duration: call.startTime ? Math.floor((Date.now() - call.startTime) / 1000) : 0 
     });
-
   } catch (error) {
-    console.error("Poll Error:", error);
-    res.status(500).json({ success: false, message: "Error fetching status", error: error.message });
+    res.status(500).json({ success: false, message: "Error fetching status" });
   }
 };
 
@@ -67,9 +72,10 @@ export const getCallStatus = async (req, res) => {
 export const checkIncomingCall = async (req, res) => {
   try {
     await connectToDatabase(); 
+    const userId = req.user._id || req.user.id;
 
     const incoming = await Call.findOne({ 
-      receiver: req.user._id, 
+      receiver: userId, 
       status: 'ringing' 
     }).populate('caller', 'firstName lastName photoUrl');
 
@@ -78,9 +84,11 @@ export const checkIncomingCall = async (req, res) => {
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
+      signal: incoming.signal, // CRITICAL: The receiver needs this signal to connect
       callerData: {
-        fromName: `${incoming.caller.firstName} ${incoming.caller.lastName}`,
-        photoUrl: incoming.caller.photoUrl
+        fromName: `${incoming.caller?.firstName || 'Unknown'} ${incoming.caller?.lastName || ''}`,
+        photoUrl: incoming.caller?.photoUrl || null,
+        callerId: incoming.caller?._id
       }
     });
   } catch (error) {
@@ -91,10 +99,9 @@ export const checkIncomingCall = async (req, res) => {
 // @desc    Accept an incoming call
 export const acceptCall = async (req, res) => {
   try {
-    await connectToDatabase(); // Added for Vercel safety
+    await connectToDatabase();
     const { callId } = req.body;
-    if (!callId) return res.status(400).json({ message: "callId is required" });
-
+    
     const call = await Call.findByIdAndUpdate(
       callId, 
       { status: 'connected', startTime: Date.now() }, 
@@ -103,17 +110,16 @@ export const acceptCall = async (req, res) => {
 
     res.json({ success: true, call });
   } catch (error) {
-    res.status(500).json({ message: "Error accepting call", error: error.message });
+    res.status(500).json({ message: "Error accepting call" });
   }
 };
 
 // @desc    End/Decline/Cancel call
 export const endCall = async (req, res) => {
   try {
-    await connectToDatabase(); // Added for Vercel safety
+    await connectToDatabase();
     const { callId } = req.body;
-    if (!callId) return res.status(400).json({ message: "callId is required" });
-
+    
     await Call.findByIdAndUpdate(callId, { 
       status: 'ended', 
       endTime: Date.now() 
@@ -121,6 +127,6 @@ export const endCall = async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ message: "Error ending call", error: error.message });
+    res.status(500).json({ message: "Error ending call" });
   }
 };
