@@ -685,6 +685,7 @@ const handleProfileSubmit = async (e) => {
 };
 
 const unlockAudio = () => {
+  setHasInteracted(true);
   if (notificationSound.current) {
     notificationSound.current.play()
       .then(() => {
@@ -871,9 +872,10 @@ const handleStartCall = async () => {
       setActiveCall({ 
         callId: data.callId,
         fromId: currentUserId,
+        isInitiator: true,
         callerData: {
-          fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim() || "User",
-          photoUrl: userData?.photoUrl || null,
+    fromName: `${userData?.firstName} ${userData?.lastName}`,
+photoUrl: userData?.photoUrl,
           callerId: currentUserId
         }
       });
@@ -891,14 +893,14 @@ const handleStartCall = async () => {
         });
 
         peer.on('signal', async (signalData) => {
-          socket.emit("call-user", {
-            userToCall: currentAgentId,
-            fromId: currentUserId,
-            fromName: `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim(),
-            photoUrl: userData?.photoUrl,
-            callId: data.callId,
-            signal: signalData 
-          });
+socket.emit("call-user", {
+  userToCall: currentAgentId,
+  fromId: currentUserId,
+  fromName: `${userData?.firstName} ${userData?.lastName}`, // Ensure this is sent!
+  photoUrl: userData?.photoUrl,
+  callId: data.callId,
+  signal: signalData 
+});
 
           // Move UI to ringing state
           setCallStatus('ringing'); 
