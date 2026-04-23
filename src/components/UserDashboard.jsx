@@ -870,16 +870,24 @@ const handleStartCall = async () => {
     return;
   }
 
+  // 1. IMMEDIATE MIC REQUEST (Associates with the click event)
+  let stream;
   try {
-    setCallStatus('calling'); 
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     
     if (userStreamRef) {
       userStreamRef.current = stream;
     }
     setLocalStream(stream);
+    setCallStatus('calling'); // Set status ONLY after mic is confirmed
+  } catch (err) {
+    console.error("Mic Access Denied:", err);
+    alert("Call failed: Please ensure microphone permissions are granted in your browser settings.");
+    return; // Stop here
+  }
 
+  try {
+    // 2. REGISTER CALL IN DB
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
@@ -904,6 +912,7 @@ const handleStartCall = async () => {
         }
       });
 
+      // 3. INITIALIZE WEBRTC PEER
       const PeerConstructor = Peer.default || Peer;
       const peer = new PeerConstructor({
         initiator: true,
@@ -913,6 +922,7 @@ const handleStartCall = async () => {
       });
 
       peer.on('signal', async (signalData) => {
+        // Send signal via Socket for instant notification
         socket.emit("call-user", {
           userToCall: currentAgentId,
           fromId: currentUserId,
@@ -922,6 +932,7 @@ const handleStartCall = async () => {
           signal: signalData 
         });
 
+        // Backup signal to DB (Polling safety)
         try {
           await fetch('/api/calls/update-signal', {
             method: 'PATCH',
@@ -944,10 +955,10 @@ const handleStartCall = async () => {
         if (!audio) {
           audio = document.createElement('audio');
           audio.id = 'remoteAudio';
+          audio.autoplay = true; // Auto-play
           document.body.appendChild(audio);
         }
         audio.srcObject = remoteStream;
-        audio.play().catch(e => console.error("Playback error:", e));
         setCallStatus('connected');
       });
 
@@ -956,20 +967,23 @@ const handleStartCall = async () => {
       }
 
       peer.on('close', () => handleEndCall());
-      peer.on('error', () => handleEndCall());
+      peer.on('error', (err) => {
+        console.error("Peer error:", err);
+        handleEndCall();
+      });
 
     } else {
+      // Agent busy or offline
       if (stream) stream.getTracks().forEach(t => t.stop());
       setCallStatus('idle');
       alert(data.message || "Agent is currently unavailable.");
     }
 
   } catch (err) {
-    if (userStreamRef?.current) {
-      userStreamRef.current.getTracks().forEach(track => track.stop());
-    }
+    console.error("General Call Error:", err);
+    if (stream) stream.getTracks().forEach(track => track.stop());
     setCallStatus('idle');
-    alert("Call failed: Please ensure microphone permissions are granted.");
+    alert("An unexpected error occurred. Please refresh and try again.");
   }
 };
 
