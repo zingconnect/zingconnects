@@ -95,7 +95,8 @@ export const UserDashboard = () => {
   // MOVE THESE UP:
   const [callStatus, setCallStatus] = useState('idle'); 
 
-  const [activeCall, setActiveCall] = useState(null); // Now initialized!
+  const [activeCall, setActiveCall] = useState(null); 
+  const [activeCaller, setActiveCaller] = useState(null); 
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
 
@@ -210,30 +211,34 @@ useEffect(() => {
       const data = await response.json();
 
       if (data.hasIncomingCall) {
-        /**
-         * 1. GHOST PROTECTION (Time Filter)
-         * data.createdAt must be returned by your updated backend.
-         */
+        // 1. GHOST PROTECTION
         const callTime = new Date(data.createdAt).getTime();
         const now = Date.now();
         const ageInSeconds = (now - callTime) / 1000;
 
-        // If the call is older than 60 seconds, it's a ghost record. Ignore it.
         if (ageInSeconds > 60) {
           console.log(`User Dash: Ignoring stale call attempt (${ageInSeconds}s old)`);
           return;
         }
-        setActiveCaller({
-          ...data.callerData,
-          signal: data.signal // Store signal here for easy access in handleAccept
-        });
 
-        setActiveCall({
+        // 2. CONSOLIDATED STATE UPDATE
+        // We structure this to match exactly what your HTML expects:
+        // activeCall.callerData.fromName
+        const incomingCallData = {
           callId: data.callId,
-          fromId: data.callerData.callerId,
-          signal: data.signal // Store here for WebRTC handshake
-        });
+          fromId: data.callerData?.callerId,
+          signal: data.signal,
+          callerData: {
+            fromName: data.callerData?.fromName || data.callerData?.name || "Unknown Agent",
+            photoUrl: data.callerData?.photoUrl,
+            callerId: data.callerData?.callerId
+          }
+        };
 
+        // If you chose NOT to define setActiveCaller, remove that line.
+        // If you DID define it, you can keep it, but setActiveCall is the one your HTML uses.
+        setActiveCall(incomingCallData); 
+        
         setIsIncomingCall(true);
         setCallStatus('ringing');
       }
@@ -242,10 +247,9 @@ useEffect(() => {
     }
   };
 
-  // 3s interval is a good balance between responsiveness and server load
   const interval = setInterval(checkCalls, 3000); 
   return () => clearInterval(interval);
-}, [callStatus]); // Re-run if callStatus changes
+}, [callStatus]); // Dependencies are correct
 
 useEffect(() => {
   const audio = ringtoneRef.current;
