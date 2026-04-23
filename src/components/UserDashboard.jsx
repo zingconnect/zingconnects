@@ -67,44 +67,44 @@ const CallStatusMessage = ({ status, time }) => (
 export const UserDashboard = () => {
   const navigate = useNavigate();
 
-  // --- REFS ---
-  // UI & Media Refs
+  // --- 1. REFS (Initialized with static values to avoid TDZ errors) ---
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   
-  // WebRTC & Connection Refs (Critical for avoiding ReferenceErrors)
   const connectionRef = useRef(null);
   const userStreamRef = useRef(null); 
   const remoteStreamRef = useRef(null); 
   const lastNotifiedId = useRef(null);
-  const callStatusRef = useRef(callStatus);
 
+  /**
+   * CRITICAL FIX: 
+   * We initialize with 'idle' directly. 
+   * Do NOT use the variable callStatus here, as it is defined below this line.
+   */
+  const callStatusRef = useRef('idle');
 
-  // --- STATES ---
-  // User & Agent Data
+  // --- 2. STATES ---
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
 
-  // Messaging States
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
   const [hasInteracted, setHasInteracted] = useState(false);
 
   // Call System States
-  const [callStatus, setCallStatus] = useState('idle'); // 'idle', 'ringing', 'calling', 'connecting', 'connected', 'busy'
+  const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
   const [activeCaller, setActiveCaller] = useState(null); 
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
 
-  // File & UI Overlay States
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingFile, setOnboardingFile] = useState(null);
@@ -115,7 +115,6 @@ export const UserDashboard = () => {
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
 
-  // Form State
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -124,6 +123,14 @@ export const UserDashboard = () => {
     city: '',
     state: ''
   });
+
+  
+  // Keep the Ref in sync with state for socket listeners
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
+
+  // Derived variable for UI logic
   const isIncomingCall = 
     callStatus === 'ringing' && 
     activeCall?.fromId !== (userData?._id || userData?.id);
@@ -135,7 +142,7 @@ export const UserDashboard = () => {
     isIncoming: isIncomingCall
   });
 
-  // --- HELPERS ---
+  // --- 4. HELPERS ---
   const getStatusInfo = (agentData) => {
     if (!agentData) return { isOnline: false, label: "Connecting..." };
     if (agentData.status === 'online') return { isOnline: true, label: "Online" };
@@ -157,10 +164,6 @@ export const UserDashboard = () => {
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
-
-useEffect(() => {
-  callStatusRef.current = callStatus;
-}, [callStatus]);
 
 useEffect(() => {
   if (!socket || !userData?._id) return;
