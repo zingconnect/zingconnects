@@ -16,9 +16,12 @@ import {
   BsCheckCircleFill,
   BsDownload, 
   BsPlayFill, 
-  BsTelephoneFill,    // Ensure this is here
-  BsTelephoneXFill,   // Ensure this is here
-  BsMicMuteFill       // Ensure this is here
+  BsTelephoneFill,
+  BsTelephoneXFill,
+  BsMicMuteFill,
+  BsXLg,
+  BsPlusLg,
+  BsPlus
 } from 'react-icons/bs';
 
 // --- POLYFILLS MUST BE FIRST ---
