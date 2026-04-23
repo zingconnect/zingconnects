@@ -3,6 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { Buffer } from 'buffer';
 
+if (typeof window !== 'undefined') {
+  window.Buffer = Buffer;
+  window.global = window; 
+}
+
+// 3. NOW IMPORT PEER (It will now see window.Buffer correctly)
 import Peer from 'simple-peer';
 import { motion, useAnimation } from "framer-motion";
 import { useDrag } from "@use-gesture/react";
@@ -25,7 +31,6 @@ import {
   BsPlayFill     // Now properly imported
 } from 'react-icons/bs';
 
-window.Buffer = Buffer;
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -280,9 +285,9 @@ const handleAcceptCall = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     setLocalStream(stream);
 
-    // FIX: initiator must be FALSE for the person answering the call
-    const peer = new (Peer.default || Peer)({
-      initiator: false, 
+   const PeerConstructor = Peer.default || Peer;
+    const peer = new PeerConstructor({
+      initiator: false, // MANDATORY: Answering party must be false
       trickle: false,
       stream: stream,
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
@@ -816,6 +821,7 @@ const handleStartCall = async () => {
     });
     
     const data = await res.json();
+    console.log("🚀 Initializing Peer with:", Peer);
 
     if (data.success) {
       setActiveCall({ 
@@ -829,13 +835,15 @@ const handleStartCall = async () => {
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setLocalStream(stream);
+    console.log("🚀 Initializing Peer with:", Peer);
 
-     const peer = new (Peer.default || Peer)({
-  initiator: true, // true for StartCall, false for AcceptCall
-  trickle: false,
-  stream: stream,
-  config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-});
+  const PeerConstructor = Peer.default || Peer;
+  const peer = new PeerConstructor({
+    initiator: true,
+    trickle: false,
+    stream: stream,
+    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+  });
 
       peer.on('signal', (signalData) => {
         socket.emit("call-user", {
