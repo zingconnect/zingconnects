@@ -301,19 +301,13 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. Stop the ringtone immediately for UX
   if (ringtoneRef.current) {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
   }
-  
   const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
-  
   try {
     setCallStatus('connecting');
-
-    // 2. DATABASE FIRST: Flip status to 'connected' immediately.
-    // This stops the polling/ghost-ringing for all other dashboard instances.
     await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
@@ -322,13 +316,9 @@ const handleAcceptCall = async () => {
       },
       body: JSON.stringify({ callId: activeCall.callId }) 
     });
-
-    // 3. CAPTURE MEDIA: Wait for the mic to be ready
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    userStreamRef.current = stream; // Reference for cleanup
-    setLocalStream(stream); // For UI feedback
-
-    // 4. INITIALIZE PEER
+    userStreamRef.current = stream;
+    setLocalStream(stream);
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: false, 
@@ -337,10 +327,8 @@ const handleAcceptCall = async () => {
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-    // 5. SIGNAL BACK TO CALLER
     peer.on('signal', (data) => {
-      // Use the ID we saved from the poll response
-      const targetId = activeCall.fromId || activeCaller?.callerId;
+      const targetId = activeCall.fromId || activeCall.callerData?.callerId;
       
       socket.emit("answer-call", {
         to: targetId,
@@ -348,7 +336,6 @@ const handleAcceptCall = async () => {
         signal: data 
       });
 
-      // Also back up the answer signal to DB for reliability
       fetch('/api/calls/update-signal', {
         method: 'PATCH',
         headers: { 
@@ -358,50 +345,42 @@ const handleAcceptCall = async () => {
         body: JSON.stringify({ callId: activeCall.callId, signal: data })
       }).catch(e => console.warn("Signal backup failed", e));
     });
-
-    // 6. RECEIVE REMOTE AUDIO
     peer.on('stream', (remoteStream) => {
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
         audio = document.createElement('audio');
         audio.id = 'remoteAudio';
+        audio.autoplay = true;
         document.body.appendChild(audio);
       }
       audio.srcObject = remoteStream;
-      audio.play()
-        .then(() => setCallStatus('connected'))
-        .catch(e => console.error("Playback failed:", e));
+      setCallStatus('connected');
     });
-
-    // 7. THE FIX FOR THE 'CALL' ERROR: 
-    // We delay the handshake slightly to ensure the Peer object is ready.
     if (activeCall?.signal) {
+      const incomingSignal = typeof activeCall.signal === 'string' 
+        ? JSON.parse(activeCall.signal) 
+        : activeCall.signal;
       setTimeout(() => {
         if (peer && !peer.destroyed) {
-          console.log("Applying incoming signal to peer...");
-          peer.signal(activeCall.signal);
+          console.log("Applying incoming signal...");
+          peer.signal(incomingSignal);
         }
-      }, 200); // 200ms is the sweet spot for browser resource allocation
+      }, 100);
     }
-
     connectionRef.current = peer;
-
-    // Handle abrupt disconnects
     peer.on('close', () => handleEndCall());
     peer.on('error', (err) => {
-      console.error("Peer Handshake Error:", err);
+      console.error("Peer Error:", err);
       handleEndCall();
     });
 
   } catch (err) {
     console.error("Failed to accept call:", err);
-    // CRITICAL: Reset everything if any step fails to break the infinite loop
     setCallStatus('idle');
-    setIsIncomingCall(false);
     if (userStreamRef.current) {
       userStreamRef.current.getTracks().forEach(t => t.stop());
     }
-    alert("Call connection failed. Please check your microphone.");
+    alert("Call connection failed. Check microphone permissions.");
   }
 };
 
