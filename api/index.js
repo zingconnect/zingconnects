@@ -1536,34 +1536,28 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     res.status(500).json({ success: false, message: "Failed to save message", error: err.message });
   }
 });
-
-
-// 1. Unified Start Call (Supports User -> Agent AND Agent -> User)
 app.post('/api/calls/start', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const { receiverId, receiverModel } = req.body;
     
     const callerId = req.user.id || req.user._id || req.user.userId;
-    if (!callerId) return res.status(401).json({ message: "Auth Error" });
-
-    const callerObjectId = new mongoose.Types.ObjectId(callerId);
-    const receiverObjectId = new mongoose.Types.ObjectId(receiverId);
+    if (!callerId) return res.status(401).json({ message: "Auth Error: No ID in token" });
 
     const callerModel = req.user.role === 'agent' ? 'Agent' : 'User';
     const finalReceiverModel = receiverModel || (callerModel === 'Agent' ? 'User' : 'Agent');
-
     const newCall = new Call({
-      caller: callerObjectId,
+      caller: callerId,
       callerModel: callerModel,
-      receiver: receiverObjectId,
+      receiver: receiverId,
       receiverModel: finalReceiverModel,
-      status: 'calling' // PHASE 1: Initial network attempt
+      status: 'calling',
+      startTime: new Date()
     });
 
     await newCall.save();
     
-    console.log(`🚀 Call Initiated: ${callerId} -> ${receiverId} (Status: CALLING)`);
+    console.log(`🚀 Call DB Entry Created: ${callerId} (${callerModel}) -> ${receiverId}`);
     
     res.status(201).json({ 
       success: true, 
@@ -1571,10 +1565,11 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
       status: 'calling'
     });
   } catch (err) {
-    console.error("❌ Start Call Error:", err);
+    console.error("❌ Start Call Backend Error:", err);
     res.status(500).json({ success: false, error: err.message });
-  }
+  } 
 });
+
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1637,10 +1632,29 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
-    await Call.findByIdAndUpdate(callId, { signal: signal });
-    res.json({ success: true });
+
+    if (!callId || !signal) {
+      return res.status(400).json({ success: false, message: "Missing callId or signal data" });
+    }
+    const updatedCall = await Call.findByIdAndUpdate(
+      callId, 
+      { 
+        signal: signal,
+        status: 'ringing' 
+      },
+      { new: true }
+    );
+
+    if (!updatedCall) {
+      return res.status(404).json({ success: false, message: "Call session not found" });
+    }
+
+    console.log(`📞 Call ${callId} is now RINGING (Signal Saved)`);
+    
+    res.json({ success: true, status: 'ringing' });
   } catch (err) {
-    res.status(500).json({ success: false });
+    console.error("❌ Update Signal Error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
