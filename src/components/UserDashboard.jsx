@@ -1268,7 +1268,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     size={16} 
     onClick={handleStartCall} // <--- Added this
   />
-  <BsGearFill className="cursor-pointer hover:text-gray-700 transition-colors" size={18} />
+<BsGearFill 
+  className="cursor-pointer hover:text-gray-700 transition-colors active:scale-90" 
+  size={18} 
+  onClick={() => navigate('/user-profile')} 
+/>
 </div>
         </header>
 

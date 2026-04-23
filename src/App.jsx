@@ -4,11 +4,12 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 // Component Imports
 import { PricingPage } from './components/PricingPage';
 import { Registration } from './components/Registration';
-import { VerifyOTP } from './components/VerifyOTP'; // NEW IMPORT
+import { VerifyOTP } from './components/VerifyOTP'; 
 import { AgentSlug } from './components/AgentSlug';
 import { AgentDashboard } from './components/AgentDashboard'; 
 import { UserDashboard } from './components/UserDashboard'; 
 import { AgentProfile } from './components/AgentProfile'; 
+import { UserProfile } from './components/UserProfile'; 
 
 function App() {
   return (
@@ -18,8 +19,6 @@ function App() {
         <Route path="/" element={<PricingPage />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/registration" element={<Registration />} />
-        
-        {/* --- NEW: OTP VERIFICATION ROUTE --- */}
         <Route path="/verify-otp" element={<VerifyOTP />} />
 
         {/* --- 2. PROTECTED AGENT ROUTES --- */}
@@ -28,9 +27,10 @@ function App() {
 
         {/* --- 3. PROTECTED USER ROUTES --- */}
         <Route path="/user/dashboard" element={<UserDashboard />} />
+        {/* ADD THIS LINE BELOW */}
+        <Route path="/user/profile" element={<UserProfile />} />
 
         {/* --- 4. DYNAMIC PUBLIC PROFILES --- */}
-        {/* This stays at the bottom so it doesn't override /registration or /verify-otp */}
         <Route path="/:slug" element={<AgentSlug />} />
         
         {/* --- 5. GLOBAL FALLBACK --- */}
