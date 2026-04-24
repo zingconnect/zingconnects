@@ -156,18 +156,17 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
 let ioInstance; 
 
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
 
-  // 1. Room Management
   socket.on("join-main-room", (userId) => {
     socket.join(userId);
     console.log(`Connection ${socket.id} joined room: ${userId}`);
   });
 
-  // 2. Initiate Call
   socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
     console.log(`Call initiated from ${fromName} to ${userToCall}`);
     io.to(userToCall).emit("incoming-call", { 
@@ -178,25 +177,20 @@ io.on("connection", (socket) => {
     });
   });
 
-  // 3. Confirm Ringing (Visual feedback for the caller)
   socket.on("confirm-ringing", ({ to }) => {
     io.to(to).emit("user-is-ringing");
   });
 
-  // 4. Answer Call (The Handshake)
   socket.on("answer-call", ({ to, signal, callId }) => {
     console.log(`Call accepted for ID: ${callId}. Relaying signal to initiator.`);
-    // Ensure the signal is sent back to the person who started the call
     io.to(to).emit("call-accepted", { signal, callId });
   });
 
-  // 5. End/Reject Call
   socket.on("end-call", ({ to }) => {
     console.log(`Call ended/rejected. Notifying room: ${to}`);
     io.to(to).emit("call-ended");
   });
 
-  // 6. Force Logout
   socket.on("request-force-logout", (userId) => {
     socket.to(userId).emit("force-logout", {
       message: "Session terminated by server request."
@@ -207,7 +201,6 @@ io.on("connection", (socket) => {
     console.log("Socket disconnected:", socket.id);
   });
 });
-
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -1548,6 +1541,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     res.status(500).json({ success: false, message: "Failed to save message", error: err.message });
   }
 });
+
 app.post('/api/calls/start', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

@@ -277,6 +277,12 @@ useEffect(() => {
   return () => clearInterval(timer);
 }, [callStatus, activeCall?.startTime]);
 
+useEffect(() => {
+  return () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  };
+}, [previewUrl]);
+
 const formatTime = (seconds) => {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -313,6 +319,17 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, [callStatus, activeCall?.callId]); 
 
+
+useEffect(() => {
+  const audio = document.getElementById('remoteAudio');
+  if (audio) {
+    audio.volume = isSpeakerOn ? 1.0 : 0.4;
+    
+    if (audio.setSinkId) {
+      audio.setSinkId(isSpeakerOn ? '' : 'earpiece').catch(() => {});
+    }
+  }
+}, [isSpeakerOn]);
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
@@ -998,9 +1015,12 @@ const handleDownload = async (url, type) => {
 };
 
 const handleStartCall = async () => {
+  // 1. GLOBAL BUFFER CHECK (Moved for reliability)
   if (typeof window !== 'undefined' && !window.Buffer) {
+    const { Buffer } = await import('buffer');
     window.Buffer = Buffer;
   }
+
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
@@ -1010,14 +1030,15 @@ const handleStartCall = async () => {
     return;
   }
 
-  // 1. UI FEEDBACK & AUDIO TRIGGER
-  // Setting 'calling' here triggers the callingAudio logic in your useEffect
+  // Initial UI Feedback
   setCallStatus('calling'); 
   setShowFullScreenCall(true);
 
   let stream;
+  let peer;
+
   try {
-    // 2. HIGH QUALITY AUDIO ACCESS
+    // 2. MIC ACCESS
     stream = await navigator.mediaDevices.getUserMedia({ 
       audio: {
         echoCancellation: true,
@@ -1029,15 +1050,8 @@ const handleStartCall = async () => {
     
     if (userStreamRef) userStreamRef.current = stream;
     setLocalStream(stream);
-  } catch (err) {
-    console.error("Mic Access Denied:", err);
-    setCallStatus('idle');
-    setShowFullScreenCall(false);
-    alert("Call failed: Please grant microphone permissions.");
-    return;
-  }
 
-  try {
+    // 3. INITIALIZE SIGNALING
     const res = await fetch('/api/calls/start', {
       method: 'POST',
       headers: { 
@@ -1048,115 +1062,108 @@ const handleStartCall = async () => {
     });
     const data = await res.json();
     
-    if (data.success) {
-      setActiveCall({ 
-        callId: data.callId,
+    if (!data.success) throw new Error(data.message || "Agent unavailable");
+
+    setActiveCall({ 
+      callId: data.callId,
+      fromId: currentUserId,
+      isInitiator: true,
+      callerData: {
+        fromName: `${userData?.firstName} ${userData?.lastName}`,
+        photoUrl: userData?.photoUrl,
+        callerId: currentUserId
+      }
+    });
+
+    // 4. PEER INITIALIZATION
+    const { default: SimplePeer } = await import('simple-peer');
+    peer = new SimplePeer({
+      initiator: true,
+      trickle: false,
+      stream: stream,
+      config: { 
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }, 
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ] 
+      }
+    });
+
+    peer.on('signal', async (signalData) => {
+      socket.emit("call-user", {
+        userToCall: currentAgentId,
         fromId: currentUserId,
-        isInitiator: true,
-        callerData: {
-          fromName: `${userData?.firstName} ${userData?.lastName}`,
-          photoUrl: userData?.photoUrl,
-          callerId: currentUserId
-        }
+        fromName: `${userData?.firstName} ${userData?.lastName}`,
+        photoUrl: userData?.photoUrl,
+        callId: data.callId,
+        signal: signalData 
       });
+      
+      setCallStatus('ringing'); 
+      
+      await fetch('/api/calls/update-signal', {
+        method: 'PATCH',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ callId: data.callId, signal: signalData })
+      }).catch(e => console.error("Signal backup failed:", e));
+    });
 
-      const { default: SimplePeer } = await import('simple-peer');
-      const peer = new SimplePeer({
-        initiator: true,
-        trickle: false,
-        stream: stream,
-        config: { 
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' }, 
-            { urls: 'stun:stun1.l.google.com:19302' }
-          ] 
-        }
-      });
+    peer.on('stream', (remoteStream) => {
+      // Kill ringing sound
+      if (callingAudio.current) {
+        callingAudio.current.pause();
+        callingAudio.current.src = "";
+      }
 
-      peer.on('signal', async (signalData) => {
-        console.log("📡 User sending signal to Agent...");
-        socket.emit("call-user", {
-          userToCall: currentAgentId,
-          fromId: currentUserId,
-          fromName: `${userData?.firstName} ${userData?.lastName}`,
-          photoUrl: userData?.photoUrl,
-          callId: data.callId,
-          signal: signalData 
-        });
-        
-        // Change to ringing status once signal is sent
-        setCallStatus('ringing'); 
-        
-        await fetch('/api/calls/update-signal', {
-          method: 'PATCH',
-          headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json' 
-          },
-          body: JSON.stringify({ callId: data.callId, signal: signalData })
-        }).catch(e => console.error("Signal backup failed:", e));
-      });
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        audio.setAttribute('playsinline', 'true');
+        audio.setAttribute('autoplay', 'true');
+        audio.style.display = 'none';
+        document.body.appendChild(audio);
+      }
 
-      // 3. ATTACH AGENT'S VOICE (The "Hearing" Logic)
-      peer.on('stream', (remoteStream) => {
-        console.log("🔊 Agent voice stream received");
-        
-        // Ensure the beep-beep is killed immediately
-        if (callingAudio.current) {
-          callingAudio.current.pause();
-          callingAudio.current.src = "";
-        }
+      audio.srcObject = remoteStream;
+      // Volume is now handled by a separate useEffect watching [isSpeakerOn]
+      
+      audio.play()
+        .then(() => setCallStatus('connected'))
+        .catch(() => setCallStatus('connected')); 
+    });
 
-        let audio = document.getElementById('remoteAudio');
-        if (!audio) {
-          audio = document.createElement('audio');
-          audio.id = 'remoteAudio';
-          audio.setAttribute('playsinline', 'true'); // Required for iOS
-          audio.setAttribute('autoplay', 'true');
-          audio.style.display = 'none';
-          document.body.appendChild(audio);
-        }
+    connectionRef.current = peer;
 
-        audio.srcObject = remoteStream;
-        audio.muted = false;
-        audio.volume = isSpeakerOn ? 1.0 : 0.4;
-        
-        audio.play()
-          .then(() => {
-            console.log("✅ Agent audio playing");
-            setCallStatus('connected');
-          })
-          .catch(e => {
-            console.error("Audio block:", e);
-            setCallStatus('connected'); 
-          });
-      });
-
-      connectionRef.current = peer;
-
-      socket.on("call-accepted", (answerData) => {
-        if (peer && !peer.destroyed) {
-          peer.signal(answerData.signal);
-        }
-      });
-
-    } else {
-      throw new Error(data.message || "Agent unavailable");
-    }
+    socket.on("call-accepted", (answerData) => {
+      if (peer && !peer.destroyed) {
+        peer.signal(answerData.signal);
+      }
+    });
 
   } catch (err) {
     console.error("Call failed:", err);
+    
+    // CLEANUP EVERYTHING ON FAILURE
     if (callingAudio.current) {
       callingAudio.current.pause();
       callingAudio.current.src = "";
     }
-    if (stream) stream.getTracks().forEach(track => track.stop());
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    if (peer) {
+      peer.destroy();
+    }
+    
     setCallStatus('idle');
     setShowFullScreenCall(false);
     alert(err.message || "Connection failed. Please try again.");
   }
 };
-
 
  const handleSendMessage = async (e) => {
   e.preventDefault();
@@ -1975,10 +1982,9 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   ) : (
     /* State B: CONNECTED, CALLING, or CONNECTING - Shows In-Call Controls */
     <>
-     {/* Speaker Toggle */}
+    {/* Speaker Toggle */}
 <div className="flex flex-col items-center gap-3">
   <button 
-    onTouchStart={(e) => { e.preventDefault(); setIsSpeakerOn(!isSpeakerOn); }} 
     onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
     className={`w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95 ${
       isSpeakerOn ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40' : 'bg-white/10 text-white hover:bg-white/20'
