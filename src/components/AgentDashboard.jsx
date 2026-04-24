@@ -51,8 +51,9 @@ export const AgentDashboard = () => {
   const userStreamRef = useRef();
   const scrollRef = useRef(null);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
-  const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
-  const lastNotifiedId = useRef(null);
+const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
+const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing
+const lastNotifiedId = useRef(null);
 const fileInputRef = useRef(null);
 const cameraInputRef = useRef(null);
 const timerRef = useRef(null);
@@ -163,21 +164,41 @@ useEffect(() => {
 }, [socket]);
 
 useEffect(() => {
-  const ringtone = ringtoneRef.current;
+  // 1. Set properties
+  ringtoneAudio.current.loop = true;
+  callingAudio.current.loop = true;
 
-  if (callStatus === 'ringing' && isIncomingCall) {
-    ringtone.loop = true;
-    ringtone.play().catch(err => console.warn("Audio autoplay blocked by browser"));
-  } else {
-    ringtone.pause();
-    ringtone.currentTime = 0;
-  }
+  const handleAudio = async () => {
+    try {
+      if (callStatus === 'ringing') {
+        if (isIncomingCall) {
+          // Reset callingAudio just in case, then play ringtone
+          callingAudio.current.pause();
+          await ringtoneAudio.current.play();
+        } else {
+          ringtoneAudio.current.pause();
+          await callingAudio.current.play();
+        }
+      } else {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.currentTime = 0;
+        callingAudio.current.pause();
+        callingAudio.current.currentTime = 0;
+      }
+    } catch (err) {
+      // This usually happens if the user hasn't clicked anything on the page yet
+      console.warn("Audio interaction required: ", err);
+    }
+  };
+
+  handleAudio();
 
   return () => {
-    ringtone.pause();
-    ringtone.currentTime = 0;
+    ringtoneAudio.current.pause();
+    callingAudio.current.pause();
   };
 }, [callStatus, isIncomingCall]);
+
 
 useEffect(() => {
   if (callStatus === 'connected') {
@@ -410,15 +431,21 @@ const handleStartCall = async (targetUserId) => {
 };
 
 const handleAcceptCall = async () => {
+  // 1. SILENCE RINGTONE IMMEDIATELY
+  if (ringtoneAudio.current) {
+    ringtoneAudio.current.pause();
+    ringtoneAudio.current.currentTime = 0;
+  }
+
   try {
-    // 1. INSTANT UI FEEDBACK
+    // 2. INSTANT UI FEEDBACK
     setCallStatus('connecting');
     setCallTime(0);
     
     const token = localStorage.getItem('agentToken');
     const callId = activeCaller?.callId || activeCall?.callId;
 
-    // 2. FETCH SIGNAL IF MISSING (Prevents hanging on 'connecting')
+    // 3. FETCH SIGNAL IF MISSING (Prevents hanging on 'connecting')
     let incomingSignal = activeCaller?.signal || activeCall?.signal;
     
     if (!incomingSignal) {
@@ -431,7 +458,7 @@ const handleAcceptCall = async () => {
 
     if (!incomingSignal) throw new Error("Connection signal not found. Handshake aborted.");
 
-    // 3. BACKEND ACKNOWLEDGMENT
+    // 4. BACKEND ACKNOWLEDGMENT
     await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
@@ -441,27 +468,39 @@ const handleAcceptCall = async () => {
       body: JSON.stringify({ callId })
     });
 
-    // 4. MICROPHONE ACCESS
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // 5. HIGH-QUALITY MICROPHONE ACCESS
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }, 
+      video: false 
+    });
     userStreamRef.current = stream; 
 
-    // 5. INITIALIZE PEER (Initiator: false)
+    // 6. INITIALIZE PEER (Initiator: false)
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: false, 
       trickle: false,
       stream: stream,
-      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+      config: { 
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ] 
+      }
     });
 
-    // 6. ANSWER SIGNAL HANDLER
+    // 7. ANSWER SIGNAL HANDLER
     peer.on('signal', async (data) => {
       const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId;
       
-      // Fast path: Socket
-      socket.emit("answer-call", { to: targetId, signal: data });
+      // Socket path
+      socket.emit("answer-call", { to: targetId, signal: data, callId });
 
-      // Reliable path: DB update for User's polling
+      // Database path
       await fetch('/api/calls/update-signal', {
         method: 'PATCH',
         headers: { 
@@ -472,26 +511,38 @@ const handleAcceptCall = async () => {
       });
     });
 
-    // 7. REMOTE STREAM HANDLER
+    // 8. REMOTE STREAM HANDLER (The "Hearing" Logic)
     peer.on('stream', (remoteStream) => {
+      console.log("🔊 Remote stream attached");
       let audio = document.getElementById('remoteAudio');
+      
       if (!audio) {
         audio = document.createElement('audio');
         audio.id = 'remoteAudio';
+        audio.style.display = 'none';
         document.body.appendChild(audio);
       }
+
       audio.srcObject = remoteStream;
+      audio.muted = false; // Ensure not muted
+      audio.volume = isSpeakerOn ? 1.0 : 0.4; // Sync with your speaker state
+      
       audio.play()
-        .then(() => setCallStatus('connected'))
-        .catch(e => console.error("Audio play blocked:", e));
+        .then(() => {
+          setCallStatus('connected');
+        })
+        .catch(e => {
+          console.error("Audio playback requires interaction:", e);
+          setCallStatus('connected'); // Set connected anyway as they already clicked 'Accept'
+        });
     });
 
-    // 8. THE HANDSHAKE (Delayed for stability)
+    // 9. THE HANDSHAKE (Delayed slightly for peer stability)
     setTimeout(() => {
       if (peer && !peer.destroyed) {
         peer.signal(incomingSignal);
       }
-    }, 100);
+    }, 150);
     
     connectionRef.current = peer;
 
@@ -509,11 +560,23 @@ const handleAcceptCall = async () => {
 };
 
 const handleEndCall = async () => {
-  console.log("📴 Initiating call cleanup and database update...");
+  console.log("📴 Initiating call cleanup...");
+
+  // --- ADD THESE LINES TO STOP SOUNDS ---
+  if (ringtoneAudio.current) {
+    ringtoneAudio.current.pause();
+    ringtoneAudio.current.currentTime = 0;
+  }
+  if (callingAudio.current) {
+    callingAudio.current.pause();
+    callingAudio.current.currentTime = 0;
+  }
+  // ---------------------------------------
 
   const callId = activeCall?.callId || activeCaller?.callId;
   const targetId = activeCall?.fromId || activeCall?.toId || activeCaller?.callerId;
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+
   if (callId && token) {
     fetch('/api/calls/end', {
       method: 'POST',
@@ -522,49 +585,27 @@ const handleEndCall = async () => {
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({ callId })
-    })
-    .then(() => console.log("✅ Database status updated to: ended"))
-    .catch(e => console.error("❌ DB End Call failed:", e));
+    }).catch(e => console.error("❌ DB End Call failed:", e));
   }
+
   if (targetId && socket) {
     socket.emit("end-call", { to: targetId });
   }
   
   if (userStreamRef.current) {
-    userStreamRef.current.getTracks().forEach(track => {
-      track.stop();
-      console.log("🎤 Mic track stopped");
-    });
+    userStreamRef.current.getTracks().forEach(track => track.stop());
     userStreamRef.current = null;
   }
 
   if (connectionRef.current) {
-    try {
-      connectionRef.current.destroy();
-    } catch (e) {
-      console.warn("Peer cleanup: already destroyed");
-    }
+    try { connectionRef.current.destroy(); } catch (e) {}
     connectionRef.current = null;
   }
 
-  // 6. Reset All UI State
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCall(null);
   setActiveCaller(null);
-  
-  // 7. Stop Audio/Ringtones
-  if (ringtoneRef.current) {
-    ringtoneRef.current.pause();
-    ringtoneRef.current.currentTime = 0;
-  }
-
-  const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio) {
-    remoteAudio.pause();
-    remoteAudio.srcObject = null;
-    remoteAudio.remove();
-  }
 };
 
 
@@ -578,12 +619,14 @@ useEffect(() => {
 
 useEffect(() => {
   const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio) {
-    // If "Speaker" is off, we lower volume to simulate earpiece, 
-    // or keep at 1 for loud speaker.
+  if (remoteAudio && callStatus === 'connected') {
     remoteAudio.volume = isSpeakerOn ? 1.0 : 0.3; 
+    
+    remoteAudio.play().catch(err => {
+      console.warn("Audio play interrupted or blocked:", err);
+    });
   }
-}, [isSpeakerOn]);
+}, [isSpeakerOn, callStatus]); // Add callStatus here!
 
 useEffect(() => {
   const handleOnline = () => setConnectionStatus('connected');

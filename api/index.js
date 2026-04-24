@@ -156,28 +156,20 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-
 let ioInstance; 
 
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
 
-  /**
-   * 1. Room Management
-   * Every user (Agent or User) joins a room named after their Database ID.
-   * This allows us to target them specifically using io.to(userId).
-   */
+  // 1. Room Management
   socket.on("join-main-room", (userId) => {
     socket.join(userId);
     console.log(`Connection ${socket.id} joined room: ${userId}`);
   });
 
-  /**
-   * 2. Initiate Call (WhatsApp: "Calling...")
-   * Triggered by either the Agent or User when clicking the Call button.
-   */
+  // 2. Initiate Call
   socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
-    // Relay the signal to the target user/agent
+    console.log(`Call initiated from ${fromName} to ${userToCall}`);
     io.to(userToCall).emit("incoming-call", { 
       signal: signalData, 
       fromId, 
@@ -186,31 +178,25 @@ io.on("connection", (socket) => {
     });
   });
 
-  /**
-   * 3. Acknowledge Receipt (WhatsApp: "Ringing...")
-   * Triggered automatically by the Receiver's device as soon as it gets 'incoming-call'.
-   */
+  // 3. Confirm Ringing (Visual feedback for the caller)
   socket.on("confirm-ringing", ({ to }) => {
-    // 'to' is the ID of the person who started the call
     io.to(to).emit("user-is-ringing");
   });
 
- socket.on("answer-call", ({ to, signal, callId }) => {
-  console.log(`Relaying answer for Call: ${callId}`);
-  // We send the signal to the initiator
-  io.to(to).emit("call-accepted", { signal, callId });
-});
-  /**
-   * 5. End/Reject Call
-   * Triggered by either side to stop the ringing or hang up an active call.
-   */
+  // 4. Answer Call (The Handshake)
+  socket.on("answer-call", ({ to, signal, callId }) => {
+    console.log(`Call accepted for ID: ${callId}. Relaying signal to initiator.`);
+    // Ensure the signal is sent back to the person who started the call
+    io.to(to).emit("call-accepted", { signal, callId });
+  });
+
+  // 5. End/Reject Call
   socket.on("end-call", ({ to }) => {
+    console.log(`Call ended/rejected. Notifying room: ${to}`);
     io.to(to).emit("call-ended");
   });
 
-  /**
-   * 6. Force Logout (Management)
-   */
+  // 6. Force Logout
   socket.on("request-force-logout", (userId) => {
     socket.to(userId).emit("force-logout", {
       message: "Session terminated by server request."
@@ -221,6 +207,7 @@ io.on("connection", (socket) => {
     console.log("Socket disconnected:", socket.id);
   });
 });
+
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',

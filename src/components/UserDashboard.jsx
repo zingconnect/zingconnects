@@ -84,8 +84,9 @@ export const UserDashboard = () => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3'));
-  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
+const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
+const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
+const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   
   
   const connectionRef = useRef(null);
@@ -438,6 +439,11 @@ const handleAcceptCall = async () => {
 
 const handleEndCall = async () => {
   const token = localStorage.getItem('userToken');
+  ringtoneRef.current.pause();
+  ringtoneRef.current.currentTime = 0;
+  callingAudio.current.pause();
+  callingAudio.current.currentTime = 0;
+
   console.log("📴 Ending call and cleaning up resources...");
 
   // 1. STOP HARDWARE (Microphone)
@@ -903,18 +909,34 @@ const handleStartCall = async () => {
     alert("Profile data still loading. Please try again.");
     return;
   }
+
+  // 1. START OUTGOING SOUND (Beep-Beep)
+  callingAudio.current.loop = true;
+  callingAudio.current.play().catch(() => console.log("Audio play blocked"));
+
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // 2. HIGH QUALITY AUDIO CONSTRAINTS
+    stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }, 
+      video: false 
+    });
+    
     if (userStreamRef) userStreamRef.current = stream;
     setLocalStream(stream);
     setCallStatus('calling'); 
     setShowFullScreenCall(true);
   } catch (err) {
+    callingAudio.current.pause();
     console.error("Mic Access Denied:", err);
     alert("Call failed: Please grant microphone permissions.");
     return;
   }
+
   try {
     const res = await fetch('/api/calls/start', {
       method: 'POST',
@@ -925,89 +947,94 @@ const handleStartCall = async () => {
       body: JSON.stringify({ receiverId: currentAgentId, receiverModel: 'Agent' })
     });
     const data = await res.json();
+    
     if (data.success) {
       setActiveCall({ 
         callId: data.callId,
         fromId: currentUserId,
         isInitiator: true,
         callerData: {
-    fromName: `${userData?.firstName} ${userData?.lastName}`,
-photoUrl: userData?.photoUrl,
+          fromName: `${userData?.firstName} ${userData?.lastName}`,
+          photoUrl: userData?.photoUrl,
           callerId: currentUserId
         }
       });
+
       const { default: SimplePeer } = await import('simple-peer');
-      try {
-        const peer = new SimplePeer({
-          initiator: true,
-          trickle: false,
-          stream: stream,
-          config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-        });
-        peer.on('signal', async (signalData) => {
-socket.emit("call-user", {
-  userToCall: currentAgentId,
-  fromId: currentUserId,
-  fromName: `${userData?.firstName} ${userData?.lastName}`, // Ensure this is sent!
-  photoUrl: userData?.photoUrl,
-  callId: data.callId,
-  signal: signalData 
-});
-          setCallStatus('ringing'); 
-          try {
-            await fetch('/api/calls/update-signal', {
-              method: 'PATCH',
-              headers: { 
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json' 
-              },
-              body: JSON.stringify({ callId: data.callId, signal: signalData })
-            });
-          } catch (dbErr) {
-            console.error("Signal backup failed:", dbErr);
-          }
-        });
+      const peer = new SimplePeer({
+        initiator: true,
+        trickle: false,
+        stream: stream,
+        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] }
+      });
 
-        peer.on('stream', (remoteStream) => {
-          let audio = document.getElementById('remoteAudio');
-          if (!audio) {
-            audio = document.createElement('audio');
-            audio.id = 'remoteAudio';
-            audio.autoplay = true; 
-            document.body.appendChild(audio);
-          }
-          audio.srcObject = remoteStream;
-          setCallStatus('connected');
+      peer.on('signal', async (signalData) => {
+        socket.emit("call-user", {
+          userToCall: currentAgentId,
+          fromId: currentUserId,
+          fromName: `${userData?.firstName} ${userData?.lastName}`,
+          photoUrl: userData?.photoUrl,
+          callId: data.callId,
+          signal: signalData 
         });
+        
+        // Wait for the agent to pick up (ringing status)
+        setCallStatus('ringing'); 
+        
+        await fetch('/api/calls/update-signal', {
+          method: 'PATCH',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({ callId: data.callId, signal: signalData })
+        }).catch(e => console.error("Signal backup failed:", e));
+      });
 
-        if (connectionRef) connectionRef.current = peer;
+      // 3. ATTACH AGENT'S VOICE
+      peer.on('stream', (remoteStream) => {
+        console.log("🔊 Agent voice received");
+        
+        // STOP THE BEAPING SOUND
+        callingAudio.current.pause();
+        callingAudio.current.currentTime = 0;
 
-        peer.on('close', () => handleEndCall());
-        peer.on('error', (err) => {
-          console.error("Peer connection error:", err);
-          handleEndCall();
-        });
+        let audio = document.getElementById('remoteAudio');
+        if (!audio) {
+          audio = document.createElement('audio');
+          audio.id = 'remoteAudio';
+          audio.autoplay = true; 
+          audio.playsInline = true;
+          document.body.appendChild(audio);
+        }
+        audio.srcObject = remoteStream;
+        audio.volume = isSpeakerOn ? 1.0 : 0.4;
+        audio.play().catch(e => console.error("Audio play error:", e));
+        
+        setCallStatus('connected');
+      });
 
-      } catch (peerInitError) {
-        console.error("Failed to initialize Peer:", peerInitError);
-        throw new Error("WEBRTC_INIT_FAILED");
-      }
+      connectionRef.current = peer;
+
+      // Handle the signal coming back from the agent
+      socket.on("call-accepted", (answerData) => {
+        if (peer && !peer.destroyed) {
+          peer.signal(answerData.signal);
+        }
+      });
+
     } else {
+      callingAudio.current.pause();
       if (stream) stream.getTracks().forEach(t => t.stop());
       setCallStatus('idle');
       alert(data.message || "Agent is currently unavailable.");
     }
 
   } catch (err) {
-    console.error("General Call Error:", err);
+    callingAudio.current.pause();
     if (stream) stream.getTracks().forEach(track => track.stop());
     setCallStatus('idle');
-    
-    if (err.message === "WEBRTC_INIT_FAILED") {
-      alert("Connection engine failed. Please refresh your browser.");
-    } else {
-      alert("An unexpected error occurred. Please refresh and try again.");
-    }
+    alert("Connection failed. Please refresh and try again.");
   }
 };
 
