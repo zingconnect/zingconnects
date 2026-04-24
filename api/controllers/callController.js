@@ -46,28 +46,6 @@ export const updateCallSignal = async (req, res) => {
   }
 };
 
-// @desc    Get current status of a specific call
-export const getCallStatus = async (req, res) => {
-  try {
-    await connectToDatabase(); 
-    const { callId } = req.params;
-
-    const call = await Call.findById(callId);
-    if (!call) {
-      return res.status(404).json({ success: false, message: "Call not found" });
-    }
-
-    res.json({ 
-      success: true, 
-      status: call.status,
-      signal: call.signal, // Also provide the signal here as a backup
-      duration: call.startTime ? Math.floor((Date.now() - call.startTime) / 1000) : 0 
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Error fetching status" });
-  }
-};
-
 // @desc    Check for incoming calls (Polling)
 export const checkIncomingCall = async (req, res) => {
   try {
