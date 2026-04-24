@@ -416,7 +416,8 @@ const handleStartCall = async (targetUserId) => {
       config: { 
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' }
         ] 
       }
     });
@@ -431,36 +432,33 @@ const handleStartCall = async (targetUserId) => {
         signal: data 
       });
     });
+peer.on('stream', (remoteStream) => {
+  let audio = document.getElementById('remoteAudio');
+  
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = 'remoteAudio';
+    audio.setAttribute('playsinline', 'true'); // REQUIRED for iOS
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+  }
+  if ("srcObject" in audio) {
+    audio.srcObject = remoteStream;
+  } else {
+    audio.src = window.URL.createObjectURL(remoteStream);
+  }
 
-    // 5. REMOTE STREAM HANDLER (Optimized for Mobile/Desktop)
-    peer.on('stream', (remoteStream) => {
-      console.log("🔊 Remote user stream received");
-      
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.setAttribute('playsinline', 'true'); // Required for iOS
-        audio.setAttribute('autoplay', 'true');    // Force start
-        audio.style.display = 'none';
-        document.body.appendChild(audio);
-      }
-
-      audio.srcObject = remoteStream;
-      audio.muted = false;
-      audio.volume = isSpeakerOn ? 1.0 : 0.4;
-      
-      audio.play()
-        .then(() => {
-          console.log("✅ Voice audio playing");
-          setCallStatus('connected');
-        })
-        .catch(e => {
-          console.error("❌ Audio playback failed:", e);
-          setCallStatus('connected'); // Set connected anyway as handshake succeeded
-        });
-    });
-
+  audio.onloadedmetadata = () => {
+    audio.muted = false;
+    audio.volume = isSpeakerOn ? 1.0 : 0.4; 
+    
+    audio.play()
+      .then(() => setCallStatus('connected'))
+      .catch(e => {
+         console.warn("Auto-play blocked. User interaction required.");
+      });
+  };
+});
     connectionRef.current = peer;
 
     peer.on('close', () => handleEndCall());

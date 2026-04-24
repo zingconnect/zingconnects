@@ -168,43 +168,43 @@ const isIncomingCall =
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
+
 const unlockAudio = () => {
-  // 1. Immediate UI Feedback
   setHasInteracted(true);
   console.log("🔐 Initializing secure audio channels...");
 
-  // 2. Define all audio elements including the remote stream element
   const remoteAudio = document.getElementById('remoteAudio');
   
   const audioRefs = [
     { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
-    { ref: callingAudio, src: '/sounds/calling.wav' },
+    { ref: callingAudio, src: '/sounds/calling.wav' }, // Matches your project file
     { ref: notificationSound, src: '/sounds/notification.mp3' }
   ];
+
   audioRefs.forEach(({ ref, src }) => {
     const el = ref.current;
     if (el) {
-      // Ensure the source is set correctly
-      if (!el.src || el.src === '' || el.src.includes('undefined')) {
-        el.src = src;
-      }
-            el.play()
+      el.src = src;      
+      el.load(); 
+      el.play()
         .then(() => {
           el.pause();
           el.currentTime = 0;
           console.log(`✅ Primed: ${src}`);
         })
-        .catch(err => console.warn(`⚠️ Unlock delayed for ${src}:`, err));
+        .catch(err => {
+          console.warn(`Unlock delayed for ${src}:`, err.name);
+        });
     }
   });
+
   if (remoteAudio) {
     remoteAudio.play()
       .then(() => {
         remoteAudio.pause();
         console.log("✅ Primed: Remote Voice Channel");
       })
-      .catch(() => {
-      });
+      .catch(() => { /* Silent catch for empty remote stream */ });
   }
 
   const currentAgentId = agent?._id || agent?.id;
@@ -449,19 +449,42 @@ const handleAcceptCall = async () => {
       body: JSON.stringify({ callId: activeCall.callId }) 
     });
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+   const stream = await navigator.mediaDevices.getUserMedia({ 
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    sampleRate: 48000 
+  }, 
+  video: false 
+});
     userStreamRef.current = stream;
     setLocalStream(stream);
 
-    const { default: SimplePeer } = await import('simple-peer');
-    const peer = new SimplePeer({
-      initiator: false, 
-      trickle: false,
-      stream: stream,
-      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-    });
-
-    peer.on('signal', (data) => {
+   const peer = new SimplePeer({
+  // IMPORTANT: Set to true if this is the person STARTING the call
+  initiator: isOutgoingCall ? true : false, 
+  trickle: false,
+  stream: stream, // Your local camera/mic stream
+  config: { 
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      }
+    ] 
+  }
+});
+       peer.on('signal', (data) => {
       const targetId = activeCall.fromId || activeCall.callerData?.callerId;
       socket.emit("answer-call", {
         to: targetId,
@@ -479,19 +502,25 @@ const handleAcceptCall = async () => {
       }).catch(e => console.warn("Signal backup failed", e));
     });
 
-    peer.on('stream', (remoteStream) => {
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-      }
-      audio.srcObject = remoteStream;
-      
-      setPeerConnected(true);
-      setCallStatus('connected');
-    });
+   peer.on('stream', (remoteStream) => {
+  let audio = document.getElementById('remoteAudio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = 'remoteAudio';
+    audio.setAttribute('playsinline', 'true'); 
+    audio.setAttribute('autoplay', 'true');
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+  }
+  audio.srcObject = remoteStream;
+    audio.muted = true; 
+  audio.play().then(() => {
+    audio.muted = false; 
+    console.log("🔊 Remote audio is now live and audible");
+  });
+  setPeerConnected(true);
+  setCallStatus('connected');
+});
 
     if (activeCall?.signal) {
       const incomingSignal = typeof activeCall.signal === 'string' 
