@@ -218,7 +218,6 @@ useEffect(() => {
   if (!token) return;
 
   const syncStatus = async () => {
-    // Check if we are waiting for a connection
     const isInTransition = ['calling', 'ringing', 'connecting'].includes(callStatus);
     
     if (isInTransition && activeCall?.callId) {
@@ -228,29 +227,24 @@ useEffect(() => {
         });
         const data = await res.json();
 
-        // 1. Update UI to Ringing
         if (data.status === 'ringing' && callStatus !== 'ringing') {
           setCallStatus('ringing');
         }
 
-        // 2. THE HANDSHAKE (Fixes the "Connecting" hang)
         if (data.status === 'connected') {
-          // Look specifically for the answerSignal we just fixed in the API
           if (data.answerSignal && connectionRef.current && !peerConnected) {
-            console.log("Handshake detected! Finalizing connection...");
             try {
               connectionRef.current.signal(data.answerSignal);
-              setPeerConnected(true); 
-              setCallStatus('connected'); // UI: End-to-End Encrypted
+              setPeerConnected(true);
             } catch (err) {
               console.error("WebRTC Handshake Failed:", err);
+              handleEndCall();
             }
           } else if (peerConnected) {
             setCallStatus('connected');
           }
         }
 
-        // 3. Termination
         if (['ended', 'declined', 'missed'].includes(data.status)) {
           handleEndCall();
         }
@@ -259,7 +253,6 @@ useEffect(() => {
       }
     }
 
-    // 4. Poll for new Incoming Calls
     if (callStatus === 'idle') {
       try {
         const res = await fetch('/api/calls/check-incoming', {
