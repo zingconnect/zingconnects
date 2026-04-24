@@ -168,42 +168,51 @@ useEffect(() => {
   ringtoneAudio.current.loop = true;
   callingAudio.current.loop = true;
 
-  const handleAudio = async () => {
-    try {
-      if (callStatus === 'ringing') {
-        if (isIncomingCall) {
-          callingAudio.current.pause();
-          callingAudio.current.src = ""; // Clear source
-          
-          ringtoneAudio.current.src = "/sounds/ringtone.mp3"; // Re-assign source
-          await ringtoneAudio.current.play();
-        } else {
-          ringtoneAudio.current.pause();
-          ringtoneAudio.current.src = ""; 
-          callingAudio.current.src = "/sounds/calling.mp3"; 
-          await callingAudio.current.play();
-        }
-      } else {
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.src = ""; 
-        ringtoneAudio.current.currentTime = 0;
+  const handleAudioLogic = async () => {
+    // 1. Identify which sound should play
+    const isIncoming = isIncomingCall && callStatus === 'ringing';
+    const isOutgoing = !isIncomingCall && (callStatus === 'ringing' || callStatus === 'calling');
 
+    try {
+      if (isIncoming) {
+        // Stop Beep, Load Ringtone
         callingAudio.current.pause();
         callingAudio.current.src = ""; 
-        callingAudio.current.currentTime = 0;
+
+        ringtoneAudio.current.src = "/sounds/ringtone.mp3"; 
+        await ringtoneAudio.current.load(); // Force load before play
+        await ringtoneAudio.current.play();
+      } 
+      else if (isOutgoing) {
+        // Stop Ringtone, Load Beep
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.src = "";
+
+        callingAudio.current.src = "/sounds/calling.mp3";
+        await callingAudio.current.load(); // Force load before play
+        await callingAudio.current.play();
+      } 
+      else {
+        // KILL BOTH - But don't try to play after wiping
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.src = "";
+        callingAudio.current.pause();
+        callingAudio.current.src = "";
       }
     } catch (err) {
-      console.warn("Audio interaction required: ", err);
+      // This is expected on many browsers until the user clicks once
+      console.log("Audio waiting for user interaction...");
     }
   };
 
-  handleAudio();
+  handleAudioLogic();
 
   return () => {
     ringtoneAudio.current.pause();
     callingAudio.current.pause();
   };
 }, [callStatus, isIncomingCall]);
+
 
 useEffect(() => {
   if (callStatus === 'connected') {

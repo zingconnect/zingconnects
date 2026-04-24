@@ -169,6 +169,48 @@ const isIncomingCall =
     }
   };
 
+const unlockAudio = () => {
+  setHasInteracted(true);
+  console.log("Attempting to unlock all audio channels...");
+
+  const audioRefs = [
+    { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
+    { ref: callingAudio, src: '/sounds/calling.mp3' },
+    { ref: notificationSound, src: '/sounds/notification.mp3' }
+  ];
+  audioRefs.forEach(({ ref, src }) => {
+    if (ref.current) {
+      if (!ref.current.src || ref.current.src.includes('undefined')) {
+        ref.current.src = src;
+      }
+            ref.current.play()
+        .then(() => {
+          ref.current.pause();
+          ref.current.currentTime = 0;
+        })
+        .catch(err => console.warn(`Silent unlock failed for ${src}:`, err));
+    }
+  });
+
+  if (socket && agent?._id) {
+    socket.emit("join-private-room", agent._id);
+    console.log("Socket room joined after audio unlock");
+  }
+  document.removeEventListener('click', unlockAudio);
+  document.removeEventListener('touchstart', unlockAudio);
+};
+
+useEffect(() => {
+  if (!hasInteracted) {
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('touchstart', unlockAudio);
+  }
+  return () => {
+    document.removeEventListener('click', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
+  };
+}, [hasInteracted, agent?._id]); // Re-bind if agent loads later
+
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
@@ -783,28 +825,6 @@ const handleProfileSubmit = async (e) => {
   }
 };
 
-const unlockAudio = () => {
-  setHasInteracted(true);
-  if (notificationSound.current) {
-    notificationSound.current.play()
-      .then(() => {
-        notificationSound.current.pause();
-        notificationSound.current.currentTime = 0;
-        setHasInteracted(true); 
-        if (socket && agent?._id) {
-          socket.emit("join-private-room", agent._id);
-          console.log("Socket room joined after audio unlock");
-        }
-        console.log("Audio and Socket session unlocked successfully");
-      })
-      .catch(p => {
-        console.error("Audio unlock failed. User gesture required:", p);
-      });
-  } else {
-    // Fallback if the ref isn't loaded yet
-    setHasInteracted(true);
-  }
-};
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
   if (!file || !agent?._id) return;
