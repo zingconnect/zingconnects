@@ -84,7 +84,7 @@ export const UserDashboard = () => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
-const ringtoneRef = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
+const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
 const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
 const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   
@@ -297,7 +297,7 @@ useEffect(() => {
 }, [callStatus, userData?._id]);
 
 useEffect(() => {
-  const audio = ringtoneRef.current;
+  const audio = ringtoneAudio.current;
   if (callStatus === 'ringing' && isIncomingCall) {
     audio.loop = true;
     audio.play().catch(() => {});
@@ -335,9 +335,9 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
-  if (ringtoneRef.current) {
-    ringtoneRef.current.pause();
-    ringtoneRef.current.currentTime = 0;
+  if (ringtoneAudio.current) {
+    ringtoneAudio.current.pause();
+    ringtoneAudio.current.currentTime = 0;
   }
 
   const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
@@ -439,8 +439,8 @@ const handleAcceptCall = async () => {
 
 const handleEndCall = async () => {
   const token = localStorage.getItem('userToken');
-  ringtoneRef.current.pause();
-  ringtoneRef.current.currentTime = 0;
+  ringtoneAudio.current.pause();
+  ringtoneAudio.current.currentTime = 0;
   callingAudio.current.pause();
   callingAudio.current.currentTime = 0;
 

@@ -332,7 +332,7 @@ useEffect(() => {
 }, [messages]); 
 
 useEffect(() => {
-  const ringtone = ringtoneRef.current;
+  const ringtone = ringtoneAudio.current;
   if (!ringtone) return;
 
   if (callStatus === 'ringing' && isIncomingCall) {
