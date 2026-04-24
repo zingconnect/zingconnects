@@ -68,6 +68,7 @@ const [fullscreenVideo, setFullscreenVideo] = useState(null);
 const [limit, setLimit] = useState(30); // Start with 30 messages
 const [isInitialLoad, setIsInitialLoad] = useState(true);
 const [connectionStatus, setConnectionStatus] = useState('online');
+const [peerConnected, setPeerConnected] = useState(false);
 
 const [activeCall, setActiveCall] = useState(null);
 const [callStatus, setCallStatus] = useState('idle'); // idle, ringing, connecting, connected, ended
@@ -217,68 +218,77 @@ useEffect(() => {
   if (!token) return;
 
   const syncStatus = async () => {
-    // 1. Outgoing Call Status Check
-    if (callStatus === 'calling' && activeCall?.callId) {
+    // Check if we are waiting for a connection
+    const isInTransition = ['calling', 'ringing', 'connecting'].includes(callStatus);
+    
+    if (isInTransition && activeCall?.callId) {
       try {
         const res = await fetch(`/api/calls/status/${activeCall.callId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 'Authorization': 'Bearer ' + token }
         });
         const data = await res.json();
-        if (data.status === 'ringing') setCallStatus('ringing');
-      } catch (e) { 
-        console.warn("Status poll failed"); 
+
+        // 1. Update UI to Ringing
+        if (data.status === 'ringing' && callStatus !== 'ringing') {
+          setCallStatus('ringing');
+        }
+
+        // 2. THE HANDSHAKE (Fixes the "Connecting" hang)
+        if (data.status === 'connected') {
+          // Look specifically for the answerSignal we just fixed in the API
+          if (data.answerSignal && connectionRef.current && !peerConnected) {
+            console.log("Handshake detected! Finalizing connection...");
+            try {
+              connectionRef.current.signal(data.answerSignal);
+              setPeerConnected(true); 
+              setCallStatus('connected'); // UI: End-to-End Encrypted
+            } catch (err) {
+              console.error("WebRTC Handshake Failed:", err);
+            }
+          } else if (peerConnected) {
+            setCallStatus('connected');
+          }
+        }
+
+        // 3. Termination
+        if (['ended', 'declined', 'missed'].includes(data.status)) {
+          handleEndCall();
+        }
+      } catch (e) {
+        console.warn("Status poll failed:", e);
       }
     }
 
-    // 2. Incoming Call Check (with Ghost Call Protection)
+    // 4. Poll for new Incoming Calls
     if (callStatus === 'idle') {
       try {
         const res = await fetch('/api/calls/check-incoming', {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 'Authorization': 'Bearer ' + token }
         });
         const data = await res.json();
 
         if (data.hasIncomingCall) {
-          /**
-           * GHOST CALL PROTECTION:
-           * Compare current time vs when the call was created in DB.
-           * data.createdAt comes from your MongoDB document.
-           */
           const callCreationTime = new Date(data.createdAt).getTime();
-          const currentTime = Date.now();
-          const secondsElapsed = (currentTime - callCreationTime) / 1000;
+          if ((Date.now() - callCreationTime) / 1000 > 60) return;
 
-          // If the call record is older than 60 seconds, ignore it.
-          if (secondsElapsed > 60) {
-            console.log(`System: Ignoring stale call from ${secondsElapsed}s ago.`);
-            return; 
-          }
-
-          // Spread callerData so that .photoUrl and .fromName are at the top level
-          setActiveCaller({
-            ...data.callerData, 
-            signal: data.signal  
-          });
-
-          // Save the ID and Signal for the Peer connection handshake
+          setActiveCaller({ ...data.callerData, signal: data.signal });
           setActiveCall({ 
             callId: data.callId, 
             signal: data.signal, 
             fromId: data.callerData.callerId 
           });
-
           setIsIncomingCall(true);
           setCallStatus('ringing');
         }
-      } catch (e) { 
-        console.error("Polling Error:", e); 
+      } catch (e) {
+        console.error("Discovery Error:", e);
       }
     }
   };
 
   const interval = setInterval(syncStatus, 3000);
   return () => clearInterval(interval);
-}, [callStatus, activeCall?.callId]);
+}, [callStatus, activeCall?.callId, peerConnected]);
 
  useEffect(() => {
   if (messagesEndRef.current) {

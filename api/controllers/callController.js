@@ -27,8 +27,6 @@ export const startCall = async (req, res) => {
     res.status(500).json({ message: "Failed to start call", error: error.message });
   }
 };
-
-// @desc    Update the WebRTC signal data (CRITICAL: Fixes the 500 error)
 export const updateCallSignal = async (req, res) => {
   try {
     await connectToDatabase();
@@ -37,8 +35,17 @@ export const updateCallSignal = async (req, res) => {
     if (!callId || !signal) {
       return res.status(400).json({ success: false, message: "Missing callId or signal data" });
     }
+    const call = await Call.findById(callId);
+    if (!call) return res.status(404).json({ success: false, message: "Call not found" });
+    const isAnswer = ['connecting', 'connected'].includes(call.status);
 
-    await Call.findByIdAndUpdate(callId, { signal: signal });
+    const updateData = isAnswer 
+      ? { answerSignal: signal } 
+      : { signal: signal, status: 'ringing' };
+
+    await Call.findByIdAndUpdate(callId, updateData);
+    
+    console.log(`📞 Signal updated for ${callId} (Type: ${isAnswer ? 'Answer' : 'Offer'})`);
     res.json({ success: true });
   } catch (error) {
     console.error("Update Signal Error:", error);
@@ -75,10 +82,11 @@ export const checkIncomingCall = async (req, res) => {
 };
 export const acceptCall = async (req, res) => {
   try {
+    await connectToDatabase();
     const myId = req.user.id || req.user._id || req.user.userId;
+    // We NEED the answerSignal from the User's frontend here
     const { callId, answerSignal } = req.body; 
 
-    // 1. Update call to 'connected' and store the Answer Signal
     const call = await Call.findOneAndUpdate(
       { 
         _id: callId, 
@@ -88,20 +96,17 @@ export const acceptCall = async (req, res) => {
       { 
         status: 'connected', 
         startTime: Date.now(),
-        answerSignal: answerSignal // Store the receiver's answer signal
+        answerSignal: answerSignal // <--- SAVE THE USER'S HANDSHAKE HERE
       },
       { new: true }
     ).populate('caller', 'firstName lastName photoUrl');
 
-    if (!call) {
-      return res.status(404).json({ success: false, message: "Call not found" });
-    }
+    if (!call) return res.status(404).json({ success: false, message: "Call not found" });
 
-    // 2. Return the INITIAL signal (from Agent) so the User can finish their side
     res.json({ 
       success: true, 
       call,
-      initiatorSignal: call.signal // The original signal saved during /start
+      initiatorSignal: call.signal // Send Agent's signal back to User
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
