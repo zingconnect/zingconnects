@@ -397,13 +397,27 @@ const handleStartCall = async (targetUserId) => {
 
 const handleAcceptCall = async () => {
   try {
+    // 1. INSTANT UI FEEDBACK
     setCallStatus('connecting');
+    
     const token = localStorage.getItem('agentToken');
     const callId = activeCaller?.callId || activeCall?.callId;
 
-    // 1. UPDATE DB: Tell Backend we accepted (Flip status to 'connected')
-    // This is critical to stop the 'ringing' status in the database
-    const acceptRes = await fetch('/api/calls/accept', {
+    // 2. FETCH SIGNAL IF MISSING (Prevents hanging on 'connecting')
+    let incomingSignal = activeCaller?.signal || activeCall?.signal;
+    
+    if (!incomingSignal) {
+      const res = await fetch(`/api/calls/status/${callId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      incomingSignal = data.signal;
+    }
+
+    if (!incomingSignal) throw new Error("Connection signal not found. Handshake aborted.");
+
+    // 3. BACKEND ACKNOWLEDGMENT
+    await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${token}`, 
@@ -412,30 +426,27 @@ const handleAcceptCall = async () => {
       body: JSON.stringify({ callId })
     });
 
-    if (!acceptRes.ok) throw new Error("Failed to update call status in database");
-    
-    // 2. Get Microphone
+    // 4. MICROPHONE ACCESS
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     userStreamRef.current = stream; 
 
-    // 3. Initialize Peer
+    // 5. INITIALIZE PEER (Initiator: false)
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
-      initiator: false,
+      initiator: false, 
       trickle: false,
       stream: stream,
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-    // 4. Signal back to User
+    // 6. ANSWER SIGNAL HANDLER
     peer.on('signal', async (data) => {
+      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId;
+      
       // Fast path: Socket
-      socket.emit("answer-call", { 
-        to: activeCaller.callerId || activeCaller.fromId, 
-        signal: data 
-      });
+      socket.emit("answer-call", { to: targetId, signal: data });
 
-      // Reliable path: Update the answer signal in DB
+      // Reliable path: DB update for User's polling
       await fetch('/api/calls/update-signal', {
         method: 'PATCH',
         headers: { 
@@ -446,6 +457,7 @@ const handleAcceptCall = async () => {
       });
     });
 
+    // 7. REMOTE STREAM HANDLER
     peer.on('stream', (remoteStream) => {
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
@@ -455,48 +467,38 @@ const handleAcceptCall = async () => {
       }
       audio.srcObject = remoteStream;
       audio.play()
-        .then(() => {
-          setCallStatus('connected');
-        })
+        .then(() => setCallStatus('connected'))
         .catch(e => console.error("Audio play blocked:", e));
     });
 
-    // 5. Apply the Handshake Signal
-    const incomingSignal = activeCaller.signal || activeCall.signal;
-    if (incomingSignal) {
-      // Small timeout ensures the Peer object is fully initialized before signaling
-      setTimeout(() => {
-        if (peer && !peer.destroyed) {
-          peer.signal(incomingSignal);
-        }
-      }, 100);
-    }
+    // 8. THE HANDSHAKE (Delayed for stability)
+    setTimeout(() => {
+      if (peer && !peer.destroyed) {
+        peer.signal(incomingSignal);
+      }
+    }, 100);
     
     connectionRef.current = peer;
+
     peer.on('close', () => handleEndCall());
     peer.on('error', (err) => {
-      console.error("Peer Error:", err);
+      console.error("WebRTC Error:", err);
       handleEndCall();
     });
 
   } catch (err) {
     console.error("Call Acceptance Failed:", err);
     setCallStatus('idle');
-    alert("Could not connect. Please check microphone permissions.");
+    alert(err.message || "Connection failed. Please check microphone permissions.");
   }
 };
 
 const handleEndCall = async () => {
   console.log("📴 Initiating call cleanup and database update...");
 
-  // 1. Identify IDs (Support both Agent and User dashboard naming)
   const callId = activeCall?.callId || activeCaller?.callId;
   const targetId = activeCall?.fromId || activeCall?.toId || activeCaller?.callerId;
-  
-  // Determine which token to use for the API call
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-
-  // 2. Notify Backend (CRITICAL: This stops the 'Ringing' in the DB)
   if (callId && token) {
     fetch('/api/calls/end', {
       method: 'POST',
@@ -509,13 +511,10 @@ const handleEndCall = async () => {
     .then(() => console.log("✅ Database status updated to: ended"))
     .catch(e => console.error("❌ DB End Call failed:", e));
   }
-
-  // 3. Notify Socket (Immediate UI feedback for the other person)
   if (targetId && socket) {
     socket.emit("end-call", { to: targetId });
   }
   
-  // 4. Stop Hardware (Microphone)
   if (userStreamRef.current) {
     userStreamRef.current.getTracks().forEach(track => {
       track.stop();
@@ -524,7 +523,6 @@ const handleEndCall = async () => {
     userStreamRef.current = null;
   }
 
-  // 5. Destroy Peer Connection
   if (connectionRef.current) {
     try {
       connectionRef.current.destroy();
@@ -1865,7 +1863,9 @@ const handleSendMessage = async (e) => {
   </div>
       
       <div className="text-center">
-        <h2 className="text-2xl font-bold">{agentData?.firstName} {agentData?.lastName}</h2>
+<h2 className="text-2xl font-bold">
+  {isIncomingCall ? activeCaller?.fromName : `${selectedUser?.firstName} ${selectedUser?.lastName}`}
+</h2>
         <p className="text-blue-400 font-black uppercase tracking-[0.2em] text-xs mt-2 animate-pulse">
           {callStatus === 'ringing' && "Ringing..."}
           {callStatus === 'connecting' && "Securing Line..."}
