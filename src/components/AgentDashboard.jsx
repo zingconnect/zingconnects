@@ -163,8 +163,8 @@ useEffect(() => {
   };
 }, [socket]);
 
+
 useEffect(() => {
-  // 1. Set properties
   ringtoneAudio.current.loop = true;
   callingAudio.current.loop = true;
 
@@ -172,21 +172,27 @@ useEffect(() => {
     try {
       if (callStatus === 'ringing') {
         if (isIncomingCall) {
-          // Reset callingAudio just in case, then play ringtone
           callingAudio.current.pause();
+          callingAudio.current.src = ""; // Clear source
+          
+          ringtoneAudio.current.src = "/sounds/ringtone.mp3"; // Re-assign source
           await ringtoneAudio.current.play();
         } else {
           ringtoneAudio.current.pause();
+          ringtoneAudio.current.src = ""; 
+          callingAudio.current.src = "/sounds/calling.mp3"; 
           await callingAudio.current.play();
         }
       } else {
         ringtoneAudio.current.pause();
+        ringtoneAudio.current.src = ""; 
         ringtoneAudio.current.currentTime = 0;
+
         callingAudio.current.pause();
+        callingAudio.current.src = ""; 
         callingAudio.current.currentTime = 0;
       }
     } catch (err) {
-      // This usually happens if the user hasn't clicked anything on the page yet
       console.warn("Audio interaction required: ", err);
     }
   };
@@ -198,7 +204,6 @@ useEffect(() => {
     callingAudio.current.pause();
   };
 }, [callStatus, isIncomingCall]);
-
 
 useEffect(() => {
   if (callStatus === 'connected') {
@@ -431,10 +436,12 @@ const handleStartCall = async (targetUserId) => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. SILENCE RINGTONE IMMEDIATELY
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
+    ringtoneAudio.current.muted = true; // Mute just in case
     ringtoneAudio.current.currentTime = 0;
+    ringtoneAudio.current.src = ""; // Empty the source so it cannot resume
+    ringtoneAudio.current.load(); // Force the browser to drop the file
   }
 
   try {

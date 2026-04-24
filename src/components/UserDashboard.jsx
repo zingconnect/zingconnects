@@ -297,19 +297,45 @@ useEffect(() => {
 }, [callStatus, userData?._id]);
 
 useEffect(() => {
-  const audio = ringtoneAudio.current;
-  if (callStatus === 'ringing' && isIncomingCall) {
-    audio.loop = true;
-    audio.play().catch(() => {});
-  } else {
-    audio.pause();
-    audio.currentTime = 0;
-  }
-    if (callStatus === 'calling') {
-  }
+  // 1. Pre-set looping for both audio objects
+  ringtoneAudio.current.loop = true;
+  callingAudio.current.loop = true;
+
+  const handleAudioLogic = async () => {
+    try {
+      if (callStatus === 'ringing' || callStatus === 'calling') {
+        if (isIncomingCall && callStatus === 'ringing') {
+          // --- CASE: INCOMING CALL ---
+          // 1. Kill the outgoing beep (if any)
+          callingAudio.current.pause();
+          callingAudio.current.src = "";   
+          ringtoneAudio.current.src = "/sounds/ringtone.mp3";
+          await ringtoneAudio.current.play();
+        } else {
+          ringtoneAudio.current.pause();
+          ringtoneAudio.current.src = "";
+          callingAudio.current.src = "/sounds/calling.mp3";
+          await callingAudio.current.play();
+        }
+      } else {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.src = "";
+        ringtoneAudio.current.currentTime = 0;
+
+        callingAudio.current.pause();
+        callingAudio.current.src = "";
+        callingAudio.current.currentTime = 0;
+      }
+    } catch (err) {
+      console.warn("Audio play deferred until user interaction:", err);
+    }
+  };
+
+  handleAudioLogic();
+
   return () => {
-    audio.pause();
-    audio.currentTime = 0;
+    ringtoneAudio.current.pause();
+    callingAudio.current.pause();
   };
 }, [callStatus, isIncomingCall]);
 
@@ -335,9 +361,12 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
-  if (ringtoneAudio.current) {
+ if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
+    ringtoneAudio.current.muted = true; // Mute just in case
     ringtoneAudio.current.currentTime = 0;
+    ringtoneAudio.current.src = ""; // Empty the source so it cannot resume
+    ringtoneAudio.current.load(); // Force the browser to drop the file
   }
 
   const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
