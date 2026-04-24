@@ -163,53 +163,68 @@ useEffect(() => {
   };
 }, [socket]);
 
-
 useEffect(() => {
+  // 1. Pre-configure looping
   ringtoneAudio.current.loop = true;
   callingAudio.current.loop = true;
 
   const handleAudioLogic = async () => {
-    // 1. Identify which sound should play
-    const isIncoming = isIncomingCall && callStatus === 'ringing';
-    const isOutgoing = !isIncomingCall && (callStatus === 'ringing' || callStatus === 'calling');
+    // 2. Define strict conditions
+    const isRingingIncoming = callStatus === 'ringing' && isIncomingCall;
+    const isCallingOutgoing = (callStatus === 'calling' || callStatus === 'ringing') && !isIncomingCall;
 
     try {
-      if (isIncoming) {
-        // Stop Beep, Load Ringtone
-        callingAudio.current.pause();
-        callingAudio.current.src = ""; 
-
-        ringtoneAudio.current.src = "/sounds/ringtone.mp3"; 
-        await ringtoneAudio.current.load(); // Force load before play
-        await ringtoneAudio.current.play();
-      } 
-      else if (isOutgoing) {
-        // Stop Ringtone, Load Beep
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.src = "";
-
-        callingAudio.current.src = "/sounds/calling.mp3";
-        await callingAudio.current.load(); // Force load before play
-        await callingAudio.current.play();
-      } 
-      else {
-        // KILL BOTH - But don't try to play after wiping
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.src = "";
+      if (isRingingIncoming) {
+        // --- INCOMING CALL: PLAY RINGTONE ---
+        // Ensure outgoing sound is dead
         callingAudio.current.pause();
         callingAudio.current.src = "";
+
+        // Only set src and play if not already playing to avoid "re-trigger" glitches
+        if (!ringtoneAudio.current.src.includes('ringtone.mp3')) {
+          ringtoneAudio.current.src = "/sounds/ringtone.mp3";
+          await ringtoneAudio.current.load();
+        }
+        await ringtoneAudio.current.play();
+        console.log("🔔 Playing Ringtone...");
+      } 
+      else if (isCallingOutgoing) {
+        // --- OUTGOING CALL: PLAY BEEP ---
+        // Ensure ringtone is dead
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.src = "";
+
+        if (!callingAudio.current.src.includes('calling.mp3')) {
+          callingAudio.current.src = "/sounds/calling.mp3";
+          await callingAudio.current.load();
+        }
+        await callingAudio.current.play();
+        console.log("📡 Playing Outgoing Beep...");
+      } 
+      else {
+        console.log("🔇 Silencing all audio (Call Status: " + callStatus + ")");
+        
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.src = "";
+        ringtoneAudio.current.currentTime = 0;
+
+        callingAudio.current.pause();
+        callingAudio.current.src = "";
+        callingAudio.current.currentTime = 0;
       }
     } catch (err) {
-      // This is expected on many browsers until the user clicks once
-      console.log("Audio waiting for user interaction...");
+      console.info("Audio playback waiting for user interaction gesture.");
     }
   };
 
   handleAudioLogic();
 
+  // Cleanup on component unmount
   return () => {
     ringtoneAudio.current.pause();
+    ringtoneAudio.current.src = "";
     callingAudio.current.pause();
+    callingAudio.current.src = "";
   };
 }, [callStatus, isIncomingCall]);
 
@@ -365,7 +380,8 @@ const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
   const token = localStorage.getItem('agentToken');
 
-  // 1. UI FEEDBACK: Immediately show "Calling..." in the chat thread
+  // 1. UI FEEDBACK & AUDIO TRIGGER
+  // Setting 'calling' here triggers the outgoing beep in your useEffect
   setCallStatus('calling');
   setIsIncomingCall(false);
 
@@ -373,11 +389,10 @@ const handleStartCall = async (targetUserId) => {
     _id: `temp-call-${Date.now()}`,
     senderModel: 'Agent',
     fileType: 'voice_call',
-    status: 'calling', // Matches the status logic in CallStatusMessage
+    status: 'calling',
     createdAt: new Date().toISOString(),
   };
   
-  // Update local message state to show the center bubble
   setMessages(prev => [...prev, tempCallMsg]);
 
   try {
@@ -399,21 +414,33 @@ const handleStartCall = async (targetUserId) => {
 
     setActiveCall({ callId: dbCall.callId, toId: targetUserId });
 
-    // 3. MEDIA: Access Mic and save to REF
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // 3. MEDIA: Access Mic with high-quality settings
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      } 
+    });
     
-    // FIX: This prevents the 'ReferenceError' by giving the ref a value
     userStreamRef.current = stream; 
 
     // 4. WEBRTC: Setup Peer connection
-    const peer = new Peer({
+    const PeerConstructor = Peer.default || Peer;
+    const peer = new PeerConstructor({
       initiator: true,
       trickle: false,
       stream: stream,
+      config: { 
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ] 
+      }
     });
 
     peer.on('signal', (data) => {
-      console.log("Agent sending signal to User...");
+      console.log("📡 Agent sending signal to User...");
       socket.emit("call-user", {
         userToCall: targetUserId,
         fromId: agentData._id,
@@ -423,23 +450,47 @@ const handleStartCall = async (targetUserId) => {
       });
     });
 
+    // 5. REMOTE STREAM HANDLER (Optimized for Mobile/Desktop)
     peer.on('stream', (remoteStream) => {
-      // Play the user's audio when they pick up
-      const audio = new Audio();
+      console.log("🔊 Remote user stream received");
+      
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        audio.setAttribute('playsinline', 'true'); // Required for iOS
+        audio.setAttribute('autoplay', 'true');    // Force start
+        audio.style.display = 'none';
+        document.body.appendChild(audio);
+      }
+
       audio.srcObject = remoteStream;
-      audio.play();
+      audio.muted = false;
+      audio.volume = isSpeakerOn ? 1.0 : 0.4;
+      
+      audio.play()
+        .then(() => {
+          console.log("✅ Voice audio playing");
+          setCallStatus('connected');
+        })
+        .catch(e => {
+          console.error("❌ Audio playback failed:", e);
+          setCallStatus('connected'); // Set connected anyway as handshake succeeded
+        });
     });
 
-    // Save the peer connection to ref for hangup logic
     connectionRef.current = peer;
+
+    peer.on('close', () => handleEndCall());
+    peer.on('error', (err) => {
+      console.error("WebRTC Error:", err);
+      handleEndCall();
+    });
 
   } catch (err) {
     console.error("Call failed:", err);
     setCallStatus('idle');
-    
-    // UI Cleanup: Remove the call bubble if mic access fails
     setMessages(prev => prev.filter(m => m._id !== tempCallMsg._id));
-    
     alert("Microphone access is required to make calls.");
   }
 };

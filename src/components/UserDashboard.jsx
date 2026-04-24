@@ -385,19 +385,24 @@ useEffect(() => {
   const remoteMedia = document.getElementById('remoteAudio'); 
   
   if (remoteMedia) {
-    remoteMedia.volume = isSpeakerOn ? 1.0 : 0.3; 
+    remoteMedia.volume = isSpeakerOn ? 1.0 : 0.4; 
+        remoteMedia.muted = false;
+    console.log(`Audio volume set to: ${remoteMedia.volume}`);
   }
-}, [isSpeakerOn]);
+}, [isSpeakerOn, callStatus]); 
 
 const toggleMute = () => {
   setIsMuted(prev => {
     const newState = !prev;
-        if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = !newState; 
+  const stream = localStream || userStreamRef.current;  
+    if (stream) {
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = !newState; // Track enabled = not muted
       });
+      console.log(`Mic ${newState ? 'disabled' : 'enabled'}`);
+    } else {
+      console.warn("No active stream found to mute");
     }
-    
     return newState;
   });
 };
@@ -945,7 +950,6 @@ const handleDownload = async (url, type) => {
     console.error("Download failed:", err);
   }
 };
-
 const handleStartCall = async () => {
   if (typeof window !== 'undefined' && !window.Buffer) {
     window.Buffer = Buffer;
@@ -959,13 +963,14 @@ const handleStartCall = async () => {
     return;
   }
 
-  // 1. START OUTGOING SOUND (Beep-Beep)
-  callingAudio.current.loop = true;
-  callingAudio.current.play().catch(() => console.log("Audio play blocked"));
+  // 1. UI FEEDBACK & AUDIO TRIGGER
+  // Setting 'calling' here triggers the callingAudio logic in your useEffect
+  setCallStatus('calling'); 
+  setShowFullScreenCall(true);
 
   let stream;
   try {
-    // 2. HIGH QUALITY AUDIO CONSTRAINTS
+    // 2. HIGH QUALITY AUDIO ACCESS
     stream = await navigator.mediaDevices.getUserMedia({ 
       audio: {
         echoCancellation: true,
@@ -977,11 +982,10 @@ const handleStartCall = async () => {
     
     if (userStreamRef) userStreamRef.current = stream;
     setLocalStream(stream);
-    setCallStatus('calling'); 
-    setShowFullScreenCall(true);
   } catch (err) {
-    callingAudio.current.pause();
     console.error("Mic Access Denied:", err);
+    setCallStatus('idle');
+    setShowFullScreenCall(false);
     alert("Call failed: Please grant microphone permissions.");
     return;
   }
@@ -1014,10 +1018,16 @@ const handleStartCall = async () => {
         initiator: true,
         trickle: false,
         stream: stream,
-        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] }
+        config: { 
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' }, 
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ] 
+        }
       });
 
       peer.on('signal', async (signalData) => {
+        console.log("📡 User sending signal to Agent...");
         socket.emit("call-user", {
           userToCall: currentAgentId,
           fromId: currentUserId,
@@ -1027,7 +1037,7 @@ const handleStartCall = async () => {
           signal: signalData 
         });
         
-        // Wait for the agent to pick up (ringing status)
+        // Change to ringing status once signal is sent
         setCallStatus('ringing'); 
         
         await fetch('/api/calls/update-signal', {
@@ -1040,32 +1050,43 @@ const handleStartCall = async () => {
         }).catch(e => console.error("Signal backup failed:", e));
       });
 
-      // 3. ATTACH AGENT'S VOICE
+      // 3. ATTACH AGENT'S VOICE (The "Hearing" Logic)
       peer.on('stream', (remoteStream) => {
-        console.log("🔊 Agent voice received");
+        console.log("🔊 Agent voice stream received");
         
-        // STOP THE BEAPING SOUND
-        callingAudio.current.pause();
-        callingAudio.current.currentTime = 0;
+        // Ensure the beep-beep is killed immediately
+        if (callingAudio.current) {
+          callingAudio.current.pause();
+          callingAudio.current.src = "";
+        }
 
         let audio = document.getElementById('remoteAudio');
         if (!audio) {
           audio = document.createElement('audio');
           audio.id = 'remoteAudio';
-          audio.autoplay = true; 
-          audio.playsInline = true;
+          audio.setAttribute('playsinline', 'true'); // Required for iOS
+          audio.setAttribute('autoplay', 'true');
+          audio.style.display = 'none';
           document.body.appendChild(audio);
         }
+
         audio.srcObject = remoteStream;
+        audio.muted = false;
         audio.volume = isSpeakerOn ? 1.0 : 0.4;
-        audio.play().catch(e => console.error("Audio play error:", e));
         
-        setCallStatus('connected');
+        audio.play()
+          .then(() => {
+            console.log("✅ Agent audio playing");
+            setCallStatus('connected');
+          })
+          .catch(e => {
+            console.error("Audio block:", e);
+            setCallStatus('connected'); 
+          });
       });
 
       connectionRef.current = peer;
 
-      // Handle the signal coming back from the agent
       socket.on("call-accepted", (answerData) => {
         if (peer && !peer.destroyed) {
           peer.signal(answerData.signal);
@@ -1073,19 +1094,22 @@ const handleStartCall = async () => {
       });
 
     } else {
-      callingAudio.current.pause();
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      setCallStatus('idle');
-      alert(data.message || "Agent is currently unavailable.");
+      throw new Error(data.message || "Agent unavailable");
     }
 
   } catch (err) {
-    callingAudio.current.pause();
+    console.error("Call failed:", err);
+    if (callingAudio.current) {
+      callingAudio.current.pause();
+      callingAudio.current.src = "";
+    }
     if (stream) stream.getTracks().forEach(track => track.stop());
     setCallStatus('idle');
-    alert("Connection failed. Please refresh and try again.");
+    setShowFullScreenCall(false);
+    alert(err.message || "Connection failed. Please try again.");
   }
 };
+
 
  const handleSendMessage = async (e) => {
   e.preventDefault();
@@ -1904,20 +1928,37 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   ) : (
     /* State B: CONNECTED, CALLING, or CONNECTING - Shows In-Call Controls */
     <>
-      {/* Speaker Toggle */}
-      <div className="flex flex-col items-center gap-3">
-        <button 
-          onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
-          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
-            isSpeakerOn ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40' : 'bg-white/10 text-white hover:bg-white/20'
-          }`}
-        >
-          <BsVolumeUpFill size={24} />
-        </button>
-        <span className={`text-[9px] font-bold uppercase tracking-widest ${isSpeakerOn ? 'text-blue-400' : 'text-gray-400'}`}>
-          Speaker
-        </span>
-      </div>
+     {/* Speaker Toggle */}
+<div className="flex flex-col items-center gap-3">
+  <button 
+    onTouchStart={(e) => { e.preventDefault(); setIsSpeakerOn(!isSpeakerOn); }} 
+    onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
+    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95 ${
+      isSpeakerOn ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40' : 'bg-white/10 text-white hover:bg-white/20'
+    }`}
+  >
+    <BsVolumeUpFill size={24} />
+  </button>
+  <span className={`text-[9px] font-bold uppercase tracking-widest ${isSpeakerOn ? 'text-blue-400' : 'text-gray-400'}`}>
+    Speaker {isSpeakerOn ? 'ON' : 'OFF'}
+  </span>
+</div>
+
+{/* Mute Toggle */}
+<div className="flex flex-col items-center gap-3">
+  <button 
+    onTouchStart={(e) => { e.preventDefault(); toggleMute(); }}
+    onClick={toggleMute}
+    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95 ${
+      isMuted ? 'bg-red-600 text-white shadow-lg shadow-red-500/40' : 'bg-white/10 text-white hover:bg-white/20'
+    }`}
+  >
+    {isMuted ? <BsMicMuteFill size={24} /> : <BsMicFill size={24} />}
+  </button>
+  <span className={`text-[9px] font-bold uppercase tracking-widest ${isMuted ? 'text-red-400' : 'text-gray-400'}`}>
+    {isMuted ? 'Muted' : 'Mute'}
+  </span>
+</div>
 
       {/* Global End Call Button */}
       <div className="flex flex-col items-center gap-3">
