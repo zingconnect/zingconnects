@@ -95,24 +95,59 @@ export const checkIncomingCall = async (req, res) => {
     res.status(500).json({ message: "Error checking incoming calls", error: error.message });
   }
 };
-
-// @desc    Accept an incoming call
 export const acceptCall = async (req, res) => {
   try {
-    await connectToDatabase();
-    const { callId } = req.body;
-    
-    const call = await Call.findByIdAndUpdate(
-      callId, 
-      { status: 'connected', startTime: Date.now() }, 
-      { new: true }
-    );
+    const myId = req.user.id || req.user._id || req.user.userId;
+    const { callId, answerSignal } = req.body; 
 
-    res.json({ success: true, call });
+    // 1. Update call to 'connected' and store the Answer Signal
+    const call = await Call.findOneAndUpdate(
+      { 
+        _id: callId, 
+        receiver: myId, 
+        status: { $in: ['calling', 'ringing'] } 
+      },
+      { 
+        status: 'connected', 
+        startTime: Date.now(),
+        answerSignal: answerSignal // Store the receiver's answer signal
+      },
+      { new: true }
+    ).populate('caller', 'firstName lastName photoUrl');
+
+    if (!call) {
+      return res.status(404).json({ success: false, message: "Call not found" });
+    }
+
+    // 2. Return the INITIAL signal (from Agent) so the User can finish their side
+    res.json({ 
+      success: true, 
+      call,
+      initiatorSignal: call.signal // The original signal saved during /start
+    });
   } catch (error) {
-    res.status(500).json({ message: "Error accepting call" });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// @desc    Retrieve the signal (used by Agent to get the User's Answer)
+export const getCallStatus = async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const call = await Call.findById(callId);
+
+    if (!call) return res.status(404).json({ message: "Call not found" });
+
+    res.json({ 
+      success: true, 
+      status: call.status,
+      answerSignal: call.answerSignal // Agent needs this to finish handshake
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc    End/Decline/Cancel call
 export const endCall = async (req, res) => {
   try {

@@ -30,9 +30,8 @@ active: {
   type: Boolean, 
   default: true // Ensure this is flipped to false on endCall
 },
-  signal: { 
-    type: Object 
-  },
+  signal: { type: Object },
+answerSignal: { type: Object },
   startTime: { type: Date },
   endTime: { type: Date },
 }, { timestamps: true });

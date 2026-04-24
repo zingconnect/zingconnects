@@ -195,15 +195,11 @@ io.on("connection", (socket) => {
     io.to(to).emit("user-is-ringing");
   });
 
-  /**
-   * 4. Answer Call
-   * Triggered when the Receiver clicks the green 'Accept' button.
-   */
-  socket.on("answer-call", (data) => {
-    // data.to is the Caller's ID
-    io.to(data.to).emit("call-accepted", data.signal);
-  });
-
+ socket.on("answer-call", ({ to, signal, callId }) => {
+  console.log(`Relaying answer for Call: ${callId}`);
+  // We send the signal to the initiator
+  io.to(to).emit("call-accepted", { signal, callId });
+});
   /**
    * 5. End/Reject Call
    * Triggered by either side to stop the ringing or hang up an active call.
@@ -1687,54 +1683,53 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
   }
 });
 
-// 3. Unified Accept Call
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Standardize the ID from the token
+    // Support both body.callId or finding the latest via Token ID
     const myId = req.user.id || req.user._id || req.user.userId;
+    const { callId } = req.body;
 
-    /**
-     * FIX: We look for BOTH 'ringing' and 'calling'. 
-     * This ensures that if the receiver clicks "Accept" before the 
-     * status update to 'ringing' completes, the call still connects.
-     */
+    let query = { 
+      receiver: myId, 
+      status: { $in: ['calling', 'ringing'] } 
+    };
+
+    // If specific callId provided, use it, otherwise find the latest ringing call
+    if (callId) {
+      query = { _id: callId, receiver: myId };
+    }
+
     const call = await Call.findOneAndUpdate(
-      { 
-        receiver: myId, 
-        status: { $in: ['calling', 'ringing'] } 
-      }, 
+      query, 
       { 
         status: 'connected', 
         startTime: Date.now() 
       }, 
       { 
         new: true, 
-        sort: { createdAt: -1 } // Always grab the most recent attempt
+        sort: { createdAt: -1 } 
       }
     ).populate('caller', 'firstName lastName photoUrl');
 
     if (!call) {
-      console.log(`Accept Failed: No active call for user ${myId}`);
       return res.status(404).json({ 
         success: false, 
-        message: "No active call attempt found." 
+        message: "No active call found." 
       });
     }
-
-    console.log(`Call Connected: ${call._id} (Receiver: ${myId})`);
-
     res.json({ 
       success: true, 
-      call 
+      call,
+      signal: call.signal // Send the initiator's signal explicitly
     });
 
   } catch (err) {
     console.error("Accept Call Error:", err);
     res.status(500).json({ 
       success: false, 
-      message: "Internal server error during call acceptance.",
+      message: "Server error",
       error: err.message 
     });
   }
