@@ -234,7 +234,6 @@ useEffect(() => {
         if (data.status === 'connected') {
           if (data.answerSignal && connectionRef.current && !peerConnected) {
             try {
-              // This is the "bridge" that fixes the Agent UI
               connectionRef.current.signal(data.answerSignal);
               setPeerConnected(true);
               setCallStatus('connected'); 
@@ -242,8 +241,6 @@ useEffect(() => {
               console.error("WebRTC Handshake Failed:", err);
             }
           } else if (peerConnected || !data.answerSignal) {
-            // Fallback: If DB is connected but signal is handled or missing, 
-            // force the UI to match the DB status.
             setCallStatus('connected');
           }
         }

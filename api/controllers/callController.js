@@ -27,6 +27,7 @@ export const startCall = async (req, res) => {
     res.status(500).json({ message: "Failed to start call", error: error.message });
   }
 };
+
 export const updateCallSignal = async (req, res) => {
   try {
     await connectToDatabase();
@@ -40,13 +41,13 @@ export const updateCallSignal = async (req, res) => {
     const isAnswer = ['connecting', 'connected'].includes(call.status);
 
     const updateData = isAnswer 
-      ? { answerSignal: signal } 
+      ? { answerSignal: signal, status: 'connected' } 
       : { signal: signal, status: 'ringing' };
 
-    await Call.findByIdAndUpdate(callId, updateData);
+    const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
     
     console.log(`📞 Signal updated for ${callId} (Type: ${isAnswer ? 'Answer' : 'Offer'})`);
-    res.json({ success: true });
+    res.json({ success: true, status: updatedCall.status });
   } catch (error) {
     console.error("Update Signal Error:", error);
     res.status(500).json({ success: false, message: error.message });
