@@ -178,7 +178,7 @@ const unlockAudio = () => {
   
   const audioRefs = [
     { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
-    { ref: callingAudio, src: '/sounds/calling.mp3' },
+    { ref: callingAudio, src: '/sounds/calling.wav' },
     { ref: notificationSound, src: '/sounds/notification.mp3' }
   ];
   audioRefs.forEach(({ ref, src }) => {
@@ -372,7 +372,7 @@ useEffect(() => {
         } else {
           ringtoneAudio.current.pause();
           ringtoneAudio.current.src = "";
-          callingAudio.current.src = "/sounds/calling.mp3";
+          callingAudio.current.src = "/sounds/calling.wav";
           await callingAudio.current.play();
         }
       } else {

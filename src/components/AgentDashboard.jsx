@@ -184,8 +184,8 @@ useEffect(() => {
       } 
       else if (isCallingOutgoing) {
         ring.pause();
-        if (!calling.src.includes('calling.mp3')) {
-          calling.src = "/sounds/calling.mp3";
+        if (!calling.src.includes('calling.wav')) {
+          calling.src = "/sounds/calling.wav";
           await calling.load();
         }
         await calling.play();
