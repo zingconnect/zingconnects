@@ -108,6 +108,8 @@ export const UserDashboard = () => {
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const [callTime, setCallTime] = useState(0);
+  const [peerConnected, setPeerConnected] = useState(false);
 
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -204,6 +206,56 @@ useEffect(() => {
 }, [socket, userData?._id]);
 
 useEffect(() => {
+  let timer;
+  if (callStatus === 'connected') {
+    const start = activeCall?.startTime ? new Date(activeCall.startTime).getTime() : Date.now();
+    timer = setInterval(() => {
+      setCallTime(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+  } else {
+    setCallTime(0);
+  }
+  return () => clearInterval(timer);
+}, [callStatus, activeCall?.startTime]);
+
+const formatTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+};
+
+useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token || !activeCall?.callId) return;
+
+  const syncStatus = async () => {
+    const isInCall = ['calling', 'ringing', 'connecting', 'connected'].includes(callStatus);
+    if (!isInCall) return;
+
+    try {
+      const res = await fetch(`/api/calls/status/${activeCall.callId}`, {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      const data = await res.json();
+      if (data.status === 'connected' && callStatus === 'connecting') {
+        setCallStatus('connected');
+      }
+
+      // 4. Global cleanup if call ends
+      if (['ended', 'declined', 'missed'].includes(data.status)) {
+        handleEndCall();
+      }
+    } catch (e) {
+      console.warn("User status sync failed:", e);
+    }
+  };
+
+  const interval = setInterval(syncStatus, 3000);
+  return () => clearInterval(interval);
+}, [callStatus, activeCall?.callId]); 
+
+
+useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return;
   const checkCalls = async () => {
@@ -286,10 +338,14 @@ const handleAcceptCall = async () => {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
   }
+
   const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
+
   try {
     setCallStatus('connecting');
     setShowFullScreenCall(true);
+    setCallTime(0); 
+
     await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 
@@ -298,11 +354,12 @@ const handleAcceptCall = async () => {
       },
       body: JSON.stringify({ callId: activeCall.callId }) 
     });
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     userStreamRef.current = stream;
     setLocalStream(stream);
-    const { default: SimplePeer } = await import('simple-peer');
 
+    const { default: SimplePeer } = await import('simple-peer');
     const peer = new SimplePeer({
       initiator: false, 
       trickle: false,
@@ -337,19 +394,18 @@ const handleAcceptCall = async () => {
         document.body.appendChild(audio);
       }
       audio.srcObject = remoteStream;
+      
+      setPeerConnected(true);
       setCallStatus('connected');
     });
 
-    // 3. APPLY INCOMING SIGNAL
     if (activeCall?.signal) {
       const incomingSignal = typeof activeCall.signal === 'string' 
         ? JSON.parse(activeCall.signal) 
         : activeCall.signal;
         
-      // Small timeout ensures peer 'signal' listener is active
       setTimeout(() => {
         if (peer && !peer.destroyed) {
-          console.log("Applying incoming signal to peer engine...");
           try {
             peer.signal(incomingSignal);
           } catch (e) {
@@ -1741,77 +1797,90 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         </div>
       </div>
 
-      {/* 3. DYNAMIC CONTROL INTERFACE */}
-      <div className="flex items-center gap-8 md:gap-12 mt-12">
-        
-        {/* State A: INCOMING CALL (Ringing) */}
-        {callStatus === 'ringing' && activeCall?.callerData ? (
-          <div className="flex items-center gap-10">
-            <div className="flex flex-col items-center gap-3">
-              <button onClick={handleEndCall} className="w-16 h-16 md:w-20 md:h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-xl shadow-red-500/20 active:scale-90 transition-all">
-                <BsTelephoneFill className="rotate-[135deg] text-white" size={28} />
-              </button>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Decline</span>
-            </div>
-
-            <div className="flex flex-col items-center gap-3">
-              <button onClick={handleAcceptCall} className="w-16 h-16 md:w-20 md:h-20 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:bg-green-600 shadow-xl shadow-green-500/40 active:scale-95 transition-all">
-                <BsTelephoneFill className="text-white" size={28} />
-              </button>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-green-400">Accept</span>
-            </div>
-          </div>
-        ) : (
-          /* State B: CONNECTED or OUTGOING */
-          <>
-            {/* Speaker Toggle */}
-            <div className="flex flex-col items-center gap-3">
-              <button 
-                onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
-                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
-                  isSpeakerOn ? 'bg-white text-blue-600' : 'bg-white/10 text-white hover:bg-white/20'
-                }`}
-              >
-                <BsVolumeUpFill size={24} />
-              </button>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Speaker</span>
-            </div>
-
-            {/* Global End Call Button */}
-            <div className="flex flex-col items-center gap-3">
-              <button 
-                onClick={handleEndCall} 
-                className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/50 active:scale-90 transition-transform"
-              >
-                <BsTelephoneFill className="rotate-[135deg] text-white" size={32} />
-              </button>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-red-500">End</span>
-            </div>
-
-            {/* Mute Toggle */}
-            <div className="flex flex-col items-center gap-3">
-              <button 
-                onClick={toggleMute} 
-                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
-                  isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
-                }`}
-              >
-                {isMuted ? <BsMicMuteFill size={24} /> : <BsMicFill size={24} />}
-              </button>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">
-                {isMuted ? "Unmuted" : "Muted"}
-              </span>
-            </div>
-          </>
-        )}
+     {/* 3. DYNAMIC CONTROL INTERFACE */}
+<div className="flex items-center gap-8 md:gap-12 mt-12">
+  
+  {/* State A: INCOMING CALL (Ringing) - Shows Accept/Decline */}
+  {callStatus === 'ringing' ? (
+    <div className="flex items-center gap-10">
+      {/* Decline Button */}
+      <div className="flex flex-col items-center gap-3">
+        <button 
+          onClick={handleEndCall} 
+          className="w-16 h-16 md:w-20 md:h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-xl shadow-red-500/20 active:scale-90 transition-all"
+        >
+          <BsTelephoneFill className="rotate-[135deg] text-white" size={28} />
+        </button>
+        <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Decline</span>
       </div>
 
-      {/* Connection Info Tag */}
-      {callStatus === 'connected' && (
-        <div className="mt-8 px-4 py-1 bg-white/5 rounded-full border border-white/10">
-           <p className="text-[8px] font-bold tracking-[0.2em] text-white/40 uppercase">Secure Node Protocol v4.2</p>
-        </div>
-      )}
+      {/* Accept Button */}
+      <div className="flex flex-col items-center gap-3">
+        <button 
+          onClick={handleAcceptCall} 
+          className="w-16 h-16 md:w-20 md:h-20 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:bg-green-600 shadow-xl shadow-green-500/40 active:scale-95 transition-all"
+        >
+          <BsTelephoneFill className="text-white" size={28} />
+        </button>
+        <span className="text-[9px] font-bold uppercase tracking-widest text-green-400">Accept</span>
+      </div>
+    </div>
+  ) : (
+    /* State B: CONNECTED, CALLING, or CONNECTING - Shows In-Call Controls */
+    <>
+      {/* Speaker Toggle */}
+      <div className="flex flex-col items-center gap-3">
+        <button 
+          onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+            isSpeakerOn ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40' : 'bg-white/10 text-white hover:bg-white/20'
+          }`}
+        >
+          <BsVolumeUpFill size={24} />
+        </button>
+        <span className={`text-[9px] font-bold uppercase tracking-widest ${isSpeakerOn ? 'text-blue-400' : 'text-gray-400'}`}>
+          Speaker
+        </span>
+      </div>
+
+      {/* Global End Call Button */}
+      <div className="flex flex-col items-center gap-3">
+        <button 
+          onClick={handleEndCall} 
+          className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/50 active:scale-90 transition-transform"
+        >
+          <BsTelephoneFill className="rotate-[135deg] text-white" size={32} />
+        </button>
+        <span className="text-[9px] font-bold uppercase tracking-widest text-red-500">End</span>
+      </div>
+
+      {/* Mute Toggle */}
+      <div className="flex flex-col items-center gap-3">
+        <button 
+          onClick={toggleMute} 
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+            isMuted ? 'bg-red-500 text-white shadow-lg shadow-red-500/40' : 'bg-white/10 text-white hover:bg-white/20'
+          }`}
+        >
+          {isMuted ? <BsMicMuteFill size={24} /> : <BsMicFill size={24} />}
+        </button>
+        <span className={`text-[9px] font-bold uppercase tracking-widest ${isMuted ? 'text-red-400' : 'text-gray-400'}`}>
+          {isMuted ? "Unmute" : "Mute"}
+        </span>
+      </div>
+    </>
+  )}
+</div>
+
+   {/* Connection Info Tag - Only visible when call is fully established */}
+{callStatus === 'connected' && (
+  <div className="mt-8 px-4 py-1.5 bg-green-500/10 rounded-full border border-green-500/20 animate-in fade-in slide-in-from-bottom-2 duration-500">
+     <p className="text-[8px] font-bold tracking-[0.2em] text-green-400 uppercase flex items-center gap-2">
+       <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+       End-to-End Encrypted Session
+     </p>
+  </div>
+)}
     </div>
   </div>
 )}
@@ -1834,14 +1903,25 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         )}
       </div>
 
-      <div className="text-center space-y-2">
-        <h2 className="text-white text-3xl font-light">
-          {activeCall?.callerData?.fromName || agent?.firstName}
-        </h2>
-        <p className={`text-sm font-bold uppercase tracking-[0.3em] ${callStatus === 'connected' ? 'text-green-400' : 'text-gray-400'}`}>
-          {callStatus === 'calling' ? 'Calling...' : '00:05'}
-        </p>
-      </div>
+     <div className="text-center space-y-2">
+  <h2 className="text-white text-3xl font-semibold mb-1">
+    {activeCall?.callerData?.fromName || agent?.firstName}
+  </h2>
+  <div className="flex items-center justify-center gap-2">
+    {callStatus === 'connected' ? (
+      <>
+        <BsShieldLockFill className="text-green-500" size={12} />
+        <span className="text-green-500 text-sm font-medium tracking-widest italic">
+          LINE ENCRYPTED • {formatTime(callTime)}
+        </span>
+      </>
+    ) : (
+      <span className="text-gray-400 text-sm uppercase tracking-[0.2em] animate-pulse">
+        {callStatus === 'connecting' ? 'Establishing Peer Link...' : 'Calling...'}
+      </span>
+    )}
+  </div>
+</div>
     </div>
 
     {/* Call Controls */}

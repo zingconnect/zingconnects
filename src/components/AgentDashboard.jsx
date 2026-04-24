@@ -55,6 +55,8 @@ export const AgentDashboard = () => {
   const lastNotifiedId = useRef(null);
 const fileInputRef = useRef(null);
 const cameraInputRef = useRef(null);
+const timerRef = useRef(null);
+
 
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
@@ -76,6 +78,7 @@ const [isIncomingCall, setIsIncomingCall] = useState(false);
 const [activeCaller, setActiveCaller] = useState(null);
 const [isMuted, setIsMuted] = useState(false);
 const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+const [callTime, setCallTime] = useState(0);
 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -175,6 +178,24 @@ useEffect(() => {
     ringtone.currentTime = 0;
   };
 }, [callStatus, isIncomingCall]);
+
+useEffect(() => {
+  if (callStatus === 'connected') {
+    timerRef.current = setInterval(() => {
+      setCallTime((prev) => prev + 1);
+    }, 1000);
+  } else {
+    clearInterval(timerRef.current);
+    setCallTime(0);
+  }
+  return () => clearInterval(timerRef.current);
+}, [callStatus]);
+
+const formatTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
 
 // --- EFFECT: Socket Listeners ---
 useEffect(() => {
@@ -392,6 +413,7 @@ const handleAcceptCall = async () => {
   try {
     // 1. INSTANT UI FEEDBACK
     setCallStatus('connecting');
+    setCallTime(0);
     
     const token = localStorage.getItem('agentToken');
     const callId = activeCaller?.callId || activeCall?.callId;
@@ -1550,19 +1572,18 @@ const handleSendMessage = async (e) => {
     callStatus === 'connected' ? 'bg-[#06d755] text-white' : 'bg-blue-600 text-white'
   }`}>
     <div className="flex items-center gap-3">
-      <div className="flex gap-1">
-        <span className="w-1 h-1 bg-white rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-        <span className="w-1 h-1 bg-white rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-        <span className="w-1 h-1 bg-white rounded-full animate-bounce"></span>
-      </div>
+      {/* ... bouncing dots ... */}
       <span className="text-[10px] font-black uppercase tracking-widest">
         {callStatus === 'connected' ? 'Call in Progress' : 'Attempting Secure Link...'}
       </span>
     </div>
     <div className="flex items-center gap-4">
-       <span className="text-xs font-mono opacity-80">00:05</span>
+       {/* UPDATED TIMER */}
+       <span className="text-xs font-mono opacity-80">
+         {callStatus === 'connected' ? formatTime(callTime) : '--:--'}
+       </span>
        <button onClick={() => setFullscreenCall(true)} className="text-[9px] font-black border border-white/30 px-2 py-1 rounded hover:bg-white/10 uppercase">
-         Expand
+          Expand
        </button>
     </div>
   </div>
@@ -1586,45 +1607,38 @@ const handleSendMessage = async (e) => {
           <div className="absolute inset-0 w-full h-full bg-blue-500 rounded-full animate-ping opacity-10"></div>
         </div>
 
-        {/* 2. TEXT & STATUS */}
-        <div className="text-center">
-          <h2 className="text-3xl font-extrabold tracking-tighter text-white">
-            {isIncomingCall 
-              ? (activeCaller?.fromName || "Incoming Call...") 
-              : (selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : "Secure Line")}
-          </h2>
+     {/* 2. TEXT & STATUS */}
+<div className="text-center">
+  <h2 className="text-3xl font-extrabold tracking-tighter text-white">
+    {isIncomingCall 
+      ? (activeCaller?.fromName || "Incoming Call...") 
+      : (selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : "Secure Line")}
+  </h2>
 
-          <div className="flex flex-col items-center gap-3 mt-4">
-           <div className="flex items-center gap-2">
-  <span className={`w-2 h-2 rounded-full transition-all duration-500 ${
-    callStatus === 'connected' 
-      ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' 
-      : callStatus === 'connecting'
-        ? 'bg-yellow-400 animate-spin shadow-[0_0_8px_#fbbf24]' // Spinning during handshake
-      : callStatus === 'ringing'
-        ? 'bg-blue-400 animate-ping shadow-[0_0_8px_#60a5fa]'   // Pinging when user's phone is active
-      : callStatus === 'calling'
-        ? 'bg-slate-400 animate-pulse'                         // Soft pulse while searching network
-        : 'bg-slate-500'
-  }`}></span>
+  <div className="flex flex-col items-center gap-3 mt-4">
+    <div className="flex items-center gap-2">
+      <span className={`w-2 h-2 rounded-full transition-all duration-500 ${
+        callStatus === 'connected' 
+          ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' 
+          : 'bg-blue-400 animate-ping'
+      }`}></span>
 
-  <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
-    {/* Phase 1: Agent has clicked call, waiting for backend/network response */}
-    {callStatus === 'calling' && "Calling..."}
-
-    {/* Phase 2: User's device has acknowledged the call (Handshake complete) */}
-    {callStatus === 'ringing' && "Ringing..."}
+      <p className="text-blue-400 font-black uppercase tracking-[0.4em] text-[10px] italic">
+        {callStatus === 'calling' && "Calling..."}
+        {callStatus === 'ringing' && "Ringing..."}
+        {callStatus === 'connecting' && "Securing Line..."}
+        {callStatus === 'connected' && "Line Encrypted"}
+      </p>
+    </div>
     
-    {/* Phase 3: User clicked 'Answer', WebRTC is negotiating the stream */}
-    {callStatus === 'connecting' && "Securing Line..."}
-    
-    {/* Phase 4: Active voice conversation */}
-    {callStatus === 'connected' && "Line Encrypted"}
-  </p>
+    {/* UPDATED TIMER DISPLAY */}
+    {callStatus === 'connected' && (
+      <span className="text-white/60 font-mono text-xl tracking-[0.2em] animate-in fade-in zoom-in">
+        {formatTime(callTime)}
+      </span>
+    )}
+  </div>
 </div>
-            {callStatus === 'connected' && <span className="text-white/40 font-mono text-xs tracking-widest">00:05</span>}
-          </div>
-        </div>
 
         {/* 3. DYNAMIC CONTROLS (INCOMING VS ACTIVE) */}
         <div className="flex items-center justify-center gap-10 mt-16">
