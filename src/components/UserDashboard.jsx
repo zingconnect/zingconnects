@@ -168,33 +168,49 @@ const isIncomingCall =
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
-
 const unlockAudio = () => {
+  // 1. Immediate UI Feedback
   setHasInteracted(true);
-  console.log("Attempting to unlock all audio channels...");
+  console.log("🔐 Initializing secure audio channels...");
 
+  // 2. Define all audio elements including the remote stream element
+  const remoteAudio = document.getElementById('remoteAudio');
+  
   const audioRefs = [
     { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
     { ref: callingAudio, src: '/sounds/calling.mp3' },
     { ref: notificationSound, src: '/sounds/notification.mp3' }
   ];
   audioRefs.forEach(({ ref, src }) => {
-    if (ref.current) {
-      if (!ref.current.src || ref.current.src.includes('undefined')) {
-        ref.current.src = src;
+    const el = ref.current;
+    if (el) {
+      // Ensure the source is set correctly
+      if (!el.src || el.src === '' || el.src.includes('undefined')) {
+        el.src = src;
       }
-            ref.current.play()
+            el.play()
         .then(() => {
-          ref.current.pause();
-          ref.current.currentTime = 0;
+          el.pause();
+          el.currentTime = 0;
+          console.log(`✅ Primed: ${src}`);
         })
-        .catch(err => console.warn(`Silent unlock failed for ${src}:`, err));
+        .catch(err => console.warn(`⚠️ Unlock delayed for ${src}:`, err));
     }
   });
+  if (remoteAudio) {
+    remoteAudio.play()
+      .then(() => {
+        remoteAudio.pause();
+        console.log("✅ Primed: Remote Voice Channel");
+      })
+      .catch(() => {
+      });
+  }
 
-  if (socket && agent?._id) {
-    socket.emit("join-private-room", agent._id);
-    console.log("Socket room joined after audio unlock");
+  const currentAgentId = agent?._id || agent?.id;
+  if (socket && currentAgentId) {
+    socket.emit("join-private-room", currentAgentId);
+    console.log("📡 Secure room synchronized");
   }
   document.removeEventListener('click', unlockAudio);
   document.removeEventListener('touchstart', unlockAudio);
@@ -384,13 +400,14 @@ useEffect(() => {
 useEffect(() => {
   const remoteMedia = document.getElementById('remoteAudio'); 
   
-  if (remoteMedia) {
+  if (remoteMedia && callStatus === 'connected') {
     remoteMedia.volume = isSpeakerOn ? 1.0 : 0.4; 
-        remoteMedia.muted = false;
-    console.log(`Audio volume set to: ${remoteMedia.volume}`);
+    remoteMedia.muted = false;
+        if (remoteMedia.paused) {
+      remoteMedia.play().catch(e => console.log("Playback pending gesture"));
+    }
   }
-}, [isSpeakerOn, callStatus]); 
-
+}, [isSpeakerOn, callStatus]);
 const toggleMute = () => {
   setIsMuted(prev => {
     const newState = !prev;
@@ -950,6 +967,7 @@ const handleDownload = async (url, type) => {
     console.error("Download failed:", err);
   }
 };
+
 const handleStartCall = async () => {
   if (typeof window !== 'undefined' && !window.Buffer) {
     window.Buffer = Buffer;

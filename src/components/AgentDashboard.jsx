@@ -164,67 +164,50 @@ useEffect(() => {
 }, [socket]);
 
 useEffect(() => {
-  // 1. Pre-configure looping
-  ringtoneAudio.current.loop = true;
-  callingAudio.current.loop = true;
+  const ring = ringtoneAudio.current;
+  const calling = callingAudio.current;
+
+  ring.loop = true;
+  calling.loop = true;
 
   const handleAudioLogic = async () => {
-    // 2. Define strict conditions
     const isRingingIncoming = callStatus === 'ringing' && isIncomingCall;
     const isCallingOutgoing = (callStatus === 'calling' || callStatus === 'ringing') && !isIncomingCall;
-
     try {
       if (isRingingIncoming) {
-        // --- INCOMING CALL: PLAY RINGTONE ---
-        // Ensure outgoing sound is dead
-        callingAudio.current.pause();
-        callingAudio.current.src = "";
-
-        // Only set src and play if not already playing to avoid "re-trigger" glitches
-        if (!ringtoneAudio.current.src.includes('ringtone.mp3')) {
-          ringtoneAudio.current.src = "/sounds/ringtone.mp3";
-          await ringtoneAudio.current.load();
+        calling.pause();
+        if (!ring.src.includes('ringtone.mp3')) {
+          ring.src = "/sounds/ringtone.mp3";
+          await ring.load();
         }
-        await ringtoneAudio.current.play();
-        console.log("🔔 Playing Ringtone...");
+        await ring.play();
       } 
       else if (isCallingOutgoing) {
-        // --- OUTGOING CALL: PLAY BEEP ---
-        // Ensure ringtone is dead
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.src = "";
-
-        if (!callingAudio.current.src.includes('calling.mp3')) {
-          callingAudio.current.src = "/sounds/calling.mp3";
-          await callingAudio.current.load();
+        ring.pause();
+        if (!calling.src.includes('calling.mp3')) {
+          calling.src = "/sounds/calling.mp3";
+          await calling.load();
         }
-        await callingAudio.current.play();
-        console.log("📡 Playing Outgoing Beep...");
+        await calling.play();
       } 
       else {
-        console.log("🔇 Silencing all audio (Call Status: " + callStatus + ")");
-        
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.src = "";
-        ringtoneAudio.current.currentTime = 0;
-
-        callingAudio.current.pause();
-        callingAudio.current.src = "";
-        callingAudio.current.currentTime = 0;
+        [ring, calling].forEach(audio => {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.removeAttribute('src'); 
+          audio.load();
+        });
       }
     } catch (err) {
-      console.info("Audio playback waiting for user interaction gesture.");
+      console.info("Audio waiting for user gesture...");
     }
   };
 
   handleAudioLogic();
 
-  // Cleanup on component unmount
   return () => {
-    ringtoneAudio.current.pause();
-    ringtoneAudio.current.src = "";
-    callingAudio.current.pause();
-    callingAudio.current.src = "";
+    ring.pause();
+    calling.pause();
   };
 }, [callStatus, isIncomingCall]);
 
@@ -247,42 +230,41 @@ const formatTime = (seconds) => {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
-// --- EFFECT: Socket Listeners ---
 useEffect(() => {
   if (!socket || !agentData?._id) return;
   socket.emit("join-main-room", agentData._id);
-
   const onIncoming = (data) => {
-    // Handshake: Tell the sender we are ringing
     socket.emit("confirm-ringing", { to: data.fromId });
-    
-    if (callStatus === 'idle') {
-      setActiveCaller(data);
-      setActiveCall({ callId: data.callId }); 
-      setIsIncomingCall(true);
-      setCallStatus('ringing');
-    }
+        setCallStatus(prev => {
+      if (prev === 'idle') {
+        setActiveCaller(data);
+        setActiveCall({ callId: data.callId }); 
+        setIsIncomingCall(true);
+        return 'ringing';
+      }
+      return prev;
+    });
   };
   const onUserRinging = () => {
-    // WHATSAPP LOGIC: Change "Calling..." to "Ringing..."
     setCallStatus(prev => (prev === 'calling' ? 'ringing' : prev));
   };
-
+  const onCallAccepted = (signal) => {
+    if (connectionRef.current && signal) {
+      connectionRef.current.signal(signal);
+    }
+    setCallStatus('connected');
+  };
   socket.on("incoming-call", onIncoming);
   socket.on("user-is-ringing", onUserRinging);
-  socket.on("call-accepted", (signal) => {
-    if (connectionRef.current && signal) connectionRef.current.signal(signal);
-    setCallStatus('connected');
-  });
+  socket.on("call-accepted", onCallAccepted);
   socket.on("call-ended", handleEndCall);
-
   return () => {
-    socket.off("incoming-call");
-    socket.off("user-is-ringing");
-    socket.off("call-accepted");
-    socket.off("call-ended");
+    socket.off("incoming-call", onIncoming);
+    socket.off("user-is-ringing", onUserRinging);
+    socket.off("call-accepted", onCallAccepted);
+    socket.off("call-ended", handleEndCall);
   };
-}, [agentData?._id, socket]);
+}, [agentData?._id, socket, callStatus]);
 
 useEffect(() => {
   const token = localStorage.getItem('agentToken');
