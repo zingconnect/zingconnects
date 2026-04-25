@@ -44,7 +44,7 @@ const io = new Server(server, {
   cors: corsOptions
 });
 
-
+app.set('socketio', io);
 app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);

@@ -53,32 +53,42 @@ function urlBase64ToUint8Array(base64String) {
 const socket = io(import.meta.env.VITE_API_URL);
 const PhoneInput = ReactPhoneInput.default || ReactPhoneInput;
 
-const CallStatusMessage = ({ status, time }) => (
-  <div className="flex justify-center my-4 w-full z-10">
-    <div className="bg-[#1f2c33] rounded-xl px-4 py-3 flex items-center gap-3 min-w-[220px] border border-white/10 shadow-xl">
-      <div className="bg-slate-700 p-2 rounded-full">
-        <BsTelephoneFill className="text-green-500" size={16} />
-      </div>
-      <div className="flex-1">
-        <h4 className="text-white text-[13px] font-semibold">Voice call</h4>
-        <div className="text-gray-400 text-[11px] capitalize flex items-center gap-1.5">
-          {status === 'ringing' ? (
-            <>
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-              </span>
-              <span>Ringing...</span>
-            </>
-          ) : (
-            <span className={status === 'missed' ? 'text-red-400' : ''}>{status}</span>
-          )}
+const CallStatusMessage = ({ status, time }) => {
+  const isMissed = status === 'missed' || status === 'declined';
+  const isRinging = status === 'ringing';
+
+  return (
+    <div className="flex justify-center my-4 w-full z-10">
+      <div className="bg-[#1f2c33] rounded-xl px-4 py-3 flex items-center gap-3 min-w-[240px] border border-white/10 shadow-xl animate-in fade-in zoom-in duration-300">
+        <div className={`${isMissed ? 'bg-red-500/20' : 'bg-slate-700'} p-2.5 rounded-full`}>
+          <BsTelephoneFill 
+            className={isMissed ? 'text-red-500' : 'text-green-500'} 
+            size={16} 
+          />
         </div>
+        <div className="flex-1">
+          <h4 className="text-white text-[13px] font-bold tracking-tight">Voice call</h4>
+          <div className="text-gray-400 text-[11px] font-medium capitalize flex items-center gap-1.5">
+            {isRinging ? (
+              <>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                </span>
+                <span className="text-blue-400 font-bold uppercase text-[9px] tracking-widest">Ringing...</span>
+              </>
+            ) : (
+              <span className={isMissed ? 'text-red-400 font-semibold' : 'text-gray-400'}>
+                {status === 'ended' ? 'Call Ended' : status}
+              </span>
+            )}
+          </div>
+        </div>
+        <span className="text-[10px] text-gray-500 font-mono mt-auto ml-2">{time}</span>
       </div>
-      <span className="text-[10px] text-gray-500 mt-auto ml-2">{time}</span>
     </div>
-  </div>
-);
+  );
+};
 
 export const UserDashboard = () => {
   const navigate = useNavigate();
@@ -440,12 +450,19 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
- if (ringtoneAudio.current) {
+  // 1. CLEAN UP RINGTONE IMMEDIATELY
+  if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.muted = true; // Mute just in case
+    ringtoneAudio.current.muted = true;
     ringtoneAudio.current.currentTime = 0;
-    ringtoneAudio.current.src = ""; // Empty the source so it cannot resume
-    ringtoneAudio.current.load(); // Force the browser to drop the file
+    ringtoneAudio.current.src = "";
+    try { ringtoneAudio.current.load(); } catch (e) {} 
+  }
+
+  // 2. BUFFER POLYFILL (Required for simple-peer)
+  if (typeof window !== 'undefined' && !window.Buffer) {
+    const { Buffer } = await import('buffer');
+    window.Buffer = Buffer;
   }
 
   const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
@@ -453,106 +470,121 @@ const handleAcceptCall = async () => {
   try {
     setCallStatus('connecting');
     setShowFullScreenCall(true);
-    setCallTime(0); 
+    setCallTime(0);
 
+    // 3. API NOTIFICATION
     await fetch('/api/calls/accept', {
       method: 'POST',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ callId: activeCall.callId }) 
+      body: JSON.stringify({ callId: activeCall.callId })
     });
 
-   const stream = await navigator.mediaDevices.getUserMedia({ 
-  audio: {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-    sampleRate: 48000 
-  }, 
-  video: false 
-});
+    // 4. GET MICROPHONE ACCESS
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 48000
+      },
+      video: false
+    });
+
     userStreamRef.current = stream;
     setLocalStream(stream);
 
-  const PeerConstructor = Peer.default || Peer;
+    // 5. INITIALIZE PEER (Receiver Mode)
+    const { default: SimplePeer } = await import('simple-peer');
 
-const peer = new PeerConstructor({
-  initiator: false, // Explicitly false because we are ACCEPTING
-  trickle: false,
-  stream: stream,
-  config: { 
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject"
-      },
-      {
-        urls: "turn:openrelay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject"
+    const peer = new SimplePeer({
+      initiator: false, // Important: Receiver must be false
+      trickle: false,
+      stream: stream,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject"
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject"
+          }
+        ]
       }
-    ] 
-  }
-});
+    });
 
-       peer.on('signal', (data) => {
+    // 6. SIGNALING BACK TO CALLER
+    peer.on('signal', (data) => {
       const targetId = activeCall.fromId || activeCall.callerData?.callerId;
+      
       socket.emit("answer-call", {
         to: targetId,
         callId: activeCall.callId,
-        signal: data 
+        signal: data
       });
 
+      // Signal backup for reliability
       fetch('/api/calls/update-signal', {
         method: 'PATCH',
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json' 
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ callId: activeCall.callId, signal: data })
       }).catch(e => console.warn("Signal backup failed", e));
     });
 
-   peer.on('stream', (remoteStream) => {
-  let audio = document.getElementById('remoteAudio');
-  if (!audio) {
-    audio = document.createElement('audio');
-    audio.id = 'remoteAudio';
-    audio.setAttribute('playsinline', 'true'); 
-    audio.setAttribute('autoplay', 'true');
-    audio.style.display = 'none';
-    document.body.appendChild(audio);
-  }
-  audio.srcObject = remoteStream;
-    audio.muted = true; 
-  audio.play().then(() => {
-    audio.muted = false; 
-    console.log("🔊 Remote audio is now live and audible");
-  });
-  setPeerConnected(true);
-  setCallStatus('connected');
-});
+    // 7. HANDLE REMOTE STREAM
+    peer.on('stream', (remoteStream) => {
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        audio.setAttribute('playsinline', 'true');
+        audio.setAttribute('autoplay', 'true');
+        audio.style.display = 'none';
+        document.body.appendChild(audio);
+      }
 
-    if (activeCall?.signal) {
-      const incomingSignal = typeof activeCall.signal === 'string' 
-        ? JSON.parse(activeCall.signal) 
-        : activeCall.signal;
+      audio.srcObject = remoteStream;
+      
+      // Bypass Autoplay restrictions
+      audio.muted = true;
+      audio.play().then(() => {
+        audio.muted = false;
+        console.log("🔊 Call connected and audio live");
+      }).catch(err => console.error("Audio play failed:", err));
+
+      setPeerConnected(true);
+      setCallStatus('connected');
+    });
+
+    // 8. APPLY THE INCOMING SIGNAL (Critical Step)
+    const incomingSignal = activeCall?.signal || (activeCaller?.signal);
+
+    if (incomingSignal) {
+      const parsedSignal = typeof incomingSignal === 'string' 
+        ? JSON.parse(incomingSignal) 
+        : incomingSignal;
         
       setTimeout(() => {
         if (peer && !peer.destroyed) {
           try {
-            peer.signal(incomingSignal);
+            peer.signal(parsedSignal);
           } catch (e) {
-            console.error("Failed to apply signal:", e);
+            console.error("Signal Application Error:", e);
           }
         }
-      }, 250); 
+      }, 150);
     }
 
     connectionRef.current = peer;
@@ -564,18 +596,19 @@ const peer = new PeerConstructor({
     });
 
   } catch (err) {
-    console.error("Failed to accept call:", err);
-    setCallStatus('idle');
-    setActiveCall(null);
-    setActiveCaller(null); 
-
-    if (userStreamRef.current) {
+    console.error("Call Acceptance Failed:", err);
+        if (userStreamRef.current) {
       userStreamRef.current.getTracks().forEach(t => t.stop());
     }
-    alert("Call connection failed. Check microphone permissions.");
+    
+    setCallStatus('idle');
+    setActiveCall(null);
+    setActiveCaller(null);
+    setShowFullScreenCall(false);
+    
+    alert("Could not establish connection. Please verify microphone access.");
   }
 };
-
 
 const terminateLocalSession = () => {
   console.log("Cleaning up local media and peer resources...");
@@ -1604,7 +1637,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   );
 })}
 
-{/* 4. THE FIX: Scroll Anchor */}
 {/* Increased height to ensure the keyboard doesn't hide the last message */}
 <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
@@ -1808,24 +1840,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         </button>
       )}
 
-      {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
-{fullscreenImage && (
-  <div 
-    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
-    onClick={() => setFullscreenImage(null)}
-  >
-    <button className="absolute top-6 right-6 text-white/70 hover:text-white">
-      <BsChevronLeft size={30} className="rotate-180" /> {/* Close Icon */}
-    </button>
-    <img 
-      src={fullscreenImage} 
-      className="max-w-full max-h-full object-contain shadow-2xl" 
-      alt="Full view" 
-    />
-  </div>
-)}
-
-{/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
+    {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
 {fullscreenImage && (
   <div 
     className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"

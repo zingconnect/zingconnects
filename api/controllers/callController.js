@@ -32,15 +32,20 @@ export const updateCallSignal = async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
+
     if (!callId || !signal) {
       return res.status(400).json({ success: false, message: "Missing callId or signal data" });
     }
+
     const call = await Call.findById(callId);
     if (!call) {
       return res.status(404).json({ success: false, message: "Call session not found" });
     }
+
     let updateData = {};
-    if (!call.signal) {
+    const isOffer = !call.signal;
+
+    if (isOffer) {
       updateData = { 
         signal: signal, 
         status: 'ringing' 
@@ -50,19 +55,41 @@ export const updateCallSignal = async (req, res) => {
       updateData = { 
         answerSignal: signal, 
         status: 'connected',
-        startTime: call.startTime || Date.now() // Ensure startTime is set if not already
+        startTime: call.startTime || Date.now() 
       };
       console.log(`🔊 Answer Signal saved for call ${callId}. Status: Connected.`);
     }
+
     const updatedCall = await Call.findByIdAndUpdate(
       callId, 
       updateData, 
       { new: true }
     );
+    const io = req.app.get('socketio');
+    if (io) {
+      const myId = req.user.id || req.user._id || req.user.userId;
+      const targetId = myId === updatedCall.caller.toString() 
+        ? updatedCall.receiver 
+        : updatedCall.caller;
+
+      if (isOffer) {
+        io.to(targetId.toString()).emit("incoming-call", {
+          signal: signal,
+          fromId: myId,
+          fromName: req.user.name || "User",
+          callId: callId
+        });
+      } else {
+        io.to(targetId.toString()).emit("call-accepted", {
+          signal: signal,
+          callId: callId
+        });
+      }
+    }
     res.json({ 
       success: true, 
       status: updatedCall.status,
-      signalType: !call.signal ? 'offer' : 'answer' 
+      signalType: isOffer ? 'offer' : 'answer' 
     });
   } catch (error) {
     console.error("❌ WebRTC Signaling Error:", error);
@@ -70,7 +97,6 @@ export const updateCallSignal = async (req, res) => {
   }
 };
 
-// @desc    Check for incoming calls (Polling)
 export const checkIncomingCall = async (req, res) => {
   try {
     await connectToDatabase(); 
