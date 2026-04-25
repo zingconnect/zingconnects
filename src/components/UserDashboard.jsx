@@ -148,12 +148,12 @@ const isIncomingCall =
     callStatus: callStatus,
     isIncoming: isIncomingCall
   });
-  const getStatusInfo = (agentData) => {
-    if (!agentData) return { isOnline: false, label: "Connecting..." };
-    if (agentData.status === 'online') return { isOnline: true, label: "Online" };
-    if (agentData.lastSeenText) return { isOnline: false, label: agentData.lastSeenText };
-    if (agentData.lastActive) {
-      const diff = Math.floor((new Date() - new Date(agentData.lastActive)) / 1000);
+  const getStatusInfo = (agent) => {
+    if (!agent) return { isOnline: false, label: "Connecting..." };
+    if (agent.status === 'online') return { isOnline: true, label: "Online" };
+    if (agent.lastSeenText) return { isOnline: false, label: agent.lastSeenText };
+    if (agent.lastActive) {
+      const diff = Math.floor((new Date() - new Date(agent.lastActive)) / 1000);
       if (diff < 120) return { isOnline: true, label: "Online" };
     }
     return { isOnline: false, label: "Offline" };
@@ -172,7 +172,7 @@ const isIncomingCall =
 
 const unlockAudio = () => {
   setHasInteracted(true);
-  console.log("🔐 Initializing secure audio channels...");
+  console.log("Initializing secure audio channels...");
 
   const remoteAudio = document.getElementById('remoteAudio');
   
@@ -191,7 +191,7 @@ const unlockAudio = () => {
         .then(() => {
           el.pause();
           el.currentTime = 0;
-          console.log(`✅ Primed: ${src}`);
+          console.log(`Primed: ${src}`);
         })
         .catch(err => {
           console.warn(`Unlock delayed for ${src}:`, err.name);
@@ -203,7 +203,7 @@ const unlockAudio = () => {
     remoteAudio.play()
       .then(() => {
         remoteAudio.pause();
-        console.log("✅ Primed: Remote Voice Channel");
+        console.log("Primed: Remote Voice Channel");
       })
       .catch(() => { /* Silent catch for empty remote stream */ });
   }
