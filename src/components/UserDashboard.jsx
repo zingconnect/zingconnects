@@ -95,7 +95,7 @@ const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const remoteStreamRef = useRef(null); 
   const lastNotifiedId = useRef(null);
   const callStatusRef = useRef('idle');
-  const [agent, setAgent] = useState(null);
+  const [agentData, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
@@ -208,7 +208,7 @@ const unlockAudio = () => {
       .catch(() => { /* Silent catch for empty remote stream */ });
   }
 
-  const currentAgentId = agent?._id || agent?.id;
+  const currentAgentId = agentData?._id || agentData?.id;
   if (socket && currentAgentId) {
     socket.emit("join-private-room", currentAgentId);
     console.log("📡 Secure room synchronized");
@@ -226,7 +226,7 @@ useEffect(() => {
     document.removeEventListener('click', unlockAudio);
     document.removeEventListener('touchstart', unlockAudio);
   };
-}, [hasInteracted, agent?._id]); // Re-bind if agent loads later
+}, [hasInteracted, agentData?._id]); // Re-bind if agent loads later
 
 useEffect(() => {
   if (!socket || !userData?._id) return;
@@ -619,7 +619,7 @@ const terminateLocalSession = () => {
 
 const handleEndCall = async () => {
   const token = localStorage.getItem('userToken');
-    const targetId = agent?._id || activeCall?.fromId || activeCall?.callerData?.callerId;
+    const targetId = agentData?._id || activeCall?.fromId || activeCall?.callerData?.callerId;
   if (targetId) {
     socket.emit("end-call", { to: targetId });
   }
@@ -704,7 +704,7 @@ useEffect(() => {
     const data = await response.json();
     
     if (response.ok) {
-      setAgent(data.agent); 
+      setAgentData(data.agent); 
       setUserData(data.user); 
       
       if (!data.user.isProfileComplete) {
@@ -725,11 +725,11 @@ useEffect(() => {
 
   useEffect(() => {
   const token = localStorage.getItem('userToken');
-  if (!token || !agent?._id) return;
+  if (!token || !agentData?._id) return;
 
  const fetchMessages = async () => {
     try {
-      const response = await fetch(`/api/messages/${agent._id}`, {
+      const response = await fetch(`/api/messages/${agentData._id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -752,7 +752,7 @@ useEffect(() => {
 
           // Browser Notification (Branding Fix)
           if (Notification.permission === "granted") {
-            new Notification(`Agent ${agent.firstName}`, {
+            new Notification(`Agent ${agentData.firstName}`, {
               body: lastMsg.text || "Sent a file",
               icon: '/logo-s.png', // Point to your brand logo in public folder
               tag: 'zing-msg'    // Grouping tag to prevent spam
@@ -760,7 +760,7 @@ useEffect(() => {
           }
 
           // Mark as Read (Silent Background update)
-          fetch(`/api/messages/mark-read/${agent._id}`, {
+          fetch(`/api/messages/mark-read/${agentData._id}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
@@ -927,7 +927,7 @@ const handleFileUpload = (e) => {
 };
 
 const handleFinalSend = async () => {
-  if (!previewFile || isUploading || !agent?._id) return;
+  if (!previewFile || isUploading || !agentData?._id) return;
 
   const tempId = Date.now().toString();
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
@@ -980,7 +980,7 @@ const handleFinalSend = async () => {
         'Authorization': `Bearer ${token}` 
       },
       body: JSON.stringify({
-        receiverId: agent._id,
+        receiverId: agentData._id,
         text: savedCaption.trim(),
         fileUrl: urlData.key, 
         fileType: detectedType
@@ -1025,7 +1025,7 @@ const handleStartCall = async () => {
   }
 
   const currentUserId = userData?._id || userData?.id;
-  const currentAgentId = agent?._id || agent?.id;
+  const currentAgentId = agentData?._id || agentData?.id;
   const token = localStorage.getItem('userToken');
 
   if (!currentAgentId || !currentUserId) {
@@ -1170,7 +1170,7 @@ const handleStartCall = async () => {
 
  const handleSendMessage = async (e) => {
   e.preventDefault();
-  if (!newMessage.trim() || !agent?._id) return;
+  if (!newMessage.trim() || !agentData?._id) return;
   
   const textToSend = newMessage;
   const tempId = Date.now().toString(); // Temporary ID for UI tracking
@@ -1195,7 +1195,7 @@ const handleStartCall = async () => {
         'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({
-        receiverId: agent._id,
+        receiverId: agentData._id,
         text: textToSend,
         fileType: 'text',
         replyToId: replyingTo?._id 
@@ -1290,7 +1290,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         
         <main className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide pb-10">
             <div className="w-24 h-24 rounded-[2rem] bg-gray-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center relative">
-                {agent?.photoUrl ? (
+                {agentData?.photoUrl ? (
                     <img src={agent.photoUrl} alt="Agent" className="w-full h-full object-cover" />
                 ) : (
                     <span className="text-2xl font-black text-blue-600">{agent?.firstName?.[0]}</span>
