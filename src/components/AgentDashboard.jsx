@@ -285,20 +285,20 @@ useEffect(() => {
           setCallStatus('ringing');
         }
 
-        if (data.status === 'connected') {
-          if (data.answerSignal && connectionRef.current && !peerConnected) {
-            try {
-              connectionRef.current.signal(data.answerSignal);
-              setPeerConnected(true);
-              setCallStatus('connected'); 
-            } catch (err) {
-              console.error("WebRTC Handshake Failed:", err);
-            }
-          } else if (peerConnected || !data.answerSignal) {
-            setCallStatus('connected');
-          }
-        }
-
+      if (data.status === 'connected') {
+  if (data.answerSignal && connectionRef.current && !peerConnected) {
+    try {
+      console.log("📥 User's Answer Signal found! Finishing handshake...");
+       connectionRef.current.signal(data.answerSignal);
+      setPeerConnected(true);
+      setCallStatus('connected'); 
+    } catch (err) {
+      console.error("WebRTC Handshake Failed:", err);
+    }
+  } else if (callStatus !== 'connected') {
+    setCallStatus('connected');
+  }
+}
         if (['ended', 'declined', 'missed'].includes(data.status)) {
           handleEndCall();
         }
@@ -433,37 +433,30 @@ const handleStartCall = async (targetUserId) => {
         signal: data 
       });
     });
+
 peer.on('stream', (remoteStream) => {
-  let audio = document.getElementById('remoteAudio');
+  console.log("🔊 Remote stream attached. Tracks:", remoteStream.getAudioTracks().length);
   
+  let audio = document.getElementById('remoteAudio');
   if (!audio) {
     audio = document.createElement('audio');
     audio.id = 'remoteAudio';
     audio.setAttribute('autoplay', 'true');
     audio.setAttribute('playsinline', 'true');
-    audio.style.display = 'none';
     document.body.appendChild(audio);
   }
 
-  if ("srcObject" in audio) {
-    audio.srcObject = remoteStream;
-  } else {
-    audio.src = window.URL.createObjectURL(remoteStream);
-  }
-
-  audio.onloadedmetadata = () => {
+  audio.srcObject = remoteStream;
     audio.muted = false;
-    audio.volume = isSpeakerOn ? 1.0 : 0.4; 
+  audio.volume = isSpeakerOn ? 1.0 : 0.5;
+
+  audio.play()
+    .then(() => console.log("✅ Audio is playing"))
+    .catch(e => console.warn("🔈 Audio play blocked by browser", e));
     
-    audio.play()
-      .then(() => {
-        setCallStatus('connected');
-      })
-      .catch(e => {
-        setCallStatus('connected');
-      });
-  };
+  setCallStatus('connected');
 });
+
     connectionRef.current = peer;
 
     peer.on('close', () => handleEndCall());
@@ -563,32 +556,28 @@ const handleAcceptCall = async () => {
       });
     });
 
-    // 8. REMOTE STREAM HANDLER (The "Hearing" Logic)
-    peer.on('stream', (remoteStream) => {
-      console.log("🔊 Remote stream attached");
-      let audio = document.getElementById('remoteAudio');
-      
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.style.display = 'none';
-        document.body.appendChild(audio);
-      }
+   peer.on('stream', (remoteStream) => {
+  console.log("🔊 Remote stream attached. Tracks:", remoteStream.getAudioTracks().length);
+  
+  let audio = document.getElementById('remoteAudio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = 'remoteAudio';
+    audio.setAttribute('autoplay', 'true');
+    audio.setAttribute('playsinline', 'true');
+    document.body.appendChild(audio);
+  }
 
-      audio.srcObject = remoteStream;
-      audio.muted = false; // Ensure not muted
-      audio.volume = isSpeakerOn ? 1.0 : 0.4; // Sync with your speaker state
-      
-      audio.play()
-        .then(() => {
-          setCallStatus('connected');
-        })
-        .catch(e => {
-          console.error("Audio playback requires interaction:", e);
-          setCallStatus('connected'); // Set connected anyway as they already clicked 'Accept'
-        });
-    });
+  audio.srcObject = remoteStream;
+    audio.muted = false;
+  audio.volume = isSpeakerOn ? 1.0 : 0.5;
 
+  audio.play()
+    .then(() => console.log("✅ Audio is playing"))
+    .catch(e => console.warn("🔈 Audio play blocked by browser", e));
+    
+  setCallStatus('connected');
+});
     // 9. THE HANDSHAKE (Delayed slightly for peer stability)
     setTimeout(() => {
       if (peer && !peer.destroyed) {

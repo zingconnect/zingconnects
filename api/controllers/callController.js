@@ -32,24 +32,40 @@ export const updateCallSignal = async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
-
     if (!callId || !signal) {
       return res.status(400).json({ success: false, message: "Missing callId or signal data" });
     }
     const call = await Call.findById(callId);
-    if (!call) return res.status(404).json({ success: false, message: "Call not found" });
-    const isAnswer = ['connecting', 'connected'].includes(call.status);
-
-    const updateData = isAnswer 
-      ? { answerSignal: signal, status: 'connected' } 
-      : { signal: signal, status: 'ringing' };
-
-    const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
-    
-    console.log(`📞 Signal updated for ${callId} (Type: ${isAnswer ? 'Answer' : 'Offer'})`);
-    res.json({ success: true, status: updatedCall.status });
+    if (!call) {
+      return res.status(404).json({ success: false, message: "Call session not found" });
+    }
+    let updateData = {};
+    if (!call.signal) {
+      updateData = { 
+        signal: signal, 
+        status: 'ringing' 
+      };
+      console.log(`📡 Offer Signal saved for call ${callId}. Status: Ringing.`);
+    } else {
+      updateData = { 
+        answerSignal: signal, 
+        status: 'connected',
+        startTime: call.startTime || Date.now() // Ensure startTime is set if not already
+      };
+      console.log(`🔊 Answer Signal saved for call ${callId}. Status: Connected.`);
+    }
+    const updatedCall = await Call.findByIdAndUpdate(
+      callId, 
+      updateData, 
+      { new: true }
+    );
+    res.json({ 
+      success: true, 
+      status: updatedCall.status,
+      signalType: !call.signal ? 'offer' : 'answer' 
+    });
   } catch (error) {
-    console.error("Update Signal Error:", error);
+    console.error("❌ WebRTC Signaling Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -84,30 +100,26 @@ export const checkIncomingCall = async (req, res) => {
 export const acceptCall = async (req, res) => {
   try {
     await connectToDatabase();
-    const myId = req.user.id || req.user._id || req.user.userId;
-    // We NEED the answerSignal from the User's frontend here
-    const { callId, answerSignal } = req.body; 
+    const myId = req.user.id || req.user._id;
+    const { callId, signal } = req.body; // 'signal' here is the User's Answer Signal
 
     const call = await Call.findOneAndUpdate(
-      { 
-        _id: callId, 
-        receiver: myId, 
-        status: { $in: ['calling', 'ringing'] } 
-      },
+      { _id: callId, receiver: myId },
       { 
         status: 'connected', 
         startTime: Date.now(),
-        answerSignal: answerSignal // <--- SAVE THE USER'S HANDSHAKE HERE
+        answerSignal: signal // Store the answer signal from the receiver
       },
       { new: true }
-    ).populate('caller', 'firstName lastName photoUrl');
+    ).populate('caller', 'firstName lastName');
 
     if (!call) return res.status(404).json({ success: false, message: "Call not found" });
 
+    console.log(`✅ Call ${callId} accepted. Answer signal stored.`);
+    
     res.json({ 
       success: true, 
-      call,
-      initiatorSignal: call.signal // Send Agent's signal back to User
+      initiatorSignal: call.signal // Return the Agent's original signal to the User
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
