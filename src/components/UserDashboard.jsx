@@ -465,11 +465,9 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. CLEAN UP RINGTONE IMMEDIATELY
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
     ringtoneAudio.current.src = "";
-    ringtoneAudio.current.load();
   }
 
   const token = localStorage.getItem('userToken');
@@ -478,44 +476,39 @@ const handleAcceptCall = async () => {
   try {
     setCallStatus('connecting');
     setShowFullScreenCall(true);
-    setCallTime(0);
-
     let incomingSignal = activeCall?.signal;
-    
     if (!incomingSignal) {
-      console.log("Signal not in memory, fetching from secure server...");
+      console.log("📡 Fetching missing signal from DB...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      incomingSignal = data.signal;
+      incomingSignal = data.signal || data.answerSignal; // Check both just in case
     }
 
-    if (!incomingSignal) {
-      throw new Error("No handshake signal found. Connection timed out.");
-    }
+    if (!incomingSignal) throw new Error("Handshake signal missing.");
     await fetch('/api/calls/accept', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId })
     });
     const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      } 
+      audio: { echoCancellation: true, noiseSuppression: true } 
     });
     userStreamRef.current = stream;
     setLocalStream(stream);
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: false, 
-      trickle: false, // Required for DB signaling reliability
+      trickle: false, 
       stream: stream,
+      config: {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Add STUN for reliability
+      }
     });
     peer.on('signal', async (data) => {
       const targetId = activeCall?.fromId || activeCall?.callerData?.callerId;
+      console.log("📤 Sending Answer Signal to Agent...");
       
       socket.emit("answer-call", { to: targetId, signal: data, callId });
       
@@ -526,51 +519,44 @@ const handleAcceptCall = async () => {
       });
     });
 
+    // Handle Remote Stream
     peer.on('stream', (remoteStream) => {
+      console.log("🔈 Remote stream received");
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
         audio = document.createElement('audio');
         audio.id = 'remoteAudio';
-        audio.setAttribute('autoplay', 'true');
-        audio.setAttribute('playsinline', 'true');
+        audio.autoplay = true;
+        audio.playsInline = true;
         document.body.appendChild(audio);
       }
-
       audio.srcObject = remoteStream;
-      audio.muted = true; // Bypass autoplay block
-
-      audio.play().then(() => {
-        setTimeout(() => {
-          audio.muted = false;
-          setCallStatus('connected');
-          setPeerConnected(true);
-        }, 500);
-      });
+      audio.play().catch(e => console.warn("Autoplay blocked, waiting for interaction", e));
+      setCallStatus('connected');
+      setPeerConnected(true);
+    });
+    peer.on('error', (err) => {
+      console.error("Peer Error:", err);
+      handleEndCall();
     });
 
+    peer.on('close', () => handleEndCall());
     const parsedSignal = typeof incomingSignal === 'string' 
       ? JSON.parse(incomingSignal) 
       : incomingSignal;
-
-    setTimeout(() => {
-      if (peer && !peer.destroyed) {
-        peer.signal(parsedSignal);
-      }
-    }, 250);
+    peer.signal(parsedSignal);
     
     connectionRef.current = peer;
 
   } catch (err) {
-    console.error("Call Acceptance Failed:", err);
-    terminateLocalSession(); // Use your existing cleanup function
-    alert("Voice connection failed. Please check microphone permissions.");
+    console.error("❌ Call Acceptance Failed:", err);
+    terminateLocalSession();
+    alert("Connection failed. Please ensure microphone access is allowed.");
   }
 };
 
 const terminateLocalSession = () => {
   console.log("📴 Cleaning up local media and peer resources...");
-
-  // 1. Stop all audio feedback (Ringtones/Calling tones)
   const audios = [ringtoneAudio, callingAudio];
   audios.forEach(audioRef => {
     if (audioRef.current) {

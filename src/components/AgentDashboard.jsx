@@ -457,13 +457,17 @@ const handleAcceptCall = async () => {
 
   try {
     setCallStatus('connecting');
-    const token = localStorage.getItem('agentToken');
-    const callId = activeCaller?.callId || activeCall?.callId;
+    // Ensure we use the correct token key for Agents
+    const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+    
+    // Unified callId retrieval
+    const callId = activeCaller?.callId || activeCall?.callId || activeCall?._id;
 
-    // 2. RETRIEVE INITIAL OFFER SIGNAL (The "Post Office" check)
+    // 2. RETRIEVE INITIAL OFFER SIGNAL
     let incomingSignal = activeCaller?.signal || activeCall?.signal;
     
-    if (!incomingSignal) {
+    if (!incomingSignal && callId) {
+      console.log("📡 Signal missing from state, fetching from server...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -472,93 +476,93 @@ const handleAcceptCall = async () => {
     }
 
     if (!incomingSignal) {
-      alert("Call connection lost. Please try again.");
+      console.error("❌ No incoming signal found for call:", callId);
       setCallStatus('idle');
       return;
     }
-
-    // 3. MEDIA: Access Mic
     const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true
-      } 
+      audio: { echoCancellation: true, noiseSuppression: true } 
     });
     userStreamRef.current = stream; 
-
-    // 4. WEBRTC: Create Peer (Receiver Mode)
+    if (typeof setLocalStream === 'function') setLocalStream(stream);
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: false, 
-      trickle: false, // CRITICAL: Required for DB signaling stability
+      trickle: false, 
       stream: stream,
+      config: {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      }
     });
-
-    // 5. SIGNAL HANDLER: Save the Answer to DB
     peer.on('signal', async (data) => {
-      console.log("📡 Answer signal generated. Saving to DB...");
+      console.log("📤 Answer signal generated. Relaying...");
       
-      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId;
+      // Target is the person who CALLED the agent
+      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.caller;
       
-      // Speed Boost: Socket
-      socket.emit("answer-call", { to: targetId, signal: data, callId });
+      if (targetId && socket) {
+        socket.emit("answer-call", { to: targetId, signal: data, callId });
+      }
       
-      // Safety Net: Database
-      await fetch('/api/calls/update-signal', {
-        method: 'PATCH',
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ callId, signal: data })
-      });
+      if (callId) {
+        await fetch('/api/calls/update-signal', {
+          method: 'PATCH',
+          headers: { 
+            'Authorization': `Bearer ${token}`, 
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({ callId, signal: data })
+        }).catch(e => console.error("Signal Update Error:", e));
+      }
     });
-
-    // 6. STREAM HANDLER: Play Audio
     peer.on('stream', (remoteStream) => {
       console.log("🔊 Remote audio stream received");
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
         audio = document.createElement('audio');
         audio.id = 'remoteAudio';
-        audio.setAttribute('autoplay', 'true');
-        audio.setAttribute('playsinline', 'true');
+        audio.autoplay = true;
+        audio.playsInline = true;
         document.body.appendChild(audio);
       }
 
       audio.srcObject = remoteStream;
-      
-      // Workaround for browser autoplay restrictions
       audio.muted = true; 
-      audio.play()
-        .then(() => {
-          setTimeout(() => {
-            audio.muted = false; 
-            setCallStatus('connected');
-          }, 500);
-        })
-        .catch(e => {
-          console.warn("Audio interaction required", e);
+      audio.play().then(() => {
+        setTimeout(() => {
+          audio.muted = false; 
           setCallStatus('connected');
-        });
+          console.log("✅ Call fully connected");
+        }, 500);
+      }).catch(e => {
+        setCallStatus('connected'); // Still set connected so UI updates
+      });
     });
+    peer.on('close', () => handleEndCall());
+    peer.on('error', (err) => {
+      console.error("Peer Error:", err);
+      handleEndCall();
+    });
+    const parsedSignal = typeof incomingSignal === 'string' 
+      ? JSON.parse(incomingSignal) 
+      : incomingSignal;
 
-    // 7. FINALIZE HANDSHAKE
-    // We give the Peer the Agent's offer signal here
     setTimeout(() => {
       if (peer && !peer.destroyed) {
-        peer.signal(incomingSignal);
+        peer.signal(parsedSignal);
       }
-    }, 100);
+    }, 200);
     
     connectionRef.current = peer;
 
   } catch (err) {
-    console.error("Failed to accept call:", err);
+    console.error("❌ Failed to accept call:", err);
     setCallStatus('idle');
+    if (userStreamRef.current) {
+        userStreamRef.current.getTracks().forEach(t => t.stop());
+    }
   }
 };
-
 
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
@@ -611,16 +615,22 @@ const handleEndCall = async () => {
 useEffect(() => {
   if (!socket) return;
   const handleRemoteEnd = (data) => {
+    const currentCallId = activeCall?.callId || activeCall?._id || activeCaller?.callId;
+    if (data?.callId && currentCallId && data.callId !== currentCallId) {
+       console.log("Ignored end-call signal for a different session.");
+       return;
+    }
     console.log("☎️ Remote party ended the call. Cleaning up...");
-    handleEndCall(); // Trigger the same cleanup logic locally
+    handleEndCall(); 
   };
   socket.on("call-ended", handleRemoteEnd);
+  socket.on("end-call", handleRemoteEnd); 
   return () => {
     socket.off("call-ended", handleRemoteEnd);
+    socket.off("end-call", handleRemoteEnd);
   };
-}, [socket, activeCall, activeCaller]); // Ensure dependencies are fresh
+}, [socket, activeCall, activeCaller, handleEndCall]);
 
-// 3. Audio & Mute Management
 useEffect(() => {
   if (userStreamRef.current) {
     userStreamRef.current.getAudioTracks().forEach(track => {
@@ -656,7 +666,6 @@ useEffect(() => {
   };
 }, []);
 
-  // --- INITIAL FETCH & SCRIPT LOAD ---
   useEffect(() => {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
@@ -796,7 +805,6 @@ useEffect(() => {
 
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
-  // Using selectedUser to match your dashboard's state
   if (!file || !selectedUser) return;
 
   const isVideo = file.type.startsWith('video/');
@@ -849,9 +857,6 @@ const handleFinalSend = async () => {
   try {
     const token = localStorage.getItem('agentToken');
     const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-
-    // --- STEP 1: GET THE UPLOAD PERMISSION (PRESIGNED URL) ---
-    // We send only the metadata (name, type) to avoid Vercel's size limits
     const urlResponse = await fetch('/api/messages/get-upload-url', {
       method: 'POST',
       headers: { 
