@@ -1935,10 +1935,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       </div>
 
       <div className="text-center space-y-2">
-        <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
-          {/* FIX: Chain through all possible data locations to avoid 'undefined' */}
-      {activeCall?.callerData?.fromName || activeCaller?.fromName || agent?.firstName || "Secure Connection"}
-        </h2>
+       <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
+  {activeCall?.callerData?.fromName || 
+   activeCaller?.fromName || 
+   (agent?.firstName ? `${agent.firstName} ${agent.lastName}` : "Secure Connection")}
+</h2>
         
         <div className="flex items-center justify-center gap-2">
           {callStatus === 'connected' ? (
@@ -1949,10 +1950,15 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
               </span>
             </>
           ) : (
-            <span className="text-blue-400 text-sm uppercase tracking-[0.3em] font-black animate-pulse">
-              {callStatus === 'ringing' ? 'Incoming Secure Call' : 
-               callStatus === 'calling' ? 'Calling User...' : 'Connecting...'}
-            </span>
+           <span className="text-blue-400 text-sm uppercase tracking-[0.3em] font-black animate-pulse">
+  {callStatus === 'ringing' ? (
+    isIncomingCall ? 'Incoming Secure Call' : 'Ringing...'
+  ) : callStatus === 'calling' ? (
+    'Calling User...'
+  ) : (
+    'Connecting...'
+  )}
+</span>
           )}
         </div>
       </div>
