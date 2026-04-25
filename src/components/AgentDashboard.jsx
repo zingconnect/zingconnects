@@ -14,6 +14,7 @@ import {
   BsShieldLockFill,
   BsCreditCard2BackFill,
   BsCheckCircleFill,
+  BsVolumeUpFill, 
   BsDownload, 
   BsPlayFill, 
   BsTelephoneFill,
