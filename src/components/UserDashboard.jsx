@@ -458,160 +458,102 @@ const handleAcceptCall = async () => {
   // 1. CLEAN UP RINGTONE IMMEDIATELY
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.muted = true;
-    ringtoneAudio.current.currentTime = 0;
     ringtoneAudio.current.src = "";
-    try { ringtoneAudio.current.load(); } catch (e) {} 
+    ringtoneAudio.current.load();
   }
 
-  // 2. BUFFER POLYFILL (Required for simple-peer)
-  if (typeof window !== 'undefined' && !window.Buffer) {
-    const { Buffer } = await import('buffer');
-    window.Buffer = Buffer;
-  }
-
-  const token = localStorage.getItem('userToken') || localStorage.getItem('agentToken');
+  const token = localStorage.getItem('userToken');
+  const callId = activeCall?.callId;
 
   try {
     setCallStatus('connecting');
     setShowFullScreenCall(true);
     setCallTime(0);
 
-    // 3. API NOTIFICATION
+    let incomingSignal = activeCall?.signal;
+    
+    if (!incomingSignal) {
+      console.log("Signal not in memory, fetching from secure server...");
+      const res = await fetch(`/api/calls/status/${callId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      incomingSignal = data.signal;
+    }
+
+    if (!incomingSignal) {
+      throw new Error("No handshake signal found. Connection timed out.");
+    }
     await fetch('/api/calls/accept', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ callId: activeCall.callId })
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId })
     });
-
-    // 4. GET MICROPHONE ACCESS
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({ 
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true,
-        sampleRate: 48000
-      },
-      video: false
+        autoGainControl: true
+      } 
     });
-
     userStreamRef.current = stream;
     setLocalStream(stream);
-
-    // 5. INITIALIZE PEER (Receiver Mode)
-    const { default: SimplePeer } = await import('simple-peer');
-
-    const peer = new SimplePeer({
-      initiator: false, // Important: Receiver must be false
-      trickle: false,
+    const PeerConstructor = Peer.default || Peer;
+    const peer = new PeerConstructor({
+      initiator: false, 
+      trickle: false, // Required for DB signaling reliability
       stream: stream,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          {
-            urls: "turn:openrelay.metered.ca:80",
-            username: "openrelayproject",
-            credential: "openrelayproject"
-          },
-          {
-            urls: "turn:openrelay.metered.ca:443",
-            username: "openrelayproject",
-            credential: "openrelayproject"
-          }
-        ]
-      }
     });
-
-    // 6. SIGNALING BACK TO CALLER
-    peer.on('signal', (data) => {
-      const targetId = activeCall.fromId || activeCall.callerData?.callerId;
+    peer.on('signal', async (data) => {
+      const targetId = activeCall?.fromId || activeCall?.callerData?.callerId;
       
-      socket.emit("answer-call", {
-        to: targetId,
-        callId: activeCall.callId,
-        signal: data
-      });
-
-      // Signal backup for reliability
-      fetch('/api/calls/update-signal', {
+      socket.emit("answer-call", { to: targetId, signal: data, callId });
+      
+      await fetch('/api/calls/update-signal', {
         method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ callId: activeCall.callId, signal: data })
-      }).catch(e => console.warn("Signal backup failed", e));
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callId, signal: data })
+      });
     });
 
-    // 7. HANDLE REMOTE STREAM
     peer.on('stream', (remoteStream) => {
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
         audio = document.createElement('audio');
         audio.id = 'remoteAudio';
-        audio.setAttribute('playsinline', 'true');
         audio.setAttribute('autoplay', 'true');
-        audio.style.display = 'none';
+        audio.setAttribute('playsinline', 'true');
         document.body.appendChild(audio);
       }
 
       audio.srcObject = remoteStream;
-      
-      // Bypass Autoplay restrictions
-      audio.muted = true;
+      audio.muted = true; // Bypass autoplay block
+
       audio.play().then(() => {
-        audio.muted = false;
-        console.log("🔊 Call connected and audio live");
-      }).catch(err => console.error("Audio play failed:", err));
-
-      setPeerConnected(true);
-      setCallStatus('connected');
+        setTimeout(() => {
+          audio.muted = false;
+          setCallStatus('connected');
+          setPeerConnected(true);
+        }, 500);
+      });
     });
-    
-const incomingSignal = activeCall?.answerSignal || activeCall?.signal || activeCaller?.signal;
 
-if (incomingSignal && peer) {
-  try {
     const parsedSignal = typeof incomingSignal === 'string' 
       ? JSON.parse(incomingSignal) 
       : incomingSignal;
+
     setTimeout(() => {
-      if (!peer.destroyed) {
-        console.log("Applying incoming signal to peer...");
+      if (peer && !peer.destroyed) {
         peer.signal(parsedSignal);
       }
-    }, 200); 
-
-  } catch (err) {
-    console.error("Error parsing or applying signal:", err);
-  }
-}
-
+    }, 250);
+    
     connectionRef.current = peer;
-
-    peer.on('close', () => handleEndCall());
-    peer.on('error', (err) => {
-      console.error("Peer Error:", err);
-      handleEndCall();
-    });
 
   } catch (err) {
     console.error("Call Acceptance Failed:", err);
-        if (userStreamRef.current) {
-      userStreamRef.current.getTracks().forEach(t => t.stop());
-    }
-    
-    setCallStatus('idle');
-    setActiveCall(null);
-    setActiveCaller(null);
-    setShowFullScreenCall(false);
-    
-    alert("Could not establish connection. Please verify microphone access.");
+    terminateLocalSession(); // Use your existing cleanup function
+    alert("Voice connection failed. Please check microphone permissions.");
   }
 };
 

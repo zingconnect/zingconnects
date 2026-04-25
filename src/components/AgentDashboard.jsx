@@ -370,113 +370,80 @@ const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
   const token = localStorage.getItem('agentToken');
 
-  // 1. UI FEEDBACK & AUDIO TRIGGER
-  // Setting 'calling' here triggers the outgoing beep in your useEffect
-  setCallStatus('calling');
+  setCallStatus('calling'); // UI feedback (Outgoing beep starts)
   setIsIncomingCall(false);
 
-  const tempCallMsg = {
-    _id: `temp-call-${Date.now()}`,
-    senderModel: 'Agent',
-    fileType: 'voice_call',
-    status: 'calling',
-    createdAt: new Date().toISOString(),
-  };
-  
-  setMessages(prev => [...prev, tempCallMsg]);
-
   try {
-    // 2. NETWORK: Register call in DB
-    const res = await fetch('/api/calls/start', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        receiverId: targetUserId,
-        receiverModel: 'User'
-      })
-    });
-
-    const dbCall = await res.json();
-    if (!res.ok) throw new Error(dbCall.message);
-
-    setActiveCall({ callId: dbCall.callId, toId: targetUserId });
-
-    // 3. MEDIA: Access Mic with high-quality settings
+    // 1. MEDIA: Access Mic first so we can generate the signal
     const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      } 
+      audio: { echoCancellation: true, noiseSuppression: true } 
     });
-    
     userStreamRef.current = stream; 
 
-    // 4. WEBRTC: Setup Peer connection
+    // 2. WEBRTC: Create Peer
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: true,
-      trickle: false,
+      trickle: false, // Must be false for Vercel/DB signaling
       stream: stream,
-      config: { 
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' }
-        ] 
+    });
+
+    // 3. WAIT FOR SIGNAL: This is the key change
+    peer.on('signal', async (signalData) => {
+      console.log("📡 Signal generated. Registering call in DB...");
+      
+      try {
+        const res = await fetch('/api/calls/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            receiverId: targetUserId,
+            receiverModel: 'User',
+            signal: signalData // <--- SEND THE SIGNAL HERE
+          })
+        });
+
+        const dbCall = await res.json();
+        if (!res.ok) throw new Error(dbCall.message);
+
+        setActiveCall({ callId: dbCall.callId, toId: targetUserId });
+        
+        // Also emit via socket as a "speed boost" for online users
+        socket.emit("call-user", {
+          userToCall: targetUserId,
+          fromId: agentData._id,
+          fromName: `${agentData.firstName} ${agentData.lastName}`,
+          callId: dbCall.callId,
+          signal: signalData 
+        });
+
+      } catch (dbErr) {
+        console.error("DB Registration failed:", dbErr);
+        handleEndCall();
       }
     });
 
-    peer.on('signal', (data) => {
-      console.log("📡 Agent sending signal to User...");
-      socket.emit("call-user", {
-        userToCall: targetUserId,
-        fromId: agentData._id,
-        fromName: `${agentData.firstName} ${agentData.lastName}`,
-        callId: dbCall.callId,
-        signal: data 
-      });
+    peer.on('stream', (remoteStream) => {
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        audio.setAttribute('autoplay', 'true');
+        document.body.appendChild(audio);
+      }
+      audio.srcObject = remoteStream;
+      setCallStatus('connected');
     });
-
-peer.on('stream', (remoteStream) => {
-  console.log("🔊 Remote stream attached. Tracks:", remoteStream.getAudioTracks().length);
-  
-  let audio = document.getElementById('remoteAudio');
-  if (!audio) {
-    audio = document.createElement('audio');
-    audio.id = 'remoteAudio';
-    audio.setAttribute('autoplay', 'true');
-    audio.setAttribute('playsinline', 'true');
-    document.body.appendChild(audio);
-  }
-
-  audio.srcObject = remoteStream;
-    audio.muted = false;
-  audio.volume = isSpeakerOn ? 1.0 : 0.5;
-
-  audio.play()
-    .then(() => console.log("✅ Audio is playing"))
-    .catch(e => console.warn("🔈 Audio play blocked by browser", e));
-    
-  setCallStatus('connected');
-});
 
     connectionRef.current = peer;
-
-    peer.on('close', () => handleEndCall());
-    peer.on('error', (err) => {
-      console.error("WebRTC Error:", err);
-      handleEndCall();
-    });
 
   } catch (err) {
     console.error("Call failed:", err);
     setCallStatus('idle');
-    setMessages(prev => prev.filter(m => m._id !== tempCallMsg._id));
-    alert("Microphone access is required to make calls.");
+    alert("Microphone access is required.");
   }
 };
 
@@ -493,7 +460,7 @@ const handleAcceptCall = async () => {
     const token = localStorage.getItem('agentToken');
     const callId = activeCaller?.callId || activeCall?.callId;
 
-    // 2. RETRIEVE INITIAL OFFER SIGNAL
+    // 2. RETRIEVE INITIAL OFFER SIGNAL (The "Post Office" check)
     let incomingSignal = activeCaller?.signal || activeCall?.signal;
     
     if (!incomingSignal) {
@@ -504,64 +471,85 @@ const handleAcceptCall = async () => {
       incomingSignal = data.signal;
     }
 
-    if (!incomingSignal) throw new Error("No handshake signal found.");
+    if (!incomingSignal) {
+      alert("Call connection lost. Please try again.");
+      setCallStatus('idle');
+      return;
+    }
 
-    await fetch('/api/calls/accept', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callId })
+    // 3. MEDIA: Access Mic
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true
+      } 
     });
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     userStreamRef.current = stream; 
 
+    // 4. WEBRTC: Create Peer (Receiver Mode)
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: false, 
-      trickle: false,
+      trickle: false, // CRITICAL: Required for DB signaling stability
       stream: stream,
     });
 
+    // 5. SIGNAL HANDLER: Save the Answer to DB
     peer.on('signal', async (data) => {
+      console.log("📡 Answer signal generated. Saving to DB...");
+      
       const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId;
+      
+      // Speed Boost: Socket
       socket.emit("answer-call", { to: targetId, signal: data, callId });
       
+      // Safety Net: Database
       await fetch('/api/calls/update-signal', {
         method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({ callId, signal: data })
       });
     });
 
+    // 6. STREAM HANDLER: Play Audio
     peer.on('stream', (remoteStream) => {
+      console.log("🔊 Remote audio stream received");
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
         audio = document.createElement('audio');
         audio.id = 'remoteAudio';
+        audio.setAttribute('autoplay', 'true');
         audio.setAttribute('playsinline', 'true');
         document.body.appendChild(audio);
       }
 
       audio.srcObject = remoteStream;
+      
+      // Workaround for browser autoplay restrictions
       audio.muted = true; 
-
       audio.play()
         .then(() => {
           setTimeout(() => {
-            audio.muted = false; // Unmute after playback starts
+            audio.muted = false; 
             setCallStatus('connected');
           }, 500);
         })
         .catch(e => {
-          console.warn("Autoplay blocked, unmuting anyway", e);
+          console.warn("Audio interaction required", e);
           setCallStatus('connected');
         });
     });
+
+    // 7. FINALIZE HANDSHAKE
+    // We give the Peer the Agent's offer signal here
     setTimeout(() => {
       if (peer && !peer.destroyed) {
         peer.signal(incomingSignal);
       }
-    }, 250);
+    }, 100);
     
     connectionRef.current = peer;
 
@@ -572,9 +560,9 @@ const handleAcceptCall = async () => {
 };
 
 const handleEndCall = async () => {
-  console.log("📴 Initiating call cleanup...");
+  console.log("📴 Ending call and cleaning up resources...");
 
-  // --- ADD THESE LINES TO STOP SOUNDS ---
+  // Stop all audio feedback
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
     ringtoneAudio.current.currentTime = 0;
@@ -583,10 +571,9 @@ const handleEndCall = async () => {
     callingAudio.current.pause();
     callingAudio.current.currentTime = 0;
   }
-  // ---------------------------------------
 
   const callId = activeCall?.callId || activeCaller?.callId;
-  const targetId = activeCall?.fromId || activeCall?.toId || activeCaller?.callerId;
+  const targetId = activeCall?.fromId || activeCall?.toId || activeCaller?.callerId || activeCaller?.fromId;
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
 
   if (callId && token) {
@@ -597,7 +584,7 @@ const handleEndCall = async () => {
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({ callId })
-    }).catch(e => console.error("❌ DB End Call failed:", e));
+    }).catch(e => console.error("❌ End Call DB error:", e));
   }
 
   if (targetId && socket) {
@@ -608,18 +595,20 @@ const handleEndCall = async () => {
     userStreamRef.current.getTracks().forEach(track => track.stop());
     userStreamRef.current = null;
   }
-
   if (connectionRef.current) {
-    try { connectionRef.current.destroy(); } catch (e) {}
+    try {
+      connectionRef.current.destroy();
+    } catch (e) {
+      console.log("Peer already destroyed");
+    }
     connectionRef.current = null;
   }
-
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCall(null);
   setActiveCaller(null);
+  setPeerConnected(false);
 };
-
 
 useEffect(() => {
   if (userStreamRef.current) {

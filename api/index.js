@@ -1542,33 +1542,35 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
 app.post('/api/calls/start', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const { receiverId, receiverModel } = req.body;
+    // ADD 'signal' to the destructuring here
+    const { receiverId, receiverModel, signal } = req.body; 
     
     const callerId = req.user.id || req.user._id || req.user.userId;
-    if (!callerId) return res.status(401).json({ message: "Auth Error: No ID in token" });
-
     const callerModel = req.user.role === 'agent' ? 'Agent' : 'User';
-    const finalReceiverModel = receiverModel || (callerModel === 'Agent' ? 'User' : 'Agent');
+    
     const newCall = new Call({
       caller: callerId,
       callerModel: callerModel,
       receiver: receiverId,
-      receiverModel: finalReceiverModel,
+      receiverModel: receiverModel || (callerModel === 'Agent' ? 'User' : 'Agent'),
       status: 'calling',
+      signal: signal, // <--- SAVE THE OFFER IMMEDIATELY
       startTime: new Date()
     });
 
     await newCall.save();
-    
-    console.log(`🚀 Call DB Entry Created: ${callerId} (${callerModel}) -> ${receiverId}`);
-    
-    res.status(201).json({ 
-      success: true, 
-      callId: newCall._id,
-      status: 'calling'
-    });
+        const io = req.app.get('socketio');
+    if (io) {
+      io.to(receiverId.toString()).emit("incoming-call", {
+        signal,
+        fromId: callerId,
+        fromName: req.user.name || "Secure Caller",
+        callId: newCall._id
+      });
+    }
+
+    res.status(201).json({ success: true, callId: newCall._id });
   } catch (err) {
-    console.error("❌ Start Call Backend Error:", err);
     res.status(500).json({ success: false, error: err.message });
   } 
 });
@@ -1579,8 +1581,6 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     const rawId = req.user?._id || req.user?.id || req.user?.userId;
     if (!rawId) return res.status(401).json({ hasIncomingCall: false });
 
-    // We look for 'calling' or 'ringing'. This ensures the user sees the call 
-    // even if the status hasn't transitioned yet.
     let incoming = await Call.findOne({ 
       receiver: rawId,
       status: { $in: ['calling', 'ringing'] },
@@ -1595,7 +1595,6 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     const now = Date.now();
     const diffInSeconds = (now - callStartTime) / 1000;
 
-    // Ghost Protection
     if (diffInSeconds > 60) {
       incoming.status = 'missed';
       incoming.active = false;
@@ -1603,13 +1602,11 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
       return res.json({ hasIncomingCall: false });
     }
 
-    // Auto-transition to ringing so the Agent knows the User's phone is active
     if (incoming.status === 'calling') {
       incoming.status = 'ringing';
       await incoming.save();
     }
 
-    // Standardized response to match Frontend: activeCall.callerData.fromName
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
@@ -1636,54 +1633,34 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
     await connectToDatabase();
     const { callId, signal } = req.body;
 
-    if (!callId || !signal) {
-      return res.status(400).json({ success: false, message: "Missing callId or signal data" });
-    }
-
     const call = await Call.findById(callId);
-    if (!call) {
-      return res.status(404).json({ success: false, message: "Call session not found" });
-    }
+    if (!call) return res.status(404).json({ success: false, message: "Call not found" });
 
-    const isOffer = !call.signal;
+    // If signal exists, this is the ANSWER from the User
+    const isAnswer = !!call.signal; 
     
-    const updateData = isOffer 
-      ? { signal, status: 'ringing' } 
-      : { answerSignal: signal, status: 'connected', startTime: Date.now() };
+    const updateData = isAnswer 
+      ? { answerSignal: signal, status: 'connected' } 
+      : { signal: signal, status: 'ringing' };
 
     const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
+
+    // Emit socket event, but remember: the Frontend POLLING is our real hero on Vercel
     const io = req.app.get('socketio');
     if (io) {
-      const myId = (req.user.id || req.user._id).toString();
-      const targetId = updatedCall.caller.toString() === myId 
+      const targetId = updatedCall.caller.toString() === req.user.id.toString() 
         ? updatedCall.receiver.toString() 
         : updatedCall.caller.toString();
-
-      if (isOffer) {
-        io.to(targetId).emit("incoming-call", {
-          signal,
-          fromId: myId,
-          fromName: req.user.name || "User",
-          callId
-        });
-      } else {
-        io.to(targetId).emit("call-accepted", {
-          signal,
-          callId
-        });
-      }
+      
+      io.to(targetId).emit(isAnswer ? "call-accepted" : "incoming-call", { signal, callId });
     }
 
-    res.json({ 
-      success: true, 
-      status: updatedCall.status,
-      signalType: isOffer ? 'offer' : 'answer' 
-    });
+    res.json({ success: true, status: updatedCall.status });
   } catch (err) {
-    console.error("❌ Update Signal Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

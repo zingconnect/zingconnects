@@ -22,24 +22,31 @@ const callSchema = new mongoose.Schema({
     enum: ['User', 'Agent']
   },
   status: {
-  type: String,
-  enum: ['calling', 'ringing', 'connected', 'ended', 'missed', 'declined'],
-  default: 'calling'
-},
-active: { 
-  type: Boolean, 
-  default: true // Ensure this is flipped to false on endCall
-},
-  signal: { 
-    type: Object 
+    type: String,
+    enum: ['calling', 'ringing', 'connected', 'ended', 'missed', 'declined'],
+    default: 'calling'
   },
-  answerSignal: { type: Object },
+  active: { 
+    type: Boolean, 
+    default: true 
+  },
+  // Use Mixed type for WebRTC signals to ensure all nested properties are saved
+  signal: { 
+    type: mongoose.Schema.Types.Mixed 
+  },
+  answerSignal: { 
+    type: mongoose.Schema.Types.Mixed 
+  },
   startTime: { type: Date },
   endTime: { type: Date },
-}, { timestamps: true });
+}, { 
+  timestamps: true,
+  minimize: false // Ensures empty objects are still stored in the DB if necessary
+});
 
-// Create an index to make the polling route extremely fast
+// Indices for performance
 callSchema.index({ receiver: 1, status: 1 });
+callSchema.index({ caller: 1, status: 1 }); // Added this for Agent polling
 
 const Call = mongoose.model('Call', callSchema);
 export default Call;
