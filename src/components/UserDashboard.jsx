@@ -568,41 +568,53 @@ const handleAcceptCall = async () => {
 };
 
 const terminateLocalSession = () => {
-  console.log("Cleaning up local media and peer resources...");
-  if (ringtoneAudio.current) {
-    ringtoneAudio.current.pause();
-    ringtoneAudio.current.currentTime = 0;
-  }
-  if (callingAudio.current) {
-    callingAudio.current.pause();
-    callingAudio.current.currentTime = 0;
-  }
-  if (userStreamRef.current) {
-    userStreamRef.current.getTracks().forEach(track => track.stop());
-    userStreamRef.current = null;
-  }
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
-    setLocalStream(null);
-  }
+  console.log("📴 Cleaning up local media and peer resources...");
+
+  // 1. Stop all audio feedback (Ringtones/Calling tones)
+  const audios = [ringtoneAudio, callingAudio];
+  audios.forEach(audioRef => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  });
+
+  const streams = [userStreamRef.current, localStream];
+  streams.forEach(stream => {
+    if (stream) {
+      stream.getTracks().forEach(track => {
+        track.stop();
+        console.log(`Stopped track: ${track.kind}`);
+      });
+    }
+  });
+  
+  userStreamRef.current = null;
+  setLocalStream(null);
+
   const remoteAudio = document.getElementById('remoteAudio');
   if (remoteAudio) {
     remoteAudio.pause();
     remoteAudio.srcObject = null;
-    remoteAudio.remove();
+    console.log("Remote audio stream cleared.");
   }
+
   if (connectionRef.current) {
     try {
       connectionRef.current.destroy();
     } catch (e) {
-      console.warn("Peer cleanup warning:", e);
+      console.warn("Peer already closed or error during destroy:", e);
     }
     connectionRef.current = null;
   }
   setCallStatus('idle');
   setActiveCall(null);
-  setShowFullScreenCall(false);
   setPeerConnected(false);
+    if (typeof setShowFullScreenCall === 'function') {
+    setShowFullScreenCall(false);
+  }
+
+  console.log("✅ Cleanup complete. System idle.");
 };
 
 const handleEndCall = async () => {
