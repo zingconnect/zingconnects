@@ -156,6 +156,7 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
 let ioInstance; 
 
 ioInstance = io; 
@@ -187,13 +188,15 @@ io.on("connection", (socket) => {
       callId 
     });
   });
-  socket.on("end-call", ({ to }) => {
+ socket.on("end-call", ({ to, callId }) => {
     if (to) {
-      console.log(`Ending call for user: ${to}`);
-      io.to(to.toString()).emit("call-ended");
+      console.log(`📴 End-call signal from ${socket.id} to Room: ${to} (Call: ${callId || 'N/A'})`);
+            io.to(to.toString()).emit("call-ended", { callId });
+            if (callId) {
+        io.to(callId.toString()).emit("call-ended");
+      }
     }
   });
-
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
   });

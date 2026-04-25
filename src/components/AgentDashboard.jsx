@@ -559,23 +559,23 @@ const handleAcceptCall = async () => {
   }
 };
 
+
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
+  [ringtoneAudio, callingAudio].forEach(ref => {
+    if (ref.current) {
+      ref.current.pause();
+      ref.current.currentTime = 0;
+    }
+  });
 
-  // Stop all audio feedback
-  if (ringtoneAudio.current) {
-    ringtoneAudio.current.pause();
-    ringtoneAudio.current.currentTime = 0;
-  }
-  if (callingAudio.current) {
-    callingAudio.current.pause();
-    callingAudio.current.currentTime = 0;
-  }
-
-  const callId = activeCall?.callId || activeCaller?.callId;
-  const targetId = activeCall?.fromId || activeCall?.toId || activeCaller?.callerId || activeCaller?.fromId;
+  const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId;
+  const targetId = activeCall?.fromId || activeCall?.receiver || activeCaller?.callerId;
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-
+  if (targetId && socket) {
+    console.log(`Sending end-call signal to: ${targetId}`);
+    socket.emit("end-call", { to: targetId, callId });
+  }
   if (callId && token) {
     fetch('/api/calls/end', {
       method: 'POST',
@@ -586,20 +586,17 @@ const handleEndCall = async () => {
       body: JSON.stringify({ callId })
     }).catch(e => console.error("❌ End Call DB error:", e));
   }
-
-  if (targetId && socket) {
-    socket.emit("end-call", { to: targetId });
-  }
-  
-  if (userStreamRef.current) {
+    if (userStreamRef.current) {
     userStreamRef.current.getTracks().forEach(track => track.stop());
     userStreamRef.current = null;
   }
+
   if (connectionRef.current) {
     try {
+      // Use .destroy() for simple-peer to close connection cleanly
       connectionRef.current.destroy();
     } catch (e) {
-      console.log("Peer already destroyed");
+      console.log("Peer already destroyed or clean-up handled");
     }
     connectionRef.current = null;
   }
@@ -608,8 +605,22 @@ const handleEndCall = async () => {
   setActiveCall(null);
   setActiveCaller(null);
   setPeerConnected(false);
+    if (typeof setShowFullScreenCall === 'function') setShowFullScreenCall(false);
 };
 
+useEffect(() => {
+  if (!socket) return;
+  const handleRemoteEnd = (data) => {
+    console.log("☎️ Remote party ended the call. Cleaning up...");
+    handleEndCall(); // Trigger the same cleanup logic locally
+  };
+  socket.on("call-ended", handleRemoteEnd);
+  return () => {
+    socket.off("call-ended", handleRemoteEnd);
+  };
+}, [socket, activeCall, activeCaller]); // Ensure dependencies are fresh
+
+// 3. Audio & Mute Management
 useEffect(() => {
   if (userStreamRef.current) {
     userStreamRef.current.getAudioTracks().forEach(track => {
@@ -620,15 +631,15 @@ useEffect(() => {
 
 useEffect(() => {
   const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio && callStatus === 'connected') {
-    remoteAudio.volume = isSpeakerOn ? 1.0 : 0.4; 
-    remoteAudio.muted = false;
-    if (remoteAudio.paused) {
-      remoteAudio.play().catch(err => console.warn("Audio play failed:", err));
+  if (remoteAudio) {
+    if (callStatus === 'connected') {
+      remoteAudio.volume = isSpeakerOn ? 1.0 : 0.4; 
+      remoteAudio.muted = false;
+      remoteAudio.play().catch(err => console.warn("Audio play prevented by browser:", err));
+    } else {
+      remoteAudio.pause();
+      remoteAudio.srcObject = null;
     }
-  } else if (remoteAudio && (callStatus === 'idle' || callStatus === 'ended')) {
-    remoteAudio.pause();
-    remoteAudio.srcObject = null;
   }
 }, [isSpeakerOn, callStatus]);
 

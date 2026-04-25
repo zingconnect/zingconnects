@@ -313,9 +313,8 @@ useEffect(() => {
       if (data.status === 'connected' && callStatus === 'connecting') {
         setCallStatus('connected');
       }
-
-      // 4. Global cleanup if call ends
       if (['ended', 'declined', 'missed'].includes(data.status)) {
+        console.log("Polling detected call has ended in DB.");
         handleEndCall();
       }
     } catch (e) {
@@ -325,8 +324,19 @@ useEffect(() => {
 
   const interval = setInterval(syncStatus, 3000);
   return () => clearInterval(interval);
-}, [callStatus, activeCall?.callId]); 
+}, [callStatus, activeCall?.callId]);
 
+useEffect(() => {
+  if (!socket) return;
+  const handleRemoteEnd = () => {
+    console.log("☎️ Agent ended the call. Cleaning up local UI...");
+    handleEndCall(); 
+  };
+  socket.on("call-ended", handleRemoteEnd);
+  return () => {
+    socket.off("call-ended", handleRemoteEnd);
+  };
+}, [socket, activeCall, agent]);
 
 useEffect(() => {
   const audio = document.getElementById('remoteAudio');
@@ -595,21 +605,23 @@ const terminateLocalSession = () => {
   setPeerConnected(false);
 };
 
-
 const handleEndCall = async () => {
+  console.log("📴 Ending call and cleaning up resources...");
+
   const token = localStorage.getItem('userToken');
-    const targetId = agent?._id || activeCall?.fromId || activeCall?.callerData?.callerId;
-  if (targetId) {
-    socket.emit("end-call", { to: targetId });
+  const targetId = agent?._id || activeCall?.fromId || activeCall?.callerData?.callerId;
+  const callId = activeCall?.callId;
+  if (targetId && socket) {
+    socket.emit("end-call", { to: targetId, callId: callId });
   }
-  if (activeCall?.callId) {
+  if (callId && token) {
     fetch('/api/calls/end', {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json' 
       },
-      body: JSON.stringify({ callId: activeCall.callId }) 
+      body: JSON.stringify({ callId: callId }) 
     }).catch(err => console.error("Database sync failed:", err));
   }
   terminateLocalSession();
