@@ -252,6 +252,7 @@ setActiveCall({
   fromId: currentUserId,
   isInitiator: true,
   recipientName: `${agent?.firstName} ${agent?.lastName}`, // Add this line
+  photoUrl: agentData.photoUrl,
   callerData: {
     fromName: `${userData?.firstName} ${userData?.lastName}`,
     photoUrl: userData?.photoUrl,
