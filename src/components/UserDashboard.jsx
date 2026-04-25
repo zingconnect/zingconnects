@@ -183,21 +183,20 @@ const unlockAudio = () => {
   ];
 
   audioRefs.forEach(({ ref, src }) => {
-    const el = ref.current;
-    if (el) {
-      el.src = src;      
-      el.load(); 
-      el.play()
-        .then(() => {
-          el.pause();
-          el.currentTime = 0;
-          console.log(`Primed: ${src}`);
-        })
-        .catch(err => {
-          console.warn(`Unlock delayed for ${src}:`, err.name);
-        });
-    }
-  });
+  const el = ref.current;
+  if (el) {
+    el.src = src;
+    el.load();
+    el.play()
+      .then(() => {
+        el.pause(); // Only pause if it successfully started playing
+        el.currentTime = 0;
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') console.warn(`Audio: ${src}`, err);
+      });
+  }
+});
 
   if (remoteAudio) {
     remoteAudio.play()
@@ -1449,7 +1448,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 
             <div onClick={() => setShowProfilePanel(true)} className="flex flex-col cursor-pointer hover:bg-black/5 p-1 rounded transition-colors overflow-hidden">
               <h1 className="text-[13px] md:text-[15px] font-bold text-gray-800 leading-tight truncate">
-{agent?.firstName ? `${agent.firstName} ${agent.lastName}` : 'Loading Agent...'}
+              {agent?.firstName ? `${agent.firstName} ${agent.lastName}` : 'Loading Agent...'}
               </h1>
               <p className={`text-[9px] md:text-[10px] font-bold uppercase tracking-tighter ${agentStatus.isOnline ? 'text-green-600' : 'text-gray-500'}`}>
                 {agentStatus.label}
@@ -1935,10 +1934,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       </div>
 
       <div className="text-center space-y-2">
-       <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
+      <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
+  {/* Priority 1: Data from someone calling you */}
   {activeCall?.callerData?.fromName || 
    activeCaller?.fromName || 
-   (agent?.firstName ? `${agent.firstName} ${agent.lastName}` : "Secure Connection")}
+   (agent ? `${agent.firstName} ${agent.lastName}` : "Secure Connection")}
 </h2>
         
         <div className="flex items-center justify-center gap-2">
@@ -1950,7 +1950,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
               </span>
             </>
           ) : (
-           <span className="text-blue-400 text-sm uppercase tracking-[0.3em] font-black animate-pulse">
+         <span className="text-blue-400 text-sm uppercase tracking-[0.3em] font-black animate-pulse">
   {callStatus === 'ringing' ? (
     isIncomingCall ? 'Incoming Secure Call' : 'Ringing...'
   ) : callStatus === 'calling' ? (
