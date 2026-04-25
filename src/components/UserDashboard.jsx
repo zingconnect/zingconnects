@@ -1912,216 +1912,108 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </p>
   </div>
 )}
-{/* --- UPDATED CALL OVERLAY --- */}
+
+{/* --- UNIFIED SECURE CALL INTERFACE --- */}
 {callStatus !== 'idle' && (
-  <div className="fixed inset-0 z-[9999] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white animate-in fade-in duration-300">
-    <div className="flex flex-col items-center space-y-10 animate-in zoom-in duration-500">
-      
-      {/* 1. AVATAR & PULSE */}
-      <div className="relative">
-        <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-blue-500/30 p-1 relative z-10">
-          <img 
-            src={activeCall?.callerData?.photoUrl || agent?.photoUrl || "/default-agent.png"} 
-            className="w-full h-full rounded-full object-cover shadow-2xl"
-            alt="Caller"
-          />
-        </div>
-        {/* Animated Rings for 'Ringing' or 'Calling' */}
-        {(callStatus === 'ringing' || callStatus === 'calling') && (
-          <>
-            <div className="absolute inset-0 w-full h-full bg-blue-500 rounded-full animate-ping opacity-20"></div>
-            <div className="absolute -inset-4 border border-blue-500/10 rounded-full animate-pulse"></div>
-          </>
-        )}
-      </div>
-
-      {/* 2. IDENTITY & ENCRYPTION STATUS */}
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl md:text-3xl font-black tracking-tight">
-      {activeCall?.callerData?.fromName || (isIncomingCall ? "Incoming User" : "Connecting...")}
-        </h2>
-        
-        <div className="flex items-center justify-center gap-2">
-          {callStatus === 'connected' && <BsShieldLockFill className="text-green-500" size={12} />}
-          <p className={`text-[10px] font-black uppercase tracking-[0.3em] italic ${
-            callStatus === 'connected' ? 'text-green-400' : 'text-blue-400'
-          }`}>
-            {callStatus === 'ringing' && (activeCall?.callerData ? "Incoming Secure Call" : "Calling Agent...")}
-            {callStatus === 'connecting' && "Establishing Peer Link..."}
-            {callStatus === 'connected' && "End-to-End Encrypted"}
-            {callStatus === 'busy' && "Agent Unavailable"} 
-          </p>
-        </div>
-      </div>
-
-     {/* 3. DYNAMIC CONTROL INTERFACE */}
-<div className="flex items-center gap-8 md:gap-12 mt-12">
-  
-  {/* State A: INCOMING CALL (Ringing) - Shows Accept/Decline */}
-  {callStatus === 'ringing' ? (
-    <div className="flex items-center gap-10">
-      {/* Decline Button */}
-      <div className="flex flex-col items-center gap-3">
-        <button 
-          onClick={handleEndCall} 
-          className="w-16 h-16 md:w-20 md:h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-xl shadow-red-500/20 active:scale-90 transition-all"
-        >
-          <BsTelephoneFill className="rotate-[135deg] text-white" size={28} />
-        </button>
-        <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Decline</span>
-      </div>
-
-      {/* Accept Button */}
-      <div className="flex flex-col items-center gap-3">
-        <button 
-          onClick={handleAcceptCall} 
-          className="w-16 h-16 md:w-20 md:h-20 bg-green-500 rounded-full flex items-center justify-center animate-bounce hover:bg-green-600 shadow-xl shadow-green-500/40 active:scale-95 transition-all"
-        >
-          <BsTelephoneFill className="text-white" size={28} />
-        </button>
-        <span className="text-[9px] font-bold uppercase tracking-widest text-green-400">Accept</span>
-      </div>
-    </div>
-  ) : (
-    /* State B: CONNECTED, CALLING, or CONNECTING - Shows In-Call Controls */
-    <>
-    {/* Speaker Toggle */}
-<div className="flex flex-col items-center gap-3">
-  <button 
-    onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
-    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95 ${
-      isSpeakerOn ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40' : 'bg-white/10 text-white hover:bg-white/20'
-    }`}
-  >
-    <BsVolumeUpFill size={24} />
-  </button>
-  <span className={`text-[9px] font-bold uppercase tracking-widest ${isSpeakerOn ? 'text-blue-400' : 'text-gray-400'}`}>
-    Speaker {isSpeakerOn ? 'ON' : 'OFF'}
-  </span>
-</div>
-
-{/* Mute Toggle */}
-<div className="flex flex-col items-center gap-3">
-  <button 
-    onTouchStart={(e) => { e.preventDefault(); toggleMute(); }}
-    onClick={toggleMute}
-    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95 ${
-      isMuted ? 'bg-red-600 text-white shadow-lg shadow-red-500/40' : 'bg-white/10 text-white hover:bg-white/20'
-    }`}
-  >
-    {isMuted ? <BsMicMuteFill size={24} /> : <BsMicFill size={24} />}
-  </button>
-  <span className={`text-[9px] font-bold uppercase tracking-widest ${isMuted ? 'text-red-400' : 'text-gray-400'}`}>
-    {isMuted ? 'Muted' : 'Mute'}
-  </span>
-</div>
-
-      {/* Global End Call Button */}
-      <div className="flex flex-col items-center gap-3">
-        <button 
-          onClick={handleEndCall} 
-          className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 shadow-2xl shadow-red-500/50 active:scale-90 transition-transform"
-        >
-          <BsTelephoneFill className="rotate-[135deg] text-white" size={32} />
-        </button>
-        <span className="text-[9px] font-bold uppercase tracking-widest text-red-500">End</span>
-      </div>
-
-      {/* Mute Toggle */}
-      <div className="flex flex-col items-center gap-3">
-        <button 
-          onClick={toggleMute} 
-          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
-            isMuted ? 'bg-red-500 text-white shadow-lg shadow-red-500/40' : 'bg-white/10 text-white hover:bg-white/20'
-          }`}
-        >
-          {isMuted ? <BsMicMuteFill size={24} /> : <BsMicFill size={24} />}
-        </button>
-        <span className={`text-[9px] font-bold uppercase tracking-widest ${isMuted ? 'text-red-400' : 'text-gray-400'}`}>
-          {isMuted ? "Unmute" : "Mute"}
-        </span>
-      </div>
-    </>
-  )}
-</div>
-
-   {/* Connection Info Tag - Only visible when call is fully established */}
-{callStatus === 'connected' && (
-  <div className="mt-8 px-4 py-1.5 bg-green-500/10 rounded-full border border-green-500/20 animate-in fade-in slide-in-from-bottom-2 duration-500">
-     <p className="text-[8px] font-bold tracking-[0.2em] text-green-400 uppercase flex items-center gap-2">
-       <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-       End-to-End Encrypted Session
-     </p>
-  </div>
-)}
-    </div>
-  </div>
-)}
-
-{/* --- FULLSCREEN CALL INTERFACE (Active/Outgoing) --- */}
-{(callStatus === 'calling' || callStatus === 'connected') && (
-  <div className="fixed inset-0 z-[10000] bg-[#0b141a] flex flex-col items-center justify-between py-20 animate-in fade-in zoom-in duration-300">
-    {/* Caller Identity */}
+  <div className="fixed inset-0 z-[10000] bg-[#0b141a] flex flex-col items-center justify-between py-20 animate-in fade-in zoom-in duration-300 text-white">
+    
+    {/* 1. IDENTITY SECTION */}
     <div className="flex flex-col items-center gap-6 mt-10">
       <div className="relative">
-        <div className="w-32 h-32 rounded-full border-2 border-white/10 overflow-hidden shadow-2xl">
+        <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border-2 border-white/10 overflow-hidden shadow-2xl relative z-10">
           <img 
-            src={activeCall?.callerData?.photoUrl || agent?.photoUrl} 
+            src={activeCall?.callerData?.photoUrl || activeCaller?.photoUrl || agentData?.photoUrl || "/default-agent.png"} 
             className="w-full h-full object-cover" 
-            alt="Identity"
+            alt="Caller Identity"
           />
         </div>
-        {callStatus === 'calling' && (
+        
+        {/* Animated Pulse Rings */}
+        {(callStatus === 'ringing' || callStatus === 'calling' || callStatus === 'connecting') && (
           <div className="absolute inset-0 w-full h-full border-4 border-blue-500 rounded-full animate-ping opacity-20" />
         )}
       </div>
 
-     <div className="text-center space-y-2">
-  <h2 className="text-white text-3xl font-semibold mb-1">
-    {activeCall?.callerData?.fromName || agent?.firstName}
-  </h2>
-  <div className="flex items-center justify-center gap-2">
-    {callStatus === 'connected' ? (
-      <>
-        <BsShieldLockFill className="text-green-500" size={12} />
-        <span className="text-green-500 text-sm font-medium tracking-widest italic">
-          LINE ENCRYPTED • {formatTime(callTime)}
-        </span>
-      </>
-    ) : (
-      <span className="text-gray-400 text-sm uppercase tracking-[0.2em] animate-pulse">
-        {callStatus === 'connecting' ? 'Establishing Peer Link...' : 'Calling...'}
-      </span>
-    )}
-  </div>
-</div>
-    </div>
-
-    {/* Call Controls */}
-    <div className="flex flex-col items-center gap-12 mb-10 w-full px-10">
-      <div className="flex items-center justify-around w-full max-w-xs text-white/60">
-        <button className="flex flex-col items-center gap-2 hover:text-white transition-colors">
-          <div className="p-4 rounded-full bg-white/5"><BsVolumeUpFill size={24}/></div>
-          <span className="text-[10px] font-bold uppercase">Speaker</span>
-        </button>
-        <button className="flex flex-col items-center gap-2 hover:text-white transition-colors">
-          <div className="p-4 rounded-full bg-white/5"><BsMicFill size={24}/></div>
-          <span className="text-[10px] font-bold uppercase">Mute</span>
-        </button>
+      <div className="text-center space-y-2">
+        <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
+          {/* FIX: Chain through all possible data locations to avoid 'undefined' */}
+          {activeCall?.callerData?.fromName || activeCaller?.fromName || activeCaller?.callerName || "Secure Connection"}
+        </h2>
+        
+        <div className="flex items-center justify-center gap-2">
+          {callStatus === 'connected' ? (
+            <>
+              <BsShieldLockFill className="text-green-500" size={14} />
+              <span className="text-green-500 text-sm font-bold tracking-[0.2em] italic uppercase">
+                Line Encrypted • {formatTime(callTime)}
+              </span>
+            </>
+          ) : (
+            <span className="text-blue-400 text-sm uppercase tracking-[0.3em] font-black animate-pulse">
+              {callStatus === 'ringing' ? 'Incoming Secure Call' : 
+               callStatus === 'calling' ? 'Calling User...' : 'Connecting...'}
+            </span>
+          )}
+        </div>
       </div>
-
-      <button 
-        onClick={handleEndCall} 
-        className="bg-red-500 w-20 h-20 rounded-full text-white flex items-center justify-center shadow-2xl shadow-red-500/40 hover:bg-red-600 transition-all active:scale-90"
-      >
-        <BsTelephoneFill className="rotate-[135deg]" size={32}/>
-      </button>
     </div>
 
-    {/* Encryption Badge */}
-    <div className="flex items-center gap-2 text-white/30">
+    {/* 2. DYNAMIC CONTROL INTERFACE */}
+    <div className="flex flex-col items-center gap-12 mb-10 w-full px-10">
+      
+      {/* State A: RINGING (Incoming) - Show Accept/Decline */}
+      {callStatus === 'ringing' && isIncomingCall ? (
+        <div className="flex items-center gap-16 md:gap-24">
+          <div className="flex flex-col items-center gap-3">
+            <button onClick={handleEndCall} className="bg-red-500 w-20 h-20 rounded-full flex items-center justify-center shadow-2xl shadow-red-500/40 hover:bg-red-600 transition-transform active:scale-90">
+               <BsTelephoneFill className="rotate-[135deg] text-white" size={32} />
+            </button>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-red-500">Decline</span>
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            <button onClick={handleAcceptCall} className="bg-green-500 w-20 h-20 rounded-full flex items-center justify-center shadow-2xl shadow-green-500/40 animate-bounce hover:bg-green-600 transition-transform active:scale-95">
+               <BsTelephoneFill className="text-white" size={32} />
+            </button>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-green-500">Accept</span>
+          </div>
+        </div>
+      ) : (
+        /* State B: CALLING or CONNECTED - Show Active Controls */
+        <>
+          <div className="flex items-center justify-around w-full max-w-xs text-white/60">
+            <button onClick={() => setIsSpeakerOn(!isSpeakerOn)} className="flex flex-col items-center gap-2 group">
+              <div className={`p-4 rounded-full transition-all ${isSpeakerOn ? 'bg-blue-600 text-white shadow-lg' : 'bg-white/5 group-hover:bg-white/10'}`}>
+                <BsVolumeUpFill size={24}/>
+              </div>
+              <span className={`text-[9px] font-bold uppercase tracking-tighter ${isSpeakerOn ? 'text-blue-400' : ''}`}>Speaker</span>
+            </button>
+
+            <button onClick={() => setIsMuted(!isMuted)} className="flex flex-col items-center gap-2 group">
+              <div className={`p-4 rounded-full transition-all ${isMuted ? 'bg-red-600 text-white shadow-lg' : 'bg-white/5 group-hover:bg-white/10'}`}>
+                {isMuted ? <BsMicMuteFill size={24}/> : <BsMicFill size={24}/>}
+              </div>
+              <span className={`text-[9px] font-bold uppercase tracking-tighter ${isMuted ? 'text-red-400' : ''}`}>Mute</span>
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            <button 
+              onClick={handleEndCall} 
+              className="bg-red-500 w-24 h-24 rounded-full text-white flex items-center justify-center shadow-2xl shadow-red-500/50 hover:bg-red-600 transition-all active:scale-90"
+            >
+              <BsTelephoneFill className="rotate-[135deg]" size={38}/>
+            </button>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-red-500">End Call</span>
+          </div>
+        </>
+      )}
+    </div>
+
+    {/* 3. ENCRYPTION BADGE */}
+    <div className="flex items-center gap-2 opacity-30">
       <BsShieldLockFill size={12} />
-      <span className="text-[9px] font-bold uppercase tracking-widest">End-to-End Encrypted</span>
+      <span className="text-[9px] font-bold uppercase tracking-[0.2em]">End-to-End Encrypted Session</span>
     </div>
   </div>
 )}
