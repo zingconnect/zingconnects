@@ -1567,7 +1567,7 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
       io.to(receiverId.toString()).emit("incoming-call", {
         signal,
         fromId: callerId,
-        fromName: req.user.name || "Secure Caller",
+        fromName: req.user.firstName ? `${req.user.firstName} ${req.user.lastName || ''}` : "Secure Caller",
         callId: newCall._id
       });
     }
@@ -1716,21 +1716,24 @@ app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   }
 });
 
-// 4. Unified End/Cancel Call (Ends call if you are either the Caller OR Receiver)
 app.post('/api/calls/end', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const myId = req.user.id || req.user._id || req.user.userId;
 
-    // Find the active call associated with my ID in either slot
     const call = await Call.findOneAndUpdate(
       { 
         $or: [{ caller: myId }, { receiver: myId }],
-        status: { $in: ['ringing', 'connected'] }
+        status: { $in: ['ringing', 'connected', 'calling'] }
       },
-      { status: 'ended', endTime: Date.now() },
+      { status: 'ended', endTime: Date.now(), active: false },
       { new: true, sort: { createdAt: -1 } }
     );
+    if (call) {
+      const io = req.app.get('socketio');
+      const otherId = call.caller.toString() === myId.toString() ? call.receiver : call.caller;
+      io.to(otherId.toString()).emit("call-ended"); // Critical: Alert the other party
+    }
 
     res.json({ success: true, message: "Call terminated" });
   } catch (err) {

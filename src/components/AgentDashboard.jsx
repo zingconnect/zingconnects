@@ -214,16 +214,20 @@ useEffect(() => {
 
 
 useEffect(() => {
+  let timer;
   if (callStatus === 'connected') {
-    timerRef.current = setInterval(() => {
-      setCallTime((prev) => prev + 1);
+    const start = activeCall?.startTime ? new Date(activeCall.startTime).getTime() : Date.now();
+    
+    timer = setInterval(() => {
+      const now = Date.now();
+      const diff = Math.floor((now - start) / 1000);
+      setCallTime(diff > 0 ? diff : 0);
     }, 1000);
   } else {
-    clearInterval(timerRef.current);
     setCallTime(0);
   }
-  return () => clearInterval(timerRef.current);
-}, [callStatus]);
+  return () => clearInterval(timer);
+}, [callStatus, activeCall?.startTime]);
 
 const formatTime = (seconds) => {
   const mins = Math.floor(seconds / 60);
@@ -566,6 +570,8 @@ const handleAcceptCall = async () => {
 
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
+
+  // 1. SILENCE LOCAL SOUNDS
   [ringtoneAudio, callingAudio].forEach(ref => {
     if (ref.current) {
       ref.current.pause();
@@ -573,43 +579,50 @@ const handleEndCall = async () => {
     }
   });
 
+  // 2. NOTIFY OTHERS (Socket & DB)
   const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId;
   const targetId = activeCall?.fromId || activeCall?.receiver || activeCaller?.callerId;
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+
   if (targetId && socket) {
-    console.log(`Sending end-call signal to: ${targetId}`);
     socket.emit("end-call", { to: targetId, callId });
   }
+
   if (callId && token) {
     fetch('/api/calls/end', {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json' 
-      },
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId })
     }).catch(e => console.error("❌ End Call DB error:", e));
   }
-    if (userStreamRef.current) {
-    userStreamRef.current.getTracks().forEach(track => track.stop());
+  if (userStreamRef.current) {
+    userStreamRef.current.getTracks().forEach(track => {
+      track.stop(); // Turns off the hardware mic
+      console.log("Mic track stopped");
+    });
     userStreamRef.current = null;
   }
-
   if (connectionRef.current) {
     try {
-      // Use .destroy() for simple-peer to close connection cleanly
       connectionRef.current.destroy();
     } catch (e) {
-      console.log("Peer already destroyed or clean-up handled");
+      console.log("Peer cleanup handled");
     }
     connectionRef.current = null;
   }
+  const remoteAudio = document.getElementById('remoteAudio');
+  if (remoteAudio) {
+    remoteAudio.pause();
+    remoteAudio.srcObject = null;
+  }
+
+  // 6. UI RESET
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCall(null);
   setActiveCaller(null);
   setPeerConnected(false);
-    if (typeof setShowFullScreenCall === 'function') setShowFullScreenCall(false);
+  if (typeof setShowFullScreenCall === 'function') setShowFullScreenCall(false);
 };
 
 useEffect(() => {
@@ -1022,6 +1035,7 @@ useEffect(() => {
     }
   });
 }, [messages, isInitialLoad]); // Added isInitialLoad to deps
+
 useEffect(() => {
   if (!isSubscribed) return;
 
