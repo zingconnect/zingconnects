@@ -229,19 +229,14 @@ useEffect(() => {
 
 useEffect(() => {
   if (!socket || !userData?._id) return;
-
   socket.emit("join-main-room", userData._id);
-
   const handleIncomingCall = (data) => {
     if (callStatusRef.current !== 'idle') {
-      socket.emit("user-busy", { 
-        to: data.fromId, 
-        callId: data.callId 
-      });
+      socket.emit("user-busy", { to: data.fromId, callId: data.callId });
       return; 
     }
-  socket.emit("confirm-ringing", { to: data.fromId });
-        setActiveCall({
+    socket.emit("confirm-ringing", { to: data.fromId });
+    setActiveCall({
       callId: data.callId,
       fromId: data.fromId,
       signal: data.signal || data.signalData, 
@@ -254,10 +249,13 @@ useEffect(() => {
     setCallStatus('ringing');
   };
   const handleCallEnded = () => {
-    handleEndCall(); 
+    console.log("Remote party ended the call");
+    terminateLocalSession(); 
   };
+
   socket.on("incoming-call", handleIncomingCall);
-  socket.on("call-ended", handleCallEnded);
+  socket.on("call-ended", handleCallEnded); // Listen for the agent hanging up
+
   return () => {
     socket.off("incoming-call", handleIncomingCall);
     socket.off("call-ended", handleCallEnded);
@@ -576,21 +574,23 @@ const handleAcceptCall = async () => {
   }
 };
 
-const handleEndCall = async () => {
-  const token = localStorage.getItem('userToken');
-  ringtoneAudio.current.pause();
-  ringtoneAudio.current.currentTime = 0;
-  callingAudio.current.pause();
-  callingAudio.current.currentTime = 0;
 
-  console.log("📴 Ending call and cleaning up resources...");
-
-  // 1. STOP HARDWARE (Microphone)
+const terminateLocalSession = () => {
+  console.log("Cleaning up local media and peer resources...");
+  if (ringtoneAudio.current) {
+    ringtoneAudio.current.pause();
+    ringtoneAudio.current.currentTime = 0;
+  }
+  if (callingAudio.current) {
+    callingAudio.current.pause();
+    callingAudio.current.currentTime = 0;
+  }
+  if (userStreamRef.current) {
+    userStreamRef.current.getTracks().forEach(track => track.stop());
+    userStreamRef.current = null;
+  }
   if (localStream) {
-    localStream.getTracks().forEach(track => {
-      track.stop();
-      console.log("🎤 Mic track stopped");
-    });
+    localStream.getTracks().forEach(track => track.stop());
     setLocalStream(null);
   }
   const remoteAudio = document.getElementById('remoteAudio');
@@ -598,39 +598,39 @@ const handleEndCall = async () => {
     remoteAudio.pause();
     remoteAudio.srcObject = null;
     remoteAudio.remove();
-    console.log("🔊 Remote audio element removed");
   }
   if (connectionRef.current) {
     try {
       connectionRef.current.destroy();
     } catch (e) {
-      console.warn("Peer already destroyed or failed to destroy cleanly");
+      console.warn("Peer cleanup warning:", e);
     }
     connectionRef.current = null;
   }
-
   setCallStatus('idle');
   setActiveCall(null);
   setShowFullScreenCall(false);
-  try {
-    const targetId = agent?._id || activeCall?.fromId;
-    if (targetId) {
-      socket.emit("end-call", { to: targetId });
-    }
+  setPeerConnected(false);
+};
 
-    if (activeCall?.callId) {
-      await fetch('/api/calls/end', {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ callId: activeCall.callId }) 
-      });
-    }
-  } catch (err) {
-    console.error("Failed to notify backend of call end:", err);
+
+const handleEndCall = async () => {
+  const token = localStorage.getItem('userToken');
+    const targetId = agent?._id || activeCall?.fromId || activeCall?.callerData?.callerId;
+  if (targetId) {
+    socket.emit("end-call", { to: targetId });
   }
+  if (activeCall?.callId) {
+    fetch('/api/calls/end', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({ callId: activeCall.callId }) 
+    }).catch(err => console.error("Database sync failed:", err));
+  }
+  terminateLocalSession();
 };
 
 useEffect(() => {
