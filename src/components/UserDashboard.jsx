@@ -15,6 +15,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
+import Peer from 'simple-peer';
 import { useDrag } from "@use-gesture/react";
 import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
@@ -476,11 +477,12 @@ const handleAcceptCall = async () => {
     userStreamRef.current = stream;
     setLocalStream(stream);
 
-   const peer = new SimplePeer({
-  // IMPORTANT: Set to true if this is the person STARTING the call
-  initiator: isOutgoingCall ? true : false, 
+  const PeerConstructor = Peer.default || Peer;
+
+const peer = new PeerConstructor({
+  initiator: false, // Explicitly false because we are ACCEPTING
   trickle: false,
-  stream: stream, // Your local camera/mic stream
+  stream: stream,
   config: { 
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -499,6 +501,7 @@ const handleAcceptCall = async () => {
     ] 
   }
 });
+
        peer.on('signal', (data) => {
       const targetId = activeCall.fromId || activeCall.callerData?.callerId;
       socket.emit("answer-call", {
