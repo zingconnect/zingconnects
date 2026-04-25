@@ -1921,11 +1921,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     <div className="flex flex-col items-center gap-6 mt-10">
       <div className="relative">
         <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border-2 border-white/10 overflow-hidden shadow-2xl relative z-10">
-          <img 
-            src={activeCall?.callerData?.photoUrl || activeCaller?.photoUrl || agent?.photoUrl || "/default-agent.png"} 
-            className="w-full h-full object-cover" 
-            alt="Caller Identity"
-          />
+         <img 
+        src={activeCall?.callerData?.photoUrl || activeCaller?.photoUrl || agentData?.photoUrl || "/default-agent.png"} 
+        className="w-full h-full object-cover" 
+        alt="Caller Identity"
+      />
         </div>
         
         {/* Animated Pulse Rings */}
@@ -1937,7 +1937,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       <div className="text-center space-y-2">
         <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
           {/* FIX: Chain through all possible data locations to avoid 'undefined' */}
-          {activeCall?.callerData?.fromName || activeCaller?.fromName || activeCaller?.callerName || "Secure Connection"}
+      {activeCall?.callerData?.fromName || activeCaller?.fromName || agentData?.firstName || "Secure Connection"}
         </h2>
         
         <div className="flex items-center justify-center gap-2">
