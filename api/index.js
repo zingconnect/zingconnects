@@ -156,45 +156,42 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-
 let ioInstance; 
+
+ioInstance = io; 
 
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
-
   socket.on("join-main-room", (userId) => {
-    socket.join(userId);
-    console.log(`Connection ${socket.id} joined room: ${userId}`);
+    if (userId) {
+      socket.join(userId.toString());
+      console.log(`User ${userId} is now reachable in their private room.`);
+    }
   });
-
   socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
-    console.log(`Call initiated from ${fromName} to ${userToCall}`);
-    io.to(userToCall).emit("incoming-call", { 
+    console.log(`Relaying Offer from ${fromName} to ${userToCall}`);
+    io.to(userToCall.toString()).emit("incoming-call", { 
       signal: signalData, 
       fromId, 
       fromName, 
       callId 
     });
   });
-
   socket.on("confirm-ringing", ({ to }) => {
-    io.to(to).emit("user-is-ringing");
+    if (to) io.to(to.toString()).emit("user-is-ringing");
   });
-
   socket.on("answer-call", ({ to, signal, callId }) => {
-    console.log(`Call accepted for ID: ${callId}. Relaying signal to initiator.`);
-    io.to(to).emit("call-accepted", { signal, callId });
-  });
-
-  socket.on("end-call", ({ to }) => {
-    console.log(`Call ended/rejected. Notifying room: ${to}`);
-    io.to(to).emit("call-ended");
-  });
-
-  socket.on("request-force-logout", (userId) => {
-    socket.to(userId).emit("force-logout", {
-      message: "Session terminated by server request."
+    console.log(`Relaying Answer for Call: ${callId} back to Initiator: ${to}`);
+    io.to(to.toString()).emit("call-accepted", { 
+      signal, 
+      callId 
     });
+  });
+  socket.on("end-call", ({ to }) => {
+    if (to) {
+      console.log(`Ending call for user: ${to}`);
+      io.to(to.toString()).emit("call-ended");
+    }
   });
 
   socket.on("disconnect", () => {
@@ -1642,28 +1639,51 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
     if (!callId || !signal) {
       return res.status(400).json({ success: false, message: "Missing callId or signal data" });
     }
-    const updatedCall = await Call.findByIdAndUpdate(
-      callId, 
-      { 
-        signal: signal,
-        status: 'ringing' 
-      },
-      { new: true }
-    );
 
-    if (!updatedCall) {
+    const call = await Call.findById(callId);
+    if (!call) {
       return res.status(404).json({ success: false, message: "Call session not found" });
     }
 
-    console.log(`📞 Call ${callId} is now RINGING (Signal Saved)`);
+    const isOffer = !call.signal;
     
-    res.json({ success: true, status: 'ringing' });
+    const updateData = isOffer 
+      ? { signal, status: 'ringing' } 
+      : { answerSignal: signal, status: 'connected', startTime: Date.now() };
+
+    const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
+    const io = req.app.get('socketio');
+    if (io) {
+      const myId = (req.user.id || req.user._id).toString();
+      const targetId = updatedCall.caller.toString() === myId 
+        ? updatedCall.receiver.toString() 
+        : updatedCall.caller.toString();
+
+      if (isOffer) {
+        io.to(targetId).emit("incoming-call", {
+          signal,
+          fromId: myId,
+          fromName: req.user.name || "User",
+          callId
+        });
+      } else {
+        io.to(targetId).emit("call-accepted", {
+          signal,
+          callId
+        });
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      status: updatedCall.status,
+      signalType: isOffer ? 'offer' : 'answer' 
+    });
   } catch (err) {
     console.error("❌ Update Signal Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

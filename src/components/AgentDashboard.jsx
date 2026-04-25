@@ -250,10 +250,17 @@ useEffect(() => {
     setCallStatus(prev => (prev === 'calling' ? 'ringing' : prev));
   };
   const onCallAccepted = (data) => {
+  console.log("🔊 Call accepted by User. Finalizing Peer connection...");
   if (connectionRef.current && data.signal) {
-    connectionRef.current.signal(data.signal);
+    setTimeout(() => {
+      try {
+        connectionRef.current.signal(data.signal);
+        setCallStatus('connected');
+      } catch (e) {
+        console.error("Signal error during acceptance:", e);
+      }
+    }, 100);
   }
-  setCallStatus('connected');
 };
   socket.on("incoming-call", onIncoming);
   socket.on("user-is-ringing", onUserRinging);
@@ -477,25 +484,19 @@ const handleAcceptCall = async () => {
   // 1. SILENCE RINGTONE IMMEDIATELY
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.currentTime = 0;
     ringtoneAudio.current.src = ""; 
     ringtoneAudio.current.load();
   }
 
   try {
-    // 2. UI FEEDBACK
     setCallStatus('connecting');
-    setCallTime(0);
-    setPeerConnected(false); // Reset peer connection state
-    
     const token = localStorage.getItem('agentToken');
     const callId = activeCaller?.callId || activeCall?.callId;
 
-    // 3. RETRIEVE INITIAL OFFER SIGNAL
+    // 2. RETRIEVE INITIAL OFFER SIGNAL
     let incomingSignal = activeCaller?.signal || activeCall?.signal;
     
     if (!incomingSignal) {
-      console.log("🔍 Signal missing from state, fetching from DB...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -503,93 +504,70 @@ const handleAcceptCall = async () => {
       incomingSignal = data.signal;
     }
 
-    if (!incomingSignal) throw new Error("No handshake signal found. Connection aborted.");
+    if (!incomingSignal) throw new Error("No handshake signal found.");
+
     await fetch('/api/calls/accept', {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`, 
-        'Content-Type': 'application/json' 
-      },
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId })
     });
 
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }, 
-      video: false 
-    });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     userStreamRef.current = stream; 
+
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: false, 
       trickle: false,
       stream: stream,
-      config: { 
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' }
-        ] 
-      }
     });
+
     peer.on('signal', async (data) => {
       const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId;
-      
       socket.emit("answer-call", { to: targetId, signal: data, callId });
+      
       await fetch('/api/calls/update-signal', {
         method: 'PATCH',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json' 
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ callId, signal: data })
       });
     });
+
     peer.on('stream', (remoteStream) => {
-      console.log("🔊 Connection established! Attaching remote audio...");
-      
       let audio = document.getElementById('remoteAudio');
       if (!audio) {
         audio = document.createElement('audio');
         audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        audio.playsInline = true;
+        audio.setAttribute('playsinline', 'true');
         document.body.appendChild(audio);
       }
 
       audio.srcObject = remoteStream;
-      audio.muted = false;
-      audio.volume = isSpeakerOn ? 1.0 : 0.6; // Slightly higher default volume
+      audio.muted = true; 
 
       audio.play()
         .then(() => {
-           console.log("✅ Audio playing");
-           setCallStatus('connected');
+          setTimeout(() => {
+            audio.muted = false; // Unmute after playback starts
+            setCallStatus('connected');
+          }, 500);
         })
-        .catch(e => console.warn("🔈 Audio blocked by browser policy", e));
+        .catch(e => {
+          console.warn("Autoplay blocked, unmuting anyway", e);
+          setCallStatus('connected');
+        });
     });
-    if (!peerConnected) {
-      console.log("🤝 Signaling local peer with remote offer...");
-      peer.signal(incomingSignal);
-      setPeerConnected(true);
-    }
+    setTimeout(() => {
+      if (peer && !peer.destroyed) {
+        peer.signal(incomingSignal);
+      }
+    }, 250);
     
     connectionRef.current = peer;
-
-    peer.on('close', () => handleEndCall());
-    peer.on('error', (err) => {
-      console.error("WebRTC Peer Error:", err);
-      if (err.code === 'ERR_ICE_CONNECTION_FAILURE') return; 
-      handleEndCall();
-    });
 
   } catch (err) {
     console.error("Failed to accept call:", err);
     setCallStatus('idle');
-    alert(err.message || "Could not connect. Please check microphone permissions.");
   }
 };
 
@@ -654,19 +632,12 @@ useEffect(() => {
 useEffect(() => {
   const remoteAudio = document.getElementById('remoteAudio');
   if (remoteAudio && callStatus === 'connected') {
-    remoteAudio.volume = isSpeakerOn ? 1.0 : 0.5; 
-        remoteAudio.muted = false;
-
-    if (remoteAudio.srcObject) {
-      remoteAudio.play()
-        .then(() => {
-          console.log("🔊 Remote audio playback active");
-        })
-        .catch(err => {
-          console.warn("🔈 Audio playback delayed/blocked. Interaction may be required.", err);
-        });
+    remoteAudio.volume = isSpeakerOn ? 1.0 : 0.4; 
+    remoteAudio.muted = false;
+    if (remoteAudio.paused) {
+      remoteAudio.play().catch(err => console.warn("Audio play failed:", err));
     }
-  } else if (remoteAudio && callStatus === 'idle') {
+  } else if (remoteAudio && (callStatus === 'idle' || callStatus === 'ended')) {
     remoteAudio.pause();
     remoteAudio.srcObject = null;
   }

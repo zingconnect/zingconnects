@@ -330,11 +330,16 @@ useEffect(() => {
 
 useEffect(() => {
   const audio = document.getElementById('remoteAudio');
-  if (audio) {
-    audio.volume = isSpeakerOn ? 1.0 : 0.4;
-    
-    if (audio.setSinkId) {
-      audio.setSinkId(isSpeakerOn ? '' : 'earpiece').catch(() => {});
+  if (!audio) return;
+  audio.volume = isSpeakerOn ? 1.0 : 0.3;
+
+  if (audio.setSinkId) {
+    if (isSpeakerOn) {
+      audio.setSinkId('')
+        .then(() => console.log("Audio routed to default speaker"))
+        .catch(err => console.warn("Failed to route to speaker:", err));
+    } else {
+      console.log("Volume lowered to simulate earpiece mode");
     }
   }
 }, [isSpeakerOn]);
@@ -567,25 +572,25 @@ const handleAcceptCall = async () => {
       setPeerConnected(true);
       setCallStatus('connected');
     });
+    
+const incomingSignal = activeCall?.answerSignal || activeCall?.signal || activeCaller?.signal;
 
-    // 8. APPLY THE INCOMING SIGNAL (Critical Step)
-    const incomingSignal = activeCall?.signal || (activeCaller?.signal);
+if (incomingSignal && peer) {
+  try {
+    const parsedSignal = typeof incomingSignal === 'string' 
+      ? JSON.parse(incomingSignal) 
+      : incomingSignal;
+    setTimeout(() => {
+      if (!peer.destroyed) {
+        console.log("Applying incoming signal to peer...");
+        peer.signal(parsedSignal);
+      }
+    }, 200); 
 
-    if (incomingSignal) {
-      const parsedSignal = typeof incomingSignal === 'string' 
-        ? JSON.parse(incomingSignal) 
-        : incomingSignal;
-        
-      setTimeout(() => {
-        if (peer && !peer.destroyed) {
-          try {
-            peer.signal(parsedSignal);
-          } catch (e) {
-            console.error("Signal Application Error:", e);
-          }
-        }
-      }, 150);
-    }
+  } catch (err) {
+    console.error("Error parsing or applying signal:", err);
+  }
+}
 
     connectionRef.current = peer;
 
@@ -1146,38 +1151,41 @@ const handleStartCall = async () => {
       }).catch(e => console.error("Signal backup failed:", e));
     });
 
-    peer.on('stream', (remoteStream) => {
-      // Kill ringing sound
-      if (callingAudio.current) {
-        callingAudio.current.pause();
-        callingAudio.current.src = "";
-      }
+   peer.on('stream', (remoteStream) => {
+  // 1. Kill ringing sound immediately
+  if (callingAudio.current) {
+    callingAudio.current.pause();
+    callingAudio.current.src = "";
+    callingAudio.current.load(); // Force release of the audio file
+  }
 
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.setAttribute('playsinline', 'true');
-        audio.setAttribute('autoplay', 'true');
-        audio.style.display = 'none';
-        document.body.appendChild(audio);
-      }
+  let audio = document.getElementById('remoteAudio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = 'remoteAudio';
+    audio.setAttribute('playsinline', 'true');
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+  }
 
-      audio.srcObject = remoteStream;
-      // Volume is now handled by a separate useEffect watching [isSpeakerOn]
+  audio.srcObject = remoteStream;
+  audio.muted = true; 
+  audio.play()
+    .then(() => {
+      console.log("Stream playback started successfully");
       
-      audio.play()
-        .then(() => setCallStatus('connected'))
-        .catch(() => setCallStatus('connected')); 
+      setTimeout(() => {
+        audio.muted = false;
+        audio.volume = isSpeakerOn ? 1.0 : 0.7; 
+        setCallStatus('connected');
+      }, 500);
+    })
+    .catch((err) => {
+      console.error("Playback failed, likely needs user interaction:", err);
+      // Fallback: still set to connected so the UI shows the timer
+      setCallStatus('connected');
     });
-
-    connectionRef.current = peer;
-
-    socket.on("call-accepted", (answerData) => {
-      if (peer && !peer.destroyed) {
-        peer.signal(answerData.signal);
-      }
-    });
+});
 
   } catch (err) {
     console.error("Call failed:", err);

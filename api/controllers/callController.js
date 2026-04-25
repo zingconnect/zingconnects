@@ -36,15 +36,13 @@ export const updateCallSignal = async (req, res) => {
     if (!callId || !signal) {
       return res.status(400).json({ success: false, message: "Missing callId or signal data" });
     }
-
     const call = await Call.findById(callId);
     if (!call) {
       return res.status(404).json({ success: false, message: "Call session not found" });
     }
-
-    let updateData = {};
     const isOffer = !call.signal;
-
+    
+    let updateData = {};
     if (isOffer) {
       updateData = { 
         signal: signal, 
@@ -53,50 +51,51 @@ export const updateCallSignal = async (req, res) => {
       console.log(`📡 Offer Signal saved for call ${callId}. Status: Ringing.`);
     } else {
       updateData = { 
-        answerSignal: signal, 
+        answerSignal: signal, // We store this separately to keep the original offer intact
         status: 'connected',
-        startTime: call.startTime || Date.now() 
+        startTime: Date.now() 
       };
       console.log(`🔊 Answer Signal saved for call ${callId}. Status: Connected.`);
     }
-
     const updatedCall = await Call.findByIdAndUpdate(
       callId, 
       updateData, 
       { new: true }
     );
+
     const io = req.app.get('socketio');
     if (io) {
-      const myId = req.user.id || req.user._id || req.user.userId;
-      const targetId = myId === updatedCall.caller.toString() 
-        ? updatedCall.receiver 
-        : updatedCall.caller;
+      const myId = (req.user.id || req.user._id || req.user.userId).toString();
+      const targetId = updatedCall.caller.toString() === myId 
+        ? updatedCall.receiver.toString() 
+        : updatedCall.caller.toString();
 
       if (isOffer) {
-        io.to(targetId.toString()).emit("incoming-call", {
+        io.to(targetId).emit("incoming-call", {
           signal: signal,
           fromId: myId,
-          fromName: req.user.name || "User",
+          fromName: req.user.name || req.user.firstName || "User",
           callId: callId
         });
       } else {
-        io.to(targetId.toString()).emit("call-accepted", {
-          signal: signal,
+        io.to(targetId).emit("call-accepted", {
+          signal: signal, // This is the answer signal
           callId: callId
         });
       }
     }
+
     res.json({ 
       success: true, 
       status: updatedCall.status,
       signalType: isOffer ? 'offer' : 'answer' 
     });
+    
   } catch (error) {
     console.error("❌ WebRTC Signaling Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 export const checkIncomingCall = async (req, res) => {
   try {
     await connectToDatabase(); 
