@@ -50,11 +50,11 @@ export const acceptCall = async (req, res) => {
       return res.status(400).json({ success: false, message: "Call ID is required" });
     }
 
-    const updatedCall = await Call.findByIdAndUpdate(
-      callId,
-      { status: 'connected', startTime: Date.now() },
-      { new: true }
-    );
+   const updatedCall = await Call.findByIdAndUpdate(
+  callId,
+  { status: 'connected', startTime: Date.now() },
+  { returnDocument: 'after' } // replaces new: true
+);
 
     if (!updatedCall) {
       return res.status(404).json({ success: false, message: "Call session not found" });
@@ -177,13 +177,15 @@ export const endCall = async (req, res) => {
       ? { _id: callId } 
       : { $or: [{ caller: myId }, { receiver: myId }], status: { $ne: 'ended' } };
 
-    const call = await Call.findOneAndUpdate(
-      query,
-      { status: 'ended', endTime: Date.now(), active: false },
-      { new: true, sort: { createdAt: -1 } }
-    );
+   const call = await Call.findOneAndUpdate(
+  query,
+  { status: 'ended', endTime: Date.now(), active: false },
+  { 
+    returnDocument: 'after', // replaces new: true
+    sort: { createdAt: -1 } 
+  }
+);
 
-    // Notify other party via socket if possible
     const io = req.app.get('socketio');
     if (io && call) {
       const otherPartyId = call.caller.toString() === myId.toString() ? call.receiver : call.caller;
