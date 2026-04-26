@@ -105,7 +105,6 @@ const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const remoteStreamRef = useRef(null); 
   const lastNotifiedId = useRef(null);
   const callStatusRef = useRef('idle');
-  const hasSignaled = useRef(false); 
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -180,23 +179,6 @@ const isIncomingCall =
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
-
-  const onCallAccepted = (data) => {
-  console.log("📥 Answer Signal received. Finalizing handshake...");
-  if (hasSignaled.current || !connectionRef.current || connectionRef.current.destroyed) {
-    return;
-  }
-
-  try {
-    const parsedSignal = typeof data.signal === 'string' ? JSON.parse(data.signal) : data.signal;
-        connectionRef.current.signal(parsedSignal);
-    hasSignaled.current = false; // Lock it so it doesn't run twice
-    setCallStatus('connected');
-    console.log("✅ Connection Stable.");
-  } catch (e) {
-    console.error("Handshake error:", e);
-  }
-};
 
 const unlockAudio = () => {
   setHasInteracted(true);
