@@ -1051,30 +1051,34 @@ const handleStartCall = async (agentId) => {
       stream: stream,
     });
 
-    peer.on('signal', async (signalData) => {
-      // 1. Register Call in DB
-      const res = await fetch('/api/calls/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          receiverId: agentId,
-          receiverModel: 'Agent',
-          signal: signalData
-        })
-      });
-      const dbData = await res.json();
-      setActiveCall({ callId: dbData.callId });
-
-      // 2. Emit via Socket
-      socket.emit("call-user", {
-        userToCall: agentId,
-        fromId: userData._id,
-        signal: signalData,
-        callId: dbData.callId
-      });
+   peer.on('signal', async (signalData) => {
+  const safeReceiverId = String(agentId);
+  const safeFromId = String(userData?._id || userData?.id);
+  try {
+    const res = await fetch('/api/calls/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        receiverId: safeReceiverId, // Use safe string
+        receiverModel: 'Agent',
+        signal: signalData // Simple-peer signal is already a safe object
+      })
     });
+    
+    const dbData = await res.json();
+    if (dbData.callId) setActiveCall({ callId: dbData.callId });
+    socket.emit("call-user", {
+      userToCall: safeReceiverId, // Use safe string
+      fromId: safeFromId,       // Use safe string
+      fromName: userData?.firstName ? `${userData.firstName} ${userData.lastName || ''}` : "User",
+      signal: signalData,
+      callId: dbData.callId
+    });
+  } catch (err) {
+    console.error("Signal registration error:", err);
+  }
+});
 
-    // --- THE FIX FOR THE "KEEP RINGING" PROBLEM ---
     // User must listen for the Agent's response!
     socket.off("call-accepted"); // Avoid duplicates
     socket.on("call-accepted", (data) => {
