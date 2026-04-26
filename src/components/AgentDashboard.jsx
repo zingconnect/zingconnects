@@ -463,29 +463,21 @@ const handleStartCall = async (targetUserId) => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. SILENCE RINGTONE IMMEDIATELY
+  // 1. Silence ringtone
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.src = ""; 
+    ringtoneAudio.current.src = "";
   }
 
+  const token = localStorage.getItem('agentToken');
+  // Handle different potential names for the ID (activeCaller vs activeCall)
+  const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId;
+
   try {
-    const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-    const callId = activeCaller?.callId || activeCall?.callId || activeCall?._id;
-
-    // --- FIX 1: UPDATE DB STATUS TO 'CONNECTED' IMMEDIATELY ---
-    // This tells the User's polling system to stop ringing even if WebRTC is slow
-    fetch('/api/calls/accept', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callId })
-    }).catch(e => console.warn("Background accept sync failed", e));
-
     setCallStatus('connecting');
 
-    // 2. RETRIEVE INITIAL OFFER SIGNAL
-    let incomingSignal = activeCaller?.signal || activeCall?.signal;
-    
+    // 2. Fetch the User's Offer Signal
+    let incomingSignal = activeCall?.signal || activeCaller?.signal;
     if (!incomingSignal && callId) {
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -494,74 +486,62 @@ const handleAcceptCall = async () => {
       incomingSignal = data.signal;
     }
 
-    if (!incomingSignal) throw new Error("No incoming signal found");
-
-    // 3. GET OPTIMIZED AUDIO
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
+    // 3. Formally Accept in DB (Stops the User's "Ringing" state via Polling)
+    await fetch('/api/calls/accept', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId })
     });
 
-    userStreamRef.current = stream; 
-    if (typeof setLocalStream === 'function') setLocalStream(stream);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    userStreamRef.current = stream;
 
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
-      initiator: false, 
-      trickle: false, 
+      initiator: false, // Agent is receiving
+      trickle: false,
       stream: stream,
-      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-    // 4. GENERATE AND SEND ANSWER SIGNAL
     peer.on('signal', async (data) => {
-      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId || activeCall?.caller;
+      // --- THE CRITICAL FIX ---
+      // We must find the USER'S ID to send the answer back
+      const targetId = activeCall?.fromId || activeCall?.caller || activeCaller?.fromId;
       
       if (targetId && socket) {
-        // --- FIX 2: EMIT ANSWER-CALL ---
+        console.log("📤 Sending Answer to User:", targetId);
         socket.emit("answer-call", { 
           to: targetId, 
           signal: data, 
           callId: callId 
         });
+        
+        // Backup: Update the DB signal
+        await fetch('/api/calls/update-signal', {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callId, signal: data })
+        });
       }
-
-      // Sync signal to DB as a backup for the User's polling
-      await fetch('/api/calls/update-signal', {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callId, signal: data })
-      });
     });
 
     peer.on('stream', (remoteStream) => {
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-      }
+      const audio = document.getElementById('remoteAudio') || document.createElement('audio');
+      audio.id = 'remoteAudio';
       audio.srcObject = remoteStream;
+      audio.play();
       setCallStatus('connected');
-      if (typeof setPeerConnected === 'function') setPeerConnected(true);
     });
 
-    peer.on('error', (err) => {
-      console.error("Peer Error:", err);
-      handleEndCall();
-    });
-
-    const parsedSignal = typeof incomingSignal === 'string' ? JSON.parse(incomingSignal) : incomingSignal;
-    peer.signal(parsedSignal);
-    
+    // Inject User's Offer
+    peer.signal(incomingSignal);
     connectionRef.current = peer;
 
   } catch (err) {
-    console.error("❌ Failed to accept call:", err);
-    terminateLocalSession();
+    console.error("Agent Acceptance Failed:", err);
+    setCallStatus('idle');
   }
 };
-
 
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
