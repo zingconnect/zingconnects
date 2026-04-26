@@ -58,7 +58,7 @@ const lastNotifiedId = useRef(null);
 const fileInputRef = useRef(null);
 const cameraInputRef = useRef(null);
 const timerRef = useRef(null);
-
+const hasSignaled = useRef(false);
 
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
@@ -128,6 +128,24 @@ const plans = [
       return <BsCheckAll className="text-gray-400" size={18} />;
     default:
       return <BsCheck className="text-gray-400" size={16} />;
+  }
+};
+
+const onCallAccepted = (data) => {
+  console.log("📥 Answer Signal received. Finalizing handshake...");
+
+  if (hasSignaled.current || !connectionRef.current || connectionRef.current.destroyed) {
+    return;
+  }
+
+  try {
+    const parsedSignal = typeof data.signal === 'string' ? JSON.parse(data.signal) : data.signal;
+        connectionRef.current.signal(parsedSignal);
+    hasSignaled.current = true; // Lock it so it doesn't run twice
+    setCallStatus('connected');
+    console.log("✅ Connection Stable.");
+  } catch (e) {
+    console.error("Handshake error:", e);
   }
 };
 
