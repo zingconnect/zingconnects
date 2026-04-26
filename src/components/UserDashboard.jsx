@@ -179,48 +179,46 @@ const isIncomingCall =
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
-
 const unlockAudio = () => {
   setHasInteracted(true);
   console.log("Initializing secure audio channels...");
 
-  const remoteAudio = document.getElementById('remoteAudio');
-  
   const audioRefs = [
     { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
-    { ref: callingAudio, src: '/sounds/calling.wav' }, // Matches your project file
+    { ref: callingAudio, src: '/sounds/calling.wav' },
     { ref: notificationSound, src: '/sounds/notification.mp3' }
   ];
 
   audioRefs.forEach(({ ref, src }) => {
-  const el = ref.current;
-  if (el) {
-    el.src = src;
-    el.load();
-    el.play()
-      .then(() => {
-        el.pause(); // Only pause if it successfully started playing
-        el.currentTime = 0;
-      })
-      .catch(err => {
-        if (err.name !== 'AbortError') console.warn(`Audio: ${src}`, err);
-      });
+    const el = ref.current;
+    if (el) {
+      el.muted = true; // Temporary mute for priming
+      el.src = src;
+      el.play()
+        .then(() => {
+          el.pause();
+          el.muted = false; // Unmute so it's ready for real use
+          el.currentTime = 0;
+        })
+        .catch(err => console.warn(`Priming skipped for ${src}`));
+    }
+  });
+  let remoteAudio = document.getElementById('remoteAudio');
+  if (!remoteAudio) {
+    remoteAudio = document.createElement('audio');
+    remoteAudio.id = 'remoteAudio';
+    remoteAudio.style.display = 'none';
+    document.body.appendChild(remoteAudio);
   }
-});
+  
+  remoteAudio.play().catch(() => {
+    console.log("Voice channel primed for incoming streams.");
+  });
 
-  if (remoteAudio) {
-    remoteAudio.play()
-      .then(() => {
-        remoteAudio.pause();
-        console.log("Primed: Remote Voice Channel");
-      })
-      .catch(() => { /* Silent catch for empty remote stream */ });
-  }
-
+  // 3. Socket Synchronization
   const currentAgentId = agent?._id || agent?.id;
   if (socket && currentAgentId) {
     socket.emit("join-private-room", currentAgentId);
-    console.log("📡 Secure room synchronized");
   }
   document.removeEventListener('click', unlockAudio);
   document.removeEventListener('touchstart', unlockAudio);
@@ -409,8 +407,6 @@ useEffect(() => {
     try {
       if (callStatus === 'ringing' || callStatus === 'calling') {
         if (isIncomingCall && callStatus === 'ringing') {
-          // --- CASE: INCOMING CALL ---
-          // 1. Kill the outgoing beep (if any)
           callingAudio.current.pause();
           callingAudio.current.src = "";   
           ringtoneAudio.current.src = "/sounds/ringtone.mp3";
@@ -499,8 +495,17 @@ const handleAcceptCall = async () => {
       body: JSON.stringify({ callId })
     });
     const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { echoCancellation: true, noiseSuppression: true } 
-    });
+audio: { 
+  echoCancellation: true, 
+  noiseSuppression: true, 
+  autoGainControl: true,
+  googEchoCancellation: true,
+  googAutoGainControl: true,
+  googNoiseSuppression: true,
+  googHighpassFilter: true 
+}
+, video: false 
+});
     userStreamRef.current = stream;
     setLocalStream(stream);
     const PeerConstructor = Peer.default || Peer;
@@ -525,26 +530,35 @@ const handleAcceptCall = async () => {
       });
     });
 
-    // Handle Remote Stream
-    peer.on('stream', (remoteStream) => {
-      console.log("🔈 Remote stream received");
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        audio.playsInline = true;
-        document.body.appendChild(audio);
-      }
-      audio.srcObject = remoteStream;
-      audio.play().catch(e => console.warn("Autoplay blocked, waiting for interaction", e));
-      setCallStatus('connected');
-      setPeerConnected(true);
-    });
-    peer.on('error', (err) => {
-      console.error("Peer Error:", err);
-      handleEndCall();
-    });
+   // Handle Remote Stream
+peer.on('stream', (remoteStream) => {
+  console.log("🔈 Remote stream received");
+    let audio = document.getElementById('remoteAudio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = 'remoteAudio';
+    audio.autoplay = true;
+    audio.playsInline = true;
+    document.body.appendChild(audio);
+  }
+   audio.srcObject = remoteStream;
+audio.muted = false; 
+audio.volume = 1.0;
+audio.play().catch(e => console.warn("Playback deferred", e));
+setCallStatus('connected');
+  const playPromise = audio.play();
+  if (playPromise !== undefined) {
+    playPromise
+      .then(() => {
+        console.log("🔊 Audio playing successfully");
+        setCallStatus('connected');
+        setPeerConnected(true);
+      })
+      .catch(e => {
+        console.warn("Autoplay blocked. User must click 'Sync' or 'Accept'", e);
+      });
+  }
+});
 
     peer.on('close', () => handleEndCall());
     const parsedSignal = typeof incomingSignal === 'string' 
@@ -588,6 +602,7 @@ const terminateLocalSession = () => {
   if (remoteAudio) {
     remoteAudio.pause();
     remoteAudio.srcObject = null;
+    remoteAudio.remove();
     console.log("Remote audio stream cleared.");
   }
 
@@ -985,6 +1000,7 @@ const handleFinalSend = async () => {
     const data = await confirmResponse.json();
     if (data.success) {
       setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+      setReplyingTo(null);
     } else {
       throw new Error();
     }
@@ -1012,7 +1028,6 @@ const handleDownload = async (url, type) => {
   }
 };
 
-
 const handleStartCall = async () => {
   // 1. GLOBAL BUFFER CHECK
   if (typeof window !== 'undefined' && !window.Buffer) {
@@ -1037,12 +1052,19 @@ const handleStartCall = async () => {
   let connectionTimeout;
 
   try {
-    // 2. MIC ACCESS
-    stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, 
-      video: false 
-    });
-    
+  stream = await navigator.mediaDevices.getUserMedia({ 
+  audio: { 
+    echoCancellation: true, 
+    noiseSuppression: true, 
+    autoGainControl: true,
+    googEchoCancellation: true,
+    googAutoGainControl: true,
+    googNoiseSuppression: true,
+    googHighpassFilter: true 
+  }, 
+  video: false 
+});
+
     if (userStreamRef) userStreamRef.current = stream;
     setLocalStream(stream);
 
@@ -1201,6 +1223,7 @@ const handleStartCall = async () => {
     const data = await response.json();
     if (data.success) {
       setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+      setReplyingTo(null);
     } else {
       throw new Error("Failed to save");
     }

@@ -370,6 +370,15 @@ useEffect(() => {
   }
 }, [callStatus, isIncomingCall]);
 
+useEffect(() => {
+  return () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      console.log("Memory Cleaned: Preview URL revoked.");
+    }
+  };
+}, [previewUrl]);
+
 const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
   const token = localStorage.getItem('agentToken');
@@ -430,18 +439,20 @@ const handleStartCall = async (targetUserId) => {
       }
     });
 
-    peer.on('stream', (remoteStream) => {
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.setAttribute('autoplay', 'true');
-        document.body.appendChild(audio);
-      }
-      audio.srcObject = remoteStream;
-      setCallStatus('connected');
-    });
-
+  peer.on('stream', (remoteStream) => {
+  console.log("🔊 Remote stream attached");
+  let audio = document.getElementById('remoteAudio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = 'remoteAudio';
+    document.body.appendChild(audio);
+  }
+  audio.srcObject = remoteStream;
+  audio.autoplay = true;
+  audio.playsInline = true;
+    audio.muted = false; 
+  setCallStatus('connected');
+});
     connectionRef.current = peer;
 
   } catch (err) {
@@ -614,6 +625,8 @@ const handleEndCall = async () => {
   if (remoteAudio) {
     remoteAudio.pause();
     remoteAudio.srcObject = null;
+    remoteAudio.remove();
+    console.log("Remote audio element removed from DOM.");
   }
 
   // 6. UI RESET
@@ -654,14 +667,11 @@ useEffect(() => {
 
 useEffect(() => {
   const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio) {
-    if (callStatus === 'connected') {
-      remoteAudio.volume = isSpeakerOn ? 1.0 : 0.4; 
-      remoteAudio.muted = false;
-      remoteAudio.play().catch(err => console.warn("Audio play prevented by browser:", err));
-    } else {
-      remoteAudio.pause();
-      remoteAudio.srcObject = null;
+  if (remoteAudio && callStatus === 'connected') {
+    remoteAudio.volume = isSpeakerOn ? 1.0 : 0.7; 
+    remoteAudio.muted = false;
+        if (remoteAudio.paused) {
+      remoteAudio.play().catch(e => console.log("Playback interaction needed"));
     }
   }
 }, [isSpeakerOn, callStatus]);
@@ -838,21 +848,26 @@ const handleFileUpload = (e) => {
 
   if (previewUrl) URL.revokeObjectURL(previewUrl);
 
+ const objectUrl = URL.createObjectURL(file);
   setPreviewFile(file);
-  setPreviewUrl(URL.createObjectURL(file));
-  setCaption(""); 
+  setPreviewUrl(objectUrl);
+  setCaption("");
 
   if (e.target) e.target.value = null; 
 };
 
-const handleDownload = async (fileUrl, fileName) => {
+const handleDownload = async (fileUrl, detectedType) => {
   try {
     const response = await fetch(fileUrl);
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
+    const timestamp = new Date().getTime();
+    const extension = detectedType === 'video' ? 'mp4' : 'jpg';
+    const fileName = `Zing_Secure_${timestamp}.${extension}`;
+
     const link = document.createElement('a');
     link.href = url;
-    link.download = fileName || 'download';
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -919,8 +934,8 @@ const handleFinalSend = async () => {
     const finalData = await confirmResponse.json();
 
     if (finalData.success) {
-      // Success! Update local UI
       setMessages(prev => [...prev, finalData.message]);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
       setPreviewFile(null);
       setCaption("");
@@ -1684,7 +1699,7 @@ const handleSendMessage = async (e) => {
           <div className="absolute inset-0 w-full h-full bg-blue-500 rounded-full animate-ping opacity-10"></div>
         </div>
 
-     {/* 2. TEXT & STATUS */}
+    {/* 2. TEXT & STATUS */}
 <div className="text-center">
   <h2 className="text-3xl font-extrabold tracking-tighter text-white">
     {isIncomingCall 
@@ -1717,53 +1732,77 @@ const handleSendMessage = async (e) => {
   </div>
 </div>
 
-        {/* 3. DYNAMIC CONTROLS (INCOMING VS ACTIVE) */}
-        <div className="flex items-center justify-center gap-10 mt-16">
-          {isIncomingCall && callStatus === 'ringing' ? (
-            <>
-              {/* Decline */}
-              <div className="flex flex-col items-center gap-2">
-                <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95">
-                  <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
-                </button>
-              <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">
-  {callStatus === 'connected' ? 'End Call' : 'Cancel'}
-</span>
-              </div>
-              {/* Accept */}
-              <div className="flex flex-col items-center gap-2">
-                <button onClick={handleAcceptCall} className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center hover:bg-green-600 transition-all shadow-2xl shadow-green-500/40 animate-bounce active:scale-95">
-                  <BsTelephoneFill size={32} color="white" />
-                </button>
-                <span className="text-[9px] font-bold uppercase text-green-500/60 tracking-widest">Accept</span>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Speaker */}
-              <div className="flex flex-col items-center gap-2">
-                <button onClick={() => setIsSpeakerOn(!isSpeakerOn)} className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isSpeakerOn ? 'bg-white text-slate-900 shadow-lg shadow-white/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                  <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 16 16" height="20" width="20"><path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/><path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z"/><path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z"/></svg>
-                </button>
-                <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">Speaker</span>
-              </div>
-              {/* End Call */}
-              <div className="flex flex-col items-center gap-2">
-                <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95">
-                  <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
-                </button>
-                <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">{callStatus === 'connected' ? 'End Call' : 'Cancel'}</span>
-              </div>
-              {/* Mute */}
-              <div className="flex flex-col items-center gap-2">
-                <button onClick={() => setIsMuted(!isMuted)} className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isMuted ? 'bg-red-500 shadow-lg shadow-red-500/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                  <BsMicMuteFill size={20} color="white" className={isMuted ? "opacity-100" : "opacity-50"} />
-                </button>
-                <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">{isMuted ? 'Muted' : 'Mute'}</span>
-              </div>
-            </>
-          )}
-        </div>
+{/* 3. DYNAMIC CONTROLS (INCOMING VS ACTIVE) */}
+<div className="flex items-center justify-center gap-10 mt-16">
+  {isIncomingCall && callStatus === 'ringing' ? (
+    <>
+      {/* Decline Incoming */}
+      <div className="flex flex-col items-center gap-2">
+        <button 
+          onClick={handleEndCall} 
+          className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95"
+        >
+          <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
+        </button>
+        <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">Decline</span>
+      </div>
+
+      {/* Accept Incoming */}
+      <div className="flex flex-col items-center gap-2">
+        <button 
+          onClick={handleAcceptCall} 
+          className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center hover:bg-green-600 transition-all shadow-2xl shadow-green-500/40 animate-bounce active:scale-95"
+        >
+          <BsTelephoneFill size={32} color="white" />
+        </button>
+        <span className="text-[9px] font-bold uppercase text-green-500/60 tracking-widest">Accept</span>
+      </div>
+    </>
+  ) : (
+    <>
+      {/* Speaker Control */}
+      <div className="flex flex-col items-center gap-2">
+        <button 
+          onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+            isSpeakerOn ? 'bg-white text-slate-900 shadow-lg shadow-white/20' : 'bg-white/10 text-white hover:bg-white/20'
+          }`}
+        >
+          <BsVolumeUpFill size={22} />
+        </button>
+        <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">Speaker</span>
+      </div>
+
+      {/* Primary End Call/Cancel Action */}
+      <div className="flex flex-col items-center gap-2">
+        <button 
+          onClick={handleEndCall} 
+          className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-all shadow-2xl shadow-red-500/40 active:scale-95"
+        >
+          <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
+        </button>
+        <span className="text-[9px] font-bold uppercase text-red-500/60 tracking-widest">
+          {callStatus === 'connected' ? 'End Call' : 'Cancel'}
+        </span>
+      </div>
+
+      {/* Mute Control */}
+      <div className="flex flex-col items-center gap-2">
+        <button 
+          onClick={() => setIsMuted(!isMuted)} 
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+            isMuted ? 'bg-red-500 shadow-lg shadow-red-500/20' : 'bg-white/10 text-white hover:bg-white/20'
+          }`}
+        >
+          <BsMicMuteFill size={20} color="white" className={isMuted ? "opacity-100" : "opacity-50"} />
+        </button>
+        <span className="text-[9px] font-bold uppercase text-white/40 tracking-widest">
+          {isMuted ? 'Muted' : 'Mute'}
+        </span>
+      </div>
+    </>
+  )}
+</div>
       </div>
     </div>
   )}
