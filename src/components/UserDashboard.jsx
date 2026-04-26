@@ -1098,24 +1098,29 @@ const handleStartCall = async () => {
     });
 
     // 5. CRITICAL: SETUP SOCKET LISTENER IMMEDIATELY
-    // We remove old listeners to prevent the "Double Ringing" bug
+    // standardizing event name: listen for 'call-accepted'
     socket.off("call-accepted"); 
     socket.on("call-accepted", (acceptData) => {
       console.log("📡 Agent Accepted! Injecting Answer Signal...");
-      if (acceptData.signal) {
-        peer.signal(acceptData.signal);
+      if (acceptData.signal && peer) {
+        // Robust parsing in case signal arrives as a string
+        const remoteSignal = typeof acceptData.signal === 'string' 
+          ? JSON.parse(acceptData.signal) 
+          : acceptData.signal;
+        
+        peer.signal(remoteSignal);
       }
     });
 
     // 6. START CONNECTION TIMEOUT
     connectionTimeout = setTimeout(() => {
-      // Use a ref or a functional check to see if we are still 'ringing'
-      if (connectionRef.current && !peerConnected) {
+      // Use the local 'peer' variable for the check to ensure accuracy
+      if (peer && !peer.connected) {
         console.warn("Handshake timed out");
         handleEndCall();
         alert("Agent didn't answer. Please try again later.");
       }
-    }, 35000); // 35s to allow for network lag
+    }, 35000); 
 
     // Send Offer Signal
     peer.on('signal', async (signalData) => {
@@ -1166,7 +1171,15 @@ const handleStartCall = async () => {
           setCallStatus('connected');
           setPeerConnected(true);
         })
-        .catch(e => console.warn("Playback pending interaction", e));
+        .catch(e => {
+            // Unmute fallback for restrictive browsers
+            audio.muted = true;
+            audio.play().then(() => {
+                setTimeout(() => { audio.muted = false; }, 500);
+                setCallStatus('connected');
+                setPeerConnected(true);
+            });
+        });
     });
 
     peer.on('error', (err) => {

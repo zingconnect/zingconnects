@@ -472,14 +472,17 @@ const handleAcceptCall = async () => {
 
   try {
     setCallStatus('connecting');
+    // Ensure we use the correct token for Agents
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+    
+    // Unified callId retrieval
     const callId = activeCaller?.callId || activeCall?.callId || activeCall?._id;
 
     // 2. RETRIEVE INITIAL OFFER SIGNAL
     let incomingSignal = activeCaller?.signal || activeCall?.signal;
     
     if (!incomingSignal && callId) {
-      console.log("📡 Signal missing, fetching from server...");
+      console.log("📡 Signal missing from state, fetching from server...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -488,12 +491,12 @@ const handleAcceptCall = async () => {
     }
 
     if (!incomingSignal) {
-      console.error("❌ No incoming signal found");
+      console.error("❌ No incoming signal found for call:", callId);
       setCallStatus('idle');
       return;
     }
 
-    // 3. GET OPTIMIZED AUDIO (Matching User-side quality)
+    // 3. GET OPTIMIZED AUDIO (Matching User-side constraints for sync)
     const stream = await navigator.mediaDevices.getUserMedia({ 
       audio: { 
         echoCancellation: true, 
@@ -519,14 +522,19 @@ const handleAcceptCall = async () => {
       }
     });
 
-    // 4. GENERATE AND SEND ANSWER
+    // 4. GENERATE AND SEND ANSWER SIGNAL
     peer.on('signal', async (data) => {
-      console.log("📤 Answer signal generated. Relaying...");
-      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.caller;
+      console.log("📤 Answer signal generated. Relaying to User...");
+      
+      // CRITICAL: Ensure targetId is the User who started the call
+      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId || activeCall?.caller;
       
       if (targetId && socket) {
-        // CRITICAL: This is what tells the User to stop ringing
+        // This emit is what stops the User's "Ringing" state
         socket.emit("answer-call", { to: targetId, signal: data, callId });
+        console.log(`📡 Signal emitted to User: ${targetId}`);
+      } else {
+        console.error("❌ Could not determine targetId for signaling");
       }
       
       if (callId) {
@@ -541,7 +549,7 @@ const handleAcceptCall = async () => {
       }
     });
 
-    // 5. HANDLE REMOTE VOICE
+    // 5. HANDLE REMOTE VOICE STREAM
     peer.on('stream', (remoteStream) => {
       console.log("🔊 Remote audio stream received");
       let audio = document.getElementById('remoteAudio');
@@ -554,20 +562,22 @@ const handleAcceptCall = async () => {
       }
 
       audio.srcObject = remoteStream;
-      audio.muted = false; // Directly play on agent side
+      audio.muted = false; 
       audio.volume = 1.0;
 
       audio.play()
         .then(() => {
           setCallStatus('connected');
-          console.log("✅ Agent connected to User");
+          console.log("✅ Call fully connected");
         })
         .catch(e => {
-          console.warn("Autoplay blocked, unmuting after delay...");
+          console.warn("Autoplay blocked, attempting muted bridge...");
           audio.muted = true;
           audio.play().then(() => {
-            setTimeout(() => { audio.muted = false; }, 500);
-            setCallStatus('connected');
+            setTimeout(() => { 
+              audio.muted = false; 
+              setCallStatus('connected');
+            }, 500);
           });
         });
     });
@@ -579,12 +589,12 @@ const handleAcceptCall = async () => {
     const parsedSignal = typeof incomingSignal === 'string' 
       ? JSON.parse(incomingSignal) 
       : incomingSignal;
-
     setTimeout(() => {
       if (peer && !peer.destroyed) {
+        console.log("📥 Injecting User Offer into Agent Peer...");
         peer.signal(parsedSignal);
       }
-    }, 150);
+    }, 200);
     
     connectionRef.current = peer;
 
@@ -592,10 +602,11 @@ const handleAcceptCall = async () => {
     console.error("❌ Failed to accept call:", err);
     setCallStatus('idle');
     if (userStreamRef.current) {
-      userStreamRef.current.getTracks().forEach(t => t.stop());
+        userStreamRef.current.getTracks().forEach(t => t.stop());
     }
   }
 };
+
 
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
