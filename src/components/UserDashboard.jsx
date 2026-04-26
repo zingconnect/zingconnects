@@ -1105,21 +1105,18 @@ const handleStartCall = async () => {
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-    // 5. CRITICAL: SETUP SOCKET LISTENER IMMEDIATELY
-    // standardizing event name: listen for 'call-accepted'
-    socket.off("call-accepted"); 
-    socket.on("call-accepted", (acceptData) => {
-      console.log("📡 Agent Accepted! Injecting Answer Signal...");
-      if (acceptData.signal && peer) {
-        // Robust parsing in case signal arrives as a string
-        const remoteSignal = typeof acceptData.signal === 'string' 
-          ? JSON.parse(acceptData.signal) 
-          : acceptData.signal;
-        
-        peer.signal(remoteSignal);
-      }
-    });
+   socket.on("call-accepted", (acceptData) => {
+  console.log("📡 Agent Accepted! Injecting Answer Signal...");
+    setCallStatus('connecting'); 
 
+  if (acceptData.signal && peer) {
+    const remoteSignal = typeof acceptData.signal === 'string' 
+      ? JSON.parse(acceptData.signal) 
+      : acceptData.signal;
+    
+    peer.signal(remoteSignal);
+  }
+});
     // 6. START CONNECTION TIMEOUT
     connectionTimeout = setTimeout(() => {
       // Use the local 'peer' variable for the check to ensure accuracy

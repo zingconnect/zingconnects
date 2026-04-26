@@ -24,6 +24,7 @@ import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
 import callRoutes from './routes/callRoutes.js';
+import Call from './models/Call.js'; // Ensure the path is correct
 
 dotenv.config();
 
@@ -151,24 +152,23 @@ const authenticateToken = (req, res, next) => {
 }
     }
 
-    // 3. Attach user to request and move forward
-    req.user = decoded;
-    next();
+    req.user.id = decoded.id || decoded._id; 
+next();
   });
 };
 
-let ioInstance; 
-
-ioInstance = io; 
-
+let ioInstance = io; 
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
+
+  // 1. ROOM JOINING
   socket.on("join-main-room", (userId) => {
     if (userId) {
       socket.join(userId.toString());
       console.log(`User ${userId} is now reachable in their private room.`);
     }
   });
+  // 2. RELAY OFFER (Caller -> Receiver)
   socket.on("call-user", ({ userToCall, signalData, fromId, fromName, callId }) => {
     console.log(`Relaying Offer from ${fromName} to ${userToCall}`);
     io.to(userToCall.toString()).emit("incoming-call", { 
@@ -178,31 +178,50 @@ io.on("connection", (socket) => {
       callId 
     });
   });
+  // 3. CONFIRM RINGING
   socket.on("confirm-ringing", ({ to }) => {
     if (to) io.to(to.toString()).emit("user-is-ringing");
   });
-  socket.on("answer-call", ({ to, signal, callId }) => {
+  // THIS FIXES THE "STUCK ON RINGING" ISSUE
+  socket.on("answer-call", async ({ to, signal, callId }) => {
     console.log(`Relaying Answer for Call: ${callId} back to Initiator: ${to}`);
+    try {
+      // Force database to 'connected' so the caller's UI updates via polling if socket is slow
+      if (callId) {
+        await Call.findByIdAndUpdate(callId, { 
+          status: 'connected', 
+          startTime: Date.now() 
+        });
+        console.log(`DB Sync: Call ${callId} marked as connected.`);
+      }
+    } catch (err) {
+      console.error("Failed to update DB during answer-call relay:", err);
+    }
+    // Emit 'call-accepted' back to the person who started the call
     io.to(to.toString()).emit("call-accepted", { 
       signal, 
       callId 
     });
   });
-socket.on("end-call", async ({ to, callId }) => {
-  if (to) {
-    io.to(to.toString()).emit("call-ended", { callId });
-        try {
-      await Call.findByIdAndUpdate(callId, { 
-        status: 'ended', 
-        endTime: Date.now(), 
-        active: false 
-      });
-      console.log(`Database updated: Call ${callId} ended via Socket.`);
+  // 5. END CALL
+  socket.on("end-call", async ({ to, callId }) => {
+    console.log(`Ending call ${callId}. Notifying: ${to}`);
+    if (to) {
+      io.to(to.toString()).emit("call-ended", { callId });
+    }
+    try {
+      if (callId) {
+        await Call.findByIdAndUpdate(callId, { 
+          status: 'ended', 
+          endTime: Date.now(), 
+          active: false 
+        });
+        console.log(`Database updated: Call ${callId} ended via Socket.`);
+      }
     } catch (err) {
       console.error("Socket-driven DB update failed:", err);
     }
-  }
-});
+  });
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
   });
@@ -1645,11 +1664,11 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
 
     const call = await Call.findById(callId);
     if (!call) return res.status(404).json({ success: false, message: "Call not found" });
-    const isAnswer = call.receiver.toString() === myId;
-    
-    const updateData = isAnswer 
-      ? { answerSignal: signal, status: 'connected' } 
-      : { signal: signal, status: 'ringing' };
+const isAnswer = call.receiver.toString() === req.user.id.toString();
+
+   const updateData = isAnswer 
+  ? { answerSignal: signal, status: 'connected', startTime: Date.now() } // Mark connected here
+  : { signal: signal, status: 'ringing' };
 
     const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
 

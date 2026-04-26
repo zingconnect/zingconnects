@@ -105,50 +105,42 @@ export const answerCallSignal = async (req, res) => {
   }
 };
 
-// @desc Updates the WebRTC signal (Handles both the Initial Offer and the Answer)
 export const updateCallSignal = async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
-
-    if (!callId || !signal) {
-      return res.status(400).json({ success: false, message: "Missing callId or signal data" });
-    }
+    const myId = (req.user.id || req.user._id).toString();
 
     const call = await Call.findById(callId);
-    if (!call) return res.status(404).json({ success: false, message: "Call session not found" });
+    if (!call) return res.status(404).json({ success: false, message: "Call not found" });
 
-    // Determine if we are saving the Agent's Offer or the User's Answer
-    const isOffer = !call.signal;
-    
-    const updateData = isOffer 
-      ? { signal: signal, status: 'ringing' } 
-      : { answerSignal: signal, status: 'connected', startTime: call.startTime || Date.now() };
+    // Determine if the person sending this signal is the RECEIVER (Answering)
+    const isAnswering = call.receiver.toString() === myId;
+
+    const updateData = isAnswering 
+      ? { answerSignal: signal, status: 'connected', startTime: Date.now() } 
+      : { signal: signal, status: 'ringing' };
 
     const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
 
     const io = req.app.get('socketio');
     if (io) {
-      const myId = (req.user.id || req.user._id || req.user.userId).toString();
-      const targetId = updatedCall.caller.toString() === myId 
-        ? updatedCall.receiver.toString() 
-        : updatedCall.caller.toString();
-
-      io.to(targetId).emit(isOffer ? "incoming-call" : "call-accepted", {
+      // Send signal to the OTHER party
+      const targetId = isAnswering ? updatedCall.caller : updatedCall.receiver;
+      
+      io.to(targetId.toString()).emit(isAnswering ? "call-accepted" : "incoming-call", {
         signal: signal,
         callId: callId,
-        fromName: req.user.firstName || "User"
+        fromName: req.user.firstName || "Secure Connection"
       });
     }
 
     res.json({ success: true, status: updatedCall.status });
   } catch (error) {
-    console.error("❌ Signaling Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc User polls this to find active calls and the connection signal
 export const checkIncomingCall = async (req, res) => {
   try {
     await connectToDatabase(); 
@@ -156,25 +148,27 @@ export const checkIncomingCall = async (req, res) => {
 
     const incoming = await Call.findOne({ 
       receiver: userId, 
-      status: 'ringing',
-      signal: { $ne: null } 
-    }).populate('caller', 'firstName lastName photoUrl');
+      status: { $in: ['ringing', 'calling'] }, // Check both states
+      active: true 
+    })
+    .sort({ createdAt: -1 })
+    .populate('caller', 'firstName lastName photoUrl');
 
     if (!incoming) return res.json({ hasIncomingCall: false });
 
     res.json({
       hasIncomingCall: true,
       callId: incoming._id,
+      status: incoming.status,
       signal: incoming.signal, 
-      createdAt: incoming.createdAt,
       callerData: {
-        fromName: `${incoming.caller?.firstName || 'Unknown'} ${incoming.caller?.lastName || ''}`,
+        fromName: `${incoming.caller?.firstName || 'Unknown'} ${incoming.caller?.lastName || ''}`.trim(),
         photoUrl: incoming.caller?.photoUrl || null,
-        callerId: incoming.caller?._id
+        callerId: incoming.caller?._id // IMPORTANT: handleAcceptCall needs this!
       }
     });
   } catch (error) {
-    res.status(500).json({ message: "Error checking incoming calls", error: error.message });
+    res.status(500).json({ hasIncomingCall: false });
   }
 };
 
