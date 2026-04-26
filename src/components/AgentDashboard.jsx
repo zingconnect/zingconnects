@@ -141,7 +141,7 @@ const onCallAccepted = (data) => {
   try {
     const parsedSignal = typeof data.signal === 'string' ? JSON.parse(data.signal) : data.signal;
         connectionRef.current.signal(parsedSignal);
-    hasSignaled.current = true; // Lock it so it doesn't run twice
+    hasSignaled.current = false; // Lock it so it doesn't run twice
     setCallStatus('connected');
     console.log("✅ Connection Stable.");
   } catch (e) {
