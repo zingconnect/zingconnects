@@ -188,15 +188,21 @@ io.on("connection", (socket) => {
       callId 
     });
   });
- socket.on("end-call", ({ to, callId }) => {
-    if (to) {
-      console.log(`📴 End-call signal from ${socket.id} to Room: ${to} (Call: ${callId || 'N/A'})`);
-            io.to(to.toString()).emit("call-ended", { callId });
-            if (callId) {
-        io.to(callId.toString()).emit("call-ended");
-      }
+socket.on("end-call", async ({ to, callId }) => {
+  if (to) {
+    io.to(to.toString()).emit("call-ended", { callId });
+        try {
+      await Call.findByIdAndUpdate(callId, { 
+        status: 'ended', 
+        endTime: Date.now(), 
+        active: false 
+      });
+      console.log(`Database updated: Call ${callId} ended via Socket.`);
+    } catch (err) {
+      console.error("Socket-driven DB update failed:", err);
     }
-  });
+  }
+});
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
   });
@@ -1635,12 +1641,11 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
+    const myId = (req.user.id || req.user._id).toString();
 
     const call = await Call.findById(callId);
     if (!call) return res.status(404).json({ success: false, message: "Call not found" });
-
-    // If signal exists, this is the ANSWER from the User
-    const isAnswer = !!call.signal; 
+    const isAnswer = call.receiver.toString() === myId;
     
     const updateData = isAnswer 
       ? { answerSignal: signal, status: 'connected' } 
@@ -1648,14 +1653,13 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
 
     const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
 
-    // Emit socket event, but remember: the Frontend POLLING is our real hero on Vercel
     const io = req.app.get('socketio');
     if (io) {
-      const targetId = updatedCall.caller.toString() === req.user.id.toString() 
-        ? updatedCall.receiver.toString() 
-        : updatedCall.caller.toString();
-      
-      io.to(targetId).emit(isAnswer ? "call-accepted" : "incoming-call", { signal, callId });
+      const targetId = isAnswer ? updatedCall.caller : updatedCall.receiver;
+      io.to(targetId.toString()).emit(isAnswer ? "call-accepted" : "incoming-call", { 
+        signal, 
+        callId 
+      });
     }
 
     res.json({ success: true, status: updatedCall.status });
@@ -1663,7 +1667,6 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

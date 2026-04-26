@@ -6,6 +6,7 @@ import {
   acceptCall, 
   endCall,
   getCallStatus,
+  answerCallSignal,
   updateCallSignal // <--- Add this for WebRTC handshake
 } from '../controllers/callController.js';
 
@@ -22,6 +23,8 @@ router.get('/status/:callId', authenticateToken, getCallStatus);
 
 // 4. Signaling (The "Audio Bridge")
 router.patch('/update-signal', authenticateToken, updateCallSignal);
+
+router.patch('/answer-signal', authenticateToken, answerCallSignal);
 
 // 5. Connection & Cleanup
 router.post('/accept', authenticateToken, acceptCall);

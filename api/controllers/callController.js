@@ -74,6 +74,37 @@ export const acceptCall = async (req, res) => {
   }
 };
 
+// Optimized: Specifically for the Receiver sending their Answer signal back
+export const answerCallSignal = async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { callId, signal } = req.body;
+    const myId = (req.user.id || req.user._id).toString();
+
+    // 1. Update DB so the Caller can poll for this answer if socket fails
+    const updatedCall = await Call.findByIdAndUpdate(
+      callId, 
+      { answerSignal: signal, status: 'connected', startTime: Date.now() }, 
+      { new: true }
+    );
+
+    if (!updatedCall) return res.status(404).json({ message: "Call not found" });
+
+    // 2. Emit to the ORIGINAL caller
+    const io = req.app.get('socketio');
+    if (io) {
+      io.to(updatedCall.caller.toString()).emit("call-accepted", {
+        signal: signal,
+        callId: callId
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // @desc Updates the WebRTC signal (Handles both the Initial Offer and the Answer)
 export const updateCallSignal = async (req, res) => {
   try {

@@ -237,35 +237,41 @@ useEffect(() => {
 
 useEffect(() => {
   if (!socket || !userData?._id) return;
+
+  // 1. Ensure the user is in their own room to receive signals
   socket.emit("join-main-room", userData._id);
+
   const handleIncomingCall = (data) => {
     if (callStatusRef.current !== 'idle') {
       socket.emit("user-busy", { to: data.fromId, callId: data.callId });
       return; 
     }
     socket.emit("confirm-ringing", { to: data.fromId });
-   // Inside handleStartCall, after the /api/calls/start fetch:
-setActiveCall({ 
-  callId: data.callId,
-  fromId: currentUserId,
-  isInitiator: true,
-  recipientName: `${agent?.firstName} ${agent?.lastName}`, // Add this line
-  photoUrl: agentData.photoUrl,
-  callerData: {
-    fromName: `${userData?.firstName} ${userData?.lastName}`,
-    photoUrl: userData?.photoUrl,
-    callerId: currentUserId
-  }
+
+    setActiveCall({ 
+      callId: data.callId,
+      fromId: data.fromId,          // FIX: The 'target' for our answer is the Agent (fromId)
+      isInitiator: false,           // FIX: This is an incoming call, so isInitiator must be false
+      signal: data.signal,          // Capture the offer signal immediately
+      recipientName: data.fromName, // Use the name passed from the socket
+      photoUrl: data.photoUrl,
+      callerData: {
+        fromName: data.fromName || "Secure Agent",
+        photoUrl: data.photoUrl,
+        callerId: data.fromId
+      }
     });
+
     setCallStatus('ringing');
   };
+
   const handleCallEnded = () => {
     console.log("Remote party ended the call");
     terminateLocalSession(); 
   };
 
   socket.on("incoming-call", handleIncomingCall);
-  socket.on("call-ended", handleCallEnded); // Listen for the agent hanging up
+  socket.on("call-ended", handleCallEnded);
 
   return () => {
     socket.off("incoming-call", handleIncomingCall);
@@ -517,18 +523,20 @@ audio: {
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Add STUN for reliability
       }
     });
-    peer.on('signal', async (data) => {
-      const targetId = activeCall?.fromId || activeCall?.callerData?.callerId;
-      console.log("📤 Sending Answer Signal to Agent...");
-      
-      socket.emit("answer-call", { to: targetId, signal: data, callId });
-      
-      await fetch('/api/calls/update-signal', {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callId, signal: data })
-      });
-    });
+   peer.on('signal', async (data) => {
+  const targetId = activeCall?.fromId || activeCall?.callerData?.callerId;
+  
+  if (targetId) {
+    console.log("📤 Sending Answer Signal...");
+    socket.emit("answer-call", { to: targetId, signal: data, callId });
+    
+    await fetch('/api/calls/update-signal', {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId, signal: data })
+    }).catch(e => console.warn("Signal backup failed:", e));
+  }
+});
 
    // Handle Remote Stream
 peer.on('stream', (remoteStream) => {

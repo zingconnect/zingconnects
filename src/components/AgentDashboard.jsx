@@ -522,21 +522,20 @@ const handleAcceptCall = async () => {
       }
     });
 
-    // 4. GENERATE AND SEND ANSWER SIGNAL
+  // 4. GENERATE AND SEND ANSWER SIGNAL
     peer.on('signal', async (data) => {
       console.log("📤 Answer signal generated. Relaying to User...");
-      
-      // CRITICAL: Ensure targetId is the User who started the call
       const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId || activeCall?.caller;
-      
       if (targetId && socket) {
-        // This emit is what stops the User's "Ringing" state
-        socket.emit("answer-call", { to: targetId, signal: data, callId });
-        console.log(`📡 Signal emitted to User: ${targetId}`);
+        socket.emit("answer-call", { 
+          to: targetId, 
+          signal: data, 
+          callId: callId 
+        });
+        console.log(`📡 Signal emitted via socket to User ID: ${targetId}`);
       } else {
-        console.error("❌ Could not determine targetId for signaling");
+        console.error("❌ CRITICAL: Could not find targetId. User will keep ringing!");
       }
-      
       if (callId) {
         await fetch('/api/calls/update-signal', {
           method: 'PATCH',
@@ -979,7 +978,6 @@ const handleFinalSend = async () => {
     setIsUploading(false);
   }
 };
-
 
   const handleLogout = () => {
     const currentSlug = agentData.slug;
