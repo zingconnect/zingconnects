@@ -463,22 +463,26 @@ const handleStartCall = async (targetUserId) => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. Silence ringtone
+  // 1. SILENCE RINGTONE IMMEDIATELY
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.src = "";
+    ringtoneAudio.current.src = ""; 
+    ringtoneAudio.current.load();
   }
-
-  const token = localStorage.getItem('agentToken');
-  // Handle different potential names for the ID (activeCaller vs activeCall)
-  const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId;
 
   try {
     setCallStatus('connecting');
+    // Ensure we use the correct token for Agents
+    const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+    
+    // Unified callId retrieval
+    const callId = activeCaller?.callId || activeCall?.callId || activeCall?._id;
 
-    // 2. Fetch the User's Offer Signal
-    let incomingSignal = activeCall?.signal || activeCaller?.signal;
+    // 2. RETRIEVE INITIAL OFFER SIGNAL
+    let incomingSignal = activeCaller?.signal || activeCall?.signal;
+    
     if (!incomingSignal && callId) {
+      console.log("📡 Signal missing from state, fetching from server...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -486,62 +490,122 @@ const handleAcceptCall = async () => {
       incomingSignal = data.signal;
     }
 
-    // 3. Formally Accept in DB (Stops the User's "Ringing" state via Polling)
-    await fetch('/api/calls/accept', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callId })
+    if (!incomingSignal) {
+      console.error("❌ No incoming signal found for call:", callId);
+      setCallStatus('idle');
+      return;
+    }
+
+    // 3. GET OPTIMIZED AUDIO (Matching User-side constraints for sync)
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: { 
+        echoCancellation: true, 
+        noiseSuppression: true, 
+        autoGainControl: true,
+        googEchoCancellation: true,
+        googAutoGainControl: true,
+        googNoiseSuppression: true,
+        googHighpassFilter: true 
+      } 
     });
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    userStreamRef.current = stream;
+    userStreamRef.current = stream; 
+    if (typeof setLocalStream === 'function') setLocalStream(stream);
 
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
-      initiator: false, // Agent is receiving
-      trickle: false,
+      initiator: false, 
+      trickle: false, 
       stream: stream,
+      config: {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      }
     });
 
+  // 4. GENERATE AND SEND ANSWER SIGNAL
     peer.on('signal', async (data) => {
-      // --- THE CRITICAL FIX ---
-      // We must find the USER'S ID to send the answer back
-      const targetId = activeCall?.fromId || activeCall?.caller || activeCaller?.fromId;
-      
+      console.log("📤 Answer signal generated. Relaying to User...");
+      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId || activeCall?.caller;
       if (targetId && socket) {
-        console.log("📤 Sending Answer to User:", targetId);
         socket.emit("answer-call", { 
           to: targetId, 
           signal: data, 
           callId: callId 
         });
-        
-        // Backup: Update the DB signal
+        console.log(`📡 Signal emitted via socket to User ID: ${targetId}`);
+      } else {
+        console.error("❌ CRITICAL: Could not find targetId. User will keep ringing!");
+      }
+      if (callId) {
         await fetch('/api/calls/update-signal', {
           method: 'PATCH',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          headers: { 
+            'Authorization': `Bearer ${token}`, 
+            'Content-Type': 'application/json' 
+          },
           body: JSON.stringify({ callId, signal: data })
-        });
+        }).catch(e => console.error("Signal Update Error:", e));
       }
     });
 
+    // 5. HANDLE REMOTE VOICE STREAM
     peer.on('stream', (remoteStream) => {
-      const audio = document.getElementById('remoteAudio') || document.createElement('audio');
-      audio.id = 'remoteAudio';
-      audio.srcObject = remoteStream;
-      audio.play();
-      setCallStatus('connected');
-    });
+      console.log("🔊 Remote audio stream received");
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        audio.autoplay = true;
+        audio.playsInline = true;
+        document.body.appendChild(audio);
+      }
 
-    // Inject User's Offer
-    peer.signal(incomingSignal);
+      audio.srcObject = remoteStream;
+      audio.muted = false; 
+      audio.volume = 1.0;
+
+      audio.play()
+        .then(() => {
+          setCallStatus('connected');
+          console.log("✅ Call fully connected");
+        })
+        .catch(e => {
+          console.warn("Autoplay blocked, attempting muted bridge...");
+          audio.muted = true;
+          audio.play().then(() => {
+            setTimeout(() => { 
+              audio.muted = false; 
+              setCallStatus('connected');
+            }, 500);
+          });
+        });
+    });
+    peer.on('close', () => handleEndCall());
+    peer.on('error', (err) => {
+      console.error("Peer Error:", err);
+      handleEndCall();
+    });
+    const parsedSignal = typeof incomingSignal === 'string' 
+      ? JSON.parse(incomingSignal) 
+      : incomingSignal;
+    setTimeout(() => {
+      if (peer && !peer.destroyed) {
+        console.log("📥 Injecting User Offer into Agent Peer...");
+        peer.signal(parsedSignal);
+      }
+    }, 200);
+    
     connectionRef.current = peer;
 
   } catch (err) {
-    console.error("Agent Acceptance Failed:", err);
+    console.error("❌ Failed to accept call:", err);
     setCallStatus('idle');
+    if (userStreamRef.current) {
+        userStreamRef.current.getTracks().forEach(t => t.stop());
+    }
   }
 };
+
 
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
