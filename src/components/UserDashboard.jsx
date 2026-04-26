@@ -1048,22 +1048,22 @@ const handleStartCall = async () => {
   setShowFullScreenCall(true);
 
   let stream;
-  let peer;
   let connectionTimeout;
 
   try {
-  stream = await navigator.mediaDevices.getUserMedia({ 
-  audio: { 
-    echoCancellation: true, 
-    noiseSuppression: true, 
-    autoGainControl: true,
-    googEchoCancellation: true,
-    googAutoGainControl: true,
-    googNoiseSuppression: true,
-    googHighpassFilter: true 
-  }, 
-  video: false 
-});
+    // 2. GET OPTIMIZED AUDIO
+    stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: { 
+        echoCancellation: true, 
+        noiseSuppression: true, 
+        autoGainControl: true,
+        googEchoCancellation: true,
+        googAutoGainControl: true,
+        googNoiseSuppression: true,
+        googHighpassFilter: true 
+      }, 
+      video: false 
+    });
 
     if (userStreamRef) userStreamRef.current = stream;
     setLocalStream(stream);
@@ -1088,23 +1088,34 @@ const handleStartCall = async () => {
       }
     });
 
-    // 4. START CONNECTION TIMEOUT
-    connectionTimeout = setTimeout(() => {
-      if (callStatus !== 'connected') {
-        console.warn("Handshake timed out");
-        handleEndCall();
-        alert("Agent didn't answer. Please try again later.");
-      }
-    }, 30000); // 30 seconds for ringing
-
-    // 5. PEER INITIALIZATION
+    // 4. PEER INITIALIZATION
     const { default: SimplePeer } = await import('simple-peer');
-    peer = new SimplePeer({
+    const peer = new SimplePeer({
       initiator: true,
       trickle: false,
       stream: stream,
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
+
+    // 5. CRITICAL: SETUP SOCKET LISTENER IMMEDIATELY
+    // We remove old listeners to prevent the "Double Ringing" bug
+    socket.off("call-accepted"); 
+    socket.on("call-accepted", (acceptData) => {
+      console.log("📡 Agent Accepted! Injecting Answer Signal...");
+      if (acceptData.signal) {
+        peer.signal(acceptData.signal);
+      }
+    });
+
+    // 6. START CONNECTION TIMEOUT
+    connectionTimeout = setTimeout(() => {
+      // Use a ref or a functional check to see if we are still 'ringing'
+      if (connectionRef.current && !peerConnected) {
+        console.warn("Handshake timed out");
+        handleEndCall();
+        alert("Agent didn't answer. Please try again later.");
+      }
+    }, 35000); // 35s to allow for network lag
 
     // Send Offer Signal
     peer.on('signal', async (signalData) => {
@@ -1127,17 +1138,10 @@ const handleStartCall = async () => {
       }).catch(e => console.error("Signal backup failed:", e));
     });
 
-    // 6. IMPORTANT: LISTEN FOR ANSWER SIGNAL
-    socket.on("call-accepted", (data) => {
-      console.log("📡 Agent Accepted! Processing Answer Signal...");
-      if (data.signal) {
-        peer.signal(data.signal);
-      }
-    });
-
     // Handle Remote Stream
     peer.on('stream', (remoteStream) => {
-      clearTimeout(connectionTimeout); // Success! Stop the timeout
+      console.log("🔈 Remote stream received");
+      clearTimeout(connectionTimeout); 
       
       if (callingAudio.current) {
         callingAudio.current.pause();
@@ -1154,21 +1158,15 @@ const handleStartCall = async () => {
       }
 
       audio.srcObject = remoteStream;
+      audio.muted = false;
+      audio.volume = 1.0;
       
-      // Auto-play fix for browsers
       audio.play()
         .then(() => {
-          console.log("🔈 Audio Playing");
           setCallStatus('connected');
+          setPeerConnected(true);
         })
-        .catch(() => {
-          console.warn("Audio blocked. Playing muted then unmuting...");
-          audio.muted = true;
-          audio.play().then(() => {
-            setTimeout(() => { audio.muted = false; }, 500);
-            setCallStatus('connected');
-          });
-        });
+        .catch(e => console.warn("Playback pending interaction", e));
     });
 
     peer.on('error', (err) => {
@@ -1180,7 +1178,7 @@ const handleStartCall = async () => {
 
   } catch (err) {
     console.error("Call failed:", err);
-    clearTimeout(connectionTimeout);
+    if (connectionTimeout) clearTimeout(connectionTimeout);
     terminateLocalSession();
     alert(err.message || "Connection failed.");
   }
@@ -1936,9 +1934,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       </div>
 
       <div className="text-center space-y-2">
-     <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
-  {activeCall?.callerData?.fromName || activeCaller?.fromName || 
-   (agent?.firstName ? `${agent.firstName} ${agent.lastName}` : "Secure Connection")}
+   <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
+  {isIncomingCall 
+    ? (activeCall?.callerData?.fromName || activeCaller?.fromName || "Secure Connection")
+    : `${agent?.firstName || ''} ${agent?.lastName || ''}`.trim() || "Calling Agent..."
+  }
 </h2>
         
         <div className="flex items-center justify-center gap-2">

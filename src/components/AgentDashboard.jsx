@@ -472,17 +472,14 @@ const handleAcceptCall = async () => {
 
   try {
     setCallStatus('connecting');
-    // Ensure we use the correct token key for Agents
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-    
-    // Unified callId retrieval
     const callId = activeCaller?.callId || activeCall?.callId || activeCall?._id;
 
     // 2. RETRIEVE INITIAL OFFER SIGNAL
     let incomingSignal = activeCaller?.signal || activeCall?.signal;
     
     if (!incomingSignal && callId) {
-      console.log("📡 Signal missing from state, fetching from server...");
+      console.log("📡 Signal missing, fetching from server...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -491,15 +488,27 @@ const handleAcceptCall = async () => {
     }
 
     if (!incomingSignal) {
-      console.error("❌ No incoming signal found for call:", callId);
+      console.error("❌ No incoming signal found");
       setCallStatus('idle');
       return;
     }
+
+    // 3. GET OPTIMIZED AUDIO (Matching User-side quality)
     const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { echoCancellation: true, noiseSuppression: true } 
+      audio: { 
+        echoCancellation: true, 
+        noiseSuppression: true, 
+        autoGainControl: true,
+        googEchoCancellation: true,
+        googAutoGainControl: true,
+        googNoiseSuppression: true,
+        googHighpassFilter: true 
+      } 
     });
+
     userStreamRef.current = stream; 
     if (typeof setLocalStream === 'function') setLocalStream(stream);
+
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
       initiator: false, 
@@ -509,13 +518,14 @@ const handleAcceptCall = async () => {
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
       }
     });
+
+    // 4. GENERATE AND SEND ANSWER
     peer.on('signal', async (data) => {
       console.log("📤 Answer signal generated. Relaying...");
-      
-      // Target is the person who CALLED the agent
       const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.caller;
       
       if (targetId && socket) {
+        // CRITICAL: This is what tells the User to stop ringing
         socket.emit("answer-call", { to: targetId, signal: data, callId });
       }
       
@@ -530,6 +540,8 @@ const handleAcceptCall = async () => {
         }).catch(e => console.error("Signal Update Error:", e));
       }
     });
+
+    // 5. HANDLE REMOTE VOICE
     peer.on('stream', (remoteStream) => {
       console.log("🔊 Remote audio stream received");
       let audio = document.getElementById('remoteAudio');
@@ -542,16 +554,22 @@ const handleAcceptCall = async () => {
       }
 
       audio.srcObject = remoteStream;
-      audio.muted = true; 
-      audio.play().then(() => {
-        setTimeout(() => {
-          audio.muted = false; 
+      audio.muted = false; // Directly play on agent side
+      audio.volume = 1.0;
+
+      audio.play()
+        .then(() => {
           setCallStatus('connected');
-          console.log("✅ Call fully connected");
-        }, 500);
-      }).catch(e => {
-        setCallStatus('connected'); // Still set connected so UI updates
-      });
+          console.log("✅ Agent connected to User");
+        })
+        .catch(e => {
+          console.warn("Autoplay blocked, unmuting after delay...");
+          audio.muted = true;
+          audio.play().then(() => {
+            setTimeout(() => { audio.muted = false; }, 500);
+            setCallStatus('connected');
+          });
+        });
     });
     peer.on('close', () => handleEndCall());
     peer.on('error', (err) => {
@@ -566,7 +584,7 @@ const handleAcceptCall = async () => {
       if (peer && !peer.destroyed) {
         peer.signal(parsedSignal);
       }
-    }, 200);
+    }, 150);
     
     connectionRef.current = peer;
 
@@ -574,7 +592,7 @@ const handleAcceptCall = async () => {
     console.error("❌ Failed to accept call:", err);
     setCallStatus('idle');
     if (userStreamRef.current) {
-        userStreamRef.current.getTracks().forEach(t => t.stop());
+      userStreamRef.current.getTracks().forEach(t => t.stop());
     }
   }
 };
