@@ -1045,8 +1045,8 @@ const handleDownload = async (url, type) => {
   }
 };
 
-const handleStartCall = async (targetUserId) => {
-  if (!targetUserId || !userData) return;
+const handleStartCall = async (targetAgentId) => {
+    if (!targetAgentId || !userData) return;
   const token = localStorage.getItem('userToken');
 
   setCallStatus('calling'); // UI feedback (Outgoing beep starts)
@@ -1077,9 +1077,8 @@ const handleStartCall = async (targetUserId) => {
         'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({
-        receiverId: targetUserId.toString(), // Ensure this is a string
+        receiverId: targetAgentId.toString(), // Ensure this is a string
         receiverModel: 'Agent',
-        // signalData is usually safe, but let's be sure it's a plain object
         signal: JSON.parse(JSON.stringify(signalData)) 
       })
     });
@@ -1089,16 +1088,16 @@ const handleStartCall = async (targetUserId) => {
 
     setActiveCall({ 
       callId: dbCall.callId, 
-      toId: String(targetUserId) 
+      toId: String(targetAgentId) 
     });
     
-    socket.emit("call-user", {
-      userToCall: String(targetUserId),
-      fromId: String(userData._id || userData.id),
-      fromName: `${userData.firstName} ${userData.lastName}`,
-      callId: dbCall.callId,
-      signal: signalData 
-    });
+  socket.emit("call-user", {
+  userToCall: String(targetAgentId), 
+    fromId: String(userData._id || userData.id),
+  fromName: `${userData.firstName} ${userData.lastName}`,
+    callId: dbCall.callId,
+  signal: signalData 
+});
 
   } catch (dbErr) {
     console.error("DB Registration failed:", dbErr);
@@ -1421,11 +1420,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </div>
 
         <div className="flex items-center gap-5 md:gap-8 text-gray-500 pr-1">
-  <BsTelephoneFill 
-    className="cursor-pointer hover:text-blue-600 transition-colors active:scale-90" 
-    size={16} 
-    onClick={handleStartCall} // <--- Added this
-  />
+ <BsTelephoneFill 
+  className="cursor-pointer hover:text-blue-600 transition-colors active:scale-90" 
+  size={16} 
+  onClick={() => handleStartCall(agent?._id || agent?.id)} 
+/>
 <BsGearFill 
   className="cursor-pointer hover:text-gray-700 transition-colors active:scale-90" 
   size={18} 
