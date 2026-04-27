@@ -40,28 +40,35 @@ export const startCall = async (req, res) => {
   }
 };
 
-// Update this in your backend callController.js
+// In callController.js
 export const acceptCall = async (req, res) => {
   try {
     await connectToDatabase();
-    const { callId, signal } = req.body; // Signal must be captured from the frontend
+    const { callId, signal } = req.body;
+    if (!signal) {
+      console.error("❌ AcceptCall called but 'signal' is missing from request body!");
+      return res.status(400).json({ success: false, message: "Signal is required to connect." });
+    }
 
     const updatedCall = await Call.findByIdAndUpdate(
       callId,
-      { status: 'connected', startTime: Date.now(), answerSignal: signal },
+      { 
+        status: 'connected', 
+        startTime: Date.now(), 
+        answerSignal: signal // Store it in DB
+      },
       { new: true }
     );
-
     const io = req.app.get('socketio');
     if (io && updatedCall) {
       const targetId = updatedCall.caller.toString();
-      // CRITICAL: Relay the signal back to the User!
+      console.log(`📡 Relaying Answer Signal to User: ${targetId}`);
+      
       io.to(targetId).emit("call-accepted", { 
         callId: updatedCall._id,
-        signal: signal // Without this, User keeps ringing
+        signal: signal // Relay it via Socket
       });
     }
-
     res.status(200).json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

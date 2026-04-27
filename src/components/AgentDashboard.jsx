@@ -462,106 +462,116 @@ const handleStartCall = async (targetUserId) => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. SILENCE UI IMMEDIATELY
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.src = ""; 
-    ringtoneAudio.current.load();
+    ringtoneAudio.current.src = "";
   }
+
+  const token = localStorage.getItem('agentToken');
+  const callId = activeCall?.callId;
 
   try {
     setCallStatus('connecting');
-    const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-    
-    // Unified ID retrieval across different state structures
-    const callId = activeCaller?.callId || activeCall?.callId || activeCall?._id;
-    let incomingSignal = activeCaller?.signal || activeCall?.signal;
-
-    // 2. SAFETY CHECK: If signal is missing from state, poll the DB
-    if (!incomingSignal && callId) {
-      console.log("⚠️ Signal missing from state, fetching from database...");
+    setShowFullScreenCall(true);
+    let incomingSignal = activeCall?.signal;
+    if (!incomingSignal) {
+      console.log("📡 Fetching missing signal from DB...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      incomingSignal = data.signal;
+      incomingSignal = data.signal || data.answerSignal; // Check both just in case
     }
 
-    if (!incomingSignal) {
-      console.error("❌ Cannot accept call: No initiator signal available.");
-      setCallStatus('idle');
-      return;
-    }
-
-    // 3. MEDIA & PEER SETUP
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { echoCancellation: true, noiseSuppression: true } 
+    if (!incomingSignal) throw new Error("Handshake signal missing.");
+    await fetch('/api/calls/accept', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId })
     });
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+audio: { 
+  echoCancellation: true, 
+  noiseSuppression: true, 
+  autoGainControl: true,
+  googEchoCancellation: true,
+  googAutoGainControl: true,
+  googNoiseSuppression: true,
+  googHighpassFilter: true 
+}
+, video: false 
+});
     userStreamRef.current = stream;
-    if (typeof setLocalStream === 'function') setLocalStream(stream);
-
+    setLocalStream(stream);
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
-      initiator: false, // Agent is the receiver
-      trickle: false,
+      initiator: false, 
+      trickle: false, 
       stream: stream,
-      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-    });
-
-    // 4. ATTACH LISTENERS BEFORE TRIGGERING HANDSHAKE
-    peer.on('signal', async (data) => {
-      console.log("📤 Agent Answer Signal generated. Notifying Backend...");
-      
-      // Send the Answer Signal to the backend to relay to the User
-      await fetch('/api/calls/accept', {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ callId, signal: data }) 
-      }).catch(e => console.error("Accept API Error:", e));
-    });
-
-    peer.on('stream', (remoteStream) => {
-      console.log("✅ Remote stream received. Connection established.");
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        document.body.appendChild(audio);
+      config: {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Add STUN for reliability
       }
-      audio.srcObject = remoteStream;
-      setCallStatus('connected');
     });
+   peer.on('signal', async (data) => {
+  const targetId = activeCall?.fromId || activeCall?.callerData?.callerId;
+  
+  if (targetId) {
+    console.log("📤 Sending Answer Signal...");
+    socket.emit("answer-call", { to: targetId, signal: data, callId });
+    
+    await fetch('/api/calls/update-signal', {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId, signal: data })
+    }).catch(e => console.warn("Signal backup failed:", e));
+  }
+});
 
-    peer.on('error', (err) => {
-      console.error("❌ Peer connection error:", err);
-      handleEndCall();
-    });
+   // Handle Remote Stream
+peer.on('stream', (remoteStream) => {
+  console.log("🔈 Remote stream received");
+    let audio = document.getElementById('remoteAudio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.id = 'remoteAudio';
+    audio.autoplay = true;
+    audio.playsInline = true;
+    document.body.appendChild(audio);
+  }
+   audio.srcObject = remoteStream;
+audio.muted = false; 
+audio.volume = 1.0;
+audio.play().catch(e => console.warn("Playback deferred", e));
+setCallStatus('connected');
+  const playPromise = audio.play();
+  if (playPromise !== undefined) {
+    playPromise
+      .then(() => {
+        console.log("🔊 Audio playing successfully");
+        setCallStatus('connected');
+        setPeerConnected(true);
+      })
+      .catch(e => {
+        console.warn("Autoplay blocked. User must click 'Sync' or 'Accept'", e);
+      });
+  }
+});
 
     peer.on('close', () => handleEndCall());
-
-    // 5. FINALIZE & INJECT SIGNAL
-    connectionRef.current = peer;
-
     const parsedSignal = typeof incomingSignal === 'string' 
       ? JSON.parse(incomingSignal) 
       : incomingSignal;
-
-    // Inject the User's Offer to trigger the Agent's 'signal' event
-    console.log("📥 Injecting User Offer to complete handshake.");
     peer.signal(parsedSignal);
+    
+    connectionRef.current = peer;
 
   } catch (err) {
-    console.error("❌ Critical Failure in handleAcceptCall:", err);
-    setCallStatus('idle');
-    if (userStreamRef.current) {
-        userStreamRef.current.getTracks().forEach(t => t.stop());
-    }
+    console.error("❌ Call Acceptance Failed:", err);
+    terminateLocalSession();
+    alert("Connection failed. Please ensure microphone access is allowed.");
   }
 };
+
 
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
