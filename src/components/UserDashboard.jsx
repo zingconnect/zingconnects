@@ -1066,41 +1066,45 @@ const handleStartCall = async (targetUserId) => {
     });
 
     peer.on('signal', async (signalData) => {
-      console.log("📡 Signal generated. Registering call in DB...");
-      
-      try {
-        const res = await fetch('/api/calls/start', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            receiverId: targetUserId,
-            receiverModel: 'Agent',
-            signal: signalData 
-          })
-        });
-
-        const dbCall = await res.json();
-        if (!res.ok) throw new Error(dbCall.message);
-
-        setActiveCall({ callId: dbCall.callId, toId: targetUserId });
-        
-        // Also emit via socket as a "speed boost" for online users
-        socket.emit("call-user", {
-          userToCall: targetUserId.toString(),
-          fromId: userData._id || userData.id,
-          fromName: `${userData.firstName} ${userData.lastName}`,
-          callId: dbCall.callId,
-          signal: signalData 
-        });
-
-      } catch (dbErr) {
-        console.error("DB Registration failed:", dbErr);
-        handleEndCall();
-      }
+  console.log("📡 Signal generated. Registering call in DB...");
+  
+  try {
+    // FIX: Ensure you are only sending SERIALIZABLE data
+    const res = await fetch('/api/calls/start', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        receiverId: targetUserId.toString(), // Ensure this is a string
+        receiverModel: 'Agent',
+        // signalData is usually safe, but let's be sure it's a plain object
+        signal: JSON.parse(JSON.stringify(signalData)) 
+      })
     });
+
+    const dbCall = await res.json();
+    if (!res.ok) throw new Error(dbCall.message);
+
+    setActiveCall({ 
+      callId: dbCall.callId, 
+      toId: String(targetUserId) 
+    });
+    
+    socket.emit("call-user", {
+      userToCall: String(targetUserId),
+      fromId: String(userData._id || userData.id),
+      fromName: `${userData.firstName} ${userData.lastName}`,
+      callId: dbCall.callId,
+      signal: signalData 
+    });
+
+  } catch (dbErr) {
+    console.error("DB Registration failed:", dbErr);
+    handleEndCall();
+  }
+});
 
   peer.on('stream', (remoteStream) => {
   console.log("🔊 Remote stream attached");
