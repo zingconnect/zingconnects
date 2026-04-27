@@ -52,8 +52,8 @@ export const AgentDashboard = () => {
   const userStreamRef = useRef();
   const scrollRef = useRef(null);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
-const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
-const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing
+const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); 
+const callingAudio = useRef(new Audio('/sounds/calling.wav'));  
 const lastNotifiedId = useRef(null);
 const fileInputRef = useRef(null);
 const cameraInputRef = useRef(null);
@@ -252,6 +252,7 @@ useEffect(() => {
       return prev;
     });
   };
+
   const onUserRinging = () => {
     setCallStatus(prev => (prev === 'calling' ? 'ringing' : prev));
   };
@@ -490,14 +491,17 @@ const handleAcceptCall = async () => {
     }
 
     if (!incomingSignal) throw new Error("Handshake signal missing.");
-    await fetch('/api/calls/accept', {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`, 
-        'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify({ callId })
-    });
+ await fetch('/api/calls/accept', {
+  method: 'POST',
+  headers: { 
+    'Authorization': `Bearer ${token}`, 
+    'Content-Type': 'application/json' 
+  },
+  body: JSON.stringify({ 
+    callId, 
+    signal: incomingSignal // Passing the offer signal to mark as accepted
+  })
+});
 
     // 4. Get Microphone Stream
     const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -517,11 +521,11 @@ const handleAcceptCall = async () => {
     });
 
     peer.on('signal', async (data) => {
-      const targetId = activeCall?.fromId || activeCall?.caller;
-      
+const targetId = activeCall?.fromId || activeCall?.caller || activeCaller?.fromId || activeCaller?.callerId;
+
       if (targetId) {
-        console.log("📤 Sending Answer Signal to User via Socket...");
-        socket.emit("answer-call", { to: targetId, signal: data, callId });
+    console.log(`📤 Sending Answer Signal to User: ${targetId}`);
+    socket.emit("answer-call", { to: targetId.toString(), signal: data, callId });
                 await fetch('/api/calls/update-signal', {
           method: 'PATCH',
           headers: { 

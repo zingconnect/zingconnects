@@ -547,10 +547,10 @@ audio: {
   }
 });
 
-   // Handle Remote Stream
-peer.on('stream', (remoteStream) => {
+  peer.on('stream', (remoteStream) => {
   console.log("🔈 Remote stream received");
-    let audio = document.getElementById('remoteAudio');
+  
+  let audio = document.getElementById('remoteAudio');
   if (!audio) {
     audio = document.createElement('audio');
     audio.id = 'remoteAudio';
@@ -558,25 +558,27 @@ peer.on('stream', (remoteStream) => {
     audio.playsInline = true;
     document.body.appendChild(audio);
   }
-   audio.srcObject = remoteStream;
-audio.muted = false; 
-audio.volume = 1.0;
-audio.play().catch(e => console.warn("Playback deferred", e));
-setCallStatus('connected');
-  const playPromise = audio.play();
-  if (playPromise !== undefined) {
-    playPromise
-      .then(() => {
-        console.log("🔊 Audio playing successfully");
-        setCallStatus('connected');
-        setPeerConnected(true);
-      })
-      .catch(e => {
-        console.warn("Autoplay blocked. User must click 'Sync' or 'Accept'", e);
-      });
-  }
-});
 
+  audio.srcObject = remoteStream;
+  audio.muted = false;
+  audio.volume = 1.0;
+
+  // Modern browsers return a promise on .play()
+  audio.play()
+    .then(() => {
+      console.log("🔊 Audio playing successfully");
+      // Only set these once playback is actually confirmed
+      setCallStatus('connected');
+      setPeerConnected(true);
+      if (typeof setShowFullScreenCall === 'function') {
+        setShowFullScreenCall(true);
+      }
+    })
+    .catch(e => {
+      console.warn("Autoplay blocked. User interaction required:", e);
+      // Fallback: stay in 'connecting' or show a "Click to Unmute" button
+    });
+});
     peer.on('close', () => handleEndCall());
     const parsedSignal = typeof incomingSignal === 'string' 
       ? JSON.parse(incomingSignal) 
@@ -1177,6 +1179,26 @@ const handleStartCall = async (targetAgentId) => {
     ));
   }
 };
+
+useEffect(() => {
+  if (!socket) return;
+
+  socket.on("user-is-ringing", () => {
+    console.log("🔔 Agent device is ringing");
+    setCallStatus('ringing'); 
+  });
+  socket.on("call-accepted", (data) => {
+    console.log("✅ Agent accepted the call");
+    if (connectionRef.current && data.signal) {
+      connectionRef.current.signal(data.signal);
+    }
+  });
+
+  return () => {
+    socket.off("user-is-ringing");
+    socket.off("call-accepted");
+  };
+}, [socket]);
 
 const handleResend = (msg) => {
   setMessages(prev => prev.filter(m => m._id !== msg._id));
@@ -1882,7 +1904,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
    <h2 className="text-3xl md:text-4xl font-bold tracking-tight">
   {isIncomingCall 
     ? (activeCall?.callerData?.fromName || activeCaller?.fromName || "Secure Connection")
-    : `${agent?.firstName || ''} ${agent?.lastName || ''}`.trim() || "Calling Agent..."
+    : (agent?.firstName ? `${agent.firstName} ${agent.lastName}` : "Calling Agent...")
   }
 </h2>
         
@@ -1899,7 +1921,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   {callStatus === 'ringing' ? (
     isIncomingCall ? 'Incoming Secure Call' : 'Ringing...'
   ) : callStatus === 'calling' ? (
-    /* Change 'Calling User...' to be dynamic based on the target */
     `Calling ${agent?.firstName || 'Agent'}...`
   ) : (
     'Connecting...'
@@ -1941,12 +1962,14 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
               <span className={`text-[9px] font-bold uppercase tracking-tighter ${isSpeakerOn ? 'text-blue-400' : ''}`}>Speaker</span>
             </button>
 
-            <button onClick={() => setIsMuted(!isMuted)} className="flex flex-col items-center gap-2 group">
-              <div className={`p-4 rounded-full transition-all ${isMuted ? 'bg-red-600 text-white shadow-lg' : 'bg-white/5 group-hover:bg-white/10'}`}>
-                {isMuted ? <BsMicMuteFill size={24}/> : <BsMicFill size={24}/>}
-              </div>
-              <span className={`text-[9px] font-bold uppercase tracking-tighter ${isMuted ? 'text-red-400' : ''}`}>Mute</span>
-            </button>
+            <button onClick={toggleMute} className="flex flex-col items-center gap-2 group">
+  <div className={`p-4 rounded-full transition-all ${isMuted ? 'bg-red-600 text-white shadow-lg' : 'bg-white/5 group-hover:bg-white/10'}`}>
+    {isMuted ? <BsMicMuteFill size={24}/> : <BsMicFill size={24}/>}
+  </div>
+  <span className={`text-[9px] font-bold uppercase tracking-tighter ${isMuted ? 'text-red-400' : ''}`}>
+    {isMuted ? 'Muted' : 'Mute'}
+  </span>
+</button>
           </div>
 
           <div className="flex flex-col items-center gap-3">
