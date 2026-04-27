@@ -182,27 +182,25 @@ io.on("connection", (socket) => {
   socket.on("confirm-ringing", ({ to }) => {
     if (to) io.to(to.toString()).emit("user-is-ringing");
   });
-  // THIS FIXES THE "STUCK ON RINGING" ISSUE
   socket.on("answer-call", async ({ to, signal, callId }) => {
-    console.log(`Relaying Answer for Call: ${callId} back to Initiator: ${to}`);
+    console.log(`Relaying Answer for Call: ${callId}`);
     try {
-      // Force database to 'connected' so the caller's UI updates via polling if socket is slow
-      if (callId) {
-        await Call.findByIdAndUpdate(callId, { 
-          status: 'connected', 
-          startTime: Date.now() 
-        });
-        console.log(`DB Sync: Call ${callId} marked as connected.`);
-      }
+        if (callId) {
+            await Call.findOneAndUpdate(
+                { _id: callId, status: { $ne: 'ended' } }, 
+                { status: 'connected', startTime: Date.now() }
+            );
+        }
     } catch (err) {
-      console.error("Failed to update DB during answer-call relay:", err);
+        console.error("DB Update Error:", err);
     }
-    // Emit 'call-accepted' back to the person who started the call
+
+    // Ensure this only goes to the 'to' (The User)
     io.to(to.toString()).emit("call-accepted", { 
-      signal, 
-      callId 
+        signal, 
+        callId 
     });
-  });
+});
   // 5. END CALL
   socket.on("end-call", async ({ to, callId }) => {
     console.log(`Ending call ${callId}. Notifying: ${to}`);

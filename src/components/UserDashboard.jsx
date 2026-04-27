@@ -1101,28 +1101,21 @@ const handleStartCall = async () => {
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-    // 5. ATTACH TO REF IMMEDIATELY
     connectionRef.current = peer;
 
-    // 6. IMPROVED SOCKET LISTENER (Scoped to this specific peer instance)
     socket.off("call-accepted"); // Remove any existing listeners
-    socket.on("call-accepted", (acceptData) => {
-      console.log("📡 Agent Accepted! Processing Signal...");
-      
-      // Ensure we are signaling the correct peer instance
-      if (connectionRef.current && acceptData.signal) {
-        try {
-          const remoteSignal = typeof acceptData.signal === 'string' 
+socket.on("call-accepted", (acceptData) => {
+    if (callStatus === 'connected') return;
+
+    console.log("📡 Answer received from Agent. Finishing handshake...");
+    
+    if (acceptData.signal && connectionRef.current) {
+        const remoteSignal = typeof acceptData.signal === 'string' 
             ? JSON.parse(acceptData.signal) 
             : acceptData.signal;
-          
-          setCallStatus('connecting'); 
-          connectionRef.current.signal(remoteSignal);
-        } catch (err) {
-          console.error("Signal Injection Failed:", err);
-        }
-      }
-    });
+                connectionRef.current.signal(remoteSignal);
+    }
+});
 
     // 7. START CONNECTION TIMEOUT
     connectionTimeout = setTimeout(() => {

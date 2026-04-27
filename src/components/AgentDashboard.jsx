@@ -571,17 +571,17 @@ const handleAcceptCall = async () => {
 
     peer.on('close', () => handleEndCall());
     peer.on('error', () => handleEndCall());
+const parsedSignal = typeof incomingSignal === 'string' 
+  ? JSON.parse(incomingSignal) 
+  : incomingSignal;
+try {
+    console.log("📥 Final Step: Injecting User Offer into Agent Peer");
+    peer.signal(parsedSignal);
+} catch (err) {
+  console.error("Signal error:", err);
+}
 
-    const parsedSignal = typeof incomingSignal === 'string' 
-      ? JSON.parse(incomingSignal) 
-      : incomingSignal;
-
-    setTimeout(() => {
-      if (connectionRef.current && !connectionRef.current.destroyed) {
-        connectionRef.current.signal(parsedSignal);
-      }
-    }, 250);
-
+connectionRef.current = peer;
   } catch (err) {
     setCallStatus('idle');
     if (userStreamRef.current) {
