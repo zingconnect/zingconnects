@@ -352,21 +352,29 @@ useEffect(() => {
 useEffect(() => {
   const audio = document.getElementById('remoteAudio');
   if (!audio) return;
-
   audio.volume = isSpeakerOn ? 1.0 : 0.2;
-  if (audio.setSinkId) {
-    if (isSpeakerOn) {
-      audio.setSinkId('')
-        .catch(err => console.warn("Audio route error:", err));
-    } else {
-      console.log("Speaker off: Audio volume reduced.");
+  const toggleOutput = async () => {
+    if (typeof audio.setSinkId === 'function') {
+      try {
+        if (isSpeakerOn) {
+          await audio.setSinkId('');
+          console.log("🔊 Audio routed to Default Speaker");
+        } else {
+          console.log("👂 Speaker Off: Using low-volume mode (Earpiece fallback)");
+        }
+      } catch (err) {
+        console.warn("⚠️ Audio routing not supported on this hardware/browser:", err);
+      }
     }
-  }
+  };
+  toggleOutput();
 }, [isSpeakerOn]);
+
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
-  if (!token) return;
+  if (!token || !userData?._id) return;
+
   const checkCalls = async () => {
     if (callStatus !== 'idle') return; 
     try {
@@ -377,17 +385,17 @@ useEffect(() => {
         }
       });
       const data = await response.json();
-      if (data.hasIncomingCall) {
-        const callTime = new Date(data.createdAt).getTime();
+      if (data.hasIncomingCall && data.status !== 'ended' && data.status !== 'declined') {
+      const callTime = new Date(data.createdAt || Date.now()).getTime();
         const now = Date.now();
         const ageInSeconds = (now - callTime) / 1000;
-        if (ageInSeconds > 60) {
-          return;
-        }
+        if (ageInSeconds > 60) return;
+        if (activeCall?.callId === data.callId) return;
+        console.log("📞 Incoming call detected via polling:", data.callId);
         setActiveCall({
-          callId: data.callId,
+        callId: data.callId,
           fromId: data.callerData?.callerId,
-          signal: data.signal,
+          signal: data.signal, // The Initiator's Offer
           callerData: {
             fromName: data.callerData?.fromName || "Secure Caller",
             photoUrl: data.callerData?.photoUrl,
@@ -401,39 +409,40 @@ useEffect(() => {
     }
   };
   const interval = setInterval(checkCalls, 3000); 
-  return () => clearInterval(interval);
-}, [callStatus, userData?._id]);
+    checkCalls();
 
+  return () => clearInterval(interval);
+}, [callStatus, userData?._id, activeCall?.callId]); // Added activeCall.callId to dependencies
 useEffect(() => {
-  // 1. Pre-set looping for both audio objects
   ringtoneAudio.current.loop = true;
   callingAudio.current.loop = true;
 
   const handleAudioLogic = async () => {
     try {
-      if (callStatus === 'ringing' || callStatus === 'calling') {
-        if (isIncomingCall && callStatus === 'ringing') {
-          callingAudio.current.pause();
-          callingAudio.current.src = "";   
-          ringtoneAudio.current.src = "/sounds/ringtone.mp3";
+      if (callStatus === 'ringing' && isIncomingCall) {
+        callingAudio.current.pause();
+        callingAudio.current.currentTime = 0;
+        
+        if (ringtoneAudio.current.paused) {
           await ringtoneAudio.current.play();
-        } else {
-          ringtoneAudio.current.pause();
-          ringtoneAudio.current.src = "";
-          callingAudio.current.src = "/sounds/calling.wav";
-          await callingAudio.current.play();
         }
-      } else {
+      } 
+      else if (callStatus === 'calling' || (callStatus === 'ringing' && !isIncomingCall)) {
         ringtoneAudio.current.pause();
-        ringtoneAudio.current.src = "";
         ringtoneAudio.current.currentTime = 0;
 
-        callingAudio.current.pause();
-        callingAudio.current.src = "";
-        callingAudio.current.currentTime = 0;
+        if (callingAudio.current.paused) {
+          await callingAudio.current.play();
+        }
+      } 
+      else {
+        [ringtoneAudio, callingAudio].forEach(audio => {
+          audio.current.pause();
+          audio.current.currentTime = 0;
+        });
       }
     } catch (err) {
-      console.warn("Audio play deferred until user interaction:", err);
+      console.warn("Audio deferred:", err);
     }
   };
 
@@ -1041,7 +1050,6 @@ const handleStartCall = async (targetUserId) => {
   const token = localStorage.getItem('userToken');
 
   setCallStatus('calling'); // UI feedback (Outgoing beep starts)
-  setIsIncomingCall(false);
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -1081,8 +1089,8 @@ const handleStartCall = async (targetUserId) => {
         
         // Also emit via socket as a "speed boost" for online users
         socket.emit("call-user", {
-          userToCall: currentAgentId.toString(),
-          fromId: userData._id,
+          userToCall: targetUserId.toString(),
+          fromId: userData._id || userData.id,
           fromName: `${userData.firstName} ${userData.lastName}`,
           callId: dbCall.callId,
           signal: signalData 
