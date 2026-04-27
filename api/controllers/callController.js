@@ -1,41 +1,37 @@
 import Call from '../models/Call.js';
 import { connectToDatabase } from '../index.js'; 
 
-// @desc Start a call initiation (Saves the Agent's Offer Signal immediately)
 export const startCall = async (req, res) => {
   try {
     await connectToDatabase();
     const { receiverId, receiverModel, signal } = req.body; 
-    
-    const callerId = req.user._id || req.user.id || req.user.userId;
+    const callerId = req.user.id || req.user._id;
     if (!callerId) {
-      return res.status(400).json({ message: "Token does not contain a valid User ID" });
+      return res.status(400).json({ message: "User ID not found in token" });
     }
-
     const newCall = new Call({
       caller: callerId,
       callerModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiver: receiverId,
-      receiverModel: receiverModel || 'Agent', 
+      receiverModel: receiverModel || 'Agent',
       status: 'ringing', 
-      signal: signal 
+      signal: signal,
+      startTime: new Date()
     });
-
     await newCall.save();
-
     const io = req.app.get('socketio');
     if (io) {
-      io.to(receiverId.toString()).emit("incoming-call", {
-        signal,
+      const targetRoom = receiverId.toString().trim();
+      io.to(targetRoom).emit("incoming-call", {
+        signal: signal,
         fromId: callerId,
-        fromName: req.user.firstName || "Secure Caller",
+        fromName: req.user.firstName ? `${req.user.firstName} ${req.user.lastName || ''}` : "Secure Caller",
         callId: newCall._id
       });
     }
-
     res.status(201).json({ success: true, callId: newCall._id });
   } catch (error) {
-    console.error("Call Start Error:", error);
+    console.error("🔥 Backend StartCall Crash:", error.message);
     res.status(500).json({ message: "Failed to start call", error: error.message });
   }
 };

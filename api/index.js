@@ -128,32 +128,26 @@ const authenticateToken = (req, res, next) => {
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
   jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-    if (err) {
-      return res.status(403).json({ message: "Invalid Token" });
-    }
+    if (err) return res.status(403).json({ message: "Invalid Token" });
+
+    req.user = decoded; 
+
     if (decoded.role === 'agent') {
       try {
         const agent = await Agent.findById(decoded.id).select('currentSessionId lastActive');
-
         if (!agent || agent.currentSessionId !== decoded.sessionId) {
-          console.log(`AUTH FAIL - Session Mismatch for Agent: ${decoded.id}`);
-          return res.status(401).json({ 
-            success: false, 
-            message: "Account logged in from another device.",
-            forceLogout: true // Signal for frontend to clear storage
-          });
+          return res.status(401).json({ success: false, message: "Session Mismatch", forceLogout: true });
         }
         agent.lastActive = new Date();
         await agent.save();
-
-     } catch (dbErr) {
-  console.error("DATABASE AUTH ERROR:", dbErr); // <--- Add this!
-  return res.status(500).json({ message: "Internal Auth Error", error: dbErr.message });
-}
+      } catch (dbErr) {
+        return res.status(500).json({ message: "Internal Auth Error" });
+      }
     }
 
+    // Ensure id is consistently mapped
     req.user.id = decoded.id || decoded._id; 
-next();
+    next();
   });
 };
 

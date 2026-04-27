@@ -74,12 +74,14 @@ const [connectionStatus, setConnectionStatus] = useState('online');
 const [peerConnected, setPeerConnected] = useState(false);
 
 const [activeCall, setActiveCall] = useState(null);
-const [callStatus, setCallStatus] = useState('idle'); // idle, ringing, connecting, connected, ended
+const [callStatus, setCallStatus] = useState('idle'); 
 const [isIncomingCall, setIsIncomingCall] = useState(false);
 const [activeCaller, setActiveCaller] = useState(null);
 const [isMuted, setIsMuted] = useState(false);
 const [isSpeakerOn, setIsSpeakerOn] = useState(false);
 const [callTime, setCallTime] = useState(0);
+const [showFullScreenCall, setShowFullScreenCall] = useState(false);
+const [localStream, setLocalStream] = useState(null); 
 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -462,148 +464,152 @@ const handleStartCall = async (targetUserId) => {
 };
 
 const handleAcceptCall = async () => {
+  // 1. Stop audio alerts
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.src = "";
+    ringtoneAudio.current.currentTime = 0;
   }
 
   const token = localStorage.getItem('agentToken');
-  const callId = activeCall?.callId;
+  const callId = activeCall?.callId || activeCall?._id;
 
   try {
     setCallStatus('connecting');
     setShowFullScreenCall(true);
+
     let incomingSignal = activeCall?.signal;
-    if (!incomingSignal) {
+
+    // 2. Safety check: if signal didn't come through socket, get it from DB
+    if (!incomingSignal && callId) {
       console.log("📡 Fetching missing signal from DB...");
       const res = await fetch(`/api/calls/status/${callId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      incomingSignal = data.signal || data.answerSignal; // Check both just in case
+      incomingSignal = data.signal;
     }
 
     if (!incomingSignal) throw new Error("Handshake signal missing.");
     await fetch('/api/calls/accept', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { 
+        'Authorization': `Bearer ${token}`, 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({ callId })
     });
+
+    // 4. Get Microphone Stream
     const stream = await navigator.mediaDevices.getUserMedia({ 
-audio: { 
-  echoCancellation: true, 
-  noiseSuppression: true, 
-  autoGainControl: true,
-  googEchoCancellation: true,
-  googAutoGainControl: true,
-  googNoiseSuppression: true,
-  googHighpassFilter: true 
-}
-, video: false 
-});
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: false 
+    });
+    
     userStreamRef.current = stream;
     setLocalStream(stream);
+
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
-      initiator: false, 
+      initiator: false, // Agent is receiver
       trickle: false, 
       stream: stream,
-      config: {
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Add STUN for reliability
+      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+    });
+
+    peer.on('signal', async (data) => {
+      const targetId = activeCall?.fromId || activeCall?.caller;
+      
+      if (targetId) {
+        console.log("📤 Sending Answer Signal to User via Socket...");
+        socket.emit("answer-call", { to: targetId, signal: data, callId });
+                await fetch('/api/calls/update-signal', {
+          method: 'PATCH',
+          headers: { 
+            'Authorization': `Bearer ${token}`, 
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({ callId, signal: data })
+        }).catch(e => console.warn("Signal backup failed:", e));
       }
     });
-   peer.on('signal', async (data) => {
-  const targetId = activeCall?.fromId || activeCall?.callerData?.callerId;
-  
-  if (targetId) {
-    console.log("📤 Sending Answer Signal...");
-    socket.emit("answer-call", { to: targetId, signal: data, callId });
-    
-    await fetch('/api/calls/update-signal', {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callId, signal: data })
-    }).catch(e => console.warn("Signal backup failed:", e));
-  }
-});
-
-   // Handle Remote Stream
-peer.on('stream', (remoteStream) => {
-  console.log("🔈 Remote stream received");
-    let audio = document.getElementById('remoteAudio');
-  if (!audio) {
-    audio = document.createElement('audio');
-    audio.id = 'remoteAudio';
-    audio.autoplay = true;
-    audio.playsInline = true;
-    document.body.appendChild(audio);
-  }
-   audio.srcObject = remoteStream;
-audio.muted = false; 
-audio.volume = 1.0;
-audio.play().catch(e => console.warn("Playback deferred", e));
-setCallStatus('connected');
-  const playPromise = audio.play();
-  if (playPromise !== undefined) {
-    playPromise
-      .then(() => {
-        console.log("🔊 Audio playing successfully");
+    peer.on('stream', (remoteStream) => {
+      console.log("🔈 User stream received");
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'remoteAudio';
+        document.body.appendChild(audio);
+      }
+      audio.srcObject = remoteStream;
+      audio.play().then(() => {
         setCallStatus('connected');
         setPeerConnected(true);
-      })
-      .catch(e => {
-        console.warn("Autoplay blocked. User must click 'Sync' or 'Accept'", e);
-      });
-  }
-});
+      }).catch(err => console.warn("Audio play deferred:", err));
+    });
 
-    peer.on('close', () => handleEndCall());
+    peer.on('error', (err) => {
+      console.error("Peer Error:", err);
+      handleEndCall();
+    });
     const parsedSignal = typeof incomingSignal === 'string' 
       ? JSON.parse(incomingSignal) 
       : incomingSignal;
-    peer.signal(parsedSignal);
     
+    peer.signal(parsedSignal);
     connectionRef.current = peer;
 
   } catch (err) {
     console.error("❌ Call Acceptance Failed:", err);
-    terminateLocalSession();
-    alert("Connection failed. Please ensure microphone access is allowed.");
+    handleEndCall(); 
+    alert("Connection failed. Check mic permissions.");
   }
 };
-
 
 const handleEndCall = async () => {
   console.log("📴 Ending call and cleaning up resources...");
 
-  // 1. SILENCE LOCAL SOUNDS
-  [ringtoneAudio, callingAudio].forEach(ref => {
-    if (ref.current) {
-      ref.current.pause();
-      ref.current.currentTime = 0;
-    }
-  });
-
-  // 2. NOTIFY OTHERS (Socket & DB)
-  const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId;
-  const targetId = activeCall?.fromId || activeCall?.receiver || activeCaller?.callerId;
-  const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-
-  if (targetId && socket) {
-    socket.emit("end-call", { to: targetId, callId });
+  // 1. STOP ALL SOUNDS
+  // Note: We use .pause() and .src = "" to fully reset the buffer
+  if (ringtoneAudio.current) {
+    ringtoneAudio.current.pause();
+    ringtoneAudio.current.src = "";
+    ringtoneAudio.current.load();
+  }
+  if (callingAudio.current) {
+    callingAudio.current.pause();
+    callingAudio.current.src = "";
+    callingAudio.current.load();
   }
 
+  // 2. IDENTIFY RECIPIENT & CALL
+  // Use a fallback chain to find the ID of the person on the other end
+  const callId = activeCall?.callId || activeCall?._id;
+  const targetId = activeCall?.fromId || activeCall?.caller || activeCall?.callerData?.callerId;
+  const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+
+  // 3. NOTIFY SOCKET (Immediate UI update for the other person)
+  if (targetId && socket) {
+    console.log(`📡 Notifying ${targetId} that call has ended...`);
+    socket.emit("end-call", { to: targetId.toString(), callId });
+  }
+
+  // 4. NOTIFY DATABASE (Persistent state update)
   if (callId && token) {
     fetch('/api/calls/end', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { 
+        'Authorization': `Bearer ${token}`, 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({ callId })
     }).catch(e => console.error("❌ End Call DB error:", e));
   }
+
+  // 5. HARDWARE CLEANUP (Mic off)
   if (userStreamRef.current) {
     userStreamRef.current.getTracks().forEach(track => {
-      track.stop(); // Turns off the hardware mic
-      console.log("Mic track stopped");
+      track.stop();
+      console.log(`Stopped track: ${track.kind}`);
     });
     userStreamRef.current = null;
   }
@@ -611,7 +617,7 @@ const handleEndCall = async () => {
     try {
       connectionRef.current.destroy();
     } catch (e) {
-      console.log("Peer cleanup handled");
+      console.log("Peer already destroyed");
     }
     connectionRef.current = null;
   }
@@ -619,27 +625,30 @@ const handleEndCall = async () => {
   if (remoteAudio) {
     remoteAudio.pause();
     remoteAudio.srcObject = null;
-    remoteAudio.remove();
-    console.log("Remote audio element removed from DOM.");
+    // Instead of remove(), just clearing srcObject is safer for React stability
+    console.log("Remote audio stream cleared.");
   }
-
-  // 6. UI RESET
   setCallStatus('idle');
   setIsIncomingCall(false);
   setActiveCall(null);
   setActiveCaller(null);
   setPeerConnected(false);
-  if (typeof setShowFullScreenCall === 'function') setShowFullScreenCall(false);
+  setCallTime(0); // Reset the timer
+    if (typeof setShowFullScreenCall === 'function') {
+    setShowFullScreenCall(false);
+  }
 };
 
 useEffect(() => {
   if (!socket) return;
+
   const handleRemoteEnd = (data) => {
-    const currentCallId = activeCall?.callId || activeCall?._id || activeCaller?.callId;
+    const currentCallId = activeCall?.callId || activeCall?._id;
     if (data?.callId && currentCallId && data.callId !== currentCallId) {
-       console.log("Ignored end-call signal for a different session.");
-       return;
+      console.log("Ignored end-call signal for a different session.");
+      return;
     }
+
     console.log("☎️ Remote party ended the call. Cleaning up...");
     handleEndCall(); 
   };
@@ -649,7 +658,7 @@ useEffect(() => {
     socket.off("call-ended", handleRemoteEnd);
     socket.off("end-call", handleRemoteEnd);
   };
-}, [socket, activeCall, activeCaller, handleEndCall]);
+}, [socket, activeCall?.callId, activeCall?._id]); 
 
 useEffect(() => {
   if (userStreamRef.current) {
@@ -661,14 +670,34 @@ useEffect(() => {
 
 useEffect(() => {
   const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio && callStatus === 'connected') {
-    remoteAudio.volume = isSpeakerOn ? 1.0 : 0.7; 
-    remoteAudio.muted = false;
+  if (!remoteAudio) return;
+  remoteAudio.volume = isSpeakerOn ? 1.0 : 0.6; 
+  remoteAudio.muted = false;
+  if (callStatus === 'connected') {
+    const playAudio = async () => {
+      try {
         if (remoteAudio.paused) {
-      remoteAudio.play().catch(e => console.log("Playback interaction needed"));
-    }
+          await remoteAudio.play();
+          console.log("🔊 Remote audio playback started.");
+        }
+      } catch (e) {
+        console.warn("🔇 Autoplay blocked. Waiting for user interaction to resume audio.");
+      }
+    };
+    playAudio();
   }
 }, [isSpeakerOn, callStatus]);
+
+useEffect(() => {
+  let timeout;
+  if (callStatus === 'ringing' && isIncomingCall) {
+    timeout = setTimeout(() => {
+      console.log("⏰ Call missed (timeout).");
+      handleEndCall();
+    }, 45000);
+  }
+  return () => clearTimeout(timeout);
+}, [callStatus, isIncomingCall]);
 
 useEffect(() => {
   const handleOnline = () => setConnectionStatus('connected');
