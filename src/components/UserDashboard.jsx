@@ -1064,11 +1064,7 @@ const handleStartCall = async () => {
       audio: { 
         echoCancellation: true, 
         noiseSuppression: true, 
-        autoGainControl: true,
-        googEchoCancellation: true,
-        googAutoGainControl: true,
-        googNoiseSuppression: true,
-        googHighpassFilter: true 
+        autoGainControl: true 
       }, 
       video: false 
     });
@@ -1105,33 +1101,44 @@ const handleStartCall = async () => {
       config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-   socket.on("call-accepted", (acceptData) => {
-  console.log("📡 Agent Accepted! Injecting Answer Signal...");
-    setCallStatus('connecting'); 
+    // 5. ATTACH TO REF IMMEDIATELY
+    connectionRef.current = peer;
 
-  if (acceptData.signal && peer) {
-    const remoteSignal = typeof acceptData.signal === 'string' 
-      ? JSON.parse(acceptData.signal) 
-      : acceptData.signal;
-    
-    peer.signal(remoteSignal);
-  }
-});
-    // 6. START CONNECTION TIMEOUT
+    // 6. IMPROVED SOCKET LISTENER (Scoped to this specific peer instance)
+    socket.off("call-accepted"); // Remove any existing listeners
+    socket.on("call-accepted", (acceptData) => {
+      console.log("📡 Agent Accepted! Processing Signal...");
+      
+      // Ensure we are signaling the correct peer instance
+      if (connectionRef.current && acceptData.signal) {
+        try {
+          const remoteSignal = typeof acceptData.signal === 'string' 
+            ? JSON.parse(acceptData.signal) 
+            : acceptData.signal;
+          
+          setCallStatus('connecting'); 
+          connectionRef.current.signal(remoteSignal);
+        } catch (err) {
+          console.error("Signal Injection Failed:", err);
+        }
+      }
+    });
+
+    // 7. START CONNECTION TIMEOUT
     connectionTimeout = setTimeout(() => {
-      // Use the local 'peer' variable for the check to ensure accuracy
-      if (peer && !peer.connected) {
-        console.warn("Handshake timed out");
+      if (connectionRef.current && !connectionRef.current.connected) {
+        console.warn("Handshake timed out - Agent likely didn't receive signal");
         handleEndCall();
-        alert("Agent didn't answer. Please try again later.");
+        alert("Connection timed out. Please try again.");
       }
     }, 35000); 
 
-    // Send Offer Signal
+    // 8. SEND OFFER SIGNAL
     peer.on('signal', async (signalData) => {
-      console.log("📤 Sending WebRTC Offer...");
+      console.log("📤 Outbound Offer Generated. Emitting to Socket...");
+      
       socket.emit("call-user", {
-        userToCall: currentAgentId,
+        userToCall: currentAgentId.toString(), // Ensure string format
         fromId: currentUserId,
         fromName: `${userData?.firstName} ${userData?.lastName}`,
         photoUrl: userData?.photoUrl,
@@ -1141,6 +1148,7 @@ const handleStartCall = async () => {
       
       setCallStatus('ringing'); 
       
+      // Secondary Signal Backup via API
       await fetch('/api/calls/update-signal', {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -1148,9 +1156,9 @@ const handleStartCall = async () => {
       }).catch(e => console.error("Signal backup failed:", e));
     });
 
-    // Handle Remote Stream
+    // 9. HANDLE REMOTE STREAM
     peer.on('stream', (remoteStream) => {
-      console.log("🔈 Remote stream received");
+      console.log("🔈 Connection established! Receiving audio...");
       clearTimeout(connectionTimeout); 
       
       if (callingAudio.current) {
@@ -1177,7 +1185,7 @@ const handleStartCall = async () => {
           setPeerConnected(true);
         })
         .catch(e => {
-            // Unmute fallback for restrictive browsers
+            console.warn("Autoplay blocked, attempting muted bridge...");
             audio.muted = true;
             audio.play().then(() => {
                 setTimeout(() => { audio.muted = false; }, 500);
@@ -1188,17 +1196,15 @@ const handleStartCall = async () => {
     });
 
     peer.on('error', (err) => {
-      console.error("Peer connection error:", err);
+      console.error("Simple-Peer Error:", err);
       handleEndCall();
     });
 
-    connectionRef.current = peer;
-
   } catch (err) {
-    console.error("Call failed:", err);
+    console.error("Call initialization failed:", err);
     if (connectionTimeout) clearTimeout(connectionTimeout);
     terminateLocalSession();
-    alert(err.message || "Connection failed.");
+    alert(err.message || "Could not start call.");
   }
 };
 

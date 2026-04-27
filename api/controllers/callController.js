@@ -109,12 +109,12 @@ export const updateCallSignal = async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
-    const myId = (req.user.id || req.user._id).toString();
+    const myId = (req.user.id || req.user._id).toString(); // Ensure string
 
     const call = await Call.findById(callId);
     if (!call) return res.status(404).json({ success: false, message: "Call not found" });
 
-    // Determine if the person sending this signal is the RECEIVER (Answering)
+    // FIX: Ensure both are strings for comparison
     const isAnswering = call.receiver.toString() === myId;
 
     const updateData = isAnswering 
@@ -125,10 +125,11 @@ export const updateCallSignal = async (req, res) => {
 
     const io = req.app.get('socketio');
     if (io) {
-      // Send signal to the OTHER party
-      const targetId = isAnswering ? updatedCall.caller : updatedCall.receiver;
+      const targetId = isAnswering ? updatedCall.caller.toString() : updatedCall.receiver.toString();
       
-      io.to(targetId.toString()).emit(isAnswering ? "call-accepted" : "incoming-call", {
+      const eventName = isAnswering ? "call-accepted" : "incoming-call";
+      
+      io.to(targetId).emit(eventName, {
         signal: signal,
         callId: callId,
         fromName: req.user.firstName || "Secure Connection"
@@ -140,7 +141,6 @@ export const updateCallSignal = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 export const checkIncomingCall = async (req, res) => {
   try {
     await connectToDatabase(); 
