@@ -182,24 +182,23 @@ io.on("connection", (socket) => {
   socket.on("confirm-ringing", ({ to }) => {
     if (to) io.to(to.toString()).emit("user-is-ringing");
   });
-  socket.on("answer-call", async ({ to, signal, callId }) => {
-    console.log(`Relaying Answer for Call: ${callId}`);
-    try {
-        if (callId) {
-            await Call.findOneAndUpdate(
-                { _id: callId, status: { $ne: 'ended' } }, 
-                { status: 'connected', startTime: Date.now() }
-            );
-        }
-    } catch (err) {
-        console.error("DB Update Error:", err);
+socket.on("answer-call", async ({ to, signal, callId }) => {
+  const targetRoom = to.toString().trim();
+  console.log(`Relaying Answer to User Room: ${targetRoom}`);
+  io.to(targetRoom).emit("call-accepted", { 
+    signal, 
+    callId 
+  });
+  try {
+    if (callId) {
+      await Call.findByIdAndUpdate(callId, { 
+        status: 'connected',
+        startTime: Date.now() 
+      });
     }
-
-    // Ensure this only goes to the 'to' (The User)
-    io.to(to.toString()).emit("call-accepted", { 
-        signal, 
-        callId 
-    });
+  } catch (err) {
+    console.error("DB Update failed during answer:", err);
+  }
 });
   // 5. END CALL
   socket.on("end-call", async ({ to, callId }) => {
@@ -1568,7 +1567,6 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
 app.post('/api/calls/start', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    // ADD 'signal' to the destructuring here
     const { receiverId, receiverModel, signal } = req.body; 
     
     const callerId = req.user.id || req.user._id || req.user.userId;
@@ -1586,14 +1584,18 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 
     await newCall.save();
         const io = req.app.get('socketio');
-    if (io) {
-      io.to(receiverId.toString()).emit("incoming-call", {
-        signal,
-        fromId: callerId,
-        fromName: req.user.firstName ? `${req.user.firstName} ${req.user.lastName || ''}` : "Secure Caller",
-        callId: newCall._id
-      });
-    }
+if (io) {
+  const target = receiverId.toString().trim();
+  console.log(`Notifying Agent ${target} of new call ${newCall._id}`);
+  
+  io.to(target).emit("incoming-call", {
+    signal: signal, // The offer signal
+    fromId: callerId,
+    fromName: req.user.firstName ? `${req.user.firstName} ${req.user.lastName || ''}` : "Secure Caller",
+    photoUrl: req.user.photoUrl || null,
+    callId: newCall._id
+  });
+}
 
     res.status(201).json({ success: true, callId: newCall._id });
   } catch (err) {
@@ -1658,24 +1660,24 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
-    const myId = (req.user.id || req.user._id).toString();
+    const myId = (req.user._id || req.user.id || req.user.userId).toString();
 
     const call = await Call.findById(callId);
     if (!call) return res.status(404).json({ success: false, message: "Call not found" });
-const isAnswer = call.receiver.toString() === req.user.id.toString();
+    const isAnswer = call.receiver.toString() === myId;
 
-   const updateData = isAnswer 
-  ? { answerSignal: signal, status: 'connected', startTime: Date.now() } // Mark connected here
-  : { signal: signal, status: 'ringing' };
-
+    const updateData = isAnswer 
+      ? { answerSignal: signal, status: 'connected', startTime: Date.now() } 
+      : { signal: signal }; // Don't force 'ringing' status if it's just a signal update
     const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
-
     const io = req.app.get('socketio');
     if (io) {
       const targetId = isAnswer ? updatedCall.caller : updatedCall.receiver;
-      io.to(targetId.toString()).emit(isAnswer ? "call-accepted" : "incoming-call", { 
+      const eventName = isAnswer ? "call-accepted" : "incoming-call";
+      
+      io.to(targetId.toString()).emit(eventName, { 
         signal, 
-        callId 
+        callId: updatedCall._id 
       });
     }
 
@@ -1684,20 +1686,17 @@ const isAnswer = call.receiver.toString() === req.user.id.toString();
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 app.post('/api/calls/accept', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    // Support both body.callId or finding the latest via Token ID
-    const myId = req.user.id || req.user._id || req.user.userId;
+        const myId = req.user.id || req.user._id || req.user.userId;
     const { callId } = req.body;
 
     let query = { 
       receiver: myId, 
       status: { $in: ['calling', 'ringing'] } 
     };
-
-    // If specific callId provided, use it, otherwise find the latest ringing call
     if (callId) {
       query = { _id: callId, receiver: myId };
     }

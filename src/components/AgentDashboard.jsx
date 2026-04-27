@@ -463,6 +463,7 @@ const handleStartCall = async (targetUserId) => {
 };
 
 const handleAcceptCall = async () => {
+  // 1. Silence ringtone immediately
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
     ringtoneAudio.current.src = ""; 
@@ -472,121 +473,57 @@ const handleAcceptCall = async () => {
   try {
     setCallStatus('connecting');
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-    
     const callId = activeCaller?.callId || activeCall?.callId || activeCall?._id;
-
     let incomingSignal = activeCaller?.signal || activeCall?.signal;
-    
-    if (!incomingSignal && callId) {
-      const res = await fetch(`/api/calls/status/${callId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      incomingSignal = data.signal;
-    }
 
-    if (!incomingSignal) {
-      setCallStatus('idle');
-      return;
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { 
-        echoCancellation: true, 
-        noiseSuppression: true, 
-        autoGainControl: true,
-        googEchoCancellation: true,
-        googAutoGainControl: true,
-        googNoiseSuppression: true,
-        googHighpassFilter: true 
-      } 
-    });
-
-    userStreamRef.current = stream; 
+    // 2. Peer Configuration
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    userStreamRef.current = stream;
     if (typeof setLocalStream === 'function') setLocalStream(stream);
 
     const PeerConstructor = Peer.default || Peer;
     const peer = new PeerConstructor({
-      initiator: false, 
-      trickle: false, 
+      initiator: false,
+      trickle: false,
       stream: stream,
-      config: {
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      }
+      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
     });
 
-    connectionRef.current = peer;
-
+    // 3. The Signal Handler (Where the Answer is born)
     peer.on('signal', async (data) => {
-      const targetId = activeCaller?.callerId || activeCaller?.fromId || activeCall?.fromId || activeCall?.caller;
+      console.log("📤 Agent Answer Signal generated. Syncing to Backend...");
       
-      if (targetId && socket) {
-        socket.emit("answer-call", { 
-          to: targetId.toString(), 
-          signal: data, 
-          callId: callId 
-        });
-      }
-
-      if (callId) {
-        await fetch('/api/calls/update-signal', {
-          method: 'PATCH',
-          headers: { 
-            'Authorization': `Bearer ${token}`, 
-            'Content-Type': 'application/json' 
-          },
-          body: JSON.stringify({ callId, signal: data })
-        }).catch(e => console.error(e));
-      }
+      // CALL THE BACKEND: This is the critical step to notify the User
+      await fetch('/api/calls/accept', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ callId, signal: data }) // Sending the signal here!
+      }).catch(e => console.error("Accept API Error:", e));
     });
 
+    // 4. Remote Stream Handling
     peer.on('stream', (remoteStream) => {
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        audio.playsInline = true;
-        document.body.appendChild(audio);
-      }
-
+      let audio = document.getElementById('remoteAudio') || document.createElement('audio');
+      audio.id = 'remoteAudio';
       audio.srcObject = remoteStream;
-      audio.muted = false; 
-      audio.volume = 1.0;
-
-      audio.play()
-        .then(() => {
-          setCallStatus('connected');
-        })
-        .catch(() => {
-          audio.muted = true;
-          audio.play().then(() => {
-            setTimeout(() => { 
-              audio.muted = false; 
-              setCallStatus('connected');
-            }, 500);
-          });
-        });
+      audio.play().then(() => setCallStatus('connected'));
     });
 
     peer.on('close', () => handleEndCall());
     peer.on('error', () => handleEndCall());
-const parsedSignal = typeof incomingSignal === 'string' 
-  ? JSON.parse(incomingSignal) 
-  : incomingSignal;
-try {
-    console.log("📥 Final Step: Injecting User Offer into Agent Peer");
-    peer.signal(parsedSignal);
-} catch (err) {
-  console.error("Signal error:", err);
-}
 
-connectionRef.current = peer;
+    // 5. Final Step: Kickstart the handshake with the User's Offer
+    const parsedSignal = typeof incomingSignal === 'string' ? JSON.parse(incomingSignal) : incomingSignal;
+    peer.signal(parsedSignal);
+    
+    connectionRef.current = peer;
+
   } catch (err) {
+    console.error("❌ Failed to accept call:", err);
     setCallStatus('idle');
-    if (userStreamRef.current) {
-        userStreamRef.current.getTracks().forEach(t => t.stop());
-    }
   }
 };
 

@@ -1102,21 +1102,25 @@ const handleStartCall = async () => {
     });
 
     connectionRef.current = peer;
+socket.off("call-accepted");
 
-    socket.off("call-accepted"); // Remove any existing listeners
 socket.on("call-accepted", (acceptData) => {
-    if (callStatus === 'connected') return;
-
-    console.log("📡 Answer received from Agent. Finishing handshake...");
-    
-    if (acceptData.signal && connectionRef.current) {
-        const remoteSignal = typeof acceptData.signal === 'string' 
-            ? JSON.parse(acceptData.signal) 
-            : acceptData.signal;
-                connectionRef.current.signal(remoteSignal);
+  console.log("📡 Answer Received! Stopping 'Ringing' and connecting...");
+  
+  if (acceptData.signal && connectionRef.current) {
+    try {
+      const remoteSignal = typeof acceptData.signal === 'string' 
+        ? JSON.parse(acceptData.signal) 
+        : acceptData.signal;
+            connectionRef.current.signal(remoteSignal);
+            setCallStatus('connecting'); 
+    } catch (err) {
+      console.error("Failed to process agent answer:", err);
     }
+  } else {
+    console.warn("Received call-accepted but peer or signal was missing.");
+  }
 });
-
     // 7. START CONNECTION TIMEOUT
     connectionTimeout = setTimeout(() => {
       if (connectionRef.current && !connectionRef.current.connected) {

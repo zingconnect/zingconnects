@@ -40,36 +40,30 @@ export const startCall = async (req, res) => {
   }
 };
 
-// @desc Receiver accepts the call - Updates status to 'connected'
+// Update this in your backend callController.js
 export const acceptCall = async (req, res) => {
   try {
     await connectToDatabase();
-    const { callId } = req.body;
+    const { callId, signal } = req.body; // Signal must be captured from the frontend
 
-    if (!callId) {
-      return res.status(400).json({ success: false, message: "Call ID is required" });
-    }
+    const updatedCall = await Call.findByIdAndUpdate(
+      callId,
+      { status: 'connected', startTime: Date.now(), answerSignal: signal },
+      { new: true }
+    );
 
-   const updatedCall = await Call.findByIdAndUpdate(
-  callId,
-  { status: 'connected', startTime: Date.now() },
-  { returnDocument: 'after' } // replaces new: true
-);
-
-    if (!updatedCall) {
-      return res.status(404).json({ success: false, message: "Call session not found" });
-    }
-
-    // Notify the caller that the call was accepted via Socket
     const io = req.app.get('socketio');
-    if (io) {
+    if (io && updatedCall) {
       const targetId = updatedCall.caller.toString();
-      io.to(targetId).emit("call-accepted", { callId: updatedCall._id });
+      // CRITICAL: Relay the signal back to the User!
+      io.to(targetId).emit("call-accepted", { 
+        callId: updatedCall._id,
+        signal: signal // Without this, User keeps ringing
+      });
     }
 
-    res.status(200).json({ success: true, status: updatedCall.status });
+    res.status(200).json({ success: true });
   } catch (error) {
-    console.error("❌ Accept Call Error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -109,26 +103,20 @@ export const updateCallSignal = async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
-    const myId = (req.user.id || req.user._id).toString(); // Ensure string
-
+    const myId = (req.user.id || req.user._id).toString();
     const call = await Call.findById(callId);
     if (!call) return res.status(404).json({ success: false, message: "Call not found" });
-
-    // FIX: Ensure both are strings for comparison
     const isAnswering = call.receiver.toString() === myId;
-
+    // Use a clean update object
     const updateData = isAnswering 
       ? { answerSignal: signal, status: 'connected', startTime: Date.now() } 
-      : { signal: signal, status: 'ringing' };
-
+      : { signal: signal }; // If caller updates, just update offer
     const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
-
     const io = req.app.get('socketio');
     if (io) {
       const targetId = isAnswering ? updatedCall.caller.toString() : updatedCall.receiver.toString();
-      
       const eventName = isAnswering ? "call-accepted" : "incoming-call";
-      
+      console.log(`Relaying ${eventName} to ${targetId}`);
       io.to(targetId).emit(eventName, {
         signal: signal,
         callId: callId,
@@ -141,14 +129,15 @@ export const updateCallSignal = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 export const checkIncomingCall = async (req, res) => {
   try {
     await connectToDatabase(); 
-    const userId = req.user._id || req.user.id;
+    const userId = (req.user._id || req.user.id).toString();
 
     const incoming = await Call.findOne({ 
       receiver: userId, 
-      status: { $in: ['ringing', 'calling'] }, // Check both states
+      status: { $in: ['ringing', 'calling'] },
       active: true 
     })
     .sort({ createdAt: -1 })
@@ -160,11 +149,11 @@ export const checkIncomingCall = async (req, res) => {
       hasIncomingCall: true,
       callId: incoming._id,
       status: incoming.status,
-      signal: incoming.signal, 
+      signal: incoming.signal, // This is the Offer from the User
       callerData: {
-        fromName: `${incoming.caller?.firstName || 'Unknown'} ${incoming.caller?.lastName || ''}`.trim(),
+        fromName: `${incoming.caller?.firstName || 'Secure'} ${incoming.caller?.lastName || 'Caller'}`.trim(),
         photoUrl: incoming.caller?.photoUrl || null,
-        callerId: incoming.caller?._id // IMPORTANT: handleAcceptCall needs this!
+        callerId: incoming.caller?._id
       }
     });
   } catch (error) {
