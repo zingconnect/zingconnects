@@ -174,14 +174,51 @@ router.get('/stats', authenticateToken, async (req, res) => {
     });
   }
 });
+// 1. GET ALL AGENTS (List View)
+router.get('/agents', authenticateToken, async (req, res) => {
+  try {
+    // Ensure the database is connected before proceeding
+    await connectToDatabase();
+    
+    // Get the model dynamically if using your helper, or use the imported model
+    const AgentModel = getAgentModel();
 
+    // Use .lean() to return plain objects and avoid Mongoose document overhead
+    const agents = await AgentModel.find({})
+      .select('firstName lastName email program isVerified photoUrl createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formattedAgents = agents.map(agent => ({
+      _id: agent._id,
+      firstName: agent.firstName || "N/A",
+      lastName: agent.lastName || "",
+      email: agent.email || "No Email",
+      program: agent.program || "General",
+      isVerified: !!agent.isVerified,
+      photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
+    }));
+
+    res.json({
+      success: true,
+      agents: formattedAgents
+    });
+  } catch (err) {
+    console.error("Admin Router: List Fetch Error:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch agent list" 
+    });
+  }
+});
+
+// 2. GET SINGLE AGENT (Detailed View)
 router.get('/agents/:id', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    // Assuming your admin auth middleware sets req.user.role or similar
-    // to verify this is indeed an admin access.
-
     const AgentModel = getAgentModel();
+    
+    // Find by ID - we don't use .lean() here because we might need to call .save()
     const agent = await AgentModel.findById(req.params.id);
 
     if (!agent) {
@@ -191,29 +228,30 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
       });
     }
 
-    // 1. CHECK & UPDATE EXPIRATIONS (Silently sync data for the admin view)
     const now = new Date();
     let needsSave = false;
 
+    // --- 1. SILENT EXPIRATION SYNC ---
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
       needsSave = true;
     }
-
     if (agent.voicePackageActive && agent.voicePackageExpiry && now > new Date(agent.voicePackageExpiry)) {
       agent.voicePackageActive = false;
       needsSave = true;
     }
-
+    
+    // Only save if status changes were made
     if (needsSave) await agent.save();
 
-    // 2. HANDLE S3 PHOTO SIGNING (Ensures admin sees the private profile photo)
+    // --- 2. SECURE PHOTO SIGNING ---
     let finalPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
         const urlParts = agent.photoUrl.split('/');
         const profileIndex = urlParts.indexOf('profiles');
         
+        // Safety check for S3 dependencies within the router scope
         if (profileIndex !== -1 && typeof GetObjectCommand !== 'undefined' && typeof s3Client !== 'undefined') {
           const fileKey = urlParts.slice(profileIndex).join('/');
           const command = new GetObjectCommand({
@@ -223,7 +261,8 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
           finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         }
       } catch (signErr) {
-        console.error("Admin View: Image Signing Failed:", signErr.message);
+        console.error("Admin Router: Image Signing Failed:", signErr.message);
+        // Fallback: the UI will use the original URL or a default avatar
       }
     }
 
@@ -232,11 +271,11 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
       finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-    // 3. CALCULATE ONLINE STATUS
+    // --- 3. STATUS CALCULATION ---
     const lastActiveDate = agent.lastActive || agent.createdAt;
     const isOnline = (now - new Date(lastActiveDate)) < 120000;
 
-    // 4. RETURN FULL AGENT DATA
+    // --- 4. RETURN FULL DATA ---
     res.json({
       success: true,
       agent: {
@@ -252,22 +291,16 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
         address: agent.address,
         photoUrl: finalPhotoUrl,
         slug: agent.slug,
-        
-        // Subscription & Financials
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed, 
         subscriptionDate: agent.subscriptionDate,
         expiryDate: agent.expiryDate,
         paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" },
-
-        // Voice & Identity (Matches your UI Masking status)
         voiceId: agent.voiceId, 
         unlockedVoiceIds: agent.unlockedVoiceIds || [], 
         voiceDisplayName: agent.voiceDisplayName,
         voicePackageActive: !!agent.voicePackageActive, 
         voicePackageExpiry: agent.voicePackageExpiry,
-
-        // System Info
         isVerified: !!agent.isVerified,
         status: isOnline ? 'online' : 'offline',
         lastActive: agent.lastActive,
@@ -276,37 +309,11 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Admin Agent Fetch Error:", err);
+    console.error("Admin Router: Detail Fetch Error:", err.message);
     res.status(500).json({ 
       success: false, 
       message: "Internal server error accessing agent data" 
     });
-  }
-});
-
-router.get('/agents', authenticateToken, async (req, res) => {
-  try {
-    await connectToDatabase();
-    const AgentModel = getAgentModel();
-
-    const agents = await AgentModel.find().sort({ createdAt: -1 });
-    const formattedAgents = agents.map(agent => ({
-      _id: agent._id,
-      firstName: agent.firstName,
-      lastName: agent.lastName,
-      email: agent.email,
-      program: agent.program,
-      isVerified: !!agent.isVerified,
-      photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
-    }));
-
-    res.json({
-      success: true,
-      agents: formattedAgents
-    });
-  } catch (err) {
-    console.error("Admin List Fetch Error:", err);
-    res.status(500).json({ success: false, message: "Failed to fetch agent list" });
   }
 });
 

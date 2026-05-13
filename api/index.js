@@ -2516,19 +2516,25 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   }
 });
 
-
+// 1. FETCH ALL AGENTS (LIST VIEW)
 app.get('/api/admin/agents', authenticateToken, async (req, res) => {
   try {
+    // Explicitly wait for the connection to avoid "buffering timed out" errors
     await connectToDatabase();
-    const AgentModel = getAgentModel();
 
-    const agents = await AgentModel.find().sort({ createdAt: -1 });
+    // Use the imported Agent model directly. 
+    // .lean() converts Mongoose documents into plain JS objects for faster processing.
+    const agents = await Agent.find({})
+      .select('firstName lastName email program isVerified photoUrl createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+
     const formattedAgents = agents.map(agent => ({
       _id: agent._id,
-      firstName: agent.firstName,
-      lastName: agent.lastName,
-      email: agent.email,
-      program: agent.program,
+      firstName: agent.firstName || "N/A",
+      lastName: agent.lastName || "",
+      email: agent.email || "No Email",
+      program: agent.program || "General",
       isVerified: !!agent.isVerified,
       photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
     }));
@@ -2538,26 +2544,32 @@ app.get('/api/admin/agents', authenticateToken, async (req, res) => {
       agents: formattedAgents
     });
   } catch (err) {
-    console.error("Admin List Fetch Error:", err);
-    res.status(500).json({ success: false, message: "Failed to fetch agent list" });
+    console.error("Admin List Fetch Error:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch agent list",
+      error: err.message 
+    });
   }
 });
 
-
+// 2. FETCH SINGLE AGENT (DETAILED VIEW)
 app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
-    try {
+  try {
     await connectToDatabase();
-    const AgentModel = getAgentModel();
-    const agent = await AgentModel.findById(req.params.id);
+    
+    const agent = await Agent.findById(req.params.id);
     if (!agent) {
       return res.status(404).json({
         success: false,
         message: "Agent record not found in system"
       });
     }
+
     const now = new Date();
     let needsSave = false;
 
+    // --- 1. SILENT EXPIRATION SYNC ---
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
       needsSave = true;
@@ -2567,12 +2579,15 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
       needsSave = true;
     }
     if (needsSave) await agent.save();
+
+    // --- 2. SECURE PHOTO SIGNING (S3) ---
     let finalPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
         const urlParts = agent.photoUrl.split('/');
         const profileIndex = urlParts.indexOf('profiles');
         
+        // Use the global imports (GetObjectCommand and s3Client) from your index.js
         if (profileIndex !== -1 && typeof GetObjectCommand !== 'undefined' && typeof s3Client !== 'undefined') {
           const fileKey = urlParts.slice(profileIndex).join('/');
           const command = new GetObjectCommand({
@@ -2583,13 +2598,20 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
         }
       } catch (signErr) {
         console.error("Admin View: Image Signing Failed:", signErr.message);
+        // Fallback to original URL if signing fails so the page doesn't crash
       }
     }
+
+    // Default Avatar Fallback if all else fails
     if (!finalPhotoUrl) {
       finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
+
+    // --- 3. STATUS CALCULATION ---
     const lastActiveDate = agent.lastActive || agent.createdAt;
     const isOnline = (now - new Date(lastActiveDate)) < 120000;
+
+    // --- 4. RETURN FORMATTED RESPONSE ---
     res.json({
       success: true,
       agent: {
@@ -2605,7 +2627,7 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
         address: agent.address,
         photoUrl: finalPhotoUrl,
         slug: agent.slug,
-                plan: agent.plan || "BASIC",
+        plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed, 
         subscriptionDate: agent.subscriptionDate,
         expiryDate: agent.expiryDate,
@@ -2623,13 +2645,14 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Admin Agent Fetch Error:", err);
+    console.error("Admin Agent Fetch Error:", err.message);
     res.status(500).json({ 
       success: false, 
       message: "Internal server error accessing agent data" 
     });
   }
 });
+
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
