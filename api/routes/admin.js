@@ -139,27 +139,20 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
  */
 router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
   try {
-    // 1. Ensure DB Connection
     await connectToDatabase();
-
-    // 2. Fetch agents with specific fields needed for the table/list
     const agents = await Agent.find({})
       .select('firstName lastName email program isVerified photoUrl lastActive createdAt isSubscribed')
       .sort({ createdAt: -1 })
       .lean();
 
     const now = new Date();
-
-    // 3. Format data for the Admin Dashboard UI
     const formattedAgents = agents.map(agent => {
       const lastActiveDate = agent.lastActive || agent.createdAt;
       const isOnline = (now - new Date(lastActiveDate)) < 120000; // 2-minute threshold
 
       return {
         ...agent,
-        // Provide a clear status string for the frontend badge
         status: isOnline ? 'online' : 'offline',
-        // Fallback for profile photos if S3 signing isn't needed for the thumbnail list
         photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=random`
       };
     });
