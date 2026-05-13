@@ -2354,6 +2354,38 @@ app.post('/api/agents/unlock-voice-package', async (req, res) => {
   }
 });
 
+
+app.get('/api/admin/register', authenticateToken, async (req, res) => {
+   try {
+      const { firstName, lastName, email, password } = req.body;
+      if (!firstName || !lastName || !email || !password) {
+        return res.status(400).json({ success: false, message: "All fields are required" });
+      }
+      const lowerEmail = email.toLowerCase().trim();
+      const existingAdmin = await Admin.findOne({ email: lowerEmail });
+      if (existingAdmin) {
+        return res.status(400).json({ success: false, message: "Admin email already exists" });
+      }
+      const newAdmin = new Admin({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: lowerEmail,
+        password 
+      });
+  
+      await newAdmin.save();
+  
+      res.status(201).json({ 
+        success: true, 
+        message: "Administrator account created successfully" 
+      });
+    } catch (err) {
+      console.error("Admin Reg Error:", err);
+      res.status(500).json({ success: false, message: "Error creating admin account" });
+    }
+  });
+
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
