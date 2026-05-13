@@ -96,6 +96,7 @@ const getPrivateUrl = async (fileKey) => {
     return null;
   }
 };
+
 // Cache for connections and a flag to track which DB is currently active
 let cached = global.mongoose;
 
@@ -108,14 +109,13 @@ if (!cached) {
 }
 
 const commonOpts = {
-  // High pool size to prevent "Hanging" during traffic spikes
   maxPoolSize: 100, 
   minPoolSize: 20,
-  // If the Primary DB is slow/full, fail fast (5 seconds) and switch to Reserve
   serverSelectionTimeoutMS: 5000, 
   socketTimeoutMS: 45000,
   heartbeatFrequencyMS: 10000,
   family: 4,
+  bufferCommands: false, // CRITICAL: Stop Mongoose from "waiting" on a dead connection
 };
 
 /**
@@ -2354,42 +2354,48 @@ app.post('/api/agents/unlock-voice-package', async (req, res) => {
   }
 });
 
-
-// Change from .get to .post
+// Ensure this is app.post, not app.get
 app.post('/api/admin/register', async (req, res) => {
-   try {
-      const { firstName, lastName, email, password } = req.body;
-      
-      if (!firstName || !lastName || !email || !password) {
-        return res.status(400).json({ success: false, message: "All fields are required" });
-      }
-
-      const lowerEmail = email.toLowerCase().trim();
-      
-      // 2. Check if Admin model is properly imported/defined
-      const existingAdmin = await Admin.findOne({ email: lowerEmail });
-      if (existingAdmin) {
-        return res.status(400).json({ success: false, message: "Admin email already exists" });
-      }
-
-      const newAdmin = new Admin({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: lowerEmail,
-        password // Note: Ensure you hash this before saving!
-      });
-  
-      await newAdmin.save();
-  
-      res.status(201).json({ 
-        success: true, 
-        message: "Administrator account created successfully" 
-      });
-    } catch (err) {
-      console.error("Admin Reg Error:", err);
-      // Adding err.message helps you see the actual crash reason in Vercel logs
-      res.status(500).json({ success: false, message: err.message });
+  try {
+    // Ensure the DB is connected (Primary or Reserve)
+    await connectToDatabase(); 
+    
+    const { firstName, lastName, email, password } = req.body;
+    
+    // Basic validation
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
+
+    const lowerEmail = email.toLowerCase().trim();
+    
+    // Check if Admin exists
+    const existingAdmin = await Admin.findOne({ email: lowerEmail });
+    if (existingAdmin) {
+      return res.status(400).json({ success: false, message: "Admin email already exists" });
+    }
+
+    const newAdmin = new Admin({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: lowerEmail,
+      password // Reminder: Hash this password before saving!
+    });
+
+    await newAdmin.save();
+
+    res.status(201).json({ 
+      success: true, 
+      message: "Administrator account created successfully" 
+    });
+  } catch (err) {
+    console.error("Admin Reg Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Error creating admin account",
+      details: err.message // Shows the "Buffering" or "Connection" error details
+    });
+  }
 });
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
