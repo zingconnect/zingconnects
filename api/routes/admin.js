@@ -1,11 +1,11 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+// CORRECTED PATHS: Step out of 'routes' to find 'models'
 import Admin from '../models/Admin.js';
-import Agent from './models/Agent.js';
+import Agent from '../models/Agent.js'; 
 import { authenticateToken, isAdmin } from './auth.js';
 import { connectToDatabase } from '../index.js';
-
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
