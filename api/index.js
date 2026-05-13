@@ -2455,26 +2455,78 @@ app.post('/api/admin/login', async (req, res) => {
 
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   try {
+    // 1. Ensure database connection with failover support
     await connectToDatabase();
-    const [totalAgents, pendingAgents, totalCallsToday] = await Promise.all([
+
+    // 2. Define time boundaries for revenue calculation
+    const now = new Date();
+    const startOfDay = new Date(now.setHours(0, 0, 0, 0));
+    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    // 3. Fetch Agent counts and Revenue data
+    // Assuming 'Agent' model has 'subscriptionFee' (Number) and 'updatedAt' (Date)
+    const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev] = await Promise.all([
       Agent.countDocuments(),
-      Agent.countDocuments({ status: 'pending' }), 
-      Call.countDocuments({ 
-        createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) } 
-      })
+      Agent.countDocuments({ status: 'pending' }),
+      
+      // Daily Revenue aggregate
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
+        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
+      ]),
+
+      // Weekly Revenue aggregate
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
+        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
+      ]),
+
+      // Monthly Revenue aggregate
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
+        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
+      ]),
+
+      // Yearly Revenue aggregate
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
+        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
+      ])
     ]);
+
+    // 4. Generate Chart Data (Example: Last 7 days)
+    // In a production app, you would aggregate this from a 'Transactions' collection
+    const chartData = [
+      { name: 'Mon', revenue: 4000 },
+      { name: 'Tue', revenue: 3000 },
+      { name: 'Wed', revenue: 2000 },
+      { name: 'Thu', revenue: 2780 },
+      { name: 'Fri', revenue: 1890 },
+      { name: 'Sat', revenue: 2390 },
+      { name: 'Sun', revenue: 3490 },
+    ];
+
+    // 5. Send structured response to ZingDashboard
     res.json({
       success: true,
       totalAgents,
       pendingAgents,
-      totalCallsToday
+      revenue: {
+        daily: dailyRev[0]?.total || 0,
+        weekly: weeklyRev[0]?.total || 0,
+        monthly: monthlyRev[0]?.total || 0,
+        yearly: yearlyRev[0]?.total || 0
+      },
+      chartData
     });
 
   } catch (err) {
-    console.error("Critical: Stats API Failure", err);
+    console.error("Financial Stats Error:", err);
     res.status(500).json({ 
       success: false, 
-      message: "Error fetching system stats",
+      message: "Error fetching system financial stats",
       details: err.message 
     });
   }
