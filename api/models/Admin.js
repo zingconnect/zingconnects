@@ -4,7 +4,14 @@ import bcrypt from 'bcryptjs';
 const AdminSchema = new mongoose.Schema({
   firstName: { type: String, required: true, trim: true },
   lastName: { type: String, required: true, trim: true },
-  username: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  // Added Email Field for Admin Identification
+  email: { 
+    type: String, 
+    required: true, 
+    unique: true, 
+    lowercase: true, 
+    trim: true 
+  },
   password: { type: String, required: true },
   role: { 
     type: String, 
@@ -30,8 +37,7 @@ AdminSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// 2. Keep this line for serverless/Netlify compatibility
+// Serverless compatibility check
 const Admin = mongoose.models.Admin || mongoose.model('Admin', AdminSchema);
 
-// 3. Ensure this is 'export default'
 export default Admin;

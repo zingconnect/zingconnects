@@ -3,7 +3,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js';
-import Call from '../models/Call.js';
 import { authenticateToken, isAdmin } from './auth.js';
 
 const router = express.Router();
@@ -27,7 +26,7 @@ router.post('/register', async (req, res) => {
       firstName,
       lastName,
       username,
-      password, // Plain text here; Schema hashes it before it hits the DB
+      password, 
       role: role || 'superadmin'
     });
 
