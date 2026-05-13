@@ -36,46 +36,43 @@ const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 };
 
-export const authenticateToken = async (req, res, next) => { // 1. Added async here
+export const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ message: "Access Denied" });
-  try {
-    await connectToDatabase(); 
-  } catch (connErr) {
-    return res.status(500).json({ 
-      message: "Database Connection Failed", 
-      details: connErr.message 
-    });
-  }
-  jwt.verify(token, process.env.JWT_SECRET, async (err, decodedUser) => {
-    if (err) {
-      console.error("JWT ERROR REASON:", err.message); 
-      return res.status(403).json({ message: "Session Expired" });
-    }
-    if (decodedUser.role === 'agent') {
-      try {
-        const AgentModel = getAgentModel();
-        // 3. This will now run instantly because connection is established above
-        const agent = await AgentModel.findById(decodedUser.id).select('currentSessionId');
-        
-        if (!agent || agent.currentSessionId !== decodedUser.sessionId) {
-          return res.status(401).json({ 
-            success: false, 
-            message: "You have been logged out because a new login was detected on another device.",
-            forceLogout: true 
-          });
-        }
-      } catch (dbErr) {
-        return res.status(500).json({ 
-          message: "Internal Auth Error", 
-          details: dbErr.message 
-        });
-      }
-    }
 
-    req.user = decodedUser;
-    next();
+  if (!token) return res.status(401).json({ message: "Access Denied" });
+
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+    if (err) return res.status(403).json({ message: "Invalid Token" });
+    
+    req.user = decoded; 
+    req.user.id = decoded.id || decoded._id;
+
+    try {
+      if (decoded.role === 'agent') {
+        const AgentModel = mongoose.models.Agent || mongoose.model('Agent'); 
+        const agent = await AgentModel.findById(req.user.id).select('currentSessionId lastActive');
+        
+        if (agent && agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+          return res.status(401).json({ success: false, message: "Session Mismatch", forceLogout: true });
+        }
+        if (agent) {
+          agent.lastActive = new Date();
+          await agent.save();
+        }
+      }
+
+      // Keep your Admin Last Login logic here
+      if (decoded.role === 'admin') {
+        const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
+        await AdminModel.findByIdAndUpdate(req.user.id, { lastLogin: new Date() });
+      }
+
+      next();
+    } catch (dbErr) {
+      console.error("Auth DB Error:", dbErr);
+      return res.status(500).json({ message: "Internal Auth Error" });
+    }
   });
 };
 
@@ -83,7 +80,7 @@ export const isAdmin = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
     next();
   } else {
-    res.status(403).json({ success: false, message: "Access denied: Admin only." });
+    res.status(403).json({ success: false, message: "Access denied: Admins only" });
   }
 };
 // --- IDRIVE E2 CONFIG ---
