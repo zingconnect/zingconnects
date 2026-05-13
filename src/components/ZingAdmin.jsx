@@ -25,14 +25,18 @@ const ZingAdmin = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+ const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  // Basic frontend validation
+  if (!formData.email || !formData.password || (!isLogin && (!formData.firstName || !formData.lastName))) {
+    alert("Please fill in all required fields.");
+    return;
+  }
 
-    const endpoint = isLogin ? '/api/admin/login' : '/api/admin/register';
-    const baseUrl = 'https://zingconnect.vercel.app'; 
+  setLoading(true);
 
- setLoading(true);
+  // DECLARE THESE ONLY ONCE
   const endpoint = isLogin ? '/api/admin/login' : '/api/admin/register';
   const baseUrl = 'https://zingconnect.vercel.app'; 
 
@@ -47,27 +51,28 @@ const ZingAdmin = () => {
         password: formData.password
       }),
     });
-      const data = await response.json();
 
-      if (data.success) {
-        if (isLogin) {
-          localStorage.setItem('adminToken', data.token);
-          localStorage.setItem('adminInfo', JSON.stringify(data.admin));
-          navigate('/admin/dashboard');
-        } else {
-          alert("Admin account created successfully!");
-          setIsLogin(true);
-        }
+    const data = await response.json();
+
+    if (data.success) {
+      if (isLogin) {
+        localStorage.setItem('adminToken', data.token);
+        localStorage.setItem('adminInfo', JSON.stringify(data.admin));
+        navigate('/admin/dashboard');
       } else {
-        alert(data.message || "Authentication failed");
+        alert("Admin account created successfully!");
+        setIsLogin(true);
       }
-    } catch (error) {
-      console.error("Auth Error:", error);
-      alert("System connection error. Check your backend.");
-    } finally {
-      setLoading(false);
+    } else {
+      alert(data.message || "Authentication failed");
     }
-  };
+  } catch (error) {
+    console.error("Auth Error:", error);
+    alert("System connection error. Check your backend.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans selection:bg-blue-500/30">
