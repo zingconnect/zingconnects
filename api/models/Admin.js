@@ -27,11 +27,9 @@ AdminSchema.pre('save', async function(next) {
   }
 });
 
-// --- HELPER METHOD TO CHECK PASSWORD ---
 AdminSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// CHANGE THIS LINE:
 const Admin = mongoose.models.Admin || mongoose.model('Admin', AdminSchema);
 export default Admin;
