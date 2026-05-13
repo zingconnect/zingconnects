@@ -42,7 +42,7 @@ const ZingDashboard = () => {
     const fetchStats = async () => {
       const token = localStorage.getItem('adminToken');
       if (!token) {
-        navigate('/admin-login');
+        navigate('/admin/terminal');
         return;
       }
 
@@ -55,7 +55,7 @@ const ZingDashboard = () => {
           setStats(data);
         } else {
           localStorage.removeItem('adminToken');
-          navigate('/admin-login');
+          navigate('/admin/terminal');
         }
       } catch (err) {
         console.error("Dashboard error:", err);
@@ -145,7 +145,7 @@ const ZingDashboard = () => {
           ))}
         </nav>
         <div className="p-4 border-t border-white/10">
-          <button onClick={() => { localStorage.removeItem('adminToken'); navigate('/admin-login'); }} className="w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-400/10 transition-all">Logout Session</button>
+          <button onClick={() => { localStorage.removeItem('adminToken'); navigate('/admin/terminal'); }} className="w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-400/10 transition-all">Logout Session</button>
         </div>
       </aside>
 
