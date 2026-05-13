@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 
 const AdminSchema = new mongoose.Schema({
   firstName: { type: String, required: true, trim: true },
@@ -27,9 +27,13 @@ AdminSchema.pre('save', async function(next) {
   }
 });
 
+// --- HELPER METHOD TO CHECK PASSWORD ---
 AdminSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
+// 2. Keep this line for serverless/Netlify compatibility
 const Admin = mongoose.models.Admin || mongoose.model('Admin', AdminSchema);
+
+// 3. Ensure this is 'export default'
 export default Admin;
