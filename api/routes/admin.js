@@ -1,11 +1,13 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-// CORRECTED PATHS: Step out of 'routes' to find 'models'
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; // Ensure this is imported
+import { GetObjectCommand } from "@aws-sdk/client-s3"; // Ensure this is imported
 import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js'; 
 import { authenticateToken, isAdmin } from './auth.js';
-import { connectToDatabase } from '../index.js';
+import { connectToDatabase, s3Client } from '../index.js'; // Import s3Client from your main file
+
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
@@ -211,27 +213,50 @@ router.get('/agents', authenticateToken, async (req, res) => {
     });
   }
 });
+// 1. GET ALL AGENTS (Fixed getAgentModel error)
+router.get('/agents', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    // Use the 'Agent' model imported at the top of the file
+    const agents = await Agent.find({})
+      .select('firstName lastName email program isVerified photoUrl createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
 
-// 2. GET SINGLE AGENT (Detailed View)
+    const formattedAgents = agents.map(agent => ({
+      _id: agent._id,
+      firstName: agent.firstName || "N/A",
+      lastName: agent.lastName || "",
+      email: agent.email || "No Email",
+      program: agent.program || "General",
+      isVerified: !!agent.isVerified,
+      photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
+    }));
+
+    res.json({ success: true, agents: formattedAgents });
+  } catch (err) {
+    console.error("Admin Router List Error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to fetch agent list" });
+  }
+});
+
+// 2. GET SINGLE AGENT (Fixed dependencies and model)
 router.get('/agents/:id', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const AgentModel = getAgentModel();
     
-    // Find by ID - we don't use .lean() here because we might need to call .save()
-    const agent = await AgentModel.findById(req.params.id);
+    // Using Agent directly
+    const agent = await Agent.findById(req.params.id);
 
     if (!agent) {
-      return res.status(404).json({
-        success: false,
-        message: "Agent record not found in system"
-      });
+      return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
     const now = new Date();
     let needsSave = false;
 
-    // --- 1. SILENT EXPIRATION SYNC ---
+    // Silent Expiration Sync
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
       needsSave = true;
@@ -240,20 +265,16 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
       agent.voicePackageActive = false;
       needsSave = true;
     }
-    
-    // Only save if status changes were made
     if (needsSave) await agent.save();
 
-    // --- 2. SECURE PHOTO SIGNING ---
+    // Secure Photo Signing
     let finalPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
-        const urlParts = agent.photoUrl.split('/');
-        const profileIndex = urlParts.indexOf('profiles');
+        const parts = agent.photoUrl.split('idrivee2.com/');
+        const fileKey = parts[1];
         
-        // Safety check for S3 dependencies within the router scope
-        if (profileIndex !== -1 && typeof GetObjectCommand !== 'undefined' && typeof s3Client !== 'undefined') {
-          const fileKey = urlParts.slice(profileIndex).join('/');
+        if (fileKey && typeof GetObjectCommand !== 'undefined' && s3Client) {
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: decodeURIComponent(fileKey),
@@ -261,59 +282,27 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
           finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         }
       } catch (signErr) {
-        console.error("Admin Router: Image Signing Failed:", signErr.message);
-        // Fallback: the UI will use the original URL or a default avatar
+        console.error("Signing Failed:", signErr.message);
       }
     }
 
-    // Default Avatar Fallback
     if (!finalPhotoUrl) {
-      finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
+      finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`;
     }
 
-    // --- 3. STATUS CALCULATION ---
-    const lastActiveDate = agent.lastActive || agent.createdAt;
-    const isOnline = (now - new Date(lastActiveDate)) < 120000;
+    const isOnline = (now - new Date(agent.lastActive || agent.createdAt)) < 120000;
 
-    // --- 4. RETURN FULL DATA ---
     res.json({
       success: true,
       agent: {
-        _id: agent._id,
-        email: agent.email,
-        firstName: agent.firstName,
-        lastName: agent.lastName,
-        occupation: agent.occupation,
-        program: agent.program,
-        bio: agent.bio,
-        gender: agent.gender, 
-        dob: agent.dob,
-        address: agent.address,
+        ...agent.toObject(),
         photoUrl: finalPhotoUrl,
-        slug: agent.slug,
-        plan: agent.plan || "BASIC",
-        isSubscribed: !!agent.isSubscribed, 
-        subscriptionDate: agent.subscriptionDate,
-        expiryDate: agent.expiryDate,
-        paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" },
-        voiceId: agent.voiceId, 
-        unlockedVoiceIds: agent.unlockedVoiceIds || [], 
-        voiceDisplayName: agent.voiceDisplayName,
-        voicePackageActive: !!agent.voicePackageActive, 
-        voicePackageExpiry: agent.voicePackageExpiry,
-        isVerified: !!agent.isVerified,
-        status: isOnline ? 'online' : 'offline',
-        lastActive: agent.lastActive,
-        createdAt: agent.createdAt
+        status: isOnline ? 'online' : 'offline'
       }
     });
-
   } catch (err) {
-    console.error("Admin Router: Detail Fetch Error:", err.message);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error accessing agent data" 
-    });
+    console.error("Admin Router Detail Error:", err.message);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
