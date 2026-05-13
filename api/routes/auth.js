@@ -460,6 +460,7 @@ let agent = await AgentModel.findByIdAndUpdate(
     });
   }
 });
+
 router.get('/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

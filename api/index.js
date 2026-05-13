@@ -2401,15 +2401,10 @@ app.post('/api/admin/register', async (req, res) => {
   }
 });
 
-// Endpoint: POST /api/admin/login
 app.post('/api/admin/login', async (req, res) => {
   try {
-    // 1. Force database connection with failover protection
     await connectToDatabase(); 
-
     const { email, password } = req.body;
-
-    // 2. Validate request payload
     if (!email || !password) {
       return res.status(400).json({ 
         success: false, 
@@ -2423,15 +2418,11 @@ app.post('/api/admin/login', async (req, res) => {
         message: "Invalid admin credentials" 
       });
     }
-
-    // 5. Generate a secure JWT Token
     const token = jwt.sign(
       { id: admin._id, role: admin.role || 'superadmin' },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
-
-    // 6. Return success with the token and admin details for the frontend
     res.status(200).json({ 
       success: true, 
       token, 
@@ -2442,7 +2433,6 @@ app.post('/api/admin/login', async (req, res) => {
         role: admin.role 
       } 
     });
-
   } catch (err) {
     console.error("Admin Login Error:", err);
     res.status(500).json({ 
@@ -2455,10 +2445,8 @@ app.post('/api/admin/login', async (req, res) => {
 
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   try {
-    // 1. Ensure database connection with failover support
     await connectToDatabase();
 
-    // 2. Define time boundaries for revenue calculation
     const now = new Date();
     const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
     const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
@@ -2466,33 +2454,33 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     const startOfYear = new Date(now.getFullYear(), 0, 1);
 
     const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev] = await Promise.all([
-  Agent.countDocuments(),
-  Agent.countDocuments({ status: 'pending' }),
-  
-  // Daily Revenue - Updated to use subscriptionAmount
-  Agent.aggregate([
-    { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
-    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
-  ]),
+      Agent.countDocuments(),
+      Agent.countDocuments({ status: 'pending' }),
+      
+      // Daily Revenue - Updated to target paymentDetails.amountNgn
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
+        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
 
-  // Weekly Revenue - Updated to use subscriptionAmount
-  Agent.aggregate([
-    { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
-    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
-  ]),
+      // Weekly Revenue - Updated to target paymentDetails.amountNgn
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
+        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
 
-  // Monthly Revenue - Updated to use subscriptionAmount
-  Agent.aggregate([
-    { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
-    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
-  ]),
+      // Monthly Revenue - Updated to target paymentDetails.amountNgn
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
+        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
 
-  // Yearly Revenue - Updated to use subscriptionAmount
-  Agent.aggregate([
-    { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
-    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
-  ])
-]);
+      // Yearly Revenue - Updated to target paymentDetails.amountNgn
+      Agent.aggregate([
+        { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
+        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ])
+    ]);
     const chartData = [
       { name: 'Mon', revenue: 10000 },
       { name: 'Tue', revenue: 12500 },
@@ -2503,7 +2491,6 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
       { name: 'Sun', revenue: 30000 },
     ];
 
-    // 5. Send structured response with Naira metadata
     res.json({
       success: true,
       totalAgents,
@@ -2525,6 +2512,93 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
       success: false, 
       message: "Error fetching system financial stats",
       details: err.message 
+    });
+  }
+});
+
+app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
+    try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
+    const agent = await AgentModel.findById(req.params.id);
+    if (!agent) {
+      return res.status(404).json({
+        success: false,
+        message: "Agent record not found in system"
+      });
+    }
+    const now = new Date();
+    let needsSave = false;
+
+    if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
+      agent.isSubscribed = false;
+      needsSave = true;
+    }
+    if (agent.voicePackageActive && agent.voicePackageExpiry && now > new Date(agent.voicePackageExpiry)) {
+      agent.voicePackageActive = false;
+      needsSave = true;
+    }
+    if (needsSave) await agent.save();
+    let finalPhotoUrl = agent.photoUrl;
+    if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
+      try {
+        const urlParts = agent.photoUrl.split('/');
+        const profileIndex = urlParts.indexOf('profiles');
+        
+        if (profileIndex !== -1 && typeof GetObjectCommand !== 'undefined' && typeof s3Client !== 'undefined') {
+          const fileKey = urlParts.slice(profileIndex).join('/');
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: decodeURIComponent(fileKey),
+          });
+          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        }
+      } catch (signErr) {
+        console.error("Admin View: Image Signing Failed:", signErr.message);
+      }
+    }
+    if (!finalPhotoUrl) {
+      finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
+    }
+    const lastActiveDate = agent.lastActive || agent.createdAt;
+    const isOnline = (now - new Date(lastActiveDate)) < 120000;
+    res.json({
+      success: true,
+      agent: {
+        _id: agent._id,
+        email: agent.email,
+        firstName: agent.firstName,
+        lastName: agent.lastName,
+        occupation: agent.occupation,
+        program: agent.program,
+        bio: agent.bio,
+        gender: agent.gender, 
+        dob: agent.dob,
+        address: agent.address,
+        photoUrl: finalPhotoUrl,
+        slug: agent.slug,
+                plan: agent.plan || "BASIC",
+        isSubscribed: !!agent.isSubscribed, 
+        subscriptionDate: agent.subscriptionDate,
+        expiryDate: agent.expiryDate,
+        paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" },
+        voiceId: agent.voiceId, 
+        unlockedVoiceIds: agent.unlockedVoiceIds || [], 
+        voiceDisplayName: agent.voiceDisplayName,
+        voicePackageActive: !!agent.voicePackageActive, 
+        voicePackageExpiry: agent.voicePackageExpiry,
+        isVerified: !!agent.isVerified,
+        status: isOnline ? 'online' : 'offline',
+        lastActive: agent.lastActive,
+        createdAt: agent.createdAt
+      }
+    });
+
+  } catch (err) {
+    console.error("Admin Agent Fetch Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error accessing agent data" 
     });
   }
 });
