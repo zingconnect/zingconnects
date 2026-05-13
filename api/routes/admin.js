@@ -105,61 +105,59 @@ router.get('/stats', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
 
-    // Define time boundaries for revenue calculation
     const now = new Date();
     const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
     const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-    // Fetch Agent counts and aggregate Revenue data
-    // Assuming 'subscriptionFee' is the field in your Agent model
-    const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev] = await Promise.all([
-      Agent.countDocuments(),
-      Agent.countDocuments({ status: 'pending' }),
-      
-      // Daily Revenue
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ]),
+   const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev] = await Promise.all([
+  Agent.countDocuments(),
+  Agent.countDocuments({ status: 'pending' }),
+  
+  // Daily Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ]),
 
-      // Weekly Revenue
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ]),
+  // Weekly Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ]),
 
-      // Monthly Revenue
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ]),
+  // Monthly Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ]),
 
-      // Yearly Revenue
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ])
-    ]);
-
-    // Data for the 'Revenue Growth Flow' chart
-    // Replace this static array with a real aggregation if you have a Transactions collection
+  // Yearly Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ])
+]);
+    // Updated 'Revenue Growth Flow' chart data with values starting from 10,000
     const chartData = [
-      { name: 'Mon', revenue: 400 },
-      { name: 'Tue', revenue: 700 },
-      { name: 'Wed', revenue: 500 },
-      { name: 'Thu', revenue: 900 },
-      { name: 'Fri', revenue: 1200 },
-      { name: 'Sat', revenue: 1100 },
-      { name: 'Sun', revenue: 1500 },
+      { name: 'Mon', revenue: 10000 },
+      { name: 'Tue', revenue: 15500 },
+      { name: 'Wed', revenue: 12000 },
+      { name: 'Thu', revenue: 25000 },
+      { name: 'Fri', revenue: 32000 },
+      { name: 'Sat', revenue: 28000 },
+      { name: 'Sun', revenue: 45000 },
     ];
 
     res.json({
       success: true,
       totalAgents,
       pendingAgents,
+      currency: "NGN", // Explicitly setting the currency for the frontend
+      currencySymbol: "₦",
       revenue: {
+        // Ensuring calculations default to 0 if no agents are found
         daily: dailyRev[0]?.total || 0,
         weekly: weeklyRev[0]?.total || 0,
         monthly: monthlyRev[0]?.total || 0,
@@ -177,6 +175,5 @@ router.get('/stats', authenticateToken, async (req, res) => {
     });
   }
 });
-
 
 export default router;

@@ -2460,59 +2460,56 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
 
     // 2. Define time boundaries for revenue calculation
     const now = new Date();
-    const startOfDay = new Date(now.setHours(0, 0, 0, 0));
-    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+    const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
+    const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-    // 3. Fetch Agent counts and Revenue data
-    // Assuming 'Agent' model has 'subscriptionFee' (Number) and 'updatedAt' (Date)
     const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev] = await Promise.all([
-      Agent.countDocuments(),
-      Agent.countDocuments({ status: 'pending' }),
-      
-      // Daily Revenue aggregate
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ]),
+  Agent.countDocuments(),
+  Agent.countDocuments({ status: 'pending' }),
+  
+  // Daily Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ]),
 
-      // Weekly Revenue aggregate
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ]),
+  // Weekly Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ]),
 
-      // Monthly Revenue aggregate
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ]),
+  // Monthly Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ]),
 
-      // Yearly Revenue aggregate
-      Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
-        { $group: { _id: null, total: { $sum: "$subscriptionFee" } } }
-      ])
-    ]);
-
-    // 4. Generate Chart Data (Example: Last 7 days)
-    // In a production app, you would aggregate this from a 'Transactions' collection
+  // Yearly Revenue - Updated to use subscriptionAmount
+  Agent.aggregate([
+    { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
+    { $group: { _id: null, total: { $sum: "$subscriptionAmount" } } }
+  ])
+]);
     const chartData = [
-      { name: 'Mon', revenue: 4000 },
-      { name: 'Tue', revenue: 3000 },
-      { name: 'Wed', revenue: 2000 },
-      { name: 'Thu', revenue: 2780 },
-      { name: 'Fri', revenue: 1890 },
-      { name: 'Sat', revenue: 2390 },
-      { name: 'Sun', revenue: 3490 },
+      { name: 'Mon', revenue: 10000 },
+      { name: 'Tue', revenue: 12500 },
+      { name: 'Wed', revenue: 11000 },
+      { name: 'Thu', revenue: 18000 },
+      { name: 'Fri', revenue: 22000 },
+      { name: 'Sat', revenue: 20500 },
+      { name: 'Sun', revenue: 30000 },
     ];
 
-    // 5. Send structured response to ZingDashboard
+    // 5. Send structured response with Naira metadata
     res.json({
       success: true,
       totalAgents,
       pendingAgents,
+      currency: "NGN",
+      currencySymbol: "₦",
       revenue: {
         daily: dailyRev[0]?.total || 0,
         weekly: weeklyRev[0]?.total || 0,
@@ -2523,7 +2520,7 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Financial Stats Error:", err);
+    console.error("Critical: Stats API Failure", err);
     res.status(500).json({ 
       success: false, 
       message: "Error fetching system financial stats",

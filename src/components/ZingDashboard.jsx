@@ -69,7 +69,8 @@ const ZingDashboard = () => {
       <div>
         <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">{title}</p>
         <h3 className="text-xl md:text-2xl font-black text-slate-900">
-          {typeof value === 'number' && title.includes('REVENUE') ? `$${value.toLocaleString()}` : value}
+          {/* UPDATED: Displays Naira symbol (₦) and formats number with commas */}
+          {typeof value === 'number' && title.includes('REVENUE') ? `₦${value.toLocaleString()}` : value}
         </h3>
         {subtext && <p className="text-[8px] font-bold text-slate-400 mt-1 uppercase">{subtext}</p>}
       </div>
@@ -155,8 +156,13 @@ const ZingDashboard = () => {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
-                      <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                      {/* UPDATED: Formatter for Y-Axis values in Naira */}
+                      <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `₦${value.toLocaleString()}`} />
+                      {/* UPDATED: Tooltip logic for Naira display */}
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} 
+                        formatter={(value) => [`₦${value.toLocaleString()}`, 'Revenue']}
+                      />
                       <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorRev)" />
                     </AreaChart>
                   </ResponsiveContainer>
