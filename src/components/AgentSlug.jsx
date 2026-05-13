@@ -1,0 +1,544 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { 
+  BsShieldLockFill, 
+  BsLightningFill, 
+  BsEyeFill, 
+  BsEyeSlashFill, 
+  BsCheckCircleFill, 
+  BsDownload,
+  BsShare // Useful for the iOS instructions
+} from 'react-icons/bs';
+import ZingConnectLogo from '../../public/logo.png';
+
+export const AgentSlug = () => {
+  const { slug } = useParams();
+  const navigate = useNavigate();
+  
+  // --- UI & DATA STATES ---
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [agentData, setAgentData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  // --- PWA INSTALL STATES ---
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallBtn, setShowInstallBtn] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [showIOSModal, setShowIOSModal] = useState(false);
+
+  // --- AUTH & REMEMBER STATES ---
+  const [userEmail, setUserEmail] = useState('');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [rememberUser, setRememberUser] = useState(false);
+  const [rememberAgent, setRememberAgent] = useState(false);
+
+ useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  // 2. Detect iOS for specific instructions
+  useEffect(() => {
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    const isAppleDevice = /iphone|ipad|ipod/.test(userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+    if (isAppleDevice && !isStandalone) {
+      setIsIOS(true);
+      const timer = setTimeout(() => setShowIOSModal(true), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+useEffect(() => {
+  if (slug) {
+    localStorage.setItem('agentSlug', slug); 
+    
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('pwa')) {
+       console.log("Launched from Home Screen for:", params.get('pwa'));
+    }
+
+    if (!window.location.search.includes('pwa=')) {
+      const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
+      window.history.replaceState({ path: newUrl }, '', newUrl);
+    }
+  }
+  
+ const fetchAgentProfile = async () => {
+  try {
+    setLoading(true);
+    setError(false); // Reset error state before fetching
+    
+    const response = await fetch(`/api/agents/${slug}`);
+    
+    // Check for 404 or other non-ok responses
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.warn("Fetch failed:", errorData.message);
+      setError(true);
+      return;
+    }
+    
+    const data = await response.json();
+    setAgentData(data);
+  } catch (err) {
+    console.error("System connection error:", err);
+    setError(true);
+  } finally {
+    setLoading(false);
+  }
+};
+
+  fetchAgentProfile();
+}, [slug]);
+
+  
+
+  // Load Remembered Credentials
+  useEffect(() => {
+    const savedUserEmail = localStorage.getItem('rememberedUserEmail');
+    const savedAgentEmail = localStorage.getItem('rememberedAgentEmail');
+    
+    if (savedUserEmail) {
+      setUserEmail(savedUserEmail);
+      setRememberUser(true);
+    }
+    if (savedAgentEmail) {
+      setLoginEmail(savedAgentEmail);
+      setRememberAgent(true);
+    }
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setShowInstallBtn(false);
+    }
+    setDeferredPrompt(null);
+  };
+
+  const handleUserInquiry = async (e) => {
+    e.preventDefault();
+    if (!userEmail) return alert("Please enter your email to continue.");
+    setIsProcessing(true);
+    try {
+      const response = await fetch('/api/users/handshake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email: userEmail, 
+          agentId: agentData._id,
+          agentSlug: slug 
+        })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        if (rememberUser) localStorage.setItem('rememberedUserEmail', userEmail);
+        else localStorage.removeItem('rememberedUserEmail');
+        localStorage.setItem('userToken', data.token);
+        localStorage.setItem('userEmail', userEmail);
+        navigate('/user/dashboard');
+      } else {
+        alert(data.message || "Connection failed.");
+      }
+    } catch (err) {
+      alert("System connection error.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+const handleAgentLogin = async (e) => {
+  e.preventDefault();
+  setIsProcessing(true);
+  try {
+    // 1. CLEAR old agent session data to prevent "Inactive" screen flashes
+    localStorage.removeItem('agentToken'); 
+    localStorage.removeItem('agentSlug');
+    
+    const response = await fetch('/api/agents/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: loginEmail, password: loginPassword })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok && data.token) {
+      if (rememberAgent) {
+        localStorage.setItem('rememberedAgentEmail', loginEmail);
+      } else {
+        localStorage.removeItem('rememberedAgentEmail');
+      }
+
+      // 3. Store new credentials
+      localStorage.setItem('agentToken', data.token);
+      localStorage.setItem('agentSlug', data.slug);
+      window.location.href = '/agent/dashboard';
+
+    } else if (response.status === 403) {
+      // 5. Explicit check for Dual Login if the API blocks the login attempt
+      alert(data.message || "Account already active on another device.");
+    } else {
+      alert(data.message || "Invalid Agent Credentials");
+    }
+  } catch (err) {
+    console.error("Login Error:", err);
+    alert("Portal connection error");
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="w-8 h-8 border-[3px] border-blue-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  if (error || !agentData) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-white p-6 text-center">
+      <h1 className="text-lg font-black mb-4 text-blue-950">Profile Unavailable</h1>
+      <button onClick={() => navigate('/')} className="text-[10px] font-black uppercase tracking-widest text-blue-600 border-b-2 border-blue-600">Return Home</button>
+    </div>
+  );
+
+  const fullName = `${agentData.firstName} ${agentData.lastName}`;
+
+  return (
+    <div className="min-h-screen bg-[#FDFDFD] text-blue-950 font-sans selection:bg-blue-100 overflow-x-hidden">
+      
+  <header className="py-3 px-4 md:py-4 md:px-12 flex justify-between items-center bg-white/70 backdrop-blur-xl fixed top-0 w-full z-40 border-b border-gray-100/50">
+  {/* Left Side: Increased Logo Size, Text Removed */}
+  <div 
+    className="flex items-center cursor-pointer group" 
+    onClick={() => navigate('/')}
+  >
+    <img 
+      src={ZingConnectLogo} 
+      alt="ZingConnect" 
+      className="h-8 md:h-12 w-auto transition-transform duration-300 group-hover:scale-105" 
+    />
+  </div>
+
+  {/* Right Side: Portal Access remains consistent */}
+  <button 
+    onClick={() => setIsLoginOpen(true)}
+    className="flex items-center gap-2 md:gap-3 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.2em] text-gray-500 hover:text-blue-600 transition-all group"
+  >
+    <span className="hidden sm:inline">Portal Access</span>
+    <div className="w-8 h-8 md:w-9 md:h-9 rounded-lg md:rounded-xl bg-gray-50 flex items-center justify-center border border-gray-100 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm">
+      <BsShieldLockFill size={12} className="md:size-[14px]" />
+    </div>
+  </button>
+</header>
+
+      <main className={`transition-all duration-1000 pt-24 md:pt-40 pb-10 px-4 md:px-6 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 md:gap-16 items-start md:items-center ${isLoginOpen ? 'blur-2xl scale-[0.98] pointer-events-none' : ''}`}>
+        
+        <div className="w-full max-w-lg mx-auto lg:ml-auto order-first lg:order-last">
+          <div className="bg-white p-6 md:p-12 rounded-[2.5rem] md:rounded-[4rem] shadow-xl border border-gray-100 relative overflow-hidden">
+            <form onSubmit={handleUserInquiry} className="relative z-10">
+              <div className="text-center mb-6 md:mb-10">
+                <h2 className="text-xl md:text-2xl font-black tracking-tight mb-1 text-blue-950">Secure Inquiry</h2>
+                <p className="text-[8px] md:text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em]">Private Communication Line</p>
+              </div>
+              
+              <div className="space-y-4 md:space-y-5">
+                <div>
+                  <label className="text-[8px] md:text-[9px] font-black text-gray-400 uppercase tracking-widest ml-4 mb-2 block">Your Identity (Email)</label>
+                  <input 
+                    required type="email" value={userEmail}
+                    onChange={(e) => setUserEmail(e.target.value)}
+                    placeholder="Enter email to verify..."
+                    className="w-full px-6 py-4 md:px-8 md:py-5 bg-gray-50/50 border border-gray-100 rounded-[1.5rem] md:rounded-[2rem] text-xs md:text-sm outline-none focus:bg-white focus:border-blue-600 transition-all"
+                  />
+                  <div className="flex items-center gap-2 ml-4 mt-3">
+                    <input 
+                      type="checkbox" id="rememberUser" checked={rememberUser}
+                      onChange={(e) => setRememberUser(e.target.checked)}
+                      className="w-3 h-3 rounded border-gray-300 text-blue-600 cursor-pointer"
+                    />
+                    <label htmlFor="rememberUser" className="text-[8px] md:text-[9px] font-black text-gray-400 uppercase tracking-widest cursor-pointer">Remember Identity</label>
+                  </div>
+                </div>
+                
+                <button 
+                  type="submit" disabled={isProcessing}
+                  className="w-full py-5 md:py-6 bg-blue-600 text-white rounded-[1.5rem] md:rounded-[2rem] font-black text-[10px] md:text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  {isProcessing ? "Connecting..." : "Start Live Session"} <BsLightningFill />
+                </button>
+                
+                <div className="flex flex-col items-center gap-2">
+                  {showInstallBtn && (
+                    <button 
+                      type="button"
+                      onClick={handleInstallApp}
+                      className="flex items-center gap-2 text-[8px] md:text-[9px] font-black text-blue-600 uppercase tracking-widest hover:opacity-70 transition-opacity"
+                    >
+                      <BsDownload size={10} /> Add ZingConnect to Home Screen
+                    </button>
+                  )}
+
+                {/* UPDATED: iOS INSTALL BUTTON FOR USERS */}
+{isIOS && (
+  <div className="w-full">
+    <button 
+      type="button"
+      onClick={() => setShowIOSModal(true)}
+      className="flex items-center justify-center gap-2 w-full py-3 bg-blue-50/50 border border-blue-100 rounded-2xl hover:bg-blue-100/50 transition-all group"
+    >
+      <BsDownload size={10} className="text-blue-600" />
+      <span className="text-[8px] md:text-[9px] font-black text-blue-600 uppercase tracking-widest">
+        Add ZingConnect to Home Screen
+      </span>
+    </button>
+  </div>
+)}
+
+<p className="text-[8px] text-center text-gray-400 font-medium px-4 leading-relaxed">
+  By initializing, you agree to the <span className="text-blue-600 underline cursor-pointer">Security Terms</span>.
+</p>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div className="space-y-8 md:space-y-10">
+          <div className="space-y-3 md:space-y-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50/50 border border-blue-100 text-blue-600 rounded-full">
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+              <span className="text-[8px] md:text-[10px] font-bold uppercase tracking-widest">Verified Channel</span>
+            </div>
+            <h1 className="text-3xl md:text-6xl lg:text-8xl font-normal tracking-tighter leading-[1] md:leading-[0.9] text-slate-400 text-center lg:text-left">
+              Connect with <br />
+              <span className="font-black text-blue-950">{fullName}</span>
+            </h1>
+          </div>
+
+         <div className="flex flex-col sm:flex-row items-center gap-6 md:gap-8">
+  <div className="relative">
+    <div className="w-24 h-24 md:w-44 md:h-44 rounded-[2rem] md:rounded-[3rem] bg-white border-[4px] md:border-[6px] border-white shadow-lg overflow-hidden flex items-center justify-center">
+      {agentData.photoUrl ? (
+        <img src={agentData.photoUrl} alt={fullName} className="w-full h-full object-cover" />
+      ) : (
+        <span className="text-2xl md:text-4xl font-black text-blue-100 uppercase">
+          {agentData?.firstName?.[0]}{agentData?.lastName?.[0]}
+        </span>
+      )}
+    </div>
+    <div className="absolute -bottom-1 -right-1 bg-blue-600 text-white p-1.5 rounded-full border-2 border-[#FDFDFD]">
+      <BsCheckCircleFill className="size-3 md:size-4" />
+    </div>
+  </div>
+  
+  <div className="space-y-2 md:space-y-3 max-w-sm text-center sm:text-left">
+  {/* UPDATED PROGRAM DISPLAY: NO BG, BOLDER TEXT */}
+  {agentData.program && (
+    <div className="mb-1">
+      <span className="text-[9px] md:text-[15px] font-black text-purple-950 uppercase tracking-[0.15em]">
+        {agentData.program}
+      </span>
+    </div>
+  )}
+    <h3 className="text-[9px] md:text-[11px] font-black text-blue-600 uppercase tracking-[0.2em]">
+      {agentData.occupation || "Certified Professional"}
+    </h3>
+    <p className="text-sm md:text-lg font-medium text-slate-500 italic">
+      "{agentData.bio || "Available for secure professional consultation."}"
+    </p>
+  </div>
+</div>
+        </div>
+      </main>
+<footer className="mt-20 py-12 px-6 border-t border-gray-100 bg-white">
+  <div className="max-w-7xl mx-auto">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+      
+    {/* Brand Section */}
+<div className="space-y-4">
+  <div className="flex items-center">
+    <img 
+      src={ZingConnectLogo} 
+      alt="ZingConnect" 
+      className="h-7 md:h-9 w-auto opacity-90 transition-opacity hover:opacity-100" 
+    />
+  </div>
+  <p className="text-[8px] md:text-[10px] text-gray-400 font-medium leading-relaxed max-w-xs">
+    Secure, bidirectional communication platform for verified agents and clients. 
+    Powered by end-to-end encryption protocols.
+  </p>
+</div>
+
+      {/* Program Affiliation Section */}
+      <div className="space-y-3">
+        <h4 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Official Program</h4>
+        <div className="inline-flex items-center px-2 py-1.5 bg-gray-50 border border-gray-100 rounded-lg">
+          <span className="text-[7px] md:text-[9px] font-bold text-blue-950 uppercase tracking-wide">
+            {agentData?.program || "Standard Verification Service"}
+          </span>
+        </div>
+      </div>
+
+      {/* Utility Links */}
+      <div className="space-y-3 md:text-right">
+        <h4 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Security & Privacy</h4>
+        <div className="flex flex-col md:items-end gap-1.5">
+          <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Privacy Policy</button>
+          <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Terms of Service</button>
+          <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Compliance Audit</button>
+        </div>
+      </div>
+
+    </div>
+
+    <div className="mt-10 pt-6 border-t border-gray-50 flex flex-col md:flex-row justify-between items-center gap-4">
+      <p className="text-[7px] md:text-[9px] font-bold text-gray-400 uppercase tracking-widest text-center md:text-left">
+        © 2026 ZingConnect Communications. All Rights Reserved.
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+        <span className="text-[7px] md:text-[9px] font-black text-gray-400 uppercase tracking-widest">System Status: Operational</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+      {isLoginOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-blue-950/20 backdrop-blur-2xl">
+          <div className="w-full max-w-sm bg-white p-8 md:p-12 rounded-[3rem] shadow-2xl border border-gray-100">
+            <div className="text-center mb-8">
+              <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-950 text-white rounded-[1rem] md:rounded-[1.5rem] flex items-center justify-center mb-4 mx-auto shadow-xl">
+                <BsShieldLockFill size={20} />
+              </div>
+              <h2 className="text-xl font-black text-blue-950">ZingConnect Portal</h2>
+            </div>
+
+            <form onSubmit={handleAgentLogin} className="space-y-4">
+              <input 
+                required type="email" value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                placeholder="Agent Secure ID"
+                className="w-full px-6 py-4 bg-gray-50 border border-transparent rounded-[1.5rem] text-xs outline-none focus:border-blue-600 transition-all"
+              />
+              <div className="relative">
+                <input 
+                  required type={showPassword ? "text" : "password"} value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Access Key"
+                  className="w-full px-6 py-4 bg-gray-50 border border-transparent rounded-[1.5rem] text-xs outline-none focus:border-blue-600 transition-all"
+                />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400">
+                  {showPassword ? <BsEyeSlashFill size={16} /> : <BsEyeFill size={16} />}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 ml-2 mt-1">
+                <input 
+                  type="checkbox" 
+                  id="rememberAgent"
+                  checked={rememberAgent}
+                  onChange={(e) => setRememberAgent(e.target.checked)}
+                  className="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <label htmlFor="rememberAgent" className="text-[9px] font-black text-gray-400 uppercase tracking-widest cursor-pointer">
+                  Remember Access Key ID
+                </label>
+              </div>
+
+              <button disabled={isProcessing} className="w-full py-5 bg-blue-950 text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg mt-2 disabled:opacity-50">
+                {isProcessing ? "Verifying..." : "Establish Connection"}
+              </button>
+
+              <div className="flex flex-col items-center pt-4">
+                {showInstallBtn && (
+                  <button 
+                    type="button"
+                    onClick={handleInstallApp}
+                    className="flex items-center gap-2 text-[9px] font-black text-blue-600 uppercase tracking-widest hover:opacity-70 transition-opacity mb-4"
+                  >
+                    <BsDownload size={10} /> Install Agent Portal App
+                  </button>
+                )}
+
+               {/* iOS INSTALL BUTTON FOR AGENTS */}
+{isIOS && (
+  <div className="w-full mb-4">
+    <button 
+      type="button"
+      onClick={() => setShowIOSModal(true)}
+      className="w-full flex items-center justify-center gap-2 py-3 bg-blue-50 border border-blue-100 rounded-2xl hover:bg-blue-100 transition-colors group"
+    >
+      <BsDownload size={12} className="text-blue-600" />
+      <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">
+        Install ZingConnect Portal
+      </span>
+    </button>
+  </div>
+)}
+                <button 
+                  type="button" 
+                  onClick={() => setIsLoginOpen(false)} 
+                  className="w-full text-[9px] font-black text-gray-400 uppercase tracking-widest"
+                >
+                  Terminate Access
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {showIOSModal && (
+  <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-blue-950/40 backdrop-blur-md">
+    <div className="w-full max-w-xs bg-white rounded-[2.5rem] p-8 shadow-2xl text-center border border-gray-100 animate-in fade-in zoom-in duration-300">
+      <div className="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-200">
+        <BsDownload size={24} />
+      </div>
+      
+      <h3 className="text-sm font-black text-blue-950 uppercase tracking-tight mb-6">
+        Install on iPhone
+      </h3>
+      
+      <div className="space-y-6 text-left mb-8">
+        <div className="flex items-center gap-4">
+          <div className="bg-blue-50 text-blue-600 rounded-full h-6 w-6 flex items-center justify-center text-[10px] font-bold shrink-0">1</div>
+          <p className="text-[11px] text-gray-600 leading-tight">Tap the <span className="font-bold text-blue-950">Share button</span> at the bottom of Safari.</p>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          <div className="bg-blue-50 text-blue-600 rounded-full h-6 w-6 flex items-center justify-center text-[10px] font-bold shrink-0">2</div>
+          <p className="text-[11px] text-gray-600 leading-tight">Scroll down and select <span className="font-bold text-blue-950">"Add to Home Screen"</span>.</p>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          <div className="bg-blue-50 text-blue-600 rounded-full h-6 w-6 flex items-center justify-center text-[10px] font-bold shrink-0">3</div>
+          <p className="text-[11px] text-gray-600 leading-tight">Tap <span className="font-bold text-blue-950">"Add"</span> to finish.</p>
+        </div>
+      </div>
+
+      <button 
+        onClick={() => setShowIOSModal(false)}
+        className="w-full py-4 bg-blue-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-transform"
+      >
+        Got it
+      </button>
+    </div>
+  </div>
+)}
+    </div>
+
+  );
+};

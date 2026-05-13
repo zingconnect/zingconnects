@@ -1,0 +1,53 @@
+/* 1. Import the Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "sans-serif";
+  --color-zing-blue: #266cee;
+  --color-zing-dark: #0f172a;
+  
+  /* Tailwind v4 Theme Mappings */
+  --color-page-bg: var(--bg-main);
+  --color-card-bg: var(--bg-card);
+  --color-input-bg: var(--bg-input);
+  --color-text-main: var(--text-primary);
+  --color-text-muted: var(--text-secondary);
+}
+
+:root {
+  --bg-main: #FDFDFD;
+  --bg-card: #ffffff;
+  --bg-input: #ffffff;
+  --text-primary: #020617; 
+  --text-secondary: #94a3b8;
+  --text-main: #172554;
+}
+
+.dark {
+  --bg-main: #0f172a; 
+  --bg-card: #1e293b; 
+  --bg-input: #1e293b; /* Matches slate-800 for dark inputs */
+  --text-primary: #f8fafc; 
+  --text-secondary: #64748b;
+}
+
+body {
+  font-family: "Inter", sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Helper Utilities */
+@media screen and (max-width: 768px) {
+  input, select, textarea { font-size: 16px !important; }
+}
+
+button { touch-action: manipulation; }
+
+.h-screen {
+  height: 100vh;
+  height: 100dvh;
+}
