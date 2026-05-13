@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js';
 import Call from '../models/Call.js';
-import { authenticateToken, isAdmin } from './auth.js';
+import { authenticateToken } from './auth.js';
 
 const router = express.Router();
 
