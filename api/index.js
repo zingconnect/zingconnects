@@ -57,8 +57,8 @@ app.use('/api/agents', authRoutes);
 app.use('/api/admin', adminRoutes);
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
-
-const s3Client = new S3Client({
+// Add 'export' here
+export const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
   endpoint: process.env.IDRIVE_ENDPOINT,
   credentials: {
@@ -70,20 +70,21 @@ const s3Client = new S3Client({
 const upload = multer({ storage: multer.memoryStorage() });
 
 webpush.setVapidDetails(
-`mailto:${process.env.VITE_EMAIL}`,
+  `mailto:${process.env.VITE_EMAIL}`,
   process.env.VITE_PUBLIC_KEY, 
   process.env.VITE_PRIVATE_KEY
 );
 
-const getPrivateUrl = async (fileKey) => {
+// Add 'export' here too so you can use this helper in admin.js
+export const getPrivateUrl = async (fileKey) => {
   try {
     if (!fileKey) return null;
 
     let actualKey = fileKey;
-        if (fileKey.startsWith('http')) {
+    if (fileKey.startsWith('http')) {
       const parts = fileKey.split('.com/');
       actualKey = parts.length > 1 ? parts[1] : fileKey;
-            actualKey = actualKey.split('?')[0];
+      actualKey = actualKey.split('?')[0];
     }
 
     const command = new GetObjectCommand({

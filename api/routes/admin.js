@@ -6,8 +6,8 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js'; 
 import { authenticateToken, isAdmin } from './auth.js';
-// Import the shared client and DB helper from your index.js
-import { connectToDatabase, s3Client } from '../index.js'; 
+import { connectToDatabase, getPrivateUrl } from '../index.js';
+
 
 const router = express.Router();
 
@@ -135,67 +135,101 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
 
 /**
  * @route   GET /api/admin/agents
- * @desc    List all registered agents (SECURE)
+ * @desc    List all registered agents with formatted profile links (SECURE)
  */
 router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
   try {
+    // 1. Ensure DB Connection
     await connectToDatabase();
+
+    // 2. Fetch agents with specific fields needed for the table/list
     const agents = await Agent.find({})
-      .select('firstName lastName email program isVerified photoUrl createdAt')
+      .select('firstName lastName email program isVerified photoUrl lastActive createdAt isSubscribed')
       .sort({ createdAt: -1 })
       .lean();
 
-    const formattedAgents = agents.map(agent => ({
-      ...agent,
-      photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
-    }));
+    const now = new Date();
 
-    res.json({ success: true, agents: formattedAgents });
+    // 3. Format data for the Admin Dashboard UI
+    const formattedAgents = agents.map(agent => {
+      const lastActiveDate = agent.lastActive || agent.createdAt;
+      const isOnline = (now - new Date(lastActiveDate)) < 120000; // 2-minute threshold
+
+      return {
+        ...agent,
+        // Provide a clear status string for the frontend badge
+        status: isOnline ? 'online' : 'offline',
+        // Fallback for profile photos if S3 signing isn't needed for the thumbnail list
+        photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=random`
+      };
+    });
+
+    res.json({ 
+      success: true, 
+      count: formattedAgents.length,
+      agents: formattedAgents 
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to fetch agent list" });
+    console.error("Admin Agent List Error:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch agent list" 
+    });
   }
 });
 
 /**
  * @route   GET /api/admin/agents/:id
- * @desc    Fetch detailed profile for a single agent (SECURE)
+ * @desc    Fetch detailed profile for a single agent with subscription sync (SECURE)
  */
 router.get('/agents/:id', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
+    
     const agent = await Agent.findById(req.params.id);
-
-    if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
-
-    // --- SECURE PHOTO SIGNING ---
-    let finalPhotoUrl = agent.photoUrl;
-    if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com') && s3Client) {
-      try {
-        const urlParts = agent.photoUrl.split('/');
-        const profileIndex = urlParts.indexOf('profiles');
-        
-        if (profileIndex !== -1) {
-          const fileKey = urlParts.slice(profileIndex).join('/');
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: decodeURIComponent(fileKey),
-          });
-          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-        }
-      } catch (signErr) {
-        console.error("Photo Signing Error:", signErr.message);
-      }
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent record not found in system" });
     }
 
+    const now = new Date();
+    let needsSave = false;
+
+    // --- 1. SILENT EXPIRATION SYNC ---
+    if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
+      agent.isSubscribed = false;
+      needsSave = true;
+    }
+    if (agent.voicePackageActive && agent.voicePackageExpiry && now > new Date(agent.voicePackageExpiry)) {
+      agent.voicePackageActive = false;
+      needsSave = true;
+    }
+    if (needsSave) await agent.save();
+
+    // --- 2. SECURE PHOTO SIGNING (Using your exported helper) ---
+    // This replaces all the manual GetObjectCommand logic
+    const finalPhotoUrl = await getPrivateUrl(agent.photoUrl) || 
+      `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
+
+    // --- 3. STATUS CALCULATION ---
+    const lastActiveDate = agent.lastActive || agent.createdAt;
+    const isOnline = (now - new Date(lastActiveDate)) < 120000;
+
+    // --- 4. RETURN FORMATTED RESPONSE ---
     res.json({
       success: true,
       agent: {
-        ...agent.toObject(),
-        photoUrl: finalPhotoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}`
+        ...agent.toObject(), // Spreads all fields correctly
+        photoUrl: finalPhotoUrl,
+        status: isOnline ? 'online' : 'offline',
+        isSubscribed: !!agent.isSubscribed, 
+        voicePackageActive: !!agent.voicePackageActive, 
+        isVerified: !!agent.isVerified
       }
     });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("Admin Agent Fetch Error:", err.message);
+    res.status(500).json({ success: false, message: "Internal server error accessing agent data" });
   }
 });
 
