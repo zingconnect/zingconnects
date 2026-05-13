@@ -78,6 +78,14 @@ export const authenticateToken = async (req, res, next) => { // 1. Added async h
     next();
   });
 };
+
+export const isAdmin = (req, res, next) => {
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ success: false, message: "Access denied: Admin only." });
+  }
+};
 // --- IDRIVE E2 CONFIG ---
 const s3Client = new S3Client({
   region: process.env.IDRIVE_REGION,
