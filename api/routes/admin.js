@@ -284,4 +284,30 @@ router.get('/agents/:id', authenticateToken, async (req, res) => {
   }
 });
 
+router.get('/agents', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
+
+    const agents = await AgentModel.find().sort({ createdAt: -1 });
+    const formattedAgents = agents.map(agent => ({
+      _id: agent._id,
+      firstName: agent.firstName,
+      lastName: agent.lastName,
+      email: agent.email,
+      program: agent.program,
+      isVerified: !!agent.isVerified,
+      photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
+    }));
+
+    res.json({
+      success: true,
+      agents: formattedAgents
+    });
+  } catch (err) {
+    console.error("Admin List Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch agent list" });
+  }
+});
+
 export default router;
