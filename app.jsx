@@ -1,7 +1,6 @@
 import React, { useLayoutEffect } from 'react'; 
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 
-// Component Imports
 import { PricingPage } from './components/PricingPage';
 import { Registration } from './components/Registration';
 import { VerifyOTP } from './components/VerifyOTP'; 
@@ -11,9 +10,8 @@ import { UserDashboard } from './components/UserDashboard';
 import { AgentProfile } from './components/AgentProfile'; 
 import { UserProfile } from './components/UserProfile'; 
 import { CallSetting } from './components/CallSetting'; 
-import ZingAdmin from './components/ZingAdmin'; // ADDED: Admin Component Import
+import ZingAdmin from './components/ZingAdmin'; 
 import ZingDashboard from './components/ZingDashboard'; 
-
 
 const PWAController = ({ children }) => {
   const navigate = useNavigate();
@@ -22,7 +20,7 @@ const PWAController = ({ children }) => {
 
   React.useLayoutEffect(() => {
     const isStandalone = !!window.navigator.standalone || 
-                         window.matchMedia('(display-mode: standalone)').matches;
+      window.matchMedia('(display-mode: standalone)').matches;
 
     const params = new URLSearchParams(window.location.search);
     const urlSlug = params.get('pwa');
@@ -30,12 +28,15 @@ const PWAController = ({ children }) => {
     const target = urlSlug || storageSlug;
 
     const isAtRoot = location.pathname === '/' || location.pathname === '/pricing';
+    
+    const isAdminPath = location.pathname.startsWith('/admin');
 
-    if (isStandalone && isAtRoot && target) {
-      navigate(`/${target}`, { replace: true });
-    } else {
-      setIsChecking(false);
-    }
+   if (isStandalone && isAtRoot && target && !isAdminPath) {
+  navigate(`/${target}`, { replace: true });
+} else {
+  setIsChecking(false);
+}
+
   }, [navigate, location.pathname]);
 
   if (isChecking && (window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
@@ -97,11 +98,12 @@ function App() {
           <Route path="/user/profile" element={<UserProfile />} />
 
           {/* --- 4. ADMINISTRATOR ROUTES --- */}
-          {/* Path for creating and logging into the Admin Terminal */}
+          {/* These MUST come before the dynamic /:slug route */}
           <Route path="/admin/terminal" element={<ZingAdmin />} /> 
           <Route path="/admin/dashboard" element={<ZingDashboard />} />
-          
+
           {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
+          {/* This acts as a catch-all for strings, so it stays near the bottom */}
           <Route path="/:slug" element={<AgentSlug />} />
           
           {/* --- 6. GLOBAL FALLBACK --- */}
