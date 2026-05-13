@@ -100,32 +100,31 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// --- 3. SYSTEM STATS (Protected) ---
-router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
+router.get('/stats', authenticateToken, async (req, res) => {
   try {
+    await connectToDatabase();
     const [totalAgents, pendingAgents, totalCallsToday] = await Promise.all([
       Agent.countDocuments(),
-      Agent.countDocuments({ status: 'pending' }),
+      Agent.countDocuments({ status: 'pending' }), 
       Call.countDocuments({ 
-        createdAt: { $gte: new Date().setHours(0,0,0,0) } 
+        createdAt: { $gte: new Date(new Date().setHours(0,0,0,0)) } 
       })
     ]);
-    
-    res.json({ success: true, totalAgents, pendingAgents, totalCallsToday });
+        res.json({ 
+      success: true, 
+      totalAgents, 
+      pendingAgents, 
+      totalCallsToday 
+    });
   } catch (err) {
-    res.status(500).json({ message: "Error fetching system stats" });
+    console.error("Stats Fetch Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Error fetching system stats",
+      details: err.message 
+    });
   }
 });
 
-// --- 4. AGENT MANAGEMENT (Protected) ---
-router.patch('/agent-status/:id', authenticateToken, isAdmin, async (req, res) => {
-  try {
-    const { status } = req.body;
-    const agent = await Agent.findByIdAndUpdate(req.params.id, { status }, { new: true });
-    res.json({ success: true, agent });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to update agent status" });
-  }
-});
 
 export default router;

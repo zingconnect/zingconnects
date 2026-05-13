@@ -9,7 +9,8 @@ import {
   BsX, 
   BsArrowUpRight,
   BsPersonBadgeFill,
-  BsTelephoneFill
+  BsTelephoneFill,
+  BsShieldLockFill
 } from 'react-icons/bs';
 
 const ZingDashboard = () => {

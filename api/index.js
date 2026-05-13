@@ -2453,6 +2453,33 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
+app.get('/api/admin/stats', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const [totalAgents, pendingAgents, totalCallsToday] = await Promise.all([
+      Agent.countDocuments(),
+      Agent.countDocuments({ status: 'pending' }), 
+      Call.countDocuments({ 
+        createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) } 
+      })
+    ]);
+    res.json({
+      success: true,
+      totalAgents,
+      pendingAgents,
+      totalCallsToday
+    });
+
+  } catch (err) {
+    console.error("Critical: Stats API Failure", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Error fetching system stats",
+      details: err.message 
+    });
+  }
+});
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
