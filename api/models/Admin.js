@@ -39,11 +39,9 @@ const AdminSchema = new mongoose.Schema({
     type: Date
   }
 }, { timestamps: true });
-
 // --- PASSWORD HASHING MIDDLEWARE ---
 AdminSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
-  
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -58,4 +56,6 @@ AdminSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-module.exports = mongoose.model('Admin', AdminSchema);
+// CHANGE THIS LINE:
+const Admin = mongoose.models.Admin || mongoose.model('Admin', AdminSchema);
+export default Admin;
