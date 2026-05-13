@@ -97,7 +97,6 @@ const getPrivateUrl = async (fileKey) => {
   }
 };
 
-// Cache for connections and a flag to track which DB is currently active
 let cached = global.mongoose;
 
 if (!cached) {
@@ -109,15 +108,15 @@ if (!cached) {
 }
 
 const commonOpts = {
-  maxPoolSize: 100, 
+  maxPoolSize: 100,
   minPoolSize: 20,
   serverSelectionTimeoutMS: 5000, 
   socketTimeoutMS: 45000,
-  heartbeatFrequencyMS: 10000,
   family: 4,
-  bufferCommands: false, // CRITICAL: Stop Mongoose from "waiting" on a dead connection
+  bufferCommands: false,           // Stop the 10s buffering hang
+  autoIndex: false,                // Recommended for production/Vercel
+  connectTimeoutMS: 10000,         // Give the initial handshake enough time
 };
-
 /**
  * Main Connection Handler with Reserve Failover
  * This maintains your project structure while protecting against Free-Tier limits.
@@ -2354,50 +2353,50 @@ app.post('/api/agents/unlock-voice-package', async (req, res) => {
   }
 });
 
-// Ensure this is app.post, not app.get
+// Ensure this is app.post to receive registration data
 app.post('/api/admin/register', async (req, res) => {
   try {
-    // Ensure the DB is connected (Primary or Reserve)
+    // 1. Force the database connection before any queries
+    // This triggers your failover logic if the primary DB is lagging
     await connectToDatabase(); 
+
+    // 2. Align fields with your AdminSchema (firstName, lastName, username, password)
+    const { firstName, lastName, username, password, role } = req.body;
     
-    const { firstName, lastName, email, password } = req.body;
-    
-    // Basic validation
-    if (!firstName || !lastName || !email || !password) {
+    if (!firstName || !lastName || !username || !password) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    const lowerEmail = email.toLowerCase().trim();
-    
-    // Check if Admin exists
-    const existingAdmin = await Admin.findOne({ email: lowerEmail });
+    const lowerUsername = username.toLowerCase().trim();
+        const existingAdmin = await Admin.findOne({ username: lowerUsername });
     if (existingAdmin) {
-      return res.status(400).json({ success: false, message: "Admin email already exists" });
+      return res.status(400).json({ success: false, message: "Admin username already exists" });
     }
-
     const newAdmin = new Admin({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      email: lowerEmail,
-      password // Reminder: Hash this password before saving!
+      username: lowerUsername,
+      password: password, // Schema hashes this automatically before saving
+      role: role || 'superadmin' // Default to superadmin if not provided
     });
 
+    // 5. Save to the database
     await newAdmin.save();
 
     res.status(201).json({ 
       success: true, 
       message: "Administrator account created successfully" 
     });
+
   } catch (err) {
     console.error("Admin Reg Error:", err);
     res.status(500).json({ 
       success: false, 
       message: "Error creating admin account",
-      details: err.message // Shows the "Buffering" or "Connection" error details
+      details: err.message 
     });
   }
 });
-
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
