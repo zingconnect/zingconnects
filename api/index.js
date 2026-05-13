@@ -19,6 +19,7 @@ import { fileURLToPath } from 'url';
 import Agent from './models/Agent.js';
 import User from './models/User.js'; 
 import Message from './models/Message.js';
+import Admin from './models/Admin.js';
 import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
 import webpush from 'web-push';

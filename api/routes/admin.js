@@ -10,20 +10,25 @@ const router = express.Router();
 
 router.post('/register', async (req, res) => {
   try {
-    const { firstName, lastName, email, password } = req.body;
-    if (!firstName || !lastName || !email || !password) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
+    // 1. Force connection to avoid "buffering timed out"
+    await connectToDatabase();
+
+    const { firstName, lastName, username, email, password, role } = req.body;
+
+    // 2. Validation (Matches your schema's required fields)
+    if (!firstName || !lastName || !username || !password) {
+      return res.status(400).json({ success: false, message: "Required fields are missing" });
     }
-    const lowerEmail = email.toLowerCase().trim();
-    const existingAdmin = await Admin.findOne({ email: lowerEmail });
+    const existingAdmin = await Admin.findOne({ username: username.toLowerCase().trim() });
     if (existingAdmin) {
-      return res.status(400).json({ success: false, message: "Admin email already exists" });
+      return res.status(400).json({ success: false, message: "Username already taken" });
     }
     const newAdmin = new Admin({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: lowerEmail,
-      password // Hashed by Admin.js pre-save hook
+      firstName,
+      lastName,
+      username,
+      password, // Plain text here; Schema hashes it before it hits the DB
+      role: role || 'superadmin'
     });
 
     await newAdmin.save();
@@ -32,9 +37,15 @@ router.post('/register', async (req, res) => {
       success: true, 
       message: "Administrator account created successfully" 
     });
+
   } catch (err) {
     console.error("Admin Reg Error:", err);
-    res.status(500).json({ success: false, message: "Error creating admin account" });
+    // Ensure JSON response to prevent "Unexpected token A" HTML error
+    res.status(500).json({ 
+      success: false, 
+      message: "Error creating admin account",
+      details: err.message 
+    });
   }
 });
 

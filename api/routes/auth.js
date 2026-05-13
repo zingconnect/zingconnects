@@ -61,8 +61,6 @@ export const authenticateToken = (req, res, next) => {
           await agent.save();
         }
       }
-
-      // Keep your Admin Last Login logic here
       if (decoded.role === 'admin') {
         const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
         await AdminModel.findByIdAndUpdate(req.user.id, { lastLogin: new Date() });
