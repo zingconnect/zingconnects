@@ -32,13 +32,21 @@ const ZingAdmin = () => {
     const endpoint = isLogin ? '/api/admin/login' : '/api/admin/register';
     const baseUrl = 'https://zingconnect.vercel.app'; 
 
-    try {
-      const response = await fetch(`${baseUrl}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
+ setLoading(true);
+  const endpoint = isLogin ? '/api/admin/login' : '/api/admin/register';
+  const baseUrl = 'https://zingconnect.vercel.app'; 
 
+  try {
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+        email: formData.email.toLowerCase().trim(),
+        password: formData.password
+      }),
+    });
       const data = await response.json();
 
       if (data.success) {

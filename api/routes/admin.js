@@ -12,20 +12,31 @@ router.post('/register', async (req, res) => {
   try {
     await connectToDatabase();
 
-    const { firstName, lastName, username, email, password, role } = req.body;
+    // 1. Extract email instead of just username
+    const { firstName, lastName, email, password, role } = req.body;
 
-    // 2. Validation (Matches your schema's required fields)
-    if (!firstName || !lastName || !username || !password) {
-      return res.status(400).json({ success: false, message: "Required fields are missing" });
+    // 2. Validation: Include email in the check
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Required fields are missing" 
+      });
     }
-    const existingAdmin = await Admin.findOne({ username: username.toLowerCase().trim() });
+
+    // 3. Check for existing admin using the email field
+    const existingAdmin = await Admin.findOne({ email: email.toLowerCase().trim() });
     if (existingAdmin) {
-      return res.status(400).json({ success: false, message: "Username already taken" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email already registered" 
+      });
     }
+
+    // 4. Create new admin with the email field
     const newAdmin = new Admin({
       firstName,
       lastName,
-      username,
+      email, // Matches your new schema
       password, 
       role: role || 'superadmin'
     });
@@ -39,7 +50,6 @@ router.post('/register', async (req, res) => {
 
   } catch (err) {
     console.error("Admin Reg Error:", err);
-    // Ensure JSON response to prevent "Unexpected token A" HTML error
     res.status(500).json({ 
       success: false, 
       message: "Error creating admin account",

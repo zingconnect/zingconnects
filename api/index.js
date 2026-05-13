@@ -2353,32 +2353,34 @@ app.post('/api/agents/unlock-voice-package', async (req, res) => {
     res.status(500).json({ success: false, message: "Server error during voice activation." });
   }
 });
-
-// Ensure this is app.post to receive registration data
+// Modified to use email to match your AdminSchema and React Frontend
 app.post('/api/admin/register', async (req, res) => {
   try {
     // 1. Force the database connection before any queries
-    // This triggers your failover logic if the primary DB is lagging
     await connectToDatabase(); 
 
-    // 2. Align fields with your AdminSchema (firstName, lastName, username, password)
-    const { firstName, lastName, username, password, role } = req.body;
+    // 2. Destructure 'email' instead of 'username' to match frontend formData
+    const { firstName, lastName, email, password, role } = req.body;
     
-    if (!firstName || !lastName || !username || !password) {
+    // 3. Updated validation check
+    if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    const lowerUsername = username.toLowerCase().trim();
-        const existingAdmin = await Admin.findOne({ username: lowerUsername });
+    const lowerEmail = email.toLowerCase().trim();
+    
+    // 4. Check for existing admin using email
+    const existingAdmin = await Admin.findOne({ email: lowerEmail });
     if (existingAdmin) {
-      return res.status(400).json({ success: false, message: "Admin username already exists" });
+      return res.status(400).json({ success: false, message: "Admin email already exists" });
     }
+
     const newAdmin = new Admin({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      username: lowerUsername,
-      password: password, // Schema hashes this automatically before saving
-      role: role || 'superadmin' // Default to superadmin if not provided
+      email: lowerEmail, // Matches your updated AdminSchema
+      password: password, // Schema hashes this automatically via middleware
+      role: role || 'superadmin' 
     });
 
     // 5. Save to the database
@@ -2398,6 +2400,7 @@ app.post('/api/admin/register', async (req, res) => {
     });
   }
 });
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
