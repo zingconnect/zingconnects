@@ -2,43 +2,19 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const AdminSchema = new mongoose.Schema({
-  firstName: {
-    type: String,
-    required: true,
-    trim: true
+  firstName: { type: String, required: true, trim: true },
+  lastName: { type: String, required: true, trim: true },
+  username: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  password: { type: String, required: true },
+  role: { 
+    type: String, 
+    default: 'superadmin', 
+    enum: ['superadmin', 'support', 'editor'] 
   },
-  lastName: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  username: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
-  },
-  password: {
-    type: String,
-    required: true
-  },
-  role: {
-    type: String,
-    default: 'superadmin', // Useful if you eventually add "moderator" levels
-    enum: ['superadmin', 'support', 'editor']
-  },
-  lastLogin: {
-    type: Date
-  }
+  lastLogin: { type: Date }
 }, { timestamps: true });
+
 // --- PASSWORD HASHING MIDDLEWARE ---
 AdminSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
