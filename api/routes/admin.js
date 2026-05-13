@@ -2,7 +2,6 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Admin from '../models/Admin.js';
-import Agent from '../models/Agent.js';
 import { authenticateToken, isAdmin } from './auth.js';
 import { connectToDatabase } from '../index.js';
 
@@ -58,26 +57,46 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// --- ADMIN LOGIN ---
-// Endpoint: POST /api/admin/login
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const admin = await Admin.findOne({ email: email.toLowerCase() });
+    // 1. Ensure DB is connected before querying
+    await connectToDatabase(); 
 
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email and password are required" });
+    }
+
+    const admin = await Admin.findOne({ email: email.toLowerCase().trim() });
     if (!admin || !(await admin.comparePassword(password))) {
       return res.status(401).json({ success: false, message: "Invalid admin credentials" });
     }
 
+    // 5. Generate JWT Token
     const token = jwt.sign(
-      { id: admin._id, role: 'admin' },
+      { 
+        id: admin._id, 
+        role: 'admin',
+        firstName: admin.firstName 
+      },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    res.json({ success: true, token, admin: { name: admin.firstName, role: admin.role } });
+    // 6. Return success with token and admin info
+    res.json({ 
+      success: true, 
+      token, 
+      admin: { 
+        id: admin._id,
+        firstName: admin.firstName, 
+        lastName: admin.lastName,
+        role: admin.role 
+      } 
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Login error" });
+    console.error("Admin Login Error:", err);
+    res.status(500).json({ success: false, message: "Login error", details: err.message });
   }
 });
 

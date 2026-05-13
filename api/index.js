@@ -2401,6 +2401,58 @@ app.post('/api/admin/register', async (req, res) => {
   }
 });
 
+// Endpoint: POST /api/admin/login
+app.post('/api/admin/login', async (req, res) => {
+  try {
+    // 1. Force database connection with failover protection
+    await connectToDatabase(); 
+
+    const { email, password } = req.body;
+
+    // 2. Validate request payload
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email and password are required" 
+      });
+    }
+    const admin = await Admin.findOne({ email: email.toLowerCase().trim() });
+    if (!admin || !(await admin.comparePassword(password))) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Invalid admin credentials" 
+      });
+    }
+
+    // 5. Generate a secure JWT Token
+    const token = jwt.sign(
+      { id: admin._id, role: admin.role || 'superadmin' },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    // 6. Return success with the token and admin details for the frontend
+    res.status(200).json({ 
+      success: true, 
+      token, 
+      admin: { 
+        id: admin._id,
+        firstName: admin.firstName, 
+        lastName: admin.lastName,
+        role: admin.role 
+      } 
+    });
+
+  } catch (err) {
+    console.error("Admin Login Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "An error occurred during terminal access", 
+      details: err.message 
+    });
+  }
+});
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
