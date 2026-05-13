@@ -4,12 +4,12 @@ import jwt from 'jsonwebtoken';
 import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js';
 import { authenticateToken, isAdmin } from './auth.js';
+import { connectToDatabase } from '../index.js';
 
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
   try {
-    // 1. Force connection to avoid "buffering timed out"
     await connectToDatabase();
 
     const { firstName, lastName, username, email, password, role } = req.body;
