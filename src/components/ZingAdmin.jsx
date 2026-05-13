@@ -27,16 +27,12 @@ const ZingAdmin = () => {
 
  const handleSubmit = async (e) => {
   e.preventDefault();
-  
-  // Basic frontend validation
-  if (!formData.email || !formData.password || (!isLogin && (!formData.firstName || !formData.lastName))) {
+    if (!formData.email || !formData.password || (!isLogin && (!formData.firstName || !formData.lastName))) {
     alert("Please fill in all required fields.");
     return;
   }
 
   setLoading(true);
-
-  // DECLARE THESE ONLY ONCE
   const endpoint = isLogin ? '/api/admin/login' : '/api/admin/register';
   const baseUrl = 'https://zingconnect.vercel.app'; 
 
