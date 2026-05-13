@@ -2353,6 +2353,7 @@ app.post('/api/agents/unlock-voice-package', async (req, res) => {
     res.status(500).json({ success: false, message: "Server error during voice activation." });
   }
 });
+
 // Modified to use email to match your AdminSchema and React Frontend
 app.post('/api/admin/register', async (req, res) => {
   try {

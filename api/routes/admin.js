@@ -6,11 +6,15 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js'; 
 import { authenticateToken, isAdmin } from './auth.js';
-// Import the shared client and DB helper
+// Import the shared client and DB helper from your index.js
 import { connectToDatabase, s3Client } from '../index.js'; 
 
 const router = express.Router();
 
+/**
+ * @route   POST /api/admin/register
+ * @desc    Create a new administrator
+ */
 router.post('/register', async (req, res) => {
   try {
     await connectToDatabase();
@@ -20,16 +24,17 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, message: "Required fields are missing" });
     }
 
-    const existingAdmin = await Admin.findOne({ email: email.toLowerCase().trim() });
+    const lowerEmail = email.toLowerCase().trim();
+    const existingAdmin = await Admin.findOne({ email: lowerEmail });
     if (existingAdmin) {
       return res.status(400).json({ success: false, message: "Email already registered" });
     }
 
     const newAdmin = new Admin({
-      firstName,
-      lastName,
-      email: email.toLowerCase().trim(),
-      password, 
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: lowerEmail,
+      password, // Your Admin schema middleware should handle hashing
       role: role || 'superadmin'
     });
 
@@ -40,6 +45,10 @@ router.post('/register', async (req, res) => {
   }
 });
 
+/**
+ * @route   POST /api/admin/login
+ * @desc    Admin authentication & token generation
+ */
 router.post('/login', async (req, res) => {
   try {
     await connectToDatabase(); 
@@ -54,6 +63,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid admin credentials" });
     }
 
+    // Explicitly set role: 'admin' for the isAdmin middleware to function
     const token = jwt.sign(
       { id: admin._id, role: 'admin', firstName: admin.firstName },
       process.env.JWT_SECRET,
@@ -63,25 +73,46 @@ router.post('/login', async (req, res) => {
     res.json({ 
       success: true, 
       token, 
-      admin: { id: admin._id, firstName: admin.firstName, lastName: admin.lastName, role: admin.role } 
+      admin: { 
+        id: admin._id, 
+        firstName: admin.firstName, 
+        lastName: admin.lastName, 
+        role: admin.role 
+      } 
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Login error", details: err.message });
   }
 });
 
-router.get('/stats', authenticateToken, async (req, res) => {
+/**
+ * @route   GET /api/admin/stats
+ * @desc    Fetch system-wide statistics (SECURE)
+ */
+router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
     const now = new Date();
     const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
+    const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Using the imported 'Agent' model directly
-    const [totalAgents, pendingAgents, dailyRev] = await Promise.all([
+    const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev] = await Promise.all([
       Agent.countDocuments(),
       Agent.countDocuments({ isVerified: false }),
+      // Daily Revenue
       Agent.aggregate([
         { $match: { isSubscribed: true, updatedAt: { $gte: startOfDay } } },
+        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
+      // Weekly Revenue
+      Agent.aggregate([
+        { $match: { isSubscribed: true, updatedAt: { $gte: startOfWeek } } },
+        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
+      // Monthly Revenue
+      Agent.aggregate([
+        { $match: { isSubscribed: true, updatedAt: { $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
       ])
     ]);
@@ -90,16 +121,23 @@ router.get('/stats', authenticateToken, async (req, res) => {
       success: true,
       totalAgents,
       pendingAgents,
-      revenue: { daily: dailyRev[0]?.total || 0 }
-      // Add weekly/monthly/yearly logic similar to dailyRev
+      currency: "NGN",
+      revenue: { 
+        daily: dailyRev[0]?.total || 0,
+        weekly: weeklyRev[0]?.total || 0,
+        monthly: monthlyRev[0]?.total || 0
+      }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Error fetching stats", details: err.message });
   }
 });
 
-// GET ALL AGENTS
-router.get('/agents', authenticateToken, async (req, res) => {
+/**
+ * @route   GET /api/admin/agents
+ * @desc    List all registered agents (SECURE)
+ */
+router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
     const agents = await Agent.find({})
@@ -118,24 +156,32 @@ router.get('/agents', authenticateToken, async (req, res) => {
   }
 });
 
-// GET SINGLE AGENT
-router.get('/agents/:id', authenticateToken, async (req, res) => {
+/**
+ * @route   GET /api/admin/agents/:id
+ * @desc    Fetch detailed profile for a single agent (SECURE)
+ */
+router.get('/agents/:id', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
     const agent = await Agent.findById(req.params.id);
 
     if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
 
-    // Handle S3 Signed URL for the specific agent photo
+    // --- SECURE PHOTO SIGNING ---
     let finalPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com') && s3Client) {
       try {
-        const fileKey = agent.photoUrl.split('idrivee2.com/')[1];
-        const command = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-          Key: decodeURIComponent(fileKey),
-        });
-        finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        const urlParts = agent.photoUrl.split('/');
+        const profileIndex = urlParts.indexOf('profiles');
+        
+        if (profileIndex !== -1) {
+          const fileKey = urlParts.slice(profileIndex).join('/');
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: decodeURIComponent(fileKey),
+          });
+          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        }
       } catch (signErr) {
         console.error("Photo Signing Error:", signErr.message);
       }
