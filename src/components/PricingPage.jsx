@@ -119,13 +119,16 @@ const [guestId] = React.useState(() => {
   });
 
 React.useEffect(() => {
+  // 1. Initialize socket with polling as a fallback for Vercel's serverless environment
   const newSocket = io("https://zingconnect.vercel.app", {
-    transports: ['websocket', 'polling'], // Ensure compatibility
-    withCredentials: true
+    transports: ['polling', 'websocket'], 
+    withCredentials: true,
+    reconnection: true,
+    reconnectionAttempts: 5,
+    timeout: 10000
   }); 
-  setSocket(newSocket);
   newSocket.on("connect", () => {
-    console.log("Socket Connected:", newSocket.id);
+    console.log("✅ Socket Connected successfully:", newSocket.id);
     newSocket.emit("guest_online", { guestId });
   });
   newSocket.on("guest_receive_admin_message", (data) => {
@@ -135,9 +138,20 @@ React.useEffect(() => {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }]);
   });
-
+  newSocket.on("connect_error", (err) => {
+    console.error("❌ Socket Connection Error:", err.message);
+  });
+  newSocket.on("disconnect", (reason) => {
+    console.warn("⚠️ Socket Disconnected:", reason);
+  });
+  setSocket(newSocket);
   return () => {
-    if (newSocket) newSocket.close();
+    if (newSocket) {
+      newSocket.off("connect");
+      newSocket.off("guest_receive_admin_message");
+      newSocket.off("connect_error");
+      newSocket.close();
+    }
   };
 }, [guestId]);
 
