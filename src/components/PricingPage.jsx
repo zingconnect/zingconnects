@@ -1,6 +1,12 @@
 import React from 'react'; // This is correct since you use React.useState below
 import { useNavigate } from 'react-router-dom';
-import { BsCheckCircleFill, BsLightningChargeFill } from 'react-icons/bs'; 
+import { 
+  BsCheckCircleFill, 
+  BsLightningChargeFill, 
+  BsHeadset, // New
+  BsX,        // New
+  BsSendFill  // New
+} from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
 const plans = [
@@ -78,12 +84,10 @@ const PricingCard = ({ plan }) => {
 
 export const PricingPage = () => {
   const navigate = useNavigate();
-  
-  // Use React. prefix to guarantee the hooks are found in the build
   const [shouldRender, setShouldRender] = React.useState(false); 
+  const [chatOpen, setChatOpen] = React.useState(false); // New state
 
   React.useLayoutEffect(() => {
-    // Detect PWA mode and saved profile to handle iPhone redirects
     const isIOSStandalone = window.navigator.standalone === true;
     const isPWA = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
     const savedSlug = localStorage.getItem('lastVisitedSlug');
@@ -205,6 +209,82 @@ export const PricingPage = () => {
           <p className="mt-2 md:mt-0">PRIVACY • TERMS</p>
         </div>
       </footer>
+
+      {/* --- FLOATING LIVE SUPPORT WIDGET --- */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end">
+        {/* Chat Window */}
+        {chatOpen && (
+          <div className="mb-4 w-[320px] md:w-[380px] bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5 duration-300">
+            {/* Header */}
+            <div className="bg-blue-600 p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
+                  <BsHeadset className="text-white" size={20} />
+                </div>
+                <div>
+                  <p className="text-white font-black text-[11px] uppercase tracking-widest">Zing Support</p>
+                  <div className="flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></div>
+                    <p className="text-blue-100 text-[9px] font-bold uppercase">Online Now</p>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setChatOpen(false)}
+                className="text-white/60 hover:text-white transition-colors"
+              >
+                <BsX size={24} />
+              </button>
+            </div>
+
+            {/* Chat Body */}
+            <div className="h-[300px] overflow-y-auto p-6 bg-slate-50/50 space-y-4">
+              <div className="flex justify-start">
+                <div className="max-w-[85%] bg-white p-3 rounded-2xl rounded-tl-none shadow-sm border border-slate-100">
+                  <p className="text-[11px] font-bold text-slate-600 leading-relaxed">
+                    Welcome to ZingConnect! 👋 How can we help you choose the right plan today?
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Input Area */}
+            <div className="p-4 bg-white border-t border-slate-100">
+              <div className="flex gap-2 bg-slate-100 p-1.5 rounded-xl">
+                <input 
+                  type="text" 
+                  placeholder="Type your message..."
+                  className="flex-1 bg-transparent border-none text-[11px] font-bold px-3 focus:ring-0 placeholder:text-slate-400"
+                />
+                <button className="bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 transition-all shadow-md">
+                  <BsSendFill size={14} />
+                </button>
+              </div>
+              <p className="text-[8px] text-center text-slate-400 mt-3 font-black uppercase tracking-tighter">
+                Typical reply time: <span className="text-blue-600">Under 2 mins</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Toggle Button */}
+        <button 
+          onClick={() => setChatOpen(!chatOpen)}
+          className={`w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95 ${
+            chatOpen ? 'bg-slate-900 rotate-90' : 'bg-blue-600'
+          }`}
+        >
+          {chatOpen ? (
+            <BsX className="text-white" size={32} />
+          ) : (
+            <div className="relative">
+              <BsHeadset className="text-white" size={28} />
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-blue-600 rounded-full"></span>
+            </div>
+          )}
+        </button>
+      </div>
+      
     </div>
   );
 };
