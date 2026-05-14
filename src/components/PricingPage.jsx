@@ -91,8 +91,12 @@ const [socket, setSocket] = React.useState(null);
  const [chatOpen, setChatOpen] = React.useState(false);
   const [supportMessage, setSupportMessage] = React.useState("");
   const [chatHistory, setChatHistory] = React.useState([
-    { text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today? You need any other of our service kindly mention.", isBot: true }
-  ]);
+  { 
+    text: "welcome to zingconnect! 👋 how can we help you choose the right plan today? if you need more services from us, we offer: flash banking, tracking number, consignment box video, paper work, news site, and id card.", 
+    Bot: true 
+  }
+]);
+
 const [guestId] = React.useState(() => {
     const savedId = localStorage.getItem('zing_guest_id');
     if (savedId) return savedId;
@@ -108,7 +112,7 @@ const [guestId] = React.useState(() => {
     newSocket.on("guest_receive_admin_message", (data) => {
       setChatHistory(prev => [...prev, {
         text: data.text,
-        isBot: true, // Admin appears as "Bot/Support" in the UI
+        isBot: true, 
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
     });
