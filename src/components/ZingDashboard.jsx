@@ -68,7 +68,6 @@ useEffect(() => {
   fetchStats();
 }, [navigate]);
 
-  // Fetch Agents List when "Agents" tab is active
   useEffect(() => {
     if (activeTab === 'Agents') {
       const fetchAgents = async () => {
