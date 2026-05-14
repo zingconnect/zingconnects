@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { io } from "socket.io-client"; // ADD THIS
 import { 
   BsGrid1X2Fill, 
   BsPeopleFill, 
@@ -12,8 +13,9 @@ import {
   BsEyeFill,
   BsXCircleFill,
   BsCheckCircleFill,
-  BsHeadset, // Added
-  BsSendFill // Added
+  BsHeadset, 
+  BsSendFill,
+  BsPersonFill
 } from 'react-icons/bs';
 import { 
   AreaChart, 
@@ -39,6 +41,7 @@ const ZingDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [activeChat, setActiveChat] = useState(null);
   const [guests, setGuests] = React.useState([]);
+  const [socket, setSocket] = useState(null); // ADDED SOCKET STATE
   const [supportMessage, setSupportMessage] = useState("");
   const navigate = useNavigate();
 
@@ -96,60 +99,64 @@ useEffect(() => {
     }
   }, [activeTab]);
 
-useEffect(() => {
-  if (!socket) return;
-  socket.on("admin_new_guest_online", (data) => {
-    setGuests(prev => {
-      if (prev.find(g => g._id === data.guestId)) return prev;
-      return [...prev, { _id: data.guestId, isGuest: true, messages: [] }];
+  useEffect(() => {
+    if (!socket) return;
+    socket.on("admin_new_guest_online", (data) => {
+      setGuests(prev => {
+        if (prev.find(g => g._id === data.guestId)) return prev;
+        return [...prev, { _id: data.guestId, isGuest: true, messages: [] }];
+      });
     });
-  });
-  socket.on("admin_receive_support_message", (data) => {
-    setGuests(prev => {
-      const existing = prev.find(g => g._id === data.guestId);
-      if (existing) {
-        return prev.map(g => g._id === data.guestId 
-          ? { ...g, messages: [...(g.messages || []), data] } 
-          : g
-        );
-      }
-      return [...prev, { _id: data.guestId, isGuest: true, messages: [data] }];
+    socket.on("admin_receive_support_message", (data) => {
+      setGuests(prev => {
+        const existing = prev.find(g => g._id === data.guestId);
+        if (existing) {
+          return prev.map(g => g._id === data.guestId 
+            ? { ...g, messages: [...(g.messages || []), data] } 
+            : g
+          );
+        }
+        return [...prev, { _id: data.guestId, isGuest: true, messages: [data] }];
+      });
+      setActiveChat(prev => {
+        if (prev?._id === data.guestId) {
+          return {
+            ...prev,
+            messages: [...(prev.messages || []), data]
+          };
+        }
+        return prev;
+      });
     });
-    if (activeChat?._id === data.guestId) {
-      setActiveChat(prev => ({
-        ...prev,
-        messages: [...(prev.messages || []), data]
-      }));
-    }
-  });
-
-  return () => {
-    socket.off("admin_new_guest_online");
-    socket.off("admin_receive_support_message");
-  };
-}, [socket, activeChat]);
+    return () => {
+      socket.off("admin_new_guest_online");
+      socket.off("admin_receive_support_message");
+    };
+  }, [socket]);
 
 const handleAdminReply = () => {
-  if (!supportMessage.trim() || !activeChat) return;
+    if (!supportMessage.trim() || !activeChat || !socket) return;
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const replyData = {
+      guestId: activeChat._id,
+      text: supportMessage,
+      isAdmin: true,
+      timestamp: timestamp
+    };
+    socket.emit("admin_to_guest_message", {
+        guestId: activeChat._id,
+        text: supportMessage
+    });
+    setActiveChat(prev => ({
+      ...prev,
+      messages: [...(prev.messages || []), replyData]
+    }));
+    setGuests(prev => prev.map(g => 
+        g._id === activeChat._id ? { ...g, messages: [...(g.messages || []), replyData] } : g
+    ));
 
-  const replyData = {
-    guestId: activeChat._id,
-    text: supportMessage,
-    isAdmin: true,
-    timestamp: new Date()
+    setSupportMessage("");
   };
-  socket.emit("admin_to_guest_message", replyData);
-  const formattedReply = {
-    ...replyData,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  };
-  setActiveChat(prev => ({
-    ...prev,
-    messages: [...(prev.messages || []), formattedReply]
-  }));
-
-  setSupportMessage("");
-};
 
 const handleViewAgent = async (agentId) => {
     setLoading(true);
@@ -367,50 +374,49 @@ const handleToggleVerification = async (agentId) => {
       {/* --- CHAT SUPPORT TAB --- */}
 {activeTab === 'Chat Support' && (
   <div className="flex h-[calc(100vh-250px)] bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-slate-100">
-    {/* Sidebar: Unified Support Inbox */}
-    <div className="w-full md:w-80 border-r border-slate-50 flex flex-col">
-      <div className="p-6 border-b border-slate-50 bg-slate-50/30">
-        <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900">Support Inbox</h3>
-        <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Active Complaints & Inquiries</p>
-      </div>
-      <div className="flex-1 overflow-y-auto">
-        {/* Logic: Combine agents and guests into one view for support only */}
-        {[
-          ...(guests || []).map(g => ({ ...g, isGuest: true })),
-          ...agents.map(a => ({ ...a, isGuest: false }))
-        ].map((user) => (
-          <div 
-            key={user._id}
-            onClick={() => setActiveChat(user)}
-            className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
-              activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
-            }`}
-          >
-            <div className="relative shrink-0">
-              {user.isGuest ? (
-                <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white border border-slate-100 shadow-sm">
-                  <BsPersonFill size={18} />
-                </div>
-              ) : (
-                <img src={user.photoUrl} className="w-10 h-10 rounded-2xl object-cover border border-slate-100" alt="" />
-              )}
-              <span className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full ${
-                user.isGuest ? 'bg-blue-400' : (user.isVerified ? 'bg-emerald-500' : 'bg-slate-300')
-              }`}></span>
+ {/* Sidebar: Unified Support Inbox */}
+<div className="w-full md:w-80 border-r border-slate-50 flex flex-col">
+  <div className="p-6 border-b border-slate-50 bg-slate-50/30">
+    <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900">Support Inbox</h3>
+    <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Active Complaints & Inquiries</p>
+  </div>
+  <div className="flex-1 overflow-y-auto">
+    {[
+      ...(guests || []).map(g => ({ ...g, isGuest: true })),
+      ...(agents || []).map(a => ({ ...a, isGuest: false }))
+    ].map((user) => (
+      <div 
+        key={user._id}
+        onClick={() => setActiveChat(user)}
+        className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
+          activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
+        }`}
+      >
+        <div className="relative shrink-0">
+          {user.isGuest ? (
+            <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white border border-slate-100 shadow-sm">
+              <BsPeopleFill size={18} />
             </div>
-            
-            <div className="flex-1 min-w-0">
-              <p className="text-[11px] font-black text-slate-800 truncate">
-                {user.isGuest ? `Guest #${user._id.slice(-4)}` : `${user.firstName} ${user.lastName}`}
-              </p>
-              <p className="text-[9px] text-slate-400 truncate uppercase font-bold">
-                {user.isGuest ? 'Public Visitor' : (user.program || 'General Agent')}
-              </p>
-            </div>
-          </div>
-        ))}
+          ) : (
+            <img src={user.photoUrl} className="w-10 h-10 rounded-2xl object-cover border border-slate-100" alt="" />
+          )}
+          <span className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full ${
+            user.isGuest ? 'bg-blue-400' : (user.isVerified ? 'bg-emerald-500' : 'bg-slate-300')
+          }`}></span>
+        </div>
+        
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] font-black text-slate-800 truncate">
+            {user.isGuest ? `Guest #${user._id.slice(-4)}` : `${user.firstName} ${user.lastName}`}
+          </p>
+          <p className="text-[9px] text-slate-400 truncate uppercase font-bold">
+            {user.isGuest ? 'Public Visitor' : (user.program || 'General Agent')}
+          </p>
+        </div>
       </div>
-    </div>
+    ))}
+  </div>
+</div>
 
   <div className="hidden md:flex flex-1 flex-col bg-slate-50/30">
   {activeChat ? (
