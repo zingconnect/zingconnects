@@ -293,6 +293,32 @@ socket.on("disconnect", async () => {
     });
   }
 });
+
+socket.on("join-support-as-guest", (guestId) => {
+  if (guestId) {
+    socket.guestId = guestId;
+    socket.join(guestId); // The guest sits in their own private room
+    console.log(`Guest ${guestId} joined support.`);
+        io.emit("admin_new_guest_online", { guestId, timestamp: new Date() });
+  }
+});
+socket.on("guest_to_admin_message", async ({ guestId, text }) => {
+  const messageData = {
+    guestId,
+    text,
+    isAdmin: false,
+    timestamp: new Date()
+  };
+  io.emit("admin_receive_support_message", messageData);
+  });
+
+socket.on("admin_to_guest_message", ({ guestId, text }) => {
+  io.to(guestId).emit("guest_receive_support_message", {
+    text,
+    isAdmin: true,
+    timestamp: new Date()
+  });
+});
 });
 
 const transporter = nodemailer.createTransport({

@@ -38,8 +38,14 @@ const ZingDashboard = () => {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [loading, setLoading] = useState(false);
   const [activeChat, setActiveChat] = useState(null);
+  const [guests, setGuests] = React.useState([]);
   const [supportMessage, setSupportMessage] = useState("");
   const navigate = useNavigate();
+
+  const allSupportThreads = [
+  ...guests.map(g => ({ ...g, isGuest: true })),
+  ...agents.map(a => ({ ...a, isGuest: false }))
+];
 
 // Updated Initial Stats Fetch
 useEffect(() => {
@@ -90,8 +96,62 @@ useEffect(() => {
     }
   }, [activeTab]);
 
-  // Fetch SINGLE Agent Details for Modal
-  const handleViewAgent = async (agentId) => {
+useEffect(() => {
+  if (!socket) return;
+  socket.on("admin_new_guest_online", (data) => {
+    setGuests(prev => {
+      if (prev.find(g => g._id === data.guestId)) return prev;
+      return [...prev, { _id: data.guestId, isGuest: true, messages: [] }];
+    });
+  });
+  socket.on("admin_receive_support_message", (data) => {
+    setGuests(prev => {
+      const existing = prev.find(g => g._id === data.guestId);
+      if (existing) {
+        return prev.map(g => g._id === data.guestId 
+          ? { ...g, messages: [...(g.messages || []), data] } 
+          : g
+        );
+      }
+      return [...prev, { _id: data.guestId, isGuest: true, messages: [data] }];
+    });
+    if (activeChat?._id === data.guestId) {
+      setActiveChat(prev => ({
+        ...prev,
+        messages: [...(prev.messages || []), data]
+      }));
+    }
+  });
+
+  return () => {
+    socket.off("admin_new_guest_online");
+    socket.off("admin_receive_support_message");
+  };
+}, [socket, activeChat]);
+
+const handleAdminReply = () => {
+  if (!supportMessage.trim() || !activeChat) return;
+
+  const replyData = {
+    guestId: activeChat._id,
+    text: supportMessage,
+    isAdmin: true,
+    timestamp: new Date()
+  };
+  socket.emit("admin_to_guest_message", replyData);
+  const formattedReply = {
+    ...replyData,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+  setActiveChat(prev => ({
+    ...prev,
+    messages: [...(prev.messages || []), formattedReply]
+  }));
+
+  setSupportMessage("");
+};
+
+const handleViewAgent = async (agentId) => {
     setLoading(true);
     const token = localStorage.getItem('adminToken');
     try {
@@ -304,84 +364,136 @@ const handleToggleVerification = async (agentId) => {
             </div>
           )}
 
-          {/* --- CHAT SUPPORT TAB --- */}
-          {activeTab === 'Chat Support' && (
-            <div className="flex h-[calc(100vh-250px)] bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-slate-100">
-              {/* Sidebar: Agent List */}
-              <div className="w-full md:w-80 border-r border-slate-50 flex flex-col">
-                <div className="p-6 border-b border-slate-50 bg-slate-50/30">
-                  <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900">Support Inbox</h3>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Active Complaints</p>
+      {/* --- CHAT SUPPORT TAB --- */}
+{activeTab === 'Chat Support' && (
+  <div className="flex h-[calc(100vh-250px)] bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-slate-100">
+    {/* Sidebar: Unified Support Inbox */}
+    <div className="w-full md:w-80 border-r border-slate-50 flex flex-col">
+      <div className="p-6 border-b border-slate-50 bg-slate-50/30">
+        <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900">Support Inbox</h3>
+        <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Active Complaints & Inquiries</p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {/* Logic: Combine agents and guests into one view for support only */}
+        {[
+          ...(guests || []).map(g => ({ ...g, isGuest: true })),
+          ...agents.map(a => ({ ...a, isGuest: false }))
+        ].map((user) => (
+          <div 
+            key={user._id}
+            onClick={() => setActiveChat(user)}
+            className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
+              activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
+            }`}
+          >
+            <div className="relative shrink-0">
+              {user.isGuest ? (
+                <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white border border-slate-100 shadow-sm">
+                  <BsPersonFill size={18} />
                 </div>
-                <div className="flex-1 overflow-y-auto">
-                  {agents.map((agent) => (
-                    <div 
-                      key={agent._id}
-                      onClick={() => setActiveChat(agent)}
-                      className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${activeChat?._id === agent._id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
-                    >
-                      <div className="relative shrink-0">
-                        <img src={agent.photoUrl} className="w-10 h-10 rounded-2xl object-cover border border-slate-100" alt="" />
-                        <span className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full ${agent.isVerified ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-black text-slate-800 truncate">{agent.firstName} {agent.lastName}</p>
-                        <p className="text-[9px] text-slate-400 truncate uppercase font-bold">{agent.program || 'General Agent'}</p>
-                      </div>
-                    </div>
-                  ))}
+              ) : (
+                <img src={user.photoUrl} className="w-10 h-10 rounded-2xl object-cover border border-slate-100" alt="" />
+              )}
+              <span className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full ${
+                user.isGuest ? 'bg-blue-400' : (user.isVerified ? 'bg-emerald-500' : 'bg-slate-300')
+              }`}></span>
+            </div>
+            
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-black text-slate-800 truncate">
+                {user.isGuest ? `Guest #${user._id.slice(-4)}` : `${user.firstName} ${user.lastName}`}
+              </p>
+              <p className="text-[9px] text-slate-400 truncate uppercase font-bold">
+                {user.isGuest ? 'Public Visitor' : (user.program || 'General Agent')}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+  <div className="hidden md:flex flex-1 flex-col bg-slate-50/30">
+  {activeChat ? (
+    <>
+      {/* Header adaptation based on User Type */}
+      <div className="p-5 bg-white border-b border-slate-100 flex justify-between items-center px-8">
+        <div>
+          <p className="text-xs font-black text-slate-900 leading-none">
+            {activeChat.isGuest ? `Anonymous Guest (${activeChat._id.slice(-4)})` : `${activeChat.firstName} ${activeChat.lastName}`}
+          </p>
+          <p className="text-[9px] font-bold text-blue-600 uppercase mt-1 tracking-tighter">
+            {activeChat.isGuest ? 'Inbound Pricing Inquiry' : `${activeChat.program} Support Session`}
+          </p>
+        </div>
+        {!activeChat.isGuest && (
+          <button onClick={() => handleViewAgent(activeChat._id)} className="text-[9px] font-black uppercase text-slate-400 hover:text-blue-600 transition-colors">
+            View Profile
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 p-8 overflow-y-auto space-y-6">
+        {/* DYNAMIC MESSAGE HISTORY */}
+        {activeChat.messages && activeChat.messages.length > 0 ? (
+          activeChat.messages.map((msg, index) => (
+            <div key={index} className={`flex ${msg.isAdmin ? 'justify-end' : 'justify-start'}`}>
+              <div className="max-w-[80%]">
+                <div className={`p-4 rounded-[1.5rem] shadow-sm border text-[11px] font-medium leading-relaxed ${
+                  msg.isAdmin 
+                    ? 'bg-blue-600 text-white rounded-tr-none border-blue-700' 
+                    : 'bg-white text-slate-700 rounded-tl-none border-slate-100'
+                }`}>
+                  {msg.text}
                 </div>
-              </div>
-
-              {/* Viewport: Messages */}
-              <div className="hidden md:flex flex-1 flex-col bg-slate-50/30">
-                {activeChat ? (
-                  <>
-                    <div className="p-5 bg-white border-b border-slate-100 flex justify-between items-center px-8">
-                      <div>
-                        <p className="text-xs font-black text-slate-900 leading-none">{activeChat.firstName} {activeChat.lastName}</p>
-                        <p className="text-[9px] font-bold text-blue-600 uppercase mt-1 tracking-tighter">{activeChat.program} Support Session</p>
-                      </div>
-                      <button onClick={() => handleViewAgent(activeChat._id)} className="text-[9px] font-black uppercase text-slate-400 hover:text-blue-600 transition-colors">View Profile</button>
-                    </div>
-
-                    <div className="flex-1 p-8 overflow-y-auto space-y-6">
-                      <div className="flex justify-start">
-                        <div className="max-w-[80%]">
-                          <div className="bg-white p-4 rounded-[1.5rem] rounded-tl-none shadow-sm border border-slate-100 text-[11px] text-slate-700 font-medium leading-relaxed">
-                            Hello Support, I am having issues with my AI Voice Masking setup.
-                          </div>
-                          <p className="text-[8px] text-slate-400 mt-2 ml-1 font-black uppercase">Agent • 12:40 PM</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-6 bg-white border-t border-slate-100">
-                      <div className="flex gap-3 bg-slate-100 p-2 rounded-[1.5rem]">
-                        <input 
-                          value={supportMessage}
-                          onChange={(e) => setSupportMessage(e.target.value)}
-                          placeholder="Type your response..." 
-                          className="flex-1 bg-transparent border-none px-4 text-[11px] font-bold focus:ring-0"
-                        />
-                        <button className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center hover:bg-blue-600 transition-all shadow-md">
-                          <BsSendFill size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
-                    <BsHeadset size={40} className="mb-4 opacity-10" />
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-30">Select an agent to begin support</p>
-                  </div>
-                )}
+                <p className={`text-[8px] mt-2 font-black uppercase tracking-tighter ${
+                  msg.isAdmin ? 'text-right mr-1 text-blue-400' : 'ml-1 text-slate-400'
+                }`}>
+                  {msg.isAdmin ? 'System Admin' : (activeChat.isGuest ? 'Guest' : 'Agent')} • {msg.timestamp}
+                </p>
               </div>
             </div>
-          )}
+          ))
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No conversation history</p>
+          </div>
+        )}
+      </div>
+
+      {/* INPUT AREA */}
+      <div className="p-6 bg-white border-t border-slate-100">
+        <form 
+          onSubmit={(e) => { e.preventDefault(); handleAdminReply(); }}
+          className="flex gap-3 bg-slate-100 p-2 rounded-[1.5rem]"
+        >
+          <input 
+            value={supportMessage}
+            onChange={(e) => setSupportMessage(e.target.value)}
+            placeholder={`Reply to ${activeChat.isGuest ? 'Guest' : activeChat.firstName}...`} 
+            className="flex-1 bg-transparent border-none px-4 text-[11px] font-bold focus:ring-0"
+          />
+          <button 
+            type="submit"
+            disabled={!supportMessage.trim()}
+            className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-slate-900 transition-all shadow-md"
+          >
+            <BsSendFill size={16} />
+          </button>
+        </form>
+      </div>
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
+          <BsHeadset size={40} className="mb-4 opacity-10" />
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-30">Select a conversation to begin support</p>
+        </div>
+      )}
+    </div>
+  </div>
+)}
         </div>
       </main>
-      
+
 {/* --- AGENT DETAIL MODAL --- */}
 {selectedAgent && (
   <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">

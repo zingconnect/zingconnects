@@ -114,27 +114,27 @@ export const PricingPage = () => {
     }
   }, [navigate]);
 
-  const handleSendSupportMessage = (e) => {
-    if (e) e.preventDefault();
-    if (!supportMessage.trim()) return;
-
-    // 1. Create message object
-    const newMessage = {
-      text: supportMessage,
-      isBot: false,
-      senderId: guestId,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    // 2. Update local UI
-    setChatHistory(prev => [...prev, newMessage]);
-    
-    // 3. Clear Input
-    setSupportMessage("");
-
-    // LOGIC: socket.emit('client_to_admin_message', { ...newMessage, isGuest: true });
-    console.log("Sending message to admin from:", guestId);
+ const handleSendSupportMessage = (e) => {
+  if (e) e.preventDefault();
+  if (!supportMessage.trim()) return;
+  const newMessage = {
+    text: supportMessage,
+    isBot: false,
+    senderId: guestId, // This is your persistent guest_xxxx ID
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   };
+  setChatHistory(prev => [...prev, newMessage]);
+  if (socket) {
+    socket.emit('guest_to_admin_message', {
+      guestId: guestId,
+      text: supportMessage,
+      timestamp: new Date()
+    });
+  }
+
+  // 4. Clear Input
+  setSupportMessage("");
+};
 
   if (!shouldRender) {
     return <div className="min-h-screen bg-white" />;
