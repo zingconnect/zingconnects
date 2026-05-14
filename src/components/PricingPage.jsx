@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import { 
   BsCheckCircleFill, 
   BsLightningChargeFill, 
@@ -85,22 +86,35 @@ const PricingCard = ({ plan }) => {
 export const PricingPage = () => {
   const navigate = useNavigate();
   const [shouldRender, setShouldRender] = React.useState(false); 
-  
-  // --- CHAT STATES ---
-  const [chatOpen, setChatOpen] = React.useState(false);
+  const [socket, setSocket] = useState(null); // 2. ADD SOCKET STATE
+
+ const [chatOpen, setChatOpen] = React.useState(false);
   const [supportMessage, setSupportMessage] = React.useState("");
   const [chatHistory, setChatHistory] = React.useState([
-    { text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today?", isBot: true }
+    { text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today? You need any other of our service kindly mention.", isBot: true }
   ]);
-
-  // Persistent Guest ID for Admin tracking
-  const [guestId] = React.useState(() => {
+const [guestId] = React.useState(() => {
     const savedId = localStorage.getItem('zing_guest_id');
     if (savedId) return savedId;
     const newId = `guest_${Math.random().toString(36).substr(2, 9)}`;
     localStorage.setItem('zing_guest_id', newId);
     return newId;
   });
+
+  useEffect(() => {
+    const newSocket = io("https://zingconnect.vercel.app"); 
+    setSocket(newSocket);
+    newSocket.emit("guest_online", { guestId });
+    newSocket.on("guest_receive_admin_message", (data) => {
+      setChatHistory(prev => [...prev, {
+        text: data.text,
+        isBot: true, // Admin appears as "Bot/Support" in the UI
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }]);
+    });
+
+    return () => newSocket.close();
+  }, [guestId]);
 
   React.useLayoutEffect(() => {
     const isIOSStandalone = window.navigator.standalone === true;
@@ -115,27 +129,26 @@ export const PricingPage = () => {
   }, [navigate]);
 
  const handleSendSupportMessage = (e) => {
-  if (e) e.preventDefault();
-  if (!supportMessage.trim()) return;
-  const newMessage = {
-    text: supportMessage,
-    isBot: false,
-    senderId: guestId, // This is your persistent guest_xxxx ID
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  };
-  setChatHistory(prev => [...prev, newMessage]);
-  if (socket) {
-    socket.emit('guest_to_admin_message', {
-      guestId: guestId,
+    if (e) e.preventDefault();
+    if (!supportMessage.trim()) return;
+
+    const newMessage = {
       text: supportMessage,
-      timestamp: new Date()
-    });
-  }
+      isBot: false,
+      senderId: guestId,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    setChatHistory(prev => [...prev, newMessage]);
+    if (socket) {
+      socket.emit('guest_to_admin_message', {
+        guestId: guestId,
+        text: supportMessage,
+        timestamp: new Date()
+      });
+    }
 
-  // 4. Clear Input
-  setSupportMessage("");
-};
-
+    setSupportMessage("");
+  };
   if (!shouldRender) {
     return <div className="min-h-screen bg-white" />;
   }
