@@ -11,15 +11,16 @@ if (!cached) {
 }
 
 const commonOpts = {
-  maxPoolSize: 100,
-  minPoolSize: 20,
+  maxPoolSize: 10,                 
+  minPoolSize: 1,                  
   serverSelectionTimeoutMS: 5000, 
   socketTimeoutMS: 45000,
   family: 4,
-  bufferCommands: false,           // Stop the 10s buffering hang
-  autoIndex: false,                // Recommended for production/Vercel
-  connectTimeoutMS: 10000,         // Give the initial handshake enough time
+  bufferCommands: false, 
+  autoIndex: false, 
+  connectTimeoutMS: 10000, 
 };
+
 /**
  * Main Connection Handler with Reserve Failover
  * This maintains your project structure while protecting against Free-Tier limits.

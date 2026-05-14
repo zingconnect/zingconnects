@@ -85,7 +85,7 @@ router.post('/login', async (req, res) => {
 });
 /** 
  * @route   GET /api/admin/stats
- * @desc    Fetch system-wide statistics (SECURE & DYNAMIC)
+ * @desc    Fetch system-wide statistics (FIXED: Added compatibility & null safety)
  */
 router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
   try {
@@ -96,8 +96,6 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
     const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
-    
-    // For the Chart: Date 7 days ago
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
@@ -111,54 +109,73 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
       dynamicChart
     ] = await Promise.all([
       Agent.countDocuments(),
-      Agent.countDocuments({ isVerified: false }), // Matches UI pending logic
+      Agent.countDocuments({ isVerified: false }), 
       
-      // Daily Revenue - Based on subscriptionDate
+      // Daily Revenue - Added $ifNull safety
       Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfDay } } },
-        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfDay } } },
+        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
 
-      // Weekly Revenue
+      // Weekly Revenue - Added $ifNull safety
       Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfWeek } } },
-        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfWeek } } },
+        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
 
-      // Monthly Revenue
+      // Monthly Revenue - Added $ifNull safety
       Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfMonth } } },
-        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfMonth } } },
+        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
 
-      // Yearly Revenue
+      // Yearly Revenue - Added $ifNull safety
       Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfYear } } },
-        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfYear } } },
+        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
 
-      // --- DYNAMIC CHART DATA (Last 7 Days) ---
+      // --- DYNAMIC CHART DATA (FIXED: Bypassing %a format error) ---
       Agent.aggregate([
         { 
           $match: { 
             isSubscribed: true, 
-            subscriptionDate: { $gte: sevenDaysAgo } 
+            subscriptionDate: { $ne: null, $gte: sevenDaysAgo } 
           } 
         },
         {
           $group: {
-            _id: { $dateToString: { format: "%a", date: "$subscriptionDate" } },
-            revenue: { $sum: "$paymentDetails.amountNgn" },
-            order: { $first: { $dayOfWeek: "$subscriptionDate" } }
+            _id: { $dayOfWeek: "$subscriptionDate" }, // Returns number 1-7
+            revenue: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } }
+          }
+        },
+        {
+          $project: {
+            revenue: 1,
+            order: "$_id",
+            // Manually map numbers to Day Names to avoid %a error
+            name: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$_id", 1] }, then: "Sun" },
+                  { case: { $eq: ["$_id", 2] }, then: "Mon" },
+                  { case: { $eq: ["$_id", 3] }, then: "Tue" },
+                  { case: { $eq: ["$_id", 4] }, then: "Wed" },
+                  { case: { $eq: ["$_id", 5] }, then: "Thu" },
+                  { case: { $eq: ["$_id", 6] }, then: "Fri" },
+                  { case: { $eq: ["$_id", 7] }, then: "Sat" }
+                ],
+                default: "Day"
+              }
+            }
           }
         },
         { $sort: { order: 1 } }
       ])
     ]);
 
-    // Format for Recharts
     const chartData = dynamicChart.length > 0 
-      ? dynamicChart.map(item => ({ name: item._id, revenue: item.revenue }))
+      ? dynamicChart.map(item => ({ name: item.name, revenue: item.revenue }))
       : [{ name: 'Last 7 Days', revenue: 0 }];
 
     res.json({
@@ -181,7 +198,6 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching stats", details: err.message });
   }
 });
-
 
 /**
  * @route   GET /api/admin/agents

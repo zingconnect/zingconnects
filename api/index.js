@@ -2303,33 +2303,22 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev, dynamicChart] = await Promise.all([
       Agent.countDocuments(),
       Agent.countDocuments({ isVerified: false }),
-      
-      // Daily Revenue
-      Agent.aggregate([
+            Agent.aggregate([
         { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfDay } } },
         { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
-
-      // Weekly Revenue
       Agent.aggregate([
         { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfWeek } } },
         { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
-
-      // Monthly Revenue
       Agent.aggregate([
         { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
-
-      // Yearly Revenue
       Agent.aggregate([
         { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfYear } } },
         { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
-
-      // --- DYNAMIC CHART DATA (Last 7 Days) ---
-      // Using $switch to avoid the unsupported '%a' format character error
       Agent.aggregate([
         { 
           $match: { 
