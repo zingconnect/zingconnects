@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { 
@@ -86,7 +86,7 @@ const PricingCard = ({ plan }) => {
 export const PricingPage = () => {
   const navigate = useNavigate();
   const [shouldRender, setShouldRender] = React.useState(false); 
-  const [socket, setSocket] = useState(null); // 2. ADD SOCKET STATE
+const [socket, setSocket] = React.useState(null);
 
  const [chatOpen, setChatOpen] = React.useState(false);
   const [supportMessage, setSupportMessage] = React.useState("");
@@ -101,7 +101,7 @@ const [guestId] = React.useState(() => {
     return newId;
   });
 
-  useEffect(() => {
+ React.useEffect(() => {
     const newSocket = io("https://zingconnect.vercel.app"); 
     setSocket(newSocket);
     newSocket.emit("guest_online", { guestId });
