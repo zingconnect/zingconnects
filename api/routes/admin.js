@@ -336,7 +336,6 @@ router.get('/support/conversations', authenticateToken, isAdmin, async (req, res
   }
 });
 
-// admin.js (Inside your router)
 router.get('/support/messages/:guestId', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase(); // Always ensure connection in serverless

@@ -49,7 +49,9 @@ app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: corsOptions
+  path: '/api/socket.io', 
+  cors: corsOptions,
+  addTrailingSlash: false
 });
 
 app.set('socketio', io);
@@ -2578,11 +2580,11 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
 
 app.post('/api/support/send', async (req, res) => {
   try {
-    await connectToDatabase();
+    await connectToDatabase(); // Wake up DB connection
     const { guestId, text } = req.body;
 
     if (!guestId || !text) {
-      return res.status(400).json({ success: false, message: "Missing data" });
+      return res.status(400).json({ success: false, message: "Missing fields" });
     }
     const savedMsg = await SupportMessage.create({
       guestId: String(guestId),
@@ -2592,18 +2594,19 @@ app.post('/api/support/send', async (req, res) => {
     });
     io.emit("admin_receive_support_message", {
       _id: savedMsg._id,
-      guestId,
-      text,
+      guestId: savedMsg.guestId,
+      text: savedMsg.text,
       isAdmin: false,
       timestamp: savedMsg.createdAt
     });
 
-    return res.status(200).json({ success: true, message: "Message Saved" });
+    res.status(200).json({ success: true, message: "Message Stored" });
   } catch (err) {
-    console.error("Critical API Error:", err.message);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error("API Save Error:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;

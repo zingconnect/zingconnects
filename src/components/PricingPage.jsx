@@ -119,14 +119,13 @@ const [guestId] = React.useState(() => {
   });
 
 React.useEffect(() => {
-  // 1. Initialize socket with polling as a fallback for Vercel's serverless environment
-  const newSocket = io("https://zingconnect.vercel.app", {
-    transports: ['polling', 'websocket'], 
-    withCredentials: true,
-    reconnection: true,
-    reconnectionAttempts: 5,
-    timeout: 10000
-  }); 
+ const newSocket = io("https://zingconnect.vercel.app", {
+  path: '/api/socket.io', 
+  transports: ['polling', 'websocket'], 
+  withCredentials: true,
+  reconnection: true,
+  reconnectionAttempts: 5
+});
   newSocket.on("connect", () => {
     console.log("✅ Socket Connected successfully:", newSocket.id);
     newSocket.emit("guest_online", { guestId });
@@ -167,27 +166,29 @@ React.useEffect(() => {
     }
   }, [navigate]);
 
- const handleSendSupportMessage = (e) => {
-    if (e) e.preventDefault();
-    if (!supportMessage.trim()) return;
+ const handleSendSupportMessage = async (e) => { // Added async
+  if (e) e.preventDefault();
+  if (!supportMessage.trim()) return;
 
-    const newMessage = {
-      text: supportMessage,
-      isBot: false,
-      senderId: guestId,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    setChatHistory(prev => [...prev, newMessage]);
-    if (socket) {
-      socket.emit('guest_to_admin_message', {
-        guestId: guestId,
-        text: supportMessage,
-        timestamp: new Date()
-      });
-    }
+  const textToSend = supportMessage;
+  const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  setChatHistory(prev => [...prev, { text: textToSend, isBot: false, timestamp }]);
+  setSupportMessage("");
+  if (socket && socket.connected) {
+    socket.emit('guest_to_admin_message', { guestId, text: textToSend });
+  }
+  try {
+    await fetch('https://zingconnect.vercel.app/api/support/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guestId, text: textToSend })
+    });
+    console.log("✅ Message saved to database via API.");
+  } catch (err) {
+    console.error("❌ API fallback failed:", err);
+  }
+};
 
-    setSupportMessage("");
-  };
   if (!shouldRender) {
     return <div className="min-h-screen bg-white" />;
   }
