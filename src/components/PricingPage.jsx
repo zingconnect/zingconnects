@@ -1,11 +1,11 @@
-import React from 'react'; // This is correct since you use React.useState below
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   BsCheckCircleFill, 
   BsLightningChargeFill, 
-  BsHeadset, // New
-  BsX,        // New
-  BsSendFill  // New
+  BsHeadset, 
+  BsX,        
+  BsSendFill 
 } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
@@ -85,7 +85,22 @@ const PricingCard = ({ plan }) => {
 export const PricingPage = () => {
   const navigate = useNavigate();
   const [shouldRender, setShouldRender] = React.useState(false); 
-  const [chatOpen, setChatOpen] = React.useState(false); // New state
+  
+  // --- CHAT STATES ---
+  const [chatOpen, setChatOpen] = React.useState(false);
+  const [supportMessage, setSupportMessage] = React.useState("");
+  const [chatHistory, setChatHistory] = React.useState([
+    { text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today?", isBot: true }
+  ]);
+
+  // Persistent Guest ID for Admin tracking
+  const [guestId] = React.useState(() => {
+    const savedId = localStorage.getItem('zing_guest_id');
+    if (savedId) return savedId;
+    const newId = `guest_${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('zing_guest_id', newId);
+    return newId;
+  });
 
   React.useLayoutEffect(() => {
     const isIOSStandalone = window.navigator.standalone === true;
@@ -99,7 +114,28 @@ export const PricingPage = () => {
     }
   }, [navigate]);
 
-  // Block rendering until the layout check is complete
+  const handleSendSupportMessage = (e) => {
+    if (e) e.preventDefault();
+    if (!supportMessage.trim()) return;
+
+    // 1. Create message object
+    const newMessage = {
+      text: supportMessage,
+      isBot: false,
+      senderId: guestId,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    // 2. Update local UI
+    setChatHistory(prev => [...prev, newMessage]);
+    
+    // 3. Clear Input
+    setSupportMessage("");
+
+    // LOGIC: socket.emit('client_to_admin_message', { ...newMessage, isGuest: true });
+    console.log("Sending message to admin from:", guestId);
+  };
+
   if (!shouldRender) {
     return <div className="min-h-screen bg-white" />;
   }
@@ -149,7 +185,6 @@ export const PricingPage = () => {
 
           <div className="flex flex-col lg:flex-row items-center justify-center gap-6 md:gap-12 bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-6 md:p-16 overflow-hidden relative shadow-xl">
             <div className="absolute top-0 right-0 w-32 h-32 md:w-64 md:h-64 bg-white/10 rounded-full -mr-16 -mt-16"></div>
-            
             <div className="w-full max-w-[240px] md:max-w-[290px] bg-white rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-blue-950 relative z-10">
               <div className="bg-blue-600 h-8 rounded-t-[1rem] -mx-3 -mt-3 mb-3 flex items-center px-3 justify-between">
                 <img src={ZingConnectLogo} className="h-3 brightness-0 invert" alt="logo" />
@@ -160,11 +195,9 @@ export const PricingPage = () => {
                 <div className="bg-blue-600 text-white p-2 rounded-xl rounded-tr-none text-[9px] md:text-[11px] font-bold w-4/5 ml-auto text-right">I'd like to start.</div>
               </div>
             </div>
-
             <div className="hidden lg:block">
               <BsLightningChargeFill className="text-white text-5xl animate-pulse" />
             </div>
-
             <div className="w-full max-w-[240px] md:max-w-[290px] bg-blue-950 rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-white relative z-10">
               <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-2">
                 <div className="w-5 h-5 bg-blue-600 rounded-full"></div>
@@ -211,8 +244,7 @@ export const PricingPage = () => {
       </footer>
 
       {/* --- FLOATING LIVE SUPPORT WIDGET --- */}
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end">
-        {/* Chat Window */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end font-sans">
         {chatOpen && (
           <div className="mb-4 w-[320px] md:w-[380px] bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5 duration-300">
             {/* Header */}
@@ -222,44 +254,51 @@ export const PricingPage = () => {
                   <BsHeadset className="text-white" size={20} />
                 </div>
                 <div>
-                  <p className="text-white font-black text-[11px] uppercase tracking-widest">Zing Support</p>
-                  <div className="flex items-center gap-1">
+                  <p className="text-white font-black text-[11px] uppercase tracking-widest leading-none">Zing Support</p>
+                  <div className="flex items-center gap-1 mt-1">
                     <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></div>
                     <p className="text-blue-100 text-[9px] font-bold uppercase">Online Now</p>
                   </div>
                 </div>
               </div>
-              <button 
-                onClick={() => setChatOpen(false)}
-                className="text-white/60 hover:text-white transition-colors"
-              >
+              <button onClick={() => setChatOpen(false)} className="text-white/60 hover:text-white transition-colors">
                 <BsX size={24} />
               </button>
             </div>
 
             {/* Chat Body */}
-            <div className="h-[300px] overflow-y-auto p-6 bg-slate-50/50 space-y-4">
-              <div className="flex justify-start">
-                <div className="max-w-[85%] bg-white p-3 rounded-2xl rounded-tl-none shadow-sm border border-slate-100">
-                  <p className="text-[11px] font-bold text-slate-600 leading-relaxed">
-                    Welcome to ZingConnect! 👋 How can we help you choose the right plan today?
-                  </p>
+            <div className="h-[300px] overflow-y-auto p-6 bg-slate-50/50 space-y-4 flex flex-col">
+              {chatHistory.map((msg, index) => (
+                <div key={index} className={`flex ${msg.isBot ? 'justify-start' : 'justify-end'}`}>
+                  <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm border ${
+                    msg.isBot 
+                      ? 'bg-white rounded-tl-none border-slate-100 text-slate-600' 
+                      : 'bg-blue-600 rounded-tr-none border-blue-700 text-white'
+                  }`}>
+                    <p className="text-[11px] font-bold leading-relaxed">{msg.text}</p>
+                    {!msg.isBot && <p className="text-[7px] opacity-70 mt-1 text-right uppercase">{msg.timestamp}</p>}
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
 
             {/* Input Area */}
             <div className="p-4 bg-white border-t border-slate-100">
-              <div className="flex gap-2 bg-slate-100 p-1.5 rounded-xl">
+              <form onSubmit={handleSendSupportMessage} className="flex gap-2 bg-slate-100 p-1.5 rounded-xl">
                 <input 
                   type="text" 
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
                   placeholder="Type your message..."
                   className="flex-1 bg-transparent border-none text-[11px] font-bold px-3 focus:ring-0 placeholder:text-slate-400"
                 />
-                <button className="bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 transition-all shadow-md">
+                <button 
+                  type="submit"
+                  className="bg-blue-600 text-white p-2.5 rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-90"
+                >
                   <BsSendFill size={14} />
                 </button>
-              </div>
+              </form>
               <p className="text-[8px] text-center text-slate-400 mt-3 font-black uppercase tracking-tighter">
                 Typical reply time: <span className="text-blue-600">Under 2 mins</span>
               </p>
@@ -267,7 +306,6 @@ export const PricingPage = () => {
           </div>
         )}
 
-        {/* Toggle Button */}
         <button 
           onClick={() => setChatOpen(!chatOpen)}
           className={`w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95 ${
@@ -284,7 +322,6 @@ export const PricingPage = () => {
           )}
         </button>
       </div>
-      
     </div>
   );
 };
