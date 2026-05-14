@@ -74,8 +74,7 @@ const ZingAdmin = () => {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans selection:bg-blue-500/30">
       <div className="w-full max-w-[380px] md:max-w-[400px] bg-white rounded-[2rem] md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-500">
         
-        {/* Header with Zingconnect Logo */}
-        <div className="h-28 md:h-32 bg-gradient-to-br from-blue-700 to-indigo-900 w-full flex flex-col items-center justify-center text-white relative">
+                <div className="h-28 md:h-32 bg-gradient-to-br from-blue-700 to-indigo-900 w-full flex flex-col items-center justify-center text-white relative">
           <div className="bg-white p-2 md:p-3 rounded-xl md:rounded-2xl shadow-lg mb-2">
             {/* Using logo.png from your public directory */}
             <img src="/logo-s.png" alt="Zingconnect Logo" className="w-8 h-8 md:w-10 md:h-10 object-contain" />
