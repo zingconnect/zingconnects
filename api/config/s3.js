@@ -23,17 +23,26 @@ export const getS3Client = () => {
 export { PutObjectCommand } from "@aws-sdk/client-s3";
 
 export const getPrivateUrl = async (fileKey) => {
-  if (!fileKey || !fileKey.includes('profiles/')) return fileKey;
+  if (!fileKey) return fileKey;
+  
   try {
     const client = getS3Client(); 
-    const actualKey = fileKey.split('.com/')[1]?.split('?')[0] || fileKey;
+    
+    // Extract only the part after .com/ (e.g., profiles/filename.png)
+    // Also strips any existing query parameters to avoid double-signing
+    const actualKey = fileKey.includes('.com/') 
+      ? fileKey.split('.com/')[1].split('?')[0] 
+      : fileKey;
+
     const command = new GetObjectCommand({
       Bucket: process.env.IDRIVE_BUCKET_NAME,
       Key: decodeURIComponent(actualKey),
     });
+
+    // Returns the temporary signed URL
     return await getSignedUrl(client, command, { expiresIn: 3600 });
   } catch (err) {
     console.error("Signing Error:", err.message);
-    return fileKey;
+    return fileKey; // Fallback to original if signing fails
   }
 };

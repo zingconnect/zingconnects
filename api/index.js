@@ -996,6 +996,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     });
   }
 });
+
 app.get('/api/agents/:slug', async (req, res) => {
   try {
     console.log("--- Profile Request Start --- for:", req.params.slug);
@@ -1004,33 +1005,18 @@ app.get('/api/agents/:slug', async (req, res) => {
     const AgentModel = getAgentModel(); 
 
     if (!AgentModel) {
-      console.error("Model Error: AgentModel is undefined");
       return res.status(500).json({ message: "Configuration Error: Agent Model not found" });
     }
 
-    // Find agent and use .lean() for faster, read-only performance
     const agent = await AgentModel.findOne({ slug: req.params.slug }).select('-password').lean();
     
     if (!agent) {
       return res.status(404).json({ message: "Agent not found" });
     }
-    if (agent.photoUrl && agent.photoUrl.includes('profiles/')) {
-      try {
-        if (!process.env.IDRIVE_BUCKET_NAME) throw new Error("IDRIVE_BUCKET_NAME missing");
 
-        const urlParts = agent.photoUrl.split('profiles/');
-        const fileNameWithParams = urlParts.pop(); // Get everything after 'profiles/'
-        const fileName = fileNameWithParams.split('?')[0]; // Strip existing signatures/params
-        const fileKey = `profiles/${fileName}`;
-        const getCommand = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME,
-          Key: decodeURIComponent(fileKey), // Handle spaces or special characters
-        });
-        agent.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
-        
-      } catch (s3Err) {
-        console.error("S3 Signing Error (Handled):", s3Err.message);
-      }
+    // Apply the private URL signing if a photo exists
+    if (agent.photoUrl) {
+      agent.photoUrl = await getPrivateUrl(agent.photoUrl);
     }
 
     console.log("--- Profile Request Success ---");
