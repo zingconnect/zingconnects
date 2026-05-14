@@ -200,11 +200,8 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
 });
 router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
   try {
-    // Ensure DB connection is active before querying
     await connectToDatabase();
-    
-    // 1. Fetch with lean() to keep memory footprint low
-    const agents = await Agent.find({})
+        const agents = await Agent.find({})
       .select('firstName lastName email program isVerified photoUrl lastActive createdAt isSubscribed')
       .sort({ createdAt: -1 })
       .lean();
