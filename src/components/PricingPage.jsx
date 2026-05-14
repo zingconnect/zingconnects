@@ -360,15 +360,15 @@ if (socket && socket.connected) {
   socket.emit('guest_to_admin_message', { guestId, text: selection });
 }
 try {
-  await fetch('https://zingconnect.vercel.app/api/support/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ guestId, text: selection })
-  });
-  console.log("Message successfully stored via API");
-} catch (err) {
-  console.error("API Fallback failed:", err);
-}
+      await fetch('/api/support/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestId, text: selection })
+      });
+      console.log("✅ Message saved to database via API fallback.");
+    } catch (err) {
+      console.error("❌ Failed to save via API:", err);
+    }
     setChatHistory(prev => [...prev, {
       text: selection,
       isBot: false,

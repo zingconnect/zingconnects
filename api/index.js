@@ -2584,11 +2584,11 @@ app.post('/api/support/send', async (req, res) => {
     if (!guestId || !text) {
       return res.status(400).json({ success: false, message: "Missing data" });
     }
-
     const savedMsg = await SupportMessage.create({
       guestId: String(guestId),
-      text,
-      senderType: 'Guest'
+      text: text,
+      senderType: 'Guest',
+      isAdminRead: false
     });
     io.emit("admin_receive_support_message", {
       _id: savedMsg._id,
@@ -2598,13 +2598,12 @@ app.post('/api/support/send', async (req, res) => {
       timestamp: savedMsg.createdAt
     });
 
-    res.json({ success: true, message: "Stored successfully" });
+    return res.status(200).json({ success: true, message: "Message Saved" });
   } catch (err) {
-    console.error("API Store Error:", err);
-    res.status(500).json({ success: false });
+    console.error("Critical API Error:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
-
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
