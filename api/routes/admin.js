@@ -1,12 +1,11 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
 import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js'; 
+import { connectToDatabase } from '../config/db.js';
+import { getPrivateUrl } from '../config/s3.js';
 import { authenticateToken, isAdmin } from './auth.js';
-import { connectToDatabase, getPrivateUrl } from '../index.js';
 
 
 const router = express.Router();

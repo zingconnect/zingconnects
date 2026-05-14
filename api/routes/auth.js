@@ -1,4 +1,3 @@
-import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
