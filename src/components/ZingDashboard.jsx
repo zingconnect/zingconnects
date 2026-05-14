@@ -11,7 +11,9 @@ import {
   BsGraphUpArrow,
   BsEyeFill,
   BsXCircleFill,
-  BsCheckCircleFill
+  BsCheckCircleFill,
+  BsHeadset, // Added
+  BsSendFill // Added
 } from 'react-icons/bs';
 import { 
   AreaChart, 
@@ -35,6 +37,8 @@ const ZingDashboard = () => {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [loading, setLoading] = useState(false);
+  const [activeChat, setActiveChat] = useState(null);
+  const [supportMessage, setSupportMessage] = useState("");
   const navigate = useNavigate();
 
 // Updated Initial Stats Fetch
@@ -127,7 +131,7 @@ const handleToggleVerification = async (agentId) => {
   const menuItems = [
     { name: 'Dashboard', icon: <BsGrid1X2Fill /> },
     { name: 'Agents', icon: <BsPeopleFill /> },
-    { name: 'Revenue', icon: <BsCashStack /> },
+  { name: 'Chat Support', icon: <BsHeadset /> }, 
     { name: 'Settings', icon: <BsGearFill /> },
   ];
 
@@ -182,8 +186,7 @@ const handleToggleVerification = async (agentId) => {
           <button onClick={() => { localStorage.removeItem('adminToken'); navigate('/admin/terminal'); }} className="w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-400/10 transition-all">Logout Session</button>
         </div>
       </aside>
-
-      {/* --- MAIN CONTENT --- */}
+{/* --- MAIN CONTENT --- */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-4 md:px-8 shrink-0">
           <div className="flex items-center gap-4">
@@ -200,94 +203,59 @@ const handleToggleVerification = async (agentId) => {
         </header>
 
         <div className="p-4 md:p-8 space-y-6 overflow-y-auto">
+          {/* --- DASHBOARD TAB --- */}
           {activeTab === 'Dashboard' && (
-  <>
-    {/* --- PRIMARY STATS --- */}
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <StatCard 
-        title="Total Registered Agents" 
-        value={stats.totalAgents} 
-        icon={<BsPeopleFill size={24} />} 
-        color="bg-blue-600" 
-      />
-      <StatCard 
-        title="Awaiting Verification" 
-        value={stats.pendingAgents} 
-        icon={<BsShieldLockFill size={24} />} 
-        color="bg-amber-500" 
-      />
-    </div>
+            <>
+              {/* --- PRIMARY STATS --- */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <StatCard title="Total Registered Agents" value={stats.totalAgents} icon={<BsPeopleFill size={24} />} color="bg-blue-600" />
+                <StatCard title="Awaiting Verification" value={stats.pendingAgents} icon={<BsShieldLockFill size={24} />} color="bg-amber-500" />
+              </div>
 
-    {/* --- REVENUE OVERVIEW --- */}
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <StatCard title="Daily Revenue" value={stats.revenue?.daily || 0} icon={<BsCashStack />} color="bg-slate-800" />
-      <StatCard title="Weekly Revenue" value={stats.revenue?.weekly || 0} icon={<BsCashStack />} color="bg-slate-800" />
-      <StatCard title="Monthly Revenue" value={stats.revenue?.monthly || 0} icon={<BsCashStack />} color="bg-slate-800" />
-      <StatCard title="Yearly Revenue" value={stats.revenue?.yearly || 0} icon={<BsCashStack />} color="bg-slate-800" />
-    </div>
+              {/* --- REVENUE OVERVIEW --- */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard title="Daily Revenue" value={stats.revenue?.daily || 0} icon={<BsCashStack />} color="bg-slate-800" />
+                <StatCard title="Weekly Revenue" value={stats.revenue?.weekly || 0} icon={<BsCashStack />} color="bg-slate-800" />
+                <StatCard title="Monthly Revenue" value={stats.revenue?.monthly || 0} icon={<BsCashStack />} color="bg-slate-800" />
+                <StatCard title="Yearly Revenue" value={stats.revenue?.yearly || 0} icon={<BsCashStack />} color="bg-slate-800" />
+              </div>
 
-    {/* --- DYNAMIC REVENUE CHART --- */}
-    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
-      <div className="flex justify-between items-center mb-6">
-        <h3 className="text-[11px] font-black uppercase tracking-widest flex items-center gap-2">
-          <BsGraphUpArrow className="text-blue-600" /> Revenue Growth Flow
-        </h3>
-        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Last 7 Days</span>
-      </div>
+              {/* --- DYNAMIC REVENUE CHART --- */}
+              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-[11px] font-black uppercase tracking-widest flex items-center gap-2">
+                    <BsGraphUpArrow className="text-blue-600" /> Revenue Growth Flow
+                  </h3>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Last 7 Days</span>
+                </div>
+                <div className="h-[300px] w-full">
+                  {stats.chartData && stats.chartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={stats.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} dy={10} />
+                        <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `₦${v.toLocaleString()}`} />
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} formatter={(v) => [`₦${v.toLocaleString()}`, 'Revenue']} />
+                        <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} fill="url(#colorRev)" animationDuration={1500} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full w-full flex flex-col items-center justify-center border-2 border-dashed border-slate-50 rounded-2xl">
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Growth Data Found</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
 
-      {/* 
-        FIX: Added a fixed height wrapper. 
-        As seen in image_956197.png, ResponsiveContainer fails without a parent height.
-      */}
-      <div className="h-[300px] w-full">
-        {stats.chartData && stats.chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={stats.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis 
-                dataKey="name" 
-                stroke="#94a3b8" 
-                fontSize={10} 
-                tickLine={false} 
-                axisLine={false} 
-                dy={10}
-              />
-              <YAxis 
-                stroke="#94a3b8" 
-                fontSize={10} 
-                tickLine={false} 
-                axisLine={false} 
-                tickFormatter={(v) => `₦${v.toLocaleString()}`} 
-              />
-              <Tooltip 
-                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                formatter={(v) => [`₦${v.toLocaleString()}`, 'Revenue']} 
-              />
-              <Area 
-                type="monotone" 
-                dataKey="revenue" 
-                stroke="#2563eb" 
-                strokeWidth={3} 
-                fill="url(#colorRev)" 
-                animationDuration={1500}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="h-full w-full flex flex-col items-center justify-center border-2 border-dashed border-slate-50 rounded-2xl">
-            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Growth Data Found</p>
-          </div>
-        )}
-      </div>
-    </div>
-  </>
-)}
+          {/* --- AGENTS TAB --- */}
           {activeTab === 'Agents' && (
             <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
               <div className="p-6 border-b border-slate-50 flex justify-between items-center">
@@ -335,8 +303,85 @@ const handleToggleVerification = async (agentId) => {
               </div>
             </div>
           )}
+
+          {/* --- CHAT SUPPORT TAB --- */}
+          {activeTab === 'Chat Support' && (
+            <div className="flex h-[calc(100vh-250px)] bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-slate-100">
+              {/* Sidebar: Agent List */}
+              <div className="w-full md:w-80 border-r border-slate-50 flex flex-col">
+                <div className="p-6 border-b border-slate-50 bg-slate-50/30">
+                  <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900">Support Inbox</h3>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Active Complaints</p>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {agents.map((agent) => (
+                    <div 
+                      key={agent._id}
+                      onClick={() => setActiveChat(agent)}
+                      className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${activeChat?._id === agent._id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                    >
+                      <div className="relative shrink-0">
+                        <img src={agent.photoUrl} className="w-10 h-10 rounded-2xl object-cover border border-slate-100" alt="" />
+                        <span className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full ${agent.isVerified ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] font-black text-slate-800 truncate">{agent.firstName} {agent.lastName}</p>
+                        <p className="text-[9px] text-slate-400 truncate uppercase font-bold">{agent.program || 'General Agent'}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Viewport: Messages */}
+              <div className="hidden md:flex flex-1 flex-col bg-slate-50/30">
+                {activeChat ? (
+                  <>
+                    <div className="p-5 bg-white border-b border-slate-100 flex justify-between items-center px-8">
+                      <div>
+                        <p className="text-xs font-black text-slate-900 leading-none">{activeChat.firstName} {activeChat.lastName}</p>
+                        <p className="text-[9px] font-bold text-blue-600 uppercase mt-1 tracking-tighter">{activeChat.program} Support Session</p>
+                      </div>
+                      <button onClick={() => handleViewAgent(activeChat._id)} className="text-[9px] font-black uppercase text-slate-400 hover:text-blue-600 transition-colors">View Profile</button>
+                    </div>
+
+                    <div className="flex-1 p-8 overflow-y-auto space-y-6">
+                      <div className="flex justify-start">
+                        <div className="max-w-[80%]">
+                          <div className="bg-white p-4 rounded-[1.5rem] rounded-tl-none shadow-sm border border-slate-100 text-[11px] text-slate-700 font-medium leading-relaxed">
+                            Hello Support, I am having issues with my AI Voice Masking setup.
+                          </div>
+                          <p className="text-[8px] text-slate-400 mt-2 ml-1 font-black uppercase">Agent • 12:40 PM</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-6 bg-white border-t border-slate-100">
+                      <div className="flex gap-3 bg-slate-100 p-2 rounded-[1.5rem]">
+                        <input 
+                          value={supportMessage}
+                          onChange={(e) => setSupportMessage(e.target.value)}
+                          placeholder="Type your response..." 
+                          className="flex-1 bg-transparent border-none px-4 text-[11px] font-bold focus:ring-0"
+                        />
+                        <button className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center hover:bg-blue-600 transition-all shadow-md">
+                          <BsSendFill size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
+                    <BsHeadset size={40} className="mb-4 opacity-10" />
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-30">Select an agent to begin support</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </main>
+      
 {/* --- AGENT DETAIL MODAL --- */}
 {selectedAgent && (
   <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">
@@ -410,21 +455,6 @@ const handleToggleVerification = async (agentId) => {
   </div>
 </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Verification</p>
-            <p className={`text-xs font-bold ${selectedAgent.isVerified ? 'text-emerald-600' : 'text-amber-500'}`}>
-              {selectedAgent.isVerified ? 'VERIFIED' : 'PENDING'}
-            </p>
-          </div>
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">AI Voice Masking</p>
-            <p className={`text-xs font-bold ${selectedAgent.isSubscribed ? 'text-emerald-600' : 'text-slate-400'}`}>
-              {selectedAgent.isSubscribed ? 'ENABLED' : 'DISABLED'}
-            </p>
-          </div>
-        </div>
-
         {/* --- PERSONAL INFO --- */}
         <div className="space-y-4">
           <div className="border-b border-slate-50 pb-3">
@@ -457,6 +487,7 @@ const handleToggleVerification = async (agentId) => {
     </div>
   </div>
 )}
+
 
       {isSidebarOpen && <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
     </div>
