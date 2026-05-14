@@ -92,7 +92,7 @@ const [socket, setSocket] = React.useState(null);
   const [supportMessage, setSupportMessage] = React.useState("");
   const [chatHistory, setChatHistory] = React.useState([
   { 
-    text: "welcome to zingconnect! 👋 how can we help you choose the right plan today? if you need more services from us, we offer: flash banking, tracking number, consignment box video, paper work, news site, and id card.", 
+    text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today? If you need more services from us, we offer: 🏦 Flash banking, 📦 Tracking number, 📹 Consignment box video, 📝 Paper work, 📰 News site, and 🪪 Id card.", 
     Bot: true 
   }
 ]);

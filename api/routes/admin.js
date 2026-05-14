@@ -6,6 +6,7 @@ import Agent from '../models/Agent.js';
 import { connectToDatabase } from '../config/db.js';
 import { getPrivateUrl } from '../config/s3.js';
 import { authenticateToken, isAdmin } from './auth.js';
+import SupportMessage from '../models/Support.js';
 
 
 const router = express.Router();
@@ -302,6 +303,59 @@ router.get('/agents/:id', authenticateToken, isAdmin, async (req, res) => {
   } catch (err) {
     console.error("Admin Agent Fetch Error:", err.message);
     res.status(500).json({ success: false, message: "Internal server error accessing agent data" });
+  }
+});
+
+/**
+ * @route   GET /api/admin/support/conversations
+ * @desc    Fetch a list of unique guests who have messaged support
+ */
+router.get('/support/conversations', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    // Group messages by guestId to get a list of "chats"
+    const conversations = await SupportMessage.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: "$guestId",
+          lastMessage: { $first: "$text" },
+          lastTimestamp: { $first: "$createdAt" },
+          unreadCount: { 
+            $sum: { $cond: [{ $and: [{ $eq: ["$senderType", "Guest"] }, { $eq: ["$isAdminRead", false] }] }, 1, 0] } 
+          }
+        }
+      },
+      { $sort: { lastTimestamp: -1 } }
+    ]);
+
+    res.json({ success: true, conversations });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching support inbox" });
+  }
+});
+
+/**
+ * @route   GET /api/admin/support/messages/:guestId
+ * @desc    Fetch full chat history for a specific guest
+ */
+router.get('/support/messages/:guestId', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { guestId } = req.params;
+
+    const messages = await SupportMessage.find({ guestId }).sort({ createdAt: 1 });
+    
+    // Mark messages as read when admin opens the chat
+    await SupportMessage.updateMany(
+      { guestId, senderType: 'Guest', isAdminRead: false },
+      { $set: { isAdminRead: true } }
+    );
+
+    res.json({ success: true, messages });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching messages" });
   }
 });
 
