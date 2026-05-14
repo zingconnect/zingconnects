@@ -93,9 +93,9 @@ const [showServices, setShowServices] = React.useState(false);
   const [supportMessage, setSupportMessage] = React.useState("");
   const [chatHistory, setChatHistory] = React.useState([
   { 
-    text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today?", 
+    text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today? Do you have any complaints or would you like to request an upgrade on your account?", 
     isInteractive: true,
-    Bot: true 
+    isBot: true 
   }
 ]);
 
@@ -314,7 +314,7 @@ const [guestId] = React.useState(() => {
       onClick={() => setShowServices(!showServices)}
       className="bg-blue-600 text-white px-4 py-2 rounded-full text-[10px] font-black hover:bg-blue-700 transition-all flex items-center gap-2 shadow-sm uppercase"
     >
-      Our Services {showServices ? '🔼' : '🔽'}
+      Our Other Services {showServices ? '🔼' : '🔽'}
     </button>
 
     {showServices && (

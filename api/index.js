@@ -307,14 +307,17 @@ socket.on("join-support-as-guest", (guestId) => {
 
 socket.on("guest_to_admin_message", async ({ guestId, text }) => {
   try {
-    await connectToDatabase();
+    await connectToDatabase(); 
+    if (!guestId || !text) {
+      return console.error("Validation Failed: Missing guestId or message text.");
+    }
     const savedMsg = await SupportMessage.create({
-      guestId, // Must match the String type in your schema
+      guestId,
       text,
       senderType: 'Guest'
     });
 
-    console.log("Message saved with ID:", savedMsg._id);
+    console.log("Success: Message saved with ID:", savedMsg._id);
     io.emit("admin_receive_support_message", {
       _id: savedMsg._id,
       guestId,
@@ -323,7 +326,7 @@ socket.on("guest_to_admin_message", async ({ guestId, text }) => {
       timestamp: savedMsg.createdAt
     });
   } catch (err) {
-    console.error("Failed to save guest message:", err);
+    console.error("MongoDB Save Crash:", err.message);
   }
 });
 
