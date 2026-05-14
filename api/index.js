@@ -23,6 +23,7 @@ import messageRoutes from './routes/message.js';
 import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { connectToDatabase } from './config/db.js';
 import { getPrivateUrl } from './config/s3.js';
 import { createLiveKitToken } from './utils/livekitHelper.js';
@@ -377,29 +378,28 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res) =
                 counter++;
             }
         }
+let savedPhotoPath = existingAgent ? existingAgent.photoUrl : "";
 
-        // --- 4. PHOTO UPLOAD (IDRIVE) ---
-        let savedPhotoPath = existingAgent ? existingAgent.photoUrl : "";
-        if (req.file) {
-            try {
-                const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
-                const fileKey = `profiles/${fileName}`;
-                const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-                
+if (req.file) {
+    try {
+        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
+        const fileKey = `profiles/${fileName}`;
+        const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
                 await s3Client.send(new PutObjectCommand({
-                    Bucket: bucketName,
-                    Key: fileKey,
-                    Body: req.file.buffer,
-                    ContentType: req.file.mimetype,
-                }));
-                
+            Bucket: bucketName,
+            Key: fileKey,
+            Body: req.file.buffer,
+            ContentType: req.file.mimetype,
+        }));
                 const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
-                savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
-            } catch (uploadErr) {
-                console.error("IDRIVE UPLOAD FAILED:", uploadErr.message);
-                // We continue even if upload fails so registration isn't blocked
-            }
-        }
+        savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
+
+        console.log("S3 Upload Successful:", fileKey);
+    } catch (uploadErr) {
+        console.error("IDRIVE UPLOAD FAILED:", uploadErr.message);
+    }
+}
+
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
 

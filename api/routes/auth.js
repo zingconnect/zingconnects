@@ -10,6 +10,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { connectToDatabase } from '../config/db.js';
 import { s3Client, getPrivateUrl } from '../config/s3.js';
 import { agentSchema } from '../models/Agent.js';
@@ -486,7 +487,7 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
     await agent.save();
 
     // 4. HANDLE PHOTO SIGNING
-    let finalPhotoUrl = agent.photoUrl;
+      let finalPhotoUrl = await getPrivateUrl(agent.photoUrl);
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
         const urlParts = agent.photoUrl.split('/');
