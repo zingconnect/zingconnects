@@ -17,7 +17,7 @@ const supportSchema = new mongoose.Schema({
     required: true, 
     trim: true 
   },
-  // Optional: tracking if the admin has seen the message
+  // Tracks if the admin has seen the message for the dashboard inbox
   isAdminRead: { 
     type: Boolean, 
     default: false 
@@ -26,8 +26,7 @@ const supportSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-const SupportMessage = mongoose.models.SupportMessage || mongoose.model('SupportMessage', supportSchema);
-
+// Robust model initialization for Vercel/Serverless
 const SupportMessage = mongoose.models && mongoose.models.SupportMessage 
   ? mongoose.models.SupportMessage 
   : mongoose.model('SupportMessage', supportSchema);
