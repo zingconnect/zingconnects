@@ -351,15 +351,15 @@ React.useEffect(() => {
           { label: "News Site", icon: "📰" },
           { label: "Id Card", icon: "🪪" }
         ].map((service) => (
-        <button
+      <button
   key={service.label}
   type="button"
-  onClick={() => {
+  onClick={async () => { // <--- Added 'async' here
     const selection = `I am interested in ${service.label}`;
-if (socket && socket.connected) {
-  socket.emit('guest_to_admin_message', { guestId, text: selection });
-}
-try {
+    if (socket && socket.connected) {
+      socket.emit('guest_to_admin_message', { guestId, text: selection });
+    }
+    try {
       await fetch('/api/support/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -369,11 +369,15 @@ try {
     } catch (err) {
       console.error("❌ Failed to save via API:", err);
     }
+
+    // 3. Update UI locally
     setChatHistory(prev => [...prev, {
       text: selection,
       isBot: false,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }]);
+
+    // 4. Close menu
     setTimeout(() => {
       setShowServices(false);
     }, 200);
