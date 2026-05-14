@@ -25,7 +25,7 @@ import { Server } from 'socket.io';
 import http from 'http';
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { connectToDatabase } from './config/db.js';
-import { getPrivateUrl } from './config/s3.js';
+import { getS3Client, getPrivateUrl } from './config/s3.js';
 import { createLiveKitToken } from './utils/livekitHelper.js';
 import callRoutes from './routes/callRoutes.js';
 import Call from './models/Call.js'; 
@@ -385,12 +385,12 @@ if (req.file) {
         const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
         const fileKey = `profiles/${fileName}`;
         const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-                await s3Client.send(new PutObjectCommand({
-            Bucket: bucketName,
-            Key: fileKey,
-            Body: req.file.buffer,
-            ContentType: req.file.mimetype,
-        }));
+              await getS3Client().send(new PutObjectCommand({
+    Bucket: bucketName,
+    Key: fileKey,
+    Body: req.file.buffer,
+    ContentType: req.file.mimetype,
+}));
                 const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
         savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
 
@@ -2548,7 +2548,6 @@ app.get('/health', (req, res) => res.status(200).send('OK'));
 const PORT = process.env.PORT || 5000;
 
 if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 5000;
   server.listen(PORT, () => {
     console.log(`--- LOCAL SERVER ACTIVE ON PORT ${PORT} ---`);
   });

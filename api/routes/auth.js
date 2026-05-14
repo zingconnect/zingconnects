@@ -12,11 +12,10 @@ import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { connectToDatabase } from '../config/db.js';
-import { s3Client, getPrivateUrl } from '../config/s3.js';
+import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
 import { agentSchema } from '../models/Agent.js';
 import User from '../models/User.js'; 
 
-dotenv.config();
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -135,14 +134,12 @@ const AgentModel = getAgentModel();
         const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
         const fileKey = `profiles/${fileName}`;
         const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-        
-        await s3Client.send(new PutObjectCommand({
-          Bucket: bucketName,
-          Key: fileKey,
-          Body: req.file.buffer,
-          ContentType: req.file.mimetype,
-        }));
-        
+      await getS3Client().send(new PutObjectCommand({
+    Bucket: bucketName,
+    Key: fileKey,
+    Body: req.file.buffer,
+    ContentType: req.file.mimetype,
+}));
         const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
         savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
       } catch (uploadError) {
