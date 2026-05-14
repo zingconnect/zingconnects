@@ -83,54 +83,105 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ success: false, message: "Login error", details: err.message });
   }
 });
-
-/**
+/** 
  * @route   GET /api/admin/stats
- * @desc    Fetch system-wide statistics (SECURE)
+ * @desc    Fetch system-wide statistics (SECURE & DYNAMIC)
  */
 router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
+    
     const now = new Date();
     const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
     const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    
+    // For the Chart: Date 7 days ago
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev] = await Promise.all([
+    const [
+      totalAgents, 
+      pendingAgents, 
+      dailyRev, 
+      weeklyRev, 
+      monthlyRev, 
+      yearlyRev, 
+      dynamicChart
+    ] = await Promise.all([
       Agent.countDocuments(),
-      Agent.countDocuments({ isVerified: false }),
-      // Daily Revenue
+      Agent.countDocuments({ isVerified: false }), // Matches UI pending logic
+      
+      // Daily Revenue - Based on subscriptionDate
       Agent.aggregate([
-        { $match: { isSubscribed: true, updatedAt: { $gte: startOfDay } } },
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfDay } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
       ]),
+
       // Weekly Revenue
       Agent.aggregate([
-        { $match: { isSubscribed: true, updatedAt: { $gte: startOfWeek } } },
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfWeek } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
       ]),
+
       // Monthly Revenue
       Agent.aggregate([
-        { $match: { isSubscribed: true, updatedAt: { $gte: startOfMonth } } },
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
+
+      // Yearly Revenue
+      Agent.aggregate([
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfYear } } },
+        { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
+
+      // --- DYNAMIC CHART DATA (Last 7 Days) ---
+      Agent.aggregate([
+        { 
+          $match: { 
+            isSubscribed: true, 
+            subscriptionDate: { $gte: sevenDaysAgo } 
+          } 
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%a", date: "$subscriptionDate" } },
+            revenue: { $sum: "$paymentDetails.amountNgn" },
+            order: { $first: { $dayOfWeek: "$subscriptionDate" } }
+          }
+        },
+        { $sort: { order: 1 } }
       ])
     ]);
+
+    // Format for Recharts
+    const chartData = dynamicChart.length > 0 
+      ? dynamicChart.map(item => ({ name: item._id, revenue: item.revenue }))
+      : [{ name: 'Last 7 Days', revenue: 0 }];
 
     res.json({
       success: true,
       totalAgents,
       pendingAgents,
       currency: "NGN",
+      currencySymbol: "₦",
       revenue: { 
         daily: dailyRev[0]?.total || 0,
         weekly: weeklyRev[0]?.total || 0,
-        monthly: monthlyRev[0]?.total || 0
-      }
+        monthly: monthlyRev[0]?.total || 0,
+        yearly: yearlyRev[0]?.total || 0
+      },
+      chartData
     });
+
   } catch (err) {
+    console.error("Stats API Failure:", err.message);
     res.status(500).json({ success: false, message: "Error fetching stats", details: err.message });
   }
 });
+
 
 /**
  * @route   GET /api/admin/agents

@@ -2298,43 +2298,67 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
+    
+    // For the chart: Calculate date 7 days ago
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev] = await Promise.all([
+    const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev, dynamicChart] = await Promise.all([
       Agent.countDocuments(),
-      Agent.countDocuments({ status: 'pending' }),
+      Agent.countDocuments({ isVerified: false }), // Use your verification field
       
-      // Daily Revenue - Updated to target paymentDetails.amountNgn
+      // Daily Revenue
       Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfDay } } },
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfDay } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
       ]),
 
-      // Weekly Revenue - Updated to target paymentDetails.amountNgn
+      // Weekly Revenue
       Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfWeek } } },
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfWeek } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
       ]),
 
-      // Monthly Revenue - Updated to target paymentDetails.amountNgn
+      // Monthly Revenue
       Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfMonth } } },
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
       ]),
 
-      // Yearly Revenue - Updated to target paymentDetails.amountNgn
+      // Yearly Revenue
       Agent.aggregate([
-        { $match: { status: 'active', updatedAt: { $gte: startOfYear } } },
+        { $match: { isSubscribed: true, subscriptionDate: { $gte: startOfYear } } },
         { $group: { _id: null, total: { $sum: "$paymentDetails.amountNgn" } } }
+      ]),
+
+      // --- DYNAMIC CHART DATA (Last 7 Days) ---
+      Agent.aggregate([
+        { 
+          $match: { 
+            isSubscribed: true, 
+            subscriptionDate: { $gte: sevenDaysAgo } 
+          } 
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%a", date: "$subscriptionDate" } }, // Groups by "Mon", "Tue", etc.
+            revenue: { $sum: "$paymentDetails.amountNgn" },
+            order: { $first: { $dayOfWeek: "$subscriptionDate" } }
+          }
+        },
+        { $sort: { order: 1 } } // Keeps days in chronological order
       ])
     ]);
-    const chartData = [
-      { name: 'Mon', revenue: 10000 },
-      { name: 'Tue', revenue: 12500 },
-      { name: 'Wed', revenue: 11000 },
-      { name: 'Thu', revenue: 18000 },
-      { name: 'Fri', revenue: 22000 },
-      { name: 'Sat', revenue: 20500 },
-      { name: 'Sun', revenue: 30000 },
+
+    // Format chart data for Recharts (Frontend)
+    const chartData = dynamicChart.map(item => ({
+      name: item._id,
+      revenue: item.revenue
+    }));
+
+    // If chart is empty (new system), provide zeroed placeholders so chart doesn't break
+    const finalChart = chartData.length > 0 ? chartData : [
+      { name: 'Last 7 Days', revenue: 0 }
     ];
 
     res.json({
@@ -2349,15 +2373,14 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
         monthly: monthlyRev[0]?.total || 0,
         yearly: yearlyRev[0]?.total || 0
       },
-      chartData
+      chartData: finalChart
     });
 
   } catch (err) {
     console.error("Critical: Stats API Failure", err);
     res.status(500).json({ 
       success: false, 
-      message: "Error fetching system financial stats",
-      details: err.message 
+      message: "Error fetching system financial stats"
     });
   }
 });
@@ -2367,9 +2390,6 @@ app.get('/api/admin/agents', authenticateToken, async (req, res) => {
   try {
     // Explicitly wait for the connection to avoid "buffering timed out" errors
     await connectToDatabase();
-
-    // Use the imported Agent model directly. 
-    // .lean() converts Mongoose documents into plain JS objects for faster processing.
     const agents = await Agent.find({})
       .select('firstName lastName email program isVerified photoUrl createdAt')
       .sort({ createdAt: -1 })

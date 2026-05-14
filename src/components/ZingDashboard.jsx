@@ -37,32 +37,36 @@ const ZingDashboard = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  // Initial Stats Fetch
-  useEffect(() => {
-    const fetchStats = async () => {
-      const token = localStorage.getItem('adminToken');
-      if (!token) {
+// Updated Initial Stats Fetch
+useEffect(() => {
+  const fetchStats = async () => {
+    const token = localStorage.getItem('adminToken');
+    if (!token) {
+      navigate('/admin/terminal');
+      return;
+    }
+
+    try {
+      const response = await fetch('https://zingconnect.vercel.app/api/admin/stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('adminToken');
         navigate('/admin/terminal');
         return;
       }
 
-      try {
-        const response = await fetch('https://zingconnect.vercel.app/api/admin/stats', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (data.success) {
-          setStats(data);
-        } else {
-          localStorage.removeItem('adminToken');
-          navigate('/admin/terminal');
-        }
-      } catch (err) {
-        console.error("Dashboard error:", err);
+      const data = await response.json();
+      if (data.success) {
+        setStats(data);
       }
-    };
-    fetchStats();
-  }, [navigate]);
+    } catch (err) {
+      console.error("Dashboard refresh error:", err);
+    }
+  };
+  fetchStats();
+}, [navigate]);
 
   // Fetch Agents List when "Agents" tab is active
   useEffect(() => {
@@ -167,40 +171,93 @@ const ZingDashboard = () => {
 
         <div className="p-4 md:p-8 space-y-6 overflow-y-auto">
           {activeTab === 'Dashboard' && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <StatCard title="Total Registered Agents" value={stats.totalAgents} icon={<BsPeopleFill size={24} />} color="bg-blue-600" />
-                <StatCard title="Awaiting Verification" value={stats.pendingAgents} icon={<BsShieldLockFill size={24} />} color="bg-amber-500" />
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard title="Daily Revenue" value={stats.revenue?.daily || 0} icon={<BsCashStack />} color="bg-slate-800" />
-                <StatCard title="Weekly Revenue" value={stats.revenue?.weekly || 0} icon={<BsCashStack />} color="bg-slate-800" />
-                <StatCard title="Monthly Revenue" value={stats.revenue?.monthly || 0} icon={<BsCashStack />} color="bg-slate-800" />
-                <StatCard title="Yearly Revenue" value={stats.revenue?.yearly || 0} icon={<BsCashStack />} color="bg-slate-800" />
-              </div>
-              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
-                <h3 className="text-[11px] font-black uppercase tracking-widest mb-6 flex items-center gap-2"><BsGraphUpArrow className="text-blue-600" /> Revenue Growth Flow</h3>
-                <div className="h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={stats.chartData}>
-                      <defs>
-                        <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `₦${v.toLocaleString()}`} />
-                      <Tooltip formatter={(v) => [`₦${v.toLocaleString()}`, 'Revenue']} contentStyle={{ borderRadius: '12px', border: 'none' }} />
-                      <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} fill="url(#colorRev)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </>
-          )}
+  <>
+    {/* --- PRIMARY STATS --- */}
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <StatCard 
+        title="Total Registered Agents" 
+        value={stats.totalAgents} 
+        icon={<BsPeopleFill size={24} />} 
+        color="bg-blue-600" 
+      />
+      <StatCard 
+        title="Awaiting Verification" 
+        value={stats.pendingAgents} 
+        icon={<BsShieldLockFill size={24} />} 
+        color="bg-amber-500" 
+      />
+    </div>
 
+    {/* --- REVENUE OVERVIEW --- */}
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <StatCard title="Daily Revenue" value={stats.revenue?.daily || 0} icon={<BsCashStack />} color="bg-slate-800" />
+      <StatCard title="Weekly Revenue" value={stats.revenue?.weekly || 0} icon={<BsCashStack />} color="bg-slate-800" />
+      <StatCard title="Monthly Revenue" value={stats.revenue?.monthly || 0} icon={<BsCashStack />} color="bg-slate-800" />
+      <StatCard title="Yearly Revenue" value={stats.revenue?.yearly || 0} icon={<BsCashStack />} color="bg-slate-800" />
+    </div>
+
+    {/* --- DYNAMIC REVENUE CHART --- */}
+    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-[11px] font-black uppercase tracking-widest flex items-center gap-2">
+          <BsGraphUpArrow className="text-blue-600" /> Revenue Growth Flow
+        </h3>
+        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Last 7 Days</span>
+      </div>
+
+      {/* 
+        FIX: Added a fixed height wrapper. 
+        As seen in image_956197.png, ResponsiveContainer fails without a parent height.
+      */}
+      <div className="h-[300px] w-full">
+        {stats.chartData && stats.chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={stats.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis 
+                dataKey="name" 
+                stroke="#94a3b8" 
+                fontSize={10} 
+                tickLine={false} 
+                axisLine={false} 
+                dy={10}
+              />
+              <YAxis 
+                stroke="#94a3b8" 
+                fontSize={10} 
+                tickLine={false} 
+                axisLine={false} 
+                tickFormatter={(v) => `₦${v.toLocaleString()}`} 
+              />
+              <Tooltip 
+                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                formatter={(v) => [`₦${v.toLocaleString()}`, 'Revenue']} 
+              />
+              <Area 
+                type="monotone" 
+                dataKey="revenue" 
+                stroke="#2563eb" 
+                strokeWidth={3} 
+                fill="url(#colorRev)" 
+                animationDuration={1500}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-full w-full flex flex-col items-center justify-center border-2 border-dashed border-slate-50 rounded-2xl">
+            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Growth Data Found</p>
+          </div>
+        )}
+      </div>
+    </div>
+  </>
+)}
           {activeTab === 'Agents' && (
             <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
               <div className="p-6 border-b border-slate-50 flex justify-between items-center">
@@ -251,32 +308,32 @@ const ZingDashboard = () => {
         </div>
       </main>
 
-    {/* --- AGENT DETAIL MODAL --- */}
-{selectedAgent && (
-  <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">
-    <div className="w-full max-w-md bg-white h-full rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
-      <div className="p-8 flex-1 overflow-y-auto">
-        <div className="flex justify-between items-start mb-8">
-          <img src={selectedAgent.photoUrl} alt="" className="w-24 h-24 rounded-3xl object-cover shadow-xl border-4 border-white bg-slate-100" />
-          <button onClick={() => setSelectedAgent(null)} className="p-2 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">
-            <BsXCircleFill size={20} className="text-slate-400" />
-          </button>
-        </div>
-        
-        <h2 className="text-2xl font-black mb-1">{selectedAgent.firstName} {selectedAgent.lastName}</h2>
-        <p className="text-blue-600 text-[10px] font-black uppercase tracking-widest mb-6">{selectedAgent.occupation || 'Agent'}</p>
-        
-        {/* --- SUBSCRIPTION STATUS CARD --- */}
+      {/* --- AGENT DETAIL MODAL --- */}
+      {selectedAgent && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-white h-full rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-8 flex-1 overflow-y-auto">
+              <div className="flex justify-between items-start mb-8">
+                <img src={selectedAgent.photoUrl} alt="" className="w-24 h-24 rounded-3xl object-cover shadow-xl border-4 border-white" />
+                <button onClick={() => setSelectedAgent(null)} className="p-2 bg-slate-100 rounded-xl hover:bg-slate-200"><BsXCircleFill size={20} /></button>
+              </div>
+              
+              <h2 className="text-2xl font-black mb-1">{selectedAgent.firstName} {selectedAgent.lastName}</h2>
+              <p className="text-blue-600 text-[10px] font-black uppercase tracking-widest mb-6">{selectedAgent.occupation || 'Agent'}</p>
+              
+              {/* --- SUBSCRIPTION STATUS CARD --- */}
         <div className="bg-slate-900 text-white p-5 rounded-[2rem] mb-6 shadow-xl shadow-slate-900/20">
           <div className="flex justify-between items-center mb-4">
             <div>
               <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Active Plan</p>
               <p className="text-sm font-black tracking-tight">{selectedAgent.plan || 'BASIC'}</p>
             </div>
-            <div className="text-right">
-              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Paid Amount</p>
-              <p className="text-sm font-black">₦{(selectedAgent.subscriptionAmount || 0).toLocaleString()}</p>
-            </div>
+           <div className="text-right">
+  <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Paid Amount</p>
+  <p className="text-sm font-black">
+    ₦{(selectedAgent.paymentDetails?.amountNgn || selectedAgent.subscriptionAmount || 0).toLocaleString()}
+  </p>
+</div>
           </div>
           <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
             <div>
@@ -309,7 +366,7 @@ const ZingDashboard = () => {
           </div>
         </div>
 
-        {/* --- PERSONAL INFO --- */}
+            {/* --- PERSONAL INFO --- */}
         <div className="space-y-4">
           <div className="border-b border-slate-50 pb-3">
             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Email Address</p>
@@ -329,15 +386,16 @@ const ZingDashboard = () => {
           </div>
         </div>
       </div>
-      
-      <div className="p-8 bg-slate-50 border-t border-slate-100">
-        <button className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg active:scale-95">
-          Toggle Verification Status
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+
+            <div className="p-8 bg-slate-50 border-t border-slate-100">
+              <button className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg">
+                Toggle Verification Status
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isSidebarOpen && <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
     </div>
   );
