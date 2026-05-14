@@ -113,20 +113,32 @@ useEffect(() => {
     { name: 'Settings', icon: <BsGearFill /> },
   ];
 
-  const StatCard = ({ title, value, icon, color, subtext }) => (
+  const StatCard = ({ title, value, icon, color, subtext }) => {
+  const isRevenue = title?.toUpperCase().includes('REVENUE');
+    const displayValue = value ?? 0;
+  return (
     <div className="bg-white p-4 md:p-6 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center justify-between transition-transform hover:scale-[1.02]">
       <div>
-        <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">{title}</p>
+        <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">
+          {title}
+        </p>
         <h3 className="text-xl md:text-2xl font-black text-slate-900">
-          {typeof value === 'number' && title.includes('REVENUE') ? `₦${value.toLocaleString()}` : value}
+          {isRevenue 
+            ? `₦${displayValue.toLocaleString()}` 
+            : displayValue.toLocaleString()}
         </h3>
-        {subtext && <p className="text-[8px] font-bold text-slate-400 mt-1 uppercase">{subtext}</p>}
+        {subtext && (
+          <p className="text-[8px] font-bold text-slate-400 mt-1 uppercase">
+            {subtext}
+          </p>
+        )}
       </div>
       <div className={`${color} p-3 rounded-2xl text-white shadow-lg`}>
         {icon}
       </div>
     </div>
   );
+};
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans text-slate-900">
