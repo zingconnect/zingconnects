@@ -2489,11 +2489,7 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
         message: "Agent record not found in system"
       });
     }
-
     const now = new Date();
-    
-    // --- 1. SILENT EXPIRATION SYNC ---
-    // Note: Since we are using .lean(), if we need to update status, we do it via updateOne
     let statusUpdate = {};
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       statusUpdate.isSubscribed = false;
@@ -2507,13 +2503,9 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
     if (Object.keys(statusUpdate).length > 0) {
       await Agent.updateOne({ _id: agent._id }, { $set: statusUpdate });
     }
-
-    // --- 2. SECURE PHOTO SIGNING (S3) ---
-    // Using the robust extraction logic to handle the IDrive e2 private URL
     let finalPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
-        // Use the helper we defined earlier or the manual block:
         const urlParts = agent.photoUrl.split('.com/');
         const fileKey = urlParts.length > 1 ? urlParts[1].split('?')[0] : null;
 
@@ -2528,13 +2520,9 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
         console.error("Admin View: Image Signing Failed:", signErr.message);
       }
     }
-
-    // Default Avatar Fallback
     if (!finalPhotoUrl) {
       finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
-
-    // --- 3. STATUS CALCULATION ---
     const lastActiveDate = agent.lastActive || agent.createdAt;
     const isOnline = (now - new Date(lastActiveDate)) < 120000;
 
@@ -2554,8 +2542,6 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
         address: agent.address,
         photoUrl: finalPhotoUrl,
         slug: agent.slug,
-        
-        // --- Subscription Data ---
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed, 
         subscriptionDate: agent.subscriptionDate,
@@ -2587,6 +2573,35 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
       success: false, 
       message: "Internal server error accessing agent data" 
     });
+  }
+});
+
+app.post('/api/support/send', async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { guestId, text } = req.body;
+
+    if (!guestId || !text) {
+      return res.status(400).json({ success: false, message: "Missing data" });
+    }
+
+    const savedMsg = await SupportMessage.create({
+      guestId: String(guestId),
+      text,
+      senderType: 'Guest'
+    });
+    io.emit("admin_receive_support_message", {
+      _id: savedMsg._id,
+      guestId,
+      text,
+      isAdmin: false,
+      timestamp: savedMsg.createdAt
+    });
+
+    res.json({ success: true, message: "Stored successfully" });
+  } catch (err) {
+    console.error("API Store Error:", err);
+    res.status(500).json({ success: false });
   }
 });
 

@@ -356,16 +356,19 @@ React.useEffect(() => {
   type="button"
   onClick={() => {
     const selection = `I am interested in ${service.label}`;
-        if (socket && guestId) {
-      socket.emit('guest_to_admin_message', {
-        guestId: String(guestId), 
-        text: selection,
-        timestamp: new Date()
-      });
-      console.log("Interactive selection sent for guest:", guestId);
-    } else {
-      console.error("Socket not connected or guestId missing. Check localStorage.");
-    }
+if (socket && socket.connected) {
+  socket.emit('guest_to_admin_message', { guestId, text: selection });
+}
+try {
+  await fetch('https://zingconnect.vercel.app/api/support/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ guestId, text: selection })
+  });
+  console.log("Message successfully stored via API");
+} catch (err) {
+  console.error("API Fallback failed:", err);
+}
     setChatHistory(prev => [...prev, {
       text: selection,
       isBot: false,
