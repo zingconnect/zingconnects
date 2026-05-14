@@ -304,22 +304,24 @@ socket.on("join-support-as-guest", (guestId) => {
         io.emit("admin_new_guest_online", { guestId, timestamp: new Date() });
   }
 });
+
 socket.on("guest_to_admin_message", async ({ guestId, text }) => {
   try {
-    // 1. SAVE to the database so the API can find it later
+    await connectToDatabase(); 
     const savedMsg = await SupportMessage.create({
       guestId,
       text,
       senderType: 'Guest'
     });
     const messageData = {
-      _id: savedMsg._id, // Database ID
+      _id: savedMsg._id,
       guestId,
       text,
       isAdmin: false,
       timestamp: savedMsg.createdAt
     };
     io.emit("admin_receive_support_message", messageData);
+    console.log("Message saved successfully to MongoDB");
   } catch (err) {
     console.error("Failed to save guest message:", err);
   }
