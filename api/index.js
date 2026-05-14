@@ -23,7 +23,6 @@ import messageRoutes from './routes/message.js';
 import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
-import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { connectToDatabase } from './config/db.js';
 import { getS3Client, getPrivateUrl } from './config/s3.js';
 import { createLiveKitToken } from './utils/livekitHelper.js';

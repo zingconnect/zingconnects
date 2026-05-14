@@ -10,7 +10,6 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
-import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { connectToDatabase } from '../config/db.js';
 import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
 import { agentSchema } from '../models/Agent.js';
