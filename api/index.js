@@ -307,21 +307,21 @@ socket.on("join-support-as-guest", (guestId) => {
 
 socket.on("guest_to_admin_message", async ({ guestId, text }) => {
   try {
-    await connectToDatabase(); 
+    await connectToDatabase();
     const savedMsg = await SupportMessage.create({
-      guestId,
+      guestId, // Must match the String type in your schema
       text,
       senderType: 'Guest'
     });
-    const messageData = {
+
+    console.log("Message saved with ID:", savedMsg._id);
+    io.emit("admin_receive_support_message", {
       _id: savedMsg._id,
       guestId,
       text,
       isAdmin: false,
       timestamp: savedMsg.createdAt
-    };
-    io.emit("admin_receive_support_message", messageData);
-    console.log("Message saved successfully to MongoDB");
+    });
   } catch (err) {
     console.error("Failed to save guest message:", err);
   }
@@ -329,6 +329,7 @@ socket.on("guest_to_admin_message", async ({ guestId, text }) => {
 
 socket.on("admin_to_guest_message", async ({ guestId, text }) => {
   try {
+    await connectToDatabase();
     await SupportMessage.create({
       guestId,
       text,
@@ -2581,51 +2582,6 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
       success: false, 
       message: "Internal server error accessing agent data" 
     });
-  }
-});
-
-app.get('/support/messages/:guestId', authenticateToken, isAdmin, async (req, res) => {
-  try {
-    const { guestId } = req.params;
-
-    const messages = await SupportMessage.find({ guestId })
-      .sort({ createdAt: 1 }) // Oldest first for the chat timeline
-      .lean();
-    await SupportMessage.updateMany(
-      { guestId, senderType: 'Guest', isAdminRead: false },
-      { $set: { isAdminRead: true } }
-    );
-
-    res.json({
-      success: true,
-      messages: messages.map(msg => ({
-        text: msg.text,
-        isAdmin: msg.senderType === 'Admin',
-        timestamp: msg.createdAt,
-        _id: msg._id
-      }))
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error fetching history" });
-  }
-});
-
-app.get('/support/messages/:guestId', authenticateToken, isAdmin, async (req, res) => {
-  try {
-    await connectToDatabase();
-    const { guestId } = req.params;
-
-    const messages = await SupportMessage.find({ guestId }).sort({ createdAt: 1 });
-    
-    // Mark messages as read when admin opens the chat
-    await SupportMessage.updateMany(
-      { guestId, senderType: 'Guest', isAdminRead: false },
-      { $set: { isAdminRead: true } }
-    );
-
-    res.json({ success: true, messages });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Error fetching messages" });
   }
 });
 

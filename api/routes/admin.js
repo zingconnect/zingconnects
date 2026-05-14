@@ -336,18 +336,16 @@ router.get('/support/conversations', authenticateToken, isAdmin, async (req, res
   }
 });
 
-/**
- * @route   GET /api/admin/support/messages/:guestId
- * @desc    Fetch full chat history for a specific guest
- */
+// admin.js (Inside your router)
 router.get('/support/messages/:guestId', authenticateToken, isAdmin, async (req, res) => {
   try {
-    await connectToDatabase();
+    await connectToDatabase(); // Always ensure connection in serverless
     const { guestId } = req.params;
 
+    // Fetch history
     const messages = await SupportMessage.find({ guestId }).sort({ createdAt: 1 });
     
-    // Mark messages as read when admin opens the chat
+    // Mark as read
     await SupportMessage.updateMany(
       { guestId, senderType: 'Guest', isAdminRead: false },
       { $set: { isAdminRead: true } }
@@ -355,6 +353,7 @@ router.get('/support/messages/:guestId', authenticateToken, isAdmin, async (req,
 
     res.json({ success: true, messages });
   } catch (err) {
+    console.error("Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error fetching messages" });
   }
 });

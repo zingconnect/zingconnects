@@ -10,8 +10,6 @@ import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
 import { authenticateToken } from './auth.js';
 import { sendOfflineNotification } from '../utils/mailer.js';
 
-
-
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
