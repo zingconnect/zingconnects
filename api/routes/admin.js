@@ -198,6 +198,7 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching stats", details: err.message });
   }
 });
+
 router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();

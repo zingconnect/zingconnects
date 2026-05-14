@@ -105,23 +105,22 @@ useEffect(() => {
     }
   };
 
-  const toggleVerification = async (agentId) => {
-  const token = localStorage.getItem('adminToken');
+const handleToggleVerification = async (agentId) => {
   try {
     const response = await fetch(`https://zingconnect.vercel.app/api/admin/agents/${agentId}/verify`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
+      method: 'PATCH', // Or POST, matching your backend
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
         'Content-Type': 'application/json'
       }
     });
-    const data = await response.json();
-    if (data.success) {
+    const result = await response.json();
+    if (result.success) {
       setAgents(prev => prev.map(a => a._id === agentId ? { ...a, isVerified: !a.isVerified } : a));
       setSelectedAgent(prev => ({ ...prev, isVerified: !prev.isVerified }));
     }
   } catch (err) {
-    console.error("Verification toggle failed:", err);
+    console.error("Failed to update status:", err.message);
   }
 };
 
@@ -338,45 +337,57 @@ useEffect(() => {
           )}
         </div>
       </main>
-
-      {/* --- AGENT DETAIL MODAL --- */}
-      {selectedAgent && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-white h-full rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
-            <div className="p-8 flex-1 overflow-y-auto">
-              <div className="flex justify-between items-start mb-8">
-                <img src={selectedAgent.photoUrl} alt="" className="w-24 h-24 rounded-3xl object-cover shadow-xl border-4 border-white" />
-                <button onClick={() => setSelectedAgent(null)} className="p-2 bg-slate-100 rounded-xl hover:bg-slate-200"><BsXCircleFill size={20} /></button>
-              </div>
-              
-              <h2 className="text-2xl font-black mb-1">{selectedAgent.firstName} {selectedAgent.lastName}</h2>
-              <p className="text-blue-600 text-[10px] font-black uppercase tracking-widest mb-6">{selectedAgent.occupation || 'Agent'}</p>
-              
-              {/* --- SUBSCRIPTION STATUS CARD --- */}
+{/* --- AGENT DETAIL MODAL --- */}
+{selectedAgent && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">
+    <div className="w-full max-w-md bg-white h-full rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
+      <div className="p-8 flex-1 overflow-y-auto">
+        <div className="flex justify-between items-start mb-8">
+          <img 
+            src={selectedAgent.photoUrl} 
+            alt="Profile" 
+            className="w-24 h-24 rounded-3xl object-cover shadow-xl border-4 border-white" 
+          />
+          <button 
+            onClick={() => setSelectedAgent(null)} 
+            className="p-2 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
+          >
+            <BsXCircleFill size={20} className="text-slate-400" />
+          </button>
+        </div>
+        
+        <h2 className="text-2xl font-black mb-1">{selectedAgent.firstName} {selectedAgent.lastName}</h2>
+        <p className="text-blue-600 text-[10px] font-black uppercase tracking-widest mb-6">
+          {selectedAgent.program || 'Community Agent'}
+        </p>
+        
+        {/* --- SUBSCRIPTION STATUS CARD --- */}
         <div className="bg-slate-900 text-white p-5 rounded-[2rem] mb-6 shadow-xl shadow-slate-900/20">
           <div className="flex justify-between items-center mb-4">
             <div>
-              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Active Plan</p>
-              <p className="text-sm font-black tracking-tight">{selectedAgent.plan || 'BASIC'}</p>
-            </div>
-           <div className="text-right">
-  <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Paid Amount</p>
-  <p className="text-sm font-black">
-    ₦{(selectedAgent.paymentDetails?.amountNgn || selectedAgent.subscriptionAmount || 0).toLocaleString()}
-  </p>
-</div>
-          </div>
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
-            <div>
-              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Start Date</p>
-              <p className="text-[10px] font-bold">
-                {selectedAgent.subscriptionDate ? new Date(selectedAgent.subscriptionDate).toLocaleDateString() : 'N/A'}
+              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Account Status</p>
+              <p className="text-sm font-black tracking-tight">
+                {selectedAgent.isSubscribed ? 'PREMIUM ACCESS' : 'BASIC PLAN'}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Expiry Date</p>
+              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Paid Amount</p>
+              <p className="text-sm font-black">
+                ₦{(selectedAgent.paymentDetails?.amountNgn || 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
+            <div>
+              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Registered On</p>
+              <p className="text-[10px] font-bold">
+                {selectedAgent.createdAt ? new Date(selectedAgent.createdAt).toLocaleDateString() : 'N/A'}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Last Active</p>
               <p className="text-[10px] font-bold text-blue-400">
-                {selectedAgent.expiryDate ? new Date(selectedAgent.expiryDate).toLocaleDateString() : 'N/A'}
+                {selectedAgent.lastActive ? new Date(selectedAgent.lastActive).toLocaleTimeString() : 'Recently'}
               </p>
             </div>
           </div>
@@ -391,13 +402,13 @@ useEffect(() => {
           </div>
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">AI Voice Masking</p>
-            <p className={`text-xs font-bold ${selectedAgent.voicePackageActive ? 'text-emerald-600' : 'text-slate-400'}`}>
-              {selectedAgent.voicePackageActive ? 'ACTIVE' : 'INACTIVE'}
+            <p className={`text-xs font-bold ${selectedAgent.isSubscribed ? 'text-emerald-600' : 'text-slate-400'}`}>
+              {selectedAgent.isSubscribed ? 'ENABLED' : 'DISABLED'}
             </p>
           </div>
         </div>
 
-            {/* --- PERSONAL INFO --- */}
+        {/* --- PERSONAL INFO --- */}
         <div className="space-y-4">
           <div className="border-b border-slate-50 pb-3">
             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Email Address</p>
@@ -405,27 +416,30 @@ useEffect(() => {
           </div>
           <div className="border-b border-slate-50 pb-3">
             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Claim Program</p>
-            <p className="text-xs font-bold">{selectedAgent.program}</p>
-          </div>
-          <div className="border-b border-slate-50 pb-3">
-            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Location Address</p>
-            <p className="text-xs font-bold">{selectedAgent.address || 'N/A'}</p>
+            <p className="text-xs font-bold">{selectedAgent.program || 'N/A'}</p>
           </div>
           <div className="pt-4">
             <p className="text-[8px] font-black text-slate-400 uppercase mb-2">Professional Bio</p>
-            <p className="text-xs text-slate-600 leading-relaxed italic">"{selectedAgent.bio || 'No biography provided.'}"</p>
+            <p className="text-xs text-slate-600 leading-relaxed italic">
+              "{selectedAgent.bio || 'No biography provided.'}"
+            </p>
           </div>
         </div>
       </div>
 
-            <div className="p-8 bg-slate-50 border-t border-slate-100">
-              <button className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg">
-                Toggle Verification Status
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="p-8 bg-slate-50 border-t border-slate-100">
+        <button 
+          onClick={() => handleToggleVerification(selectedAgent._id)}
+          className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg text-white ${
+            selectedAgent.isVerified ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-900 hover:bg-blue-600'
+          }`}
+        >
+          {selectedAgent.isVerified ? 'Revoke Verification' : 'Approve Verification'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
       {isSidebarOpen && <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
     </div>
