@@ -12,7 +12,6 @@ export const s3Client = new S3Client({
   },
 });
 
-const upload = multer({ storage: multer.memoryStorage() });
 
 
 export const getPrivateUrl = async (fileKey) => {

@@ -61,7 +61,6 @@ self.addEventListener('push', function(event) {
   );
 });
 
-// 4. NOTIFICATION CLICK HANDLER
 self.addEventListener('notificationclick', function(event) {
   event.notification.close(); 
 

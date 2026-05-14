@@ -63,9 +63,7 @@ webpush.setVapidDetails(
   process.env.VITE_PRIVATE_KEY
 );
 
-
-
-
+const upload = multer({ storage: multer.memoryStorage() });
 
 const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
