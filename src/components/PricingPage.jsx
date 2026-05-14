@@ -121,7 +121,7 @@ const [guestId] = React.useState(() => {
 React.useEffect(() => {
  const newSocket = io("https://zingconnect.vercel.app", {
   path: '/api/socket.io', 
-  transports: ['polling', 'websocket'], 
+  transports: ['websocket'],
   withCredentials: true,
   reconnection: true,
   reconnectionAttempts: 5

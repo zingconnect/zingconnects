@@ -13,6 +13,10 @@
   ],
   "rewrites": [
     { 
+      "source": "/api/socket.io/(.*)", 
+      "destination": "/api/index.js" 
+    },
+    { 
       "source": "/api/:path*", 
       "destination": "/api/index.js" 
     },
