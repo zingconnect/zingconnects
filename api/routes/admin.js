@@ -146,16 +146,20 @@ router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
       .lean();
 
     const now = new Date();
-    const formattedAgents = agents.map(agent => {
-      const lastActiveDate = agent.lastActive || agent.createdAt;
-      const isOnline = (now - new Date(lastActiveDate)) < 120000; // 2-minute threshold
+    const formattedAgents = await Promise.all(agents.map(async (agent) => {
+  const lastActiveDate = agent.lastActive || agent.createdAt;
+  const isOnline = (now - new Date(lastActiveDate)) < 120000;
+  let photo = agent.photoUrl;
+  if (photo && photo.includes('profiles/')) {
+     photo = await getPrivateUrl(agent.photoUrl);
+  }
 
-      return {
-        ...agent,
-        status: isOnline ? 'online' : 'offline',
-        photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=random`
-      };
-    });
+  return {
+    ...agent,
+    status: isOnline ? 'online' : 'offline',
+    photoUrl: photo || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
+  };
+}));
 
     res.json({ 
       success: true, 

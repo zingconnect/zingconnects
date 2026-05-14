@@ -10,9 +10,8 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { connectToDatabase } from '../index.js';
+import { connectToDatabase } from '../config/db.js';
+import { s3Client, getPrivateUrl } from '../config/s3.js';
 import { agentSchema } from '../models/Agent.js';
 import User from '../models/User.js'; 
 
@@ -81,15 +80,7 @@ export const isAdmin = (req, res, next) => {
     res.status(403).json({ success: false, message: "Access denied: Admins only" });
   }
 };
-// --- IDRIVE E2 CONFIG ---
-const s3Client = new S3Client({
-  region: process.env.IDRIVE_REGION,
-  endpoint: process.env.IDRIVE_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.IDRIVE_ACCESS_KEY_ID,
-    secretAccessKey: process.env.IDRIVE_SECRET_ACCESS_KEY,
-  },
-});
+
 
 // --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
 router.post('/register', upload.single('photo'), async (req, res) => {
@@ -117,20 +108,14 @@ const AgentModel = getAgentModel();
         message: "Email already registered. Please login." 
       });
     }
-
-    // 2. CONDITIONAL PASSWORD HASHING
-    // Fix: If password is missing (resend scenario), keep existing hash or set to empty
     let hashedPassword = existingAgent ? existingAgent.password : "";
 
     if (password && password.trim() !== "") {
       const salt = await bcrypt.genSalt(10);
       hashedPassword = await bcrypt.hash(password, salt);
     } else if (!existingAgent) {
-      // If it's a new registration and no password is provided
       return res.status(400).json({ success: false, message: "Password is required for registration." });
     }
-
-    // 3. SLUG GENERATION (Only for new agents)
     let finalSlug = existingAgent ? existingAgent.slug : "";
     if (!existingAgent) {
       const baseSlug = `${firstName || 'agent'}${lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();

@@ -13,8 +13,6 @@ import WebSocket from 'ws';
 import nodemailer from 'nodemailer';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { fileURLToPath } from 'url';
 import Agent from './models/Agent.js';
 import User from './models/User.js'; 
@@ -25,6 +23,8 @@ import messageRoutes from './routes/message.js';
 import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
+import { connectToDatabase } from './config/db.js';
+import { getPrivateUrl } from './config/s3.js';
 import { createLiveKitToken } from './utils/livekitHelper.js';
 import callRoutes from './routes/callRoutes.js';
 import Call from './models/Call.js'; 
@@ -57,117 +57,15 @@ app.use('/api/agents', authRoutes);
 app.use('/api/admin', adminRoutes);
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
-// Add 'export' here
-export const s3Client = new S3Client({
-  region: process.env.IDRIVE_REGION,
-  endpoint: process.env.IDRIVE_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.IDRIVE_ACCESS_KEY_ID,
-    secretAccessKey: process.env.IDRIVE_SECRET_ACCESS_KEY,
-  },
-});
-
-const upload = multer({ storage: multer.memoryStorage() });
-
 webpush.setVapidDetails(
   `mailto:${process.env.VITE_EMAIL}`,
   process.env.VITE_PUBLIC_KEY, 
   process.env.VITE_PRIVATE_KEY
 );
 
-// Add 'export' here too so you can use this helper in admin.js
-export const getPrivateUrl = async (fileKey) => {
-  try {
-    if (!fileKey) return null;
 
-    let actualKey = fileKey;
-    if (fileKey.startsWith('http')) {
-      const parts = fileKey.split('.com/');
-      actualKey = parts.length > 1 ? parts[1] : fileKey;
-      actualKey = actualKey.split('?')[0];
-    }
 
-    const command = new GetObjectCommand({
-      Bucket: process.env.IDRIVE_BUCKET_NAME,
-      Key: actualKey,
-    });
 
-    return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-  } catch (err) {
-    console.error("Signing error:", err);
-    return null;
-  }
-};
-
-let cached = global.mongoose;
-
-if (!cached) {
-  cached = global.mongoose = { 
-    conn: null, 
-    promise: null,
-    isUsingReserve: false 
-  };
-}
-
-const commonOpts = {
-  maxPoolSize: 100,
-  minPoolSize: 20,
-  serverSelectionTimeoutMS: 5000, 
-  socketTimeoutMS: 45000,
-  family: 4,
-  bufferCommands: false,           // Stop the 10s buffering hang
-  autoIndex: false,                // Recommended for production/Vercel
-  connectTimeoutMS: 10000,         // Give the initial handshake enough time
-};
-/**
- * Main Connection Handler with Reserve Failover
- * This maintains your project structure while protecting against Free-Tier limits.
- */
-export async function connectToDatabase() {
-  // 1. If we already have a healthy connection, use it
-  if (cached.conn && mongoose.connection.readyState === 1) {
-    return cached.conn;
-  }
-
-  // 2. If a connection is already in progress, wait for it
-  if (cached.promise) {
-    return await cached.promise;
-  }
-
-  // 3. Define the connection attempt
-  const attemptConnection = async () => {
-    try {
-      console.log("📡 Attempting connection to PRIMARY AGENT DB...");
-      const primaryConn = await mongoose.connect(process.env.AGENT_DB_URI, commonOpts);
-      cached.isUsingReserve = false;
-      console.log("✅ ZingConnect: Primary Agent DB Active");
-      return primaryConn;
-    } catch (primaryError) {
-      console.error("⚠️ Primary DB is FULL or Lagging. Switching to RESERVE...");
-      
-      try {
-        const reserveConn = await mongoose.connect(process.env.USER_DB_URI, commonOpts);
-        cached.isUsingReserve = true;
-        console.log("🚀 ZingConnect: Running on RESERVE Cluster (USER_DB_URI)");
-        return reserveConn;
-      } catch (reserveError) {
-        console.error("❌ CRITICAL: Both Primary and Reserve Databases failed.");
-        throw new Error("No database available to handle the request.");
-      }
-    }
-  };
-
-  cached.promise = attemptConnection();
-  
-  try {
-    cached.conn = await cached.promise;
-  } catch (err) {
-    cached.promise = null; // Reset promise so we can retry on next request
-    return null;
-  }
-
-  return cached.conn;
-}
 
 const getAgentModel = () => {
   return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
@@ -1104,53 +1002,44 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
 
 app.get('/api/agents/:slug', async (req, res) => {
   try {
-    console.log("--- Profile Request Start ---");
-    console.log("Slug requested:", req.params.slug);
+    console.log("--- Profile Request Start --- for:", req.params.slug);
     
     await connectToDatabase();
     const AgentModel = getAgentModel(); 
 
     if (!AgentModel) {
-      throw new Error("Agent model is not initialized");
+      console.error("Model Error: AgentModel is undefined");
+      return res.status(500).json({ message: "Configuration Error: Agent Model not found" });
     }
-
-    const agent = await AgentModel.findOne({ slug: req.params.slug }).select('-password');
+    const agent = await AgentModel.findOne({ slug: req.params.slug }).select('-password').lean();
     
     if (!agent) {
-      console.log("Profile not found in MongoDB for slug:", req.params.slug);
       return res.status(404).json({ message: "Agent not found" });
     }
-
-    const agentObj = agent.toObject();
-
-    if (agentObj.photoUrl && typeof agentObj.photoUrl === 'string' && agentObj.photoUrl.includes('profiles/')) {
+    if (agent.photoUrl && agent.photoUrl.includes('profiles/')) {
       try {
-        const urlParts = agentObj.photoUrl.split('profiles/');
-        const fileName = urlParts[urlParts.length - 1].split('?')[0]; 
+                if (!process.env.IDRIVE_BUCKET_NAME) throw new Error("IDRIVE_BUCKET_NAME missing");
+        
+        const fileName = agent.photoUrl.split('profiles/').pop().split('?')[0]; 
         const fileKey = `profiles/${fileName}`;
-
-        console.log("Generating signed URL for:", fileKey);
 
         const getCommand = new GetObjectCommand({
           Bucket: process.env.IDRIVE_BUCKET_NAME,
           Key: fileKey,
         });
-
-        // Use a 1-hour expiry
-        agentObj.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
+        agent.photoUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
       } catch (s3Err) {
         console.error("S3 Signing Error (Handled):", s3Err.message);
-        // Do not crash the app; the frontend will use the fallback avatar
       }
     }
 
     console.log("--- Profile Request Success ---");
-    res.json(agentObj);
+    return res.json(agent);
 
   } catch (err) {
-    // THIS IS THE CRITICAL LOG: Check your Vercel logs for this exact line
-    console.error("CRITICAL 500 ERROR IN /api/agents/:slug :", err);
-    res.status(500).json({ 
+    console.error("CRITICAL 500 ERROR:", err.message);
+    // Ensure we return JSON so the frontend doesn't see "A server error..." HTML
+    return res.status(500).json({ 
       success: false, 
       message: "Internal Server Error", 
       details: err.message 
