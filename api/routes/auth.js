@@ -11,7 +11,7 @@ import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { connectToDatabase } from '../config/db.js';
 import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
-import { agentSchema } from '../models/Agent.js';
+import Agent from '../models/Agent.js';
 import User from '../models/User.js'; 
 
 

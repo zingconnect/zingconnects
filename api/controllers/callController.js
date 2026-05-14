@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import Call from '../models/Call.js'; 
-import { connectToDatabase } from '../index.js'; 
+import { connectToDatabase } from '../config/db.js';
 import Agent from '../models/Agent.js';
 import Message from '../models/Message.js';
 import { createLiveKitToken } from '../utils/livekitHelper.js';
@@ -8,7 +8,6 @@ import { createLiveKitToken } from '../utils/livekitHelper.js';
 export const startCall = async (req, res) => {
   console.log("--- 📞 START CALL REQUEST RECEIVED ---");
   try {
-    // 1. Ensure dynamic connection is active (Primary or Reserve)
     await connectToDatabase();
 
     const { receiverId, isMasked, voiceId } = req.body;

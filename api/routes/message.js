@@ -2,42 +2,19 @@ import express from 'express';
 import mongoose from 'mongoose';
 import webpush from 'web-push';
 import multer from 'multer';
-import { Upload } from "@aws-sdk/lib-storage"; 
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"; 
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; 
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import Agent from '../models/Agent.js';
+import { connectToDatabase } from '../config/db.js';
+import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
 import { authenticateToken } from './auth.js';
 import { sendOfflineNotification } from '../utils/mailer.js';
 
-const s3Client = new S3Client({
-  region: process.env.IDRIVE_REGION,
-  endpoint: process.env.IDRIVE_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.IDRIVE_ACCESS_KEY_ID,
-    secretAccessKey: process.env.IDRIVE_SECRET_ACCESS_KEY,
-  },
-});
+
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-const generateSignedUrl = async (key) => {
-  try {
-    if (!key) return null;
-    if (key.startsWith('http')) return key; // Return as-is if already a full URL
-    
-    const command = new GetObjectCommand({
-      Bucket: process.env.IDRIVE_BUCKET_NAME,
-      Key: key,
-    });
-        return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-  } catch (err) {
-    console.error("Presigned URL Error:", err);
-    return null;
-  }
-};
 
 // --- UPDATED: GET CHAT HISTORY WITH CALL LOG SUPPORT ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {

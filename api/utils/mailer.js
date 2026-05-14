@@ -14,7 +14,7 @@ export const sendOfflineNotification = async (receiver, sender, text, receiverTy
   try {
     const baseUrl = "https://zingconnect.vercel.app";
     
-const logoUrl = `${BASE_URL}/icon.png`;
+const logoUrl = `${baseUrl}/icon.png`;
     const path = receiverType === 'Agent' 
       ? `/agent/dashboard?userId=${sender._id}` 
       : `/user/dashboard?agentId=${sender._id}`;
