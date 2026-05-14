@@ -305,28 +305,30 @@ socket.on("join-support-as-guest", (guestId) => {
   }
 });
 
-socket.on("guest_to_admin_message", async ({ guestId, text }) => {
+socket.on("guest_to_admin_message", async (payload) => {
   try {
-    await connectToDatabase(); 
+    const { guestId, text } = payload;
+        await connectToDatabase(); 
+
     if (!guestId || !text) {
-      return console.error("Validation Failed: Missing guestId or message text.");
+      return console.error("Database Save Denied: Missing guestId or text content.");
     }
     const savedMsg = await SupportMessage.create({
-      guestId,
-      text,
-      senderType: 'Guest'
+      guestId: String(guestId),
+      text: text,
+      senderType: 'Guest',
+      isAdminRead: false
     });
-
-    console.log("Success: Message saved with ID:", savedMsg._id);
+    console.log("Database Success: Message stored under ID:", savedMsg._id);
     io.emit("admin_receive_support_message", {
       _id: savedMsg._id,
-      guestId,
-      text,
+      guestId: savedMsg.guestId,
+      text: savedMsg.text,
       isAdmin: false,
       timestamp: savedMsg.createdAt
     });
   } catch (err) {
-    console.error("MongoDB Save Crash:", err.message);
+    console.error("Critical Database Error:", err.message);
   }
 });
 

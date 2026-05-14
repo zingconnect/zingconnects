@@ -118,20 +118,28 @@ const [guestId] = React.useState(() => {
     return newId;
   });
 
- React.useEffect(() => {
-    const newSocket = io("https://zingconnect.vercel.app"); 
-    setSocket(newSocket);
+React.useEffect(() => {
+  const newSocket = io("https://zingconnect.vercel.app", {
+    transports: ['websocket', 'polling'], // Ensure compatibility
+    withCredentials: true
+  }); 
+  setSocket(newSocket);
+  newSocket.on("connect", () => {
+    console.log("Socket Connected:", newSocket.id);
     newSocket.emit("guest_online", { guestId });
-    newSocket.on("guest_receive_admin_message", (data) => {
-      setChatHistory(prev => [...prev, {
-        text: data.text,
-        isBot: true, 
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }]);
-    });
+  });
+  newSocket.on("guest_receive_admin_message", (data) => {
+    setChatHistory(prev => [...prev, {
+      text: data.text,
+      isBot: true, 
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }]);
+  });
 
-    return () => newSocket.close();
-  }, [guestId]);
+  return () => {
+    if (newSocket) newSocket.close();
+  };
+}, [guestId]);
 
   React.useLayoutEffect(() => {
     const isIOSStandalone = window.navigator.standalone === true;
@@ -329,31 +337,38 @@ const [guestId] = React.useState(() => {
           { label: "News Site", icon: "📰" },
           { label: "Id Card", icon: "🪪" }
         ].map((service) => (
-          <button
-            key={service.label}
-            type="button"
-            onClick={() => {
-              const selection = `I am interested in ${service.label}`;
-              if (socket) {
-                socket.emit('guest_to_admin_message', {
-                  guestId: guestId, // Ensure this guestId string is in scope
-                  text: selection,
-                  timestamp: new Date()
-                });
-              }
-              setChatHistory(prev => [...prev, {
-                text: selection,
-                isBot: false,
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              }]);
-
-              setShowServices(false);
-            }}
-            className="text-left p-2.5 rounded-xl bg-slate-50 hover:bg-blue-50 border border-slate-100 text-[9px] font-black text-slate-700 flex items-center gap-3 transition-colors group"
-          >
-            <span className="text-sm group-hover:scale-110 transition-transform">{service.icon}</span>
-            <span className="uppercase tracking-tight">{service.label}</span>
-          </button>
+        <button
+  key={service.label}
+  type="button"
+  onClick={() => {
+    const selection = `I am interested in ${service.label}`;
+        if (socket && guestId) {
+      socket.emit('guest_to_admin_message', {
+        guestId: String(guestId), 
+        text: selection,
+        timestamp: new Date()
+      });
+      console.log("Interactive selection sent for guest:", guestId);
+    } else {
+      console.error("Socket not connected or guestId missing. Check localStorage.");
+    }
+    setChatHistory(prev => [...prev, {
+      text: selection,
+      isBot: false,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }]);
+    setTimeout(() => {
+      setShowServices(false);
+    }, 200);
+  }}
+  className="text-left p-2.5 rounded-xl bg-slate-50 hover:bg-blue-50 border border-slate-100 text-[9px] font-black text-slate-700 flex items-center gap-3 transition-colors group active:bg-blue-100"
+>
+  <span className="text-sm group-hover:scale-110 transition-transform">{service.icon}</span>
+  <div className="flex flex-col">
+    <span className="uppercase tracking-tight leading-none">{service.label}</span>
+    <span className="text-[6px] text-blue-500 mt-0.5 opacity-0 group-hover:opacity-100 uppercase">Click to select</span>
+  </div>
+</button>
         ))}
       </div>
     )}
