@@ -198,34 +198,40 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching stats", details: err.message });
   }
 });
-
-/**
- * @route   GET /api/admin/agents
- * @desc    List all registered agents with formatted profile links (SECURE)
- */
 router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
+    
+    // 1. Fetch only necessary fields to reduce memory load
     const agents = await Agent.find({})
       .select('firstName lastName email program isVerified photoUrl lastActive createdAt isSubscribed')
       .sort({ createdAt: -1 })
       .lean();
 
     const now = new Date();
-    const formattedAgents = await Promise.all(agents.map(async (agent) => {
-  const lastActiveDate = agent.lastActive || agent.createdAt;
-  const isOnline = (now - new Date(lastActiveDate)) < 120000;
-  let photo = agent.photoUrl;
-  if (photo && photo.includes('profiles/')) {
-     photo = await getPrivateUrl(agent.photoUrl);
-  }
 
-  return {
-    ...agent,
-    status: isOnline ? 'online' : 'offline',
-    photoUrl: photo || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
-  };
-}));
+    // 2. Process agents with a try-catch inside the map to prevent total crash
+    const formattedAgents = await Promise.all(agents.map(async (agent) => {
+      const lastActiveDate = agent.lastActive || agent.createdAt;
+      const isOnline = (now - new Date(lastActiveDate)) < 120000;
+      
+      let photo = agent.photoUrl;
+      try {
+        // Only attempt signing if the helper exists and photo is a valid path
+        if (photo && photo.includes('profiles/')) {
+          photo = await getPrivateUrl(agent.photoUrl);
+        }
+      } catch (err) {
+        console.warn(`Photo sign failed for ${agent._id}:`, err.message);
+        photo = null; // Fallback to avatar if signing fails
+      }
+
+      return {
+        ...agent,
+        status: isOnline ? 'online' : 'offline',
+        photoUrl: photo || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff`
+      };
+    }));
 
     res.json({ 
       success: true, 
@@ -233,10 +239,11 @@ router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
       agents: formattedAgents 
     });
   } catch (err) {
-    console.error("Admin Agent List Error:", err.message);
+    console.error("CRITICAL: Admin Agent List Failure:", err.message);
     res.status(500).json({ 
       success: false, 
-      message: "Failed to fetch agent list" 
+      message: "Database error or missing environment config",
+      details: err.message 
     });
   }
 });

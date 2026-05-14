@@ -2288,6 +2288,7 @@ app.post('/api/admin/login', async (req, res) => {
     });
   }
 });
+
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();

@@ -105,6 +105,26 @@ useEffect(() => {
     }
   };
 
+  const toggleVerification = async (agentId) => {
+  const token = localStorage.getItem('adminToken');
+  try {
+    const response = await fetch(`https://zingconnect.vercel.app/api/admin/agents/${agentId}/verify`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    const data = await response.json();
+    if (data.success) {
+      setAgents(prev => prev.map(a => a._id === agentId ? { ...a, isVerified: !a.isVerified } : a));
+      setSelectedAgent(prev => ({ ...prev, isVerified: !prev.isVerified }));
+    }
+  } catch (err) {
+    console.error("Verification toggle failed:", err);
+  }
+};
+
   const menuItems = [
     { name: 'Dashboard', icon: <BsGrid1X2Fill /> },
     { name: 'Agents', icon: <BsPeopleFill /> },
