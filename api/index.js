@@ -1036,33 +1036,16 @@ app.get('/api/agents/:slug', async (req, res) => {
 app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
     const AgentModel = getAgentModel();
-
-    // 1. Find the Agent Document with password for security check
     const agent = await AgentModel.findById(req.user.id).select('+password');
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent account not found" });
     }
-
-    // 2. Extract Data from Body
     const { 
-      firstName, 
-      lastName, 
-      occupation, 
-      program, 
-      bio, 
-      address, 
-      gender,
-      dob,
-      voiceId, 
-      voiceDisplayName, 
-      voiceSettings,
-      oldPassword, 
-      newPassword 
+      firstName, lastName,  occupation,   program,  bio,  address, 
+      gender, dob, voiceId,  voiceDisplayName,  voiceSettings,
+      oldPassword, newPassword 
     } = req.body;
-
-    // 3. Handle Password Security Update
     if (newPassword && newPassword.trim() !== "") {
       if (!oldPassword) {
         return res.status(400).json({ 
@@ -1082,8 +1065,6 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
       const salt = await bcrypt.genSalt(10);
       agent.password = await bcrypt.hash(newPassword, salt);
     }
-
-    // 4. Update Profile Information
     agent.firstName = firstName || agent.firstName;
     agent.lastName = lastName || agent.lastName;
     agent.occupation = occupation || agent.occupation;
@@ -1092,9 +1073,7 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
     agent.address = address || agent.address;
     agent.gender = gender || agent.gender;
     agent.dob = dob || agent.dob;
-    
-   // --- UPDATED VOICE IDENTITY SYNC (NO HARDCODING) ---
-    if (voiceId !== undefined) {
+        if (voiceId !== undefined) {
       if (voiceId === null) {
         agent.voiceId = null;
         
@@ -1102,7 +1081,6 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
           agent.voiceDisplayName = voiceDisplayName;
         }
       } else {
-        // Verify ownership via the unlocked list
         const hasLicense = agent.unlockedVoiceIds && agent.unlockedVoiceIds.includes(String(voiceId));
         
         if (hasLicense) {
@@ -1118,7 +1096,6 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
         }
       }
     }
-
     if (voiceDisplayName !== undefined) agent.voiceDisplayName = voiceDisplayName;
     
     if (voiceSettings !== undefined) {
@@ -1127,27 +1104,20 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
         ...voiceSettings
       };
     }
-
-    // 5. Save the updated document
     await agent.save();
 
     console.log(`[SECURITY SYNC] Profile synchronized for: ${agent.email}`);
-
-    // 6. PREPARE THE FULL RESPONSE (Prevents UI data loss)
     const updatedData = agent.toObject();
     delete updatedData.password;
-
     res.json({
       success: true,
       message: "Identity, Voice, and Security synchronized successfully.",
       agent: {
         ...updatedData,
-        // Explicitly include fields required for the Profile React Cards
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed,
         subscriptionDate: agent.subscriptionDate || null, 
         expiryDate: agent.expiryDate || null,
-        // Ensure the frontend receives the updated unlocked list and current voice
         unlockedVoiceIds: agent.unlockedVoiceIds || [],
         voiceId: agent.voiceId,
         paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" }
@@ -2434,7 +2404,9 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    const agent = await Agent.findById(req.params.id);
+    // Fetch agent and lean for performance
+    const agent = await Agent.findById(req.params.id).lean();
+    
     if (!agent) {
       return res.status(404).json({
         success: false,
@@ -2443,42 +2415,45 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
     }
 
     const now = new Date();
-    let needsSave = false;
-
+    
     // --- 1. SILENT EXPIRATION SYNC ---
+    // Note: Since we are using .lean(), if we need to update status, we do it via updateOne
+    let statusUpdate = {};
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
-      agent.isSubscribed = false;
-      needsSave = true;
+      statusUpdate.isSubscribed = false;
+      agent.isSubscribed = false; // Update local object for response
     }
     if (agent.voicePackageActive && agent.voicePackageExpiry && now > new Date(agent.voicePackageExpiry)) {
-      agent.voicePackageActive = false;
-      needsSave = true;
+      statusUpdate.voicePackageActive = false;
+      agent.voicePackageActive = false; // Update local object for response
     }
-    if (needsSave) await agent.save();
+
+    if (Object.keys(statusUpdate).length > 0) {
+      await Agent.updateOne({ _id: agent._id }, { $set: statusUpdate });
+    }
 
     // --- 2. SECURE PHOTO SIGNING (S3) ---
+    // Using the robust extraction logic to handle the IDrive e2 private URL
     let finalPhotoUrl = agent.photoUrl;
     if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
       try {
-        const urlParts = agent.photoUrl.split('/');
-        const profileIndex = urlParts.indexOf('profiles');
-        
-        // Use the global imports (GetObjectCommand and s3Client) from your index.js
-        if (profileIndex !== -1 && typeof GetObjectCommand !== 'undefined' && typeof s3Client !== 'undefined') {
-          const fileKey = urlParts.slice(profileIndex).join('/');
+        // Use the helper we defined earlier or the manual block:
+        const urlParts = agent.photoUrl.split('.com/');
+        const fileKey = urlParts.length > 1 ? urlParts[1].split('?')[0] : null;
+
+        if (fileKey) {
           const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Bucket: process.env.IDRIVE_BUCKET_NAME,
             Key: decodeURIComponent(fileKey),
           });
           finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         }
       } catch (signErr) {
         console.error("Admin View: Image Signing Failed:", signErr.message);
-        // Fallback to original URL if signing fails so the page doesn't crash
       }
     }
 
-    // Default Avatar Fallback if all else fails
+    // Default Avatar Fallback
     if (!finalPhotoUrl) {
       finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
@@ -2503,20 +2478,30 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
         address: agent.address,
         photoUrl: finalPhotoUrl,
         slug: agent.slug,
+        
+        // --- Subscription Data ---
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed, 
         subscriptionDate: agent.subscriptionDate,
         expiryDate: agent.expiryDate,
-        paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" },
+        subscriptionAmount: agent.subscriptionAmount || 0,
+        
+        // --- Voice & Masking ---
         voiceId: agent.voiceId, 
         unlockedVoiceIds: agent.unlockedVoiceIds || [], 
-        voiceDisplayName: agent.voiceDisplayName,
+        voiceDisplayName: agent.voiceDisplayName || "Natural Voice",
         voicePackageActive: !!agent.voicePackageActive, 
         voicePackageExpiry: agent.voicePackageExpiry,
+        voiceMaskingEnabled: !!agent.voiceMaskingEnabled,
+        
+        // --- Status ---
         isVerified: !!agent.isVerified,
         status: isOnline ? 'online' : 'offline',
         lastActive: agent.lastActive,
-        createdAt: agent.createdAt
+        createdAt: agent.createdAt,
+        
+        // Metadata from your data dump
+        paymentDetails: agent.paymentDetails || {}
       }
     });
 
@@ -2528,7 +2513,6 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
     });
   }
 });
-
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 

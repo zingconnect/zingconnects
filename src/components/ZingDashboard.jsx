@@ -251,60 +251,93 @@ const ZingDashboard = () => {
         </div>
       </main>
 
-      {/* --- AGENT DETAIL MODAL --- */}
-      {selectedAgent && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-white h-full rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
-            <div className="p-8 flex-1 overflow-y-auto">
-              <div className="flex justify-between items-start mb-8">
-                <img src={selectedAgent.photoUrl} alt="" className="w-24 h-24 rounded-3xl object-cover shadow-xl border-4 border-white" />
-                <button onClick={() => setSelectedAgent(null)} className="p-2 bg-slate-100 rounded-xl hover:bg-slate-200"><BsXCircleFill size={20} /></button>
-              </div>
-              
-              <h2 className="text-2xl font-black mb-1">{selectedAgent.firstName} {selectedAgent.lastName}</h2>
-              <p className="text-blue-600 text-[10px] font-black uppercase tracking-widest mb-6">{selectedAgent.occupation || 'Agent'}</p>
-              
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Subscription Plan</p>
-                  <p className="text-xs font-bold">{selectedAgent.plan || 'BASIC'}</p>
-                </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <p className="text-[8px] font-black text-slate-400 uppercase mb-1">AI Voice Masking</p>
-                  <p className={`text-xs font-bold ${selectedAgent.voicePackageActive ? 'text-emerald-600' : 'text-slate-400'}`}>
-                    {selectedAgent.voicePackageActive ? 'ACTIVE' : 'INACTIVE'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="border-b border-slate-50 pb-3">
-                  <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Email Address</p>
-                  <p className="text-xs font-bold">{selectedAgent.email}</p>
-                </div>
-                <div className="border-b border-slate-50 pb-3">
-                  <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Claim Program</p>
-                  <p className="text-xs font-bold">{selectedAgent.program}</p>
-                </div>
-                <div className="border-b border-slate-50 pb-3">
-                  <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Location Address</p>
-                  <p className="text-xs font-bold">{selectedAgent.address || 'N/A'}</p>
-                </div>
-                <div className="pt-4">
-                  <p className="text-[8px] font-black text-slate-400 uppercase mb-2">Professional Bio</p>
-                  <p className="text-xs text-slate-600 leading-relaxed italic">"{selectedAgent.bio || 'No biography provided.'}"</p>
-                </div>
-              </div>
+    {/* --- AGENT DETAIL MODAL --- */}
+{selectedAgent && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm p-4">
+    <div className="w-full max-w-md bg-white h-full rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
+      <div className="p-8 flex-1 overflow-y-auto">
+        <div className="flex justify-between items-start mb-8">
+          <img src={selectedAgent.photoUrl} alt="" className="w-24 h-24 rounded-3xl object-cover shadow-xl border-4 border-white bg-slate-100" />
+          <button onClick={() => setSelectedAgent(null)} className="p-2 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">
+            <BsXCircleFill size={20} className="text-slate-400" />
+          </button>
+        </div>
+        
+        <h2 className="text-2xl font-black mb-1">{selectedAgent.firstName} {selectedAgent.lastName}</h2>
+        <p className="text-blue-600 text-[10px] font-black uppercase tracking-widest mb-6">{selectedAgent.occupation || 'Agent'}</p>
+        
+        {/* --- SUBSCRIPTION STATUS CARD --- */}
+        <div className="bg-slate-900 text-white p-5 rounded-[2rem] mb-6 shadow-xl shadow-slate-900/20">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Active Plan</p>
+              <p className="text-sm font-black tracking-tight">{selectedAgent.plan || 'BASIC'}</p>
             </div>
-            <div className="p-8 bg-slate-50 border-t border-slate-100">
-              <button className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg">
-                Toggle Verification Status
-              </button>
+            <div className="text-right">
+              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Paid Amount</p>
+              <p className="text-sm font-black">₦{(selectedAgent.subscriptionAmount || 0).toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
+            <div>
+              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Start Date</p>
+              <p className="text-[10px] font-bold">
+                {selectedAgent.subscriptionDate ? new Date(selectedAgent.subscriptionDate).toLocaleDateString() : 'N/A'}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Expiry Date</p>
+              <p className="text-[10px] font-bold text-blue-400">
+                {selectedAgent.expiryDate ? new Date(selectedAgent.expiryDate).toLocaleDateString() : 'N/A'}
+              </p>
             </div>
           </div>
         </div>
-      )}
 
+        <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Verification</p>
+            <p className={`text-xs font-bold ${selectedAgent.isVerified ? 'text-emerald-600' : 'text-amber-500'}`}>
+              {selectedAgent.isVerified ? 'VERIFIED' : 'PENDING'}
+            </p>
+          </div>
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">AI Voice Masking</p>
+            <p className={`text-xs font-bold ${selectedAgent.voicePackageActive ? 'text-emerald-600' : 'text-slate-400'}`}>
+              {selectedAgent.voicePackageActive ? 'ACTIVE' : 'INACTIVE'}
+            </p>
+          </div>
+        </div>
+
+        {/* --- PERSONAL INFO --- */}
+        <div className="space-y-4">
+          <div className="border-b border-slate-50 pb-3">
+            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Email Address</p>
+            <p className="text-xs font-bold lowercase">{selectedAgent.email}</p>
+          </div>
+          <div className="border-b border-slate-50 pb-3">
+            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Claim Program</p>
+            <p className="text-xs font-bold">{selectedAgent.program}</p>
+          </div>
+          <div className="border-b border-slate-50 pb-3">
+            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Location Address</p>
+            <p className="text-xs font-bold">{selectedAgent.address || 'N/A'}</p>
+          </div>
+          <div className="pt-4">
+            <p className="text-[8px] font-black text-slate-400 uppercase mb-2">Professional Bio</p>
+            <p className="text-xs text-slate-600 leading-relaxed italic">"{selectedAgent.bio || 'No biography provided.'}"</p>
+          </div>
+        </div>
+      </div>
+      
+      <div className="p-8 bg-slate-50 border-t border-slate-100">
+        <button className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg active:scale-95">
+          Toggle Verification Status
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {isSidebarOpen && <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
     </div>
   );
