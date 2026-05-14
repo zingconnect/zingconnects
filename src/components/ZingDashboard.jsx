@@ -361,37 +361,54 @@ const handleToggleVerification = async (agentId) => {
           {selectedAgent.program || 'Community Agent'}
         </p>
         
-        {/* --- SUBSCRIPTION STATUS CARD --- */}
-        <div className="bg-slate-900 text-white p-5 rounded-[2rem] mb-6 shadow-xl shadow-slate-900/20">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Account Status</p>
-              <p className="text-sm font-black tracking-tight">
-                {selectedAgent.isSubscribed ? 'PREMIUM ACCESS' : 'BASIC PLAN'}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Paid Amount</p>
-              <p className="text-sm font-black">
-                ₦{(selectedAgent.paymentDetails?.amountNgn || 0).toLocaleString()}
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
-            <div>
-              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Registered On</p>
-              <p className="text-[10px] font-bold">
-                {selectedAgent.createdAt ? new Date(selectedAgent.createdAt).toLocaleDateString() : 'N/A'}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-[8px] font-black uppercase opacity-50 mb-1">Last Active</p>
-              <p className="text-[10px] font-bold text-blue-400">
-                {selectedAgent.lastActive ? new Date(selectedAgent.lastActive).toLocaleTimeString() : 'Recently'}
-              </p>
-            </div>
-          </div>
-        </div>
+       {/* --- SUBSCRIPTION STATUS CARD --- */}
+<div className="bg-slate-900 text-white p-5 rounded-[2rem] mb-6 shadow-xl shadow-slate-900/20">
+  <div className="flex justify-between items-center mb-4">
+    <div>
+      <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Active Plan</p>
+      {/* Use actual plan name from backend */}
+      <p className="text-sm font-black tracking-tight">{selectedAgent.plan || 'NO ACTIVE PLAN'}</p>
+    </div>
+    <div className="text-right">
+      <p className="text-[8px] font-black uppercase opacity-60 tracking-widest">Paid Amount</p>
+      <p className="text-sm font-black">
+        ₦{(selectedAgent.paymentDetails?.amountNgn || selectedAgent.subscriptionAmount || 0).toLocaleString()}
+      </p>
+    </div>
+  </div>
+  
+  {/* Displaying the missing Expiry and Start dates */}
+  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
+    <div>
+      <p className="text-[8px] font-black uppercase opacity-50 mb-1">Start Date</p>
+      <p className="text-[10px] font-bold">
+        {selectedAgent.subscriptionDate ? new Date(selectedAgent.subscriptionDate).toLocaleDateString() : 'N/A'}
+      </p>
+    </div>
+    <div className="text-right">
+      <p className="text-[8px] font-black uppercase opacity-50 mb-1">Expiry Date</p>
+      <p className="text-[10px] font-bold text-blue-400">
+        {selectedAgent.expiryDate ? new Date(selectedAgent.expiryDate).toLocaleDateString() : 'N/A'}
+      </p>
+    </div>
+  </div>
+</div>
+
+<div className="grid grid-cols-2 gap-4 mb-8">
+  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+    <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Verification</p>
+    <p className={`text-xs font-bold ${selectedAgent.isVerified ? 'text-emerald-600' : 'text-amber-500'}`}>
+      {selectedAgent.isVerified ? 'VERIFIED' : 'PENDING'}
+    </p>
+  </div>
+  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+    <p className="text-[8px] font-black text-slate-400 uppercase mb-1">AI Voice Masking</p>
+    {/* Correctly check against voicePackageActive */}
+    <p className={`text-xs font-bold ${selectedAgent.voicePackageActive ? 'text-emerald-600' : 'text-slate-400'}`}>
+      {selectedAgent.voicePackageActive ? 'ACTIVE' : 'INACTIVE'}
+    </p>
+  </div>
+</div>
 
         <div className="grid grid-cols-2 gap-4 mb-8">
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
