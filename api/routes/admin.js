@@ -200,34 +200,37 @@ router.get('/stats', authenticateToken, isAdmin, async (req, res) => {
 });
 router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
   try {
+    // Ensure DB connection is active before querying
     await connectToDatabase();
     
-    // 1. Fetch only necessary fields to reduce memory load
+    // 1. Fetch with lean() to keep memory footprint low
     const agents = await Agent.find({})
       .select('firstName lastName email program isVerified photoUrl lastActive createdAt isSubscribed')
       .sort({ createdAt: -1 })
       .lean();
-
     const now = new Date();
-
-    // 2. Process agents with a try-catch inside the map to prevent total crash
     const formattedAgents = await Promise.all(agents.map(async (agent) => {
       const lastActiveDate = agent.lastActive || agent.createdAt;
       const isOnline = (now - new Date(lastActiveDate)) < 120000;
-      
+  
       let photo = agent.photoUrl;
       try {
-        // Only attempt signing if the helper exists and photo is a valid path
-        if (photo && photo.includes('profiles/')) {
+        if (typeof getPrivateUrl === 'function' && photo && photo.includes('profiles/')) {
           photo = await getPrivateUrl(agent.photoUrl);
         }
       } catch (err) {
-        console.warn(`Photo sign failed for ${agent._id}:`, err.message);
-        photo = null; // Fallback to avatar if signing fails
+        console.warn(`[IMAGE_SIGN_FAILED] Agent ${agent._id}:`, err.message);
+        photo = null; 
       }
 
       return {
-        ...agent,
+        _id: agent._id,
+        firstName: agent.firstName || "N/A",
+        lastName: agent.lastName || "",
+        email: agent.email || "No Email",
+        program: agent.program || "General",
+        isVerified: !!agent.isVerified,
+        isSubscribed: !!agent.isSubscribed,
         status: isOnline ? 'online' : 'offline',
         photoUrl: photo || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff`
       };
@@ -238,12 +241,13 @@ router.get('/agents', authenticateToken, isAdmin, async (req, res) => {
       count: formattedAgents.length,
       agents: formattedAgents 
     });
+
   } catch (err) {
-    console.error("CRITICAL: Admin Agent List Failure:", err.message);
+    console.error("CRITICAL: Admin Agent List Failure:", err); 
     res.status(500).json({ 
       success: false, 
-      message: "Database error or missing environment config",
-      details: err.message 
+      message: "Internal Server Error",
+      error: err.message 
     });
   }
 });
