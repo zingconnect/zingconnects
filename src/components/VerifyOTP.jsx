@@ -7,7 +7,6 @@ export const VerifyOTP = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const email = location.state?.email;
-  // If you passed the first name from the previous screen, get it here
   const firstName = location.state?.firstName || 'Agent'; 
 
   const [otp, setOtp] = useState('');
@@ -21,14 +20,11 @@ export const VerifyOTP = () => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
 
-  // --- RESEND LOGIC ---
   const handleResend = async () => {
     if (isResending) return;
     setIsResending(true);
 
     try {
-      // We hit your registration/init endpoint which you've confirmed 
-      // updates existing unverified agents with a new OTP.
       const response = await fetch('/api/agents/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
