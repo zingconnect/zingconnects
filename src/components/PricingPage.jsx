@@ -87,15 +87,28 @@ export const PricingPage = () => {
   const navigate = useNavigate();
   const [shouldRender, setShouldRender] = React.useState(false); 
 const [socket, setSocket] = React.useState(null);
+const [showServices, setShowServices] = React.useState(false);
 
  const [chatOpen, setChatOpen] = React.useState(false);
   const [supportMessage, setSupportMessage] = React.useState("");
   const [chatHistory, setChatHistory] = React.useState([
   { 
-    text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today? If you need more services from us, we offer: 🏦 Flash banking, 📦 Tracking number, 📹 Consignment box video, 📝 Paper work, 📰 News site, and 🪪 Id card.", 
+    text: "Welcome to ZingConnect! 👋 How can we help you choose the right plan today?", 
+    isInteractive: true,
     Bot: true 
   }
 ]);
+
+const services = [
+  { label: "Flash Banking", icon: "🏦" },
+  { label: "Tracking Number", icon: "📦" },
+  { label: "Flight Ticket", icon: "✈️" },
+  { label: "Consignment Box Video", icon: "📹" },
+  { label: "Paper Work (Document/Certificate)", icon: "📝" },
+  { label: "Instant Website", icon: "🌐" },
+  { label: "News Site", icon: "📰" },
+  { label: "Id Card", icon: "🪪" }
+];
 
 const [guestId] = React.useState(() => {
     const savedId = localStorage.getItem('zing_guest_id');
@@ -283,21 +296,75 @@ const [guestId] = React.useState(() => {
               </button>
             </div>
 
-            {/* Chat Body */}
-            <div className="h-[300px] overflow-y-auto p-6 bg-slate-50/50 space-y-4 flex flex-col">
-              {chatHistory.map((msg, index) => (
-                <div key={index} className={`flex ${msg.isBot ? 'justify-start' : 'justify-end'}`}>
-                  <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm border ${
-                    msg.isBot 
-                      ? 'bg-white rounded-tl-none border-slate-100 text-slate-600' 
-                      : 'bg-blue-600 rounded-tr-none border-blue-700 text-white'
-                  }`}>
-                    <p className="text-[11px] font-bold leading-relaxed">{msg.text}</p>
-                    {!msg.isBot && <p className="text-[7px] opacity-70 mt-1 text-right uppercase">{msg.timestamp}</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
+           {/* Chat Body */}
+<div className="h-[300px] overflow-y-auto p-6 bg-slate-50/50 space-y-4 flex flex-col">
+  {chatHistory.map((msg, index) => (
+    <div key={index} className={`flex ${msg.isBot ? 'justify-start' : 'justify-end'}`}>
+      <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm border ${
+        msg.isBot 
+          ? 'bg-white rounded-tl-none border-slate-100 text-slate-600' 
+          : 'bg-blue-600 rounded-tr-none border-blue-700 text-white'
+      }`}>
+        <p className="text-[11px] font-bold leading-relaxed">{msg.text}</p>
+          {/* --- INTERACTIVE SERVICES SECTION --- */}
+{msg.isInteractive && (
+  <div className="mt-3">
+    <button 
+      type="button"
+      onClick={() => setShowServices(!showServices)}
+      className="bg-blue-600 text-white px-4 py-2 rounded-full text-[10px] font-black hover:bg-blue-700 transition-all flex items-center gap-2 shadow-sm uppercase"
+    >
+      Our Services {showServices ? '🔼' : '🔽'}
+    </button>
+
+    {showServices && (
+      <div className="mt-3 grid grid-cols-1 gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+        {[
+          { label: "Flash Banking", icon: "🏦" },
+          { label: "Tracking Number", icon: "📦" },
+          { label: "Flight Ticket", icon: "✈️" },
+          { label: "Consignment Box Video", icon: "📹" },
+          { label: "Paper Work (Document/Certificate)", icon: "📝" },
+          { label: "Instant Website", icon: "🌐" },
+          { label: "News Site", icon: "📰" },
+          { label: "Id Card", icon: "🪪" }
+        ].map((service) => (
+          <button
+            key={service.label}
+            type="button"
+            onClick={() => {
+              const selection = `I am interested in ${service.label}`;
+              if (socket) {
+                socket.emit('guest_to_admin_message', {
+                  guestId: guestId, // Ensure this guestId string is in scope
+                  text: selection,
+                  timestamp: new Date()
+                });
+              }
+              setChatHistory(prev => [...prev, {
+                text: selection,
+                isBot: false,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              }]);
+
+              setShowServices(false);
+            }}
+            className="text-left p-2.5 rounded-xl bg-slate-50 hover:bg-blue-50 border border-slate-100 text-[9px] font-black text-slate-700 flex items-center gap-3 transition-colors group"
+          >
+            <span className="text-sm group-hover:scale-110 transition-transform">{service.icon}</span>
+            <span className="uppercase tracking-tight">{service.label}</span>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+)}
+
+        {!msg.isBot && <p className="text-[7px] opacity-70 mt-1 text-right uppercase font-black tracking-tighter">{msg.timestamp}</p>}
+      </div>
+    </div>
+  ))}
+</div>
 
             {/* Input Area */}
             <div className="p-4 bg-white border-t border-slate-100">
