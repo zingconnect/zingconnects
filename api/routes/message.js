@@ -180,7 +180,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       const COOLDOWN = 30 * 60 * 1000;
       const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       if (Date.now() - lastEmail > COOLDOWN) {
-        await sendOfflineNotification(receiver, sender, text, receiverModel);
+        await sendOfflineNotification(receiver, sender, text,  fileUrl, fileType, receiverModel);
         await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
       }
     }
@@ -279,7 +279,7 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
       const COOLDOWN = 30 * 60 * 1000;
       const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       if (Date.now() - lastEmail > COOLDOWN) {
-        await sendOfflineNotification(receiver, sender, text, receiverModel);
+        await sendOfflineNotification(receiver, sender, text, fileUrl, fileType, receiverModel);
         await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
       }
     }

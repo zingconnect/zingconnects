@@ -1703,7 +1703,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
         const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmail > COOLDOWN) {
-          await sendOfflineNotification(receiver, sender, text, receiverModel);
+          await sendOfflineNotification(receiver, sender, text,  fileUrl, fileType, receiverModel);
           
           await TargetModel.findByIdAndUpdate(receiverId, { 
             lastNotificationEmail: new Date() 
@@ -1836,7 +1836,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
           // Pass the fileType context to sendOfflineNotification if you want specific wording
           const emailText = text || `Sent a ${fileType} attachment`;
           
-          await sendOfflineNotification(receiver, sender, emailText, receiverModel);
+          await sendOfflineNotification(receiver, sender, emailText, fileUrl, fileType, receiverModel);
           
           await TargetModel.findByIdAndUpdate(receiverId, { 
             lastNotificationEmail: new Date() 
