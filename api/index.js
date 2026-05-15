@@ -2665,108 +2665,113 @@ app.get('/api/admin/support/messages/:guestId', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    const { target, emails, subject, message } = req.body;
+    // Added 'category' to destructuring
+    const { target, emails, subject, message, category = 'news' } = req.body;
 
-    // 1. Input Validation
     if (!subject || !message) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Subject and Message content are required." 
-      });
+      return res.status(400).json({ success: false, message: "Subject and Message are required." });
     }
 
-    // 2. Resolve Recipient List
     let recipientEmails = [];
     if (target === 'all') {
-      // Fetch only the email field for all agents
       const allAgents = await Agent.find({}, 'email');
       recipientEmails = allAgents.map(a => a.email);
     } else {
-      // Use the specific array provided by the frontend
       recipientEmails = Array.isArray(emails) ? emails : [];
     }
 
     if (recipientEmails.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "No valid recipients found." 
-      });
+      return res.status(400).json({ success: false, message: "No valid recipients found." });
     }
 
-    // 3. Initialize Transporter ONCE (Singleton Pattern)
-    // This fixes the 'nodemailer is not defined' error and optimizes performance
     const transporter = nodemailer.createTransport({
       service: 'gmail',
-      auth: { 
-        user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS 
-      }
+      auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
     });
 
     const baseUrl = "https://zingconnect.vercel.app";
-    const logoUrl = `${baseUrl}/logo-s.png`; 
-    const brandColor = "#2563eb";
+    const logoUrl = `${baseUrl}/logo.png`;
 
-    // 4. Create Email Promises
+    const configs = {
+      maintenance: {
+        color: "#f59e0b", // Amber
+        label: "SYSTEM MAINTENANCE",
+        bg: "#fffbeb",
+        icon: "⚙️"
+      },
+      subscription: {
+        color: "#10b981", // Emerald
+        label: "SUBSCRIPTION UPDATE",
+        bg: "#ecfdf5",
+        icon: "💳"
+      },
+      news: {
+        color: "#2563eb", // Blue
+        label: "GENERAL ANNOUNCEMENT",
+        bg: "#eff6ff",
+        icon: "📢"
+      }
+    };
+
+    const design = configs[category] || configs.news;
+
     const emailPromises = recipientEmails.map(email => {
       const mailOptions = {
         from: `"ZingConnect Terminal" <${process.env.EMAIL_USER}>`,
         to: email,
-        subject: subject,
+        subject: `[${design.label}] ${subject}`,
         html: `
-          <div style="font-family: 'Helvetica', Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #f0f0f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-            <div style="background-color: #0f172a; padding: 25px; text-align: center;">
-              <img src="${logoUrl}" alt="ZingConnect Logo" width="150" style="display: block; margin: 0 auto 10px auto; max-width: 150px;">
-              <h1 style="color: white; font-size: 14px; margin: 0; letter-spacing: 3px; font-weight: 300; text-transform: uppercase;">
-                Official <span style="color: ${brandColor}; font-weight: bold;">Broadcast</span>
-              </h1>
+          <div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 600px; margin: auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
+            
+            <div style="background-color: ${design.color}; height: 6px;"></div>
+
+            <div style="padding: 30px; background-color: #0f172a; text-align: center;">
+              <img src="${logoUrl}" alt="ZingConnect" width="140" style="margin-bottom: 15px;">
+              <div style="color: ${design.color}; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;">
+                ${design.icon} ${design.label}
+              </div>
             </div>
 
-            <div style="padding: 40px 30px; background-color: #ffffff;">
-              <h2 style="color: #1e293b; font-size: 20px; margin-top: 0; border-left: 4px solid ${brandColor}; padding-left: 15px;">
+            <div style="padding: 40px 35px;">
+              <h2 style="color: #1e293b; font-size: 22px; font-weight: 700; margin: 0 0 20px 0; line-height: 1.3;">
                 ${subject}
               </h2>
-              <p style="color: #475569; line-height: 1.8; font-size: 15px; white-space: pre-wrap;">${message}</p>
               
-              <div style="margin-top: 40px; text-align: center;">
+              <div style="background-color: ${design.bg}; border-left: 4px solid ${design.color}; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+                <p style="color: #334155; line-height: 1.7; font-size: 15px; margin: 0; white-space: pre-wrap;">${message}</p>
+              </div>
+
+              <div style="text-align: center;">
                 <a href="${baseUrl}/agent/login" 
-                   style="background-color: ${brandColor}; color: white; padding: 14px 35px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block;">
-                   GO TO AGENT DASHBOARD
+                   style="background-color: #0f172a; color: white; padding: 16px 40px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                   Access Agent Portal
                 </a>
               </div>
             </div>
 
-            <div style="background-color: #f8fafc; padding: 25px; text-align: center; color: #94a3b8; font-size: 11px; border-top: 1px solid #f1f5f9;">
-              <p style="margin: 0 0 10px 0;">You are receiving this as a verified ZingConnect Agent.</p>
-              <strong>&copy; 2026 ZingConnect Infrastructure Team.</strong>
+            <div style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b; font-size: 12px; margin: 0 0 8px 0;">
+                This is an automated operational message from <strong>ZingConnect Infrastructure</strong>.
+              </p>
+              <p style="color: #94a3b8; font-size: 11px; margin: 0;">
+                &copy; 2026 ZingConnect Inc. • Verified System Access: ROOT_ADMIN
+              </p>
             </div>
           </div>
         `
       };
-
       return transporter.sendMail(mailOptions);
     });
 
-    // 5. Fire all emails in parallel
     await Promise.all(emailPromises);
-
-    return res.json({ 
-      success: true, 
-      message: `Announcement successfully dispatched to ${recipientEmails.length} agents.` 
-    });
+    return res.json({ success: true, message: `Broadcast successfully sent as ${design.label}.` });
 
   } catch (err) {
     console.error("Broadcast API Error:", err.message);
-    return res.status(500).json({ 
-      success: false, 
-      message: "Server failed to process broadcast dispatch", 
-      details: err.message 
-    });
+    return res.status(500).json({ success: false, message: "Broadcast failed", details: err.message });
   }
 });
 
