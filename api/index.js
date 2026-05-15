@@ -2668,23 +2668,20 @@ app.get('/api/admin/support/messages/:guestId', async (req, res) => {
 app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
-    // Added 'category' to destructuring
     const { target, emails, subject, message, category = 'news' } = req.body;
 
-    if (!subject || !message) {
-      return res.status(400).json({ success: false, message: "Subject and Message are required." });
-    }
-
-    let recipientEmails = [];
+    // 1. Resolve Recipient Data (Fetching both email and slug)
+    let recipients = [];
     if (target === 'all') {
-      const allAgents = await Agent.find({}, 'email');
-      recipientEmails = allAgents.map(a => a.email);
+      // We need 'slug' to create the personalized link
+      recipients = await Agent.find({}, 'email slug'); 
     } else {
-      recipientEmails = Array.isArray(emails) ? emails : [];
+      // If specific emails are sent, find the corresponding slugs
+      recipients = await Agent.find({ email: { $in: emails } }, 'email slug');
     }
 
-    if (recipientEmails.length === 0) {
-      return res.status(400).json({ success: false, message: "No valid recipients found." });
+    if (recipients.length === 0) {
+      return res.status(400).json({ success: false, message: "No recipients found." });
     }
 
     const transporter = nodemailer.createTransport({
@@ -2693,72 +2690,48 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
     });
 
     const baseUrl = "https://zingconnect.vercel.app";
-    const logoUrl = `${baseUrl}/logo.png`;
+    const logoUrl = `${baseUrl}/logos.png`;
 
     const configs = {
-      maintenance: {
-        color: "#f59e0b", // Amber
-        label: "SYSTEM MAINTENANCE",
-        bg: "#fffbeb",
-        icon: "⚙️"
-      },
-      subscription: {
-        color: "#10b981", // Emerald
-        label: "SUBSCRIPTION UPDATE",
-        bg: "#ecfdf5",
-        icon: "💳"
-      },
-      news: {
-        color: "#2563eb", // Blue
-        label: "GENERAL ANNOUNCEMENT",
-        bg: "#eff6ff",
-        icon: "📢"
-      }
+      maintenance: { color: "#f59e0b", label: "SYSTEM MAINTENANCE", bg: "#fffbeb", icon: "⚙️" },
+      subscription: { color: "#10b981", label: "SUBSCRIPTION UPDATE", bg: "#ecfdf5", icon: "💳" },
+      news: { color: "#2563eb", label: "GENERAL ANNOUNCEMENT", bg: "#eff6ff", icon: "📢" }
     };
 
     const design = configs[category] || configs.news;
+    const emailPromises = recipients.map(agent => {
+      const agentSlugLink = agent.slug ? `${baseUrl}/agent/${agent.slug}` : `${baseUrl}/agent/login`;
 
-    const emailPromises = recipientEmails.map(email => {
       const mailOptions = {
         from: `"ZingConnect Terminal" <${process.env.EMAIL_USER}>`,
-        to: email,
+        to: agent.email,
         subject: `[${design.label}] ${subject}`,
         html: `
           <div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 600px; margin: auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
-            
             <div style="background-color: ${design.color}; height: 6px;"></div>
-
             <div style="padding: 30px; background-color: #0f172a; text-align: center;">
               <img src="${logoUrl}" alt="ZingConnect" width="140" style="margin-bottom: 15px;">
               <div style="color: ${design.color}; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;">
                 ${design.icon} ${design.label}
               </div>
             </div>
-
             <div style="padding: 40px 35px;">
               <h2 style="color: #1e293b; font-size: 22px; font-weight: 700; margin: 0 0 20px 0; line-height: 1.3;">
                 ${subject}
               </h2>
-              
               <div style="background-color: ${design.bg}; border-left: 4px solid ${design.color}; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
                 <p style="color: #334155; line-height: 1.7; font-size: 15px; margin: 0; white-space: pre-wrap;">${message}</p>
               </div>
-
               <div style="text-align: center;">
-                <a href="${baseUrl}/agent/login" 
+                <a href="${agentSlugLink}" 
                    style="background-color: #0f172a; color: white; padding: 16px 40px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                   Access Agent Portal
+                   View Your Agent Profile
                 </a>
               </div>
             </div>
-
             <div style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
-              <p style="color: #64748b; font-size: 12px; margin: 0 0 8px 0;">
-                This is an automated operational message from <strong>ZingConnect Infrastructure</strong>.
-              </p>
-              <p style="color: #94a3b8; font-size: 11px; margin: 0;">
-                &copy; 2026 ZingConnect Inc. • Verified System Access: ROOT_ADMIN
-              </p>
+              <p style="color: #64748b; font-size: 12px; margin: 0 0 8px 0;">This is an automated operational message for verified agents.</p>
+              <p style="color: #94a3b8; font-size: 11px; margin: 0;">&copy; 2026 ZingConnect Infrastructure Team.</p>
             </div>
           </div>
         `
@@ -2767,13 +2740,14 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
     });
 
     await Promise.all(emailPromises);
-    return res.json({ success: true, message: `Broadcast successfully sent as ${design.label}.` });
+    return res.json({ success: true, message: "Personalized broadcast dispatched successfully." });
 
   } catch (err) {
     console.error("Broadcast API Error:", err.message);
     return res.status(500).json({ success: false, message: "Broadcast failed", details: err.message });
   }
 });
+
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
