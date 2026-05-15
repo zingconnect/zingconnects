@@ -1705,59 +1705,61 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
 app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
-
     if (!fileName || !fileType) {
       return res.status(400).json({ success: false, message: "File metadata missing" });
     }
-    
     const fileExtension = fileName.split('.').pop();
     const key = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
+    const client = getS3Client();
 
     const command = new PutObjectCommand({
       Bucket: process.env.IDRIVE_BUCKET_NAME,
       Key: key,
       ContentType: fileType,
     });
-
-    // Use the s3Client defined in your index.js
-    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 900 });
 
     res.json({ success: true, uploadUrl, key });
   } catch (err) {
-    console.error("Presigned URL Error:", err);
-    res.status(500).json({ success: false, message: "Could not generate upload pass", error: err.message });
+    console.error("Presigned URL Error:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Could not generate upload pass", 
+      error: err.message 
+    });
   }
 });
-
 // --- 2. CONFIRM UPLOAD & SAVE TO DB ---
 app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
-    await connectToDatabase(); // Ensure DB is connected for Vercel Serverless
+    await connectToDatabase(); 
     const { receiverId, text, fileUrl, fileType } = req.body;
-
-    const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
+    const isAgent = req.user.role === 'agent';
     
     const newMessage = new Message({
       senderId: req.user.id,
-      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      senderModel: isAgent ? 'Agent' : 'User',
       receiverId,
-      receiverModel,
+      receiverModel: isAgent ? 'User' : 'Agent',
       text: text || "",
       fileUrl: fileUrl, 
       fileType: fileType,
       status: 'sent'
     });
-
     await newMessage.save();
-        const signedUrlForFrontend = await getPrivateUrl(fileUrl);
+    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
     
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
     res.status(201).json({ success: true, message: responseData });
   } catch (err) {
-    console.error("Confirmation Error:", err);
-    res.status(500).json({ success: false, message: "Failed to save message", error: err.message });
+    console.error("Confirmation Error:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to save message", 
+      error: err.message 
+    });
   }
 });
 
@@ -1799,12 +1801,7 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     const callerId = String(req.user.id || req.user._id).trim();
     const targetId = String(receiverId).trim();
     const roomName = `room_${Date.now()}_${callerId.slice(-4)}`;
-
-    // 1. Generate LiveKit Token
     const token = await createLiveKitToken(roomName, callerId);
-
-    // 2. Create DB Record FIRST (Remove setImmediate)
-    // This prevents the 404/Automatic termination on the frontend
     await connectToDatabase();
     const CallModel = mongoose.models.Call || mongoose.model('Call');
     
@@ -1850,35 +1847,30 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const rawId = req.user?._id || req.user?.id || req.user?.userId;
+    // Normalize user ID
+    const rawId = (req.user?._id || req.user?.id || req.user?.userId)?.toString();
     
-    // --- FIX: Only look for calls created in the last 60 seconds ---
+    // Look for calls created in the last 60 seconds to avoid stale popups
     const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
 
     let incoming = await Call.findOne({ 
       receiver: rawId,
       status: { $in: ['calling', 'ringing'] },
       active: true,
-      createdAt: { $gte: sixtySecondsAgo } // Ignores old/stale records
+      createdAt: { $gte: sixtySecondsAgo } 
     })
     .sort({ createdAt: -1 })
     .populate('caller', 'firstName lastName photoUrl'); 
 
     if (!incoming) return res.json({ hasIncomingCall: false });
+    let finalPhotoUrl = null;
+    if (incoming.caller?.photoUrl) {
+      finalPhotoUrl = await getPrivateUrl(incoming.caller.photoUrl);
+    }
 
-    // Handle IDrive Photo Signing
-    let finalPhotoUrl = incoming.caller?.photoUrl || "/default-avatar.png";
-    if (finalPhotoUrl.includes('idrivee2.com')) {
-      try {
-        const fileKey = finalPhotoUrl.split('.com/')[1];
-        const command = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME,
-          Key: decodeURIComponent(fileKey),
-        });
-        finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-      } catch (s3Err) {
-        console.error("S3 Signing failed:", s3Err);
-      }
+    // Default Fallback
+    if (!finalPhotoUrl) {
+      finalPhotoUrl = `https://ui-avatars.com/api/?name=${incoming.caller?.firstName || 'User'}&background=0D1117&color=fff`;
     }
 
     res.json({
@@ -1894,7 +1886,7 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Poll Route Error:", err);
+    console.error("Poll Route Error:", err.message);
     res.status(500).json({ hasIncomingCall: false });
   }
 });
