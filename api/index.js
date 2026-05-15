@@ -336,24 +336,36 @@ socket.on("guest_to_admin_message", async (payload) => {
   }
 });
 
-socket.on("admin_to_guest_message", async ({ guestId, text }) => {
+socket.on("admin_to_guest_message", async (payload) => {
   try {
+    const guestId = payload.guestId;
+    const text = payload.text;
+    console.log(`📩 Attempting to save message for Guest: ${guestId}`);
+    if (!guestId || !text) {
+      console.error("❌ Validation Failed: Payload missing data", payload);
+      return;
+    }
     await connectToDatabase();
-        const savedMsg = await SupportMessage.create({
-      guestId,
-      text,
-      senderType: 'Admin'
+    const newMessage = new SupportMessage({
+      guestId: String(guestId),
+      text: text,
+      senderType: 'Admin',
+      isAdminRead: true,
+      createdAt: new Date() // Force timestamp if schema doesn't
     });
+    const savedMsg = await newMessage.save();
+    
+    console.log("✅ Database Save Confirmed:", savedMsg._id);
     io.to(guestId).emit("guest_receive_admin_message", {
       _id: savedMsg._id,
       text: savedMsg.text,
       isAdmin: true,
       timestamp: savedMsg.createdAt
     });
-    
-    console.log(`✅ Admin message sent to guest: ${guestId}`);
+
   } catch (err) {
-    console.error("❌ Failed to save/send admin reply:", err.message);
+    console.error("❌ Error in admin_to_guest_message logic:");
+    console.error(err); // Print the whole error object to see stack trace
   }
 });
 });

@@ -199,9 +199,9 @@ const handleAdminReply = () => {
   if (!supportMessage.trim() || !activeChat || !socket) return;
 
   const replyData = {
-    guestId: activeChat._id,
+    guestId: String(activeChat._id), // Cast to String to be safe
     text: supportMessage,
-    senderType: "Admin" // Matches your DB schema requirements
+    senderType: "Admin" 
   };
   socket.emit("admin_to_guest_message", replyData);
   const localFormattedMsg = {
