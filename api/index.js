@@ -24,7 +24,7 @@ import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
 import { connectToDatabase } from './config/db.js';
-import { getS3Client, getPrivateUrl } from './config/s3.js';
+import { getS3Client, getPrivateUrl, PutObjectCommand } from './config/s3.js';
 import { createLiveKitToken } from './utils/livekitHelper.js';
 import callRoutes from './routes/callRoutes.js';
 import Call from './models/Call.js'; 
@@ -993,31 +993,36 @@ app.get('/api/users/my-session', async (req, res) => {
     });
   }
 });
-
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
+    // 1. Ensure DB connection for Serverless environment
     await connectToDatabase();
     
-    // 1. GET THE CLIENT FROM YOUR UTILITY
+    // 2. Initialize the S3 Client instance
     const s3Client = getS3Client(); 
 
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
 
+    // Use req.user.id or fallback to req.user._id depending on your middleware
+    const userId = req.user?.id || req.user?._id;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User identity not found in token" });
+    }
     const updateData = {
-      firstName,
-      lastName,
-      phone,
+      firstName: firstName?.trim(),
+      lastName: lastName?.trim(),
+      phone: phone?.toString().trim(),
       dob,
-      gender: gender ? gender.toLowerCase().trim() : "", // Fix for the Enum
-      city,
-      state,
+      gender: gender ? gender.toLowerCase().trim() : "", // Crucial for your Mongoose Enum
+      city: city?.trim(),
+      state: state?.trim(),
       isProfileComplete: true,
       isVerified: true
     };
-
     if (req.file) {
       const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
-      const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
+      const fileKey = `users/${userId}-${Date.now()}-${sanitizedName}`;
       
       const uploadParams = {
         Bucket: process.env.IDRIVE_BUCKET_NAME,
@@ -1025,28 +1030,35 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
-
-      // 2. NOW THIS WILL WORK
       await s3Client.send(new PutObjectCommand(uploadParams));
       updateData.photoUrl = fileKey; 
+      
+      console.log(`[Storage] Photo uploaded for User: ${userId}`);
     }
-
-    // Use the User model imported at the top of your file
     const updatedUser = await User.findByIdAndUpdate(
-      req.user.id, 
+      userId, 
       updateData,
-      { new: true, runValidators: true } // runValidators ensures the gender enum is checked
+      { new: true, runValidators: true } // runValidators ensures gender matches enum
     );
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
     }
 
-    res.json({ success: true, message: "Onboarding complete", user: updatedUser });
+    // 6. Return success
+    res.json({ 
+      success: true, 
+      message: "Onboarding complete", 
+      user: updatedUser 
+    });
 
   } catch (err) {
     console.error("CRITICAL ONBOARDING ERROR:", err.message);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ 
+      success: false, 
+      message: "Update failed", 
+      details: err.message 
+    });
   }
 });
 
