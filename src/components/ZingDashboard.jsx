@@ -102,8 +102,8 @@ useEffect(() => {
 }, [navigate]);
 
   useEffect(() => {
-    if (activeTab === 'Agents') {
-      const fetchAgents = async () => {
+if (activeTab === 'Agents' || activeTab === 'News Update') {
+        const fetchAgents = async () => {
         const token = localStorage.getItem('adminToken');
         try {
           const response = await fetch('https://zingconnect.vercel.app/api/admin/agents', {
@@ -265,6 +265,14 @@ const handleSendBroadcast = async () => {
     console.error("Broadcast failed:", err);
   } finally {
     setSendingNews(false);
+  }
+};
+
+const toggleAllEmails = () => {
+  if (selectedEmails.length === agents.length) {
+    setSelectedEmails([]); // Clear all
+  } else {
+    setSelectedEmails(agents.map(a => a.email)); // Select all
   }
 };
 
