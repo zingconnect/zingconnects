@@ -47,11 +47,17 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+const server = http.createServer(app);
 const io = new Server(server, {
-  path: '/api/socket.io', // THIS MUST MATCH FRONTEND
+  path: '/api/socket.io',
   cors: corsOptions,
-  transports: ['polling', 'websocket'], // Allow both, but polling is the fallback
+  transports: ['polling', 'websocket'],
   allowEIO3: true
+});
+
+app.use((req, res, next) => {
+  req.io = io; 
+  next();
 });
 
 app.set('socketio', io);
@@ -2576,25 +2582,36 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
 
 app.post('/api/support/send', async (req, res) => {
   try {
-    await connectToDatabase(); // Wake up DB connection
+    await connectToDatabase(); 
     const { guestId, text } = req.body;
 
     if (!guestId || !text) {
       return res.status(400).json({ success: false, message: "Missing fields" });
     }
+
     const savedMsg = await SupportMessage.create({
       guestId: String(guestId),
       text: text,
       senderType: 'Guest',
       isAdminRead: false
     });
-    io.emit("admin_receive_support_message", {
-      _id: savedMsg._id,
-      guestId: savedMsg.guestId,
-      text: savedMsg.text,
-      isAdmin: false,
-      timestamp: savedMsg.createdAt
-    });
+
+    // Use the instance attached to the app settings or the request
+    // This is the safest way to access 'io' without changing the server export
+    const socketIo = req.app.get('socketio') || req.io;
+
+    if (socketIo) {
+      socketIo.emit("admin_receive_support_message", {
+        _id: savedMsg._id,
+        guestId: savedMsg.guestId,
+        text: savedMsg.text,
+        isAdmin: false,
+        timestamp: savedMsg.createdAt
+      });
+      console.log("✅ Socket emit successful via app settings");
+    } else {
+      console.warn("⚠️ Socket.io instance not found in req.app or req.io");
+    }
 
     res.status(200).json({ success: true, message: "Message Stored" });
   } catch (err) {
