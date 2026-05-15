@@ -7,11 +7,11 @@ const supportSchema = new mongoose.Schema({
     required: true, 
     index: true 
   },
-  senderType: { 
-    type: String, 
-    enum: ['Guest', 'Admin'], 
-    required: true 
-  },
+ senderType: { 
+  type: String, 
+  enum: ['Guest', 'Admin', 'admin'], 
+  required: true 
+},
   text: { 
     type: String, 
     required: true, 

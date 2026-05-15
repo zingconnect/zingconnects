@@ -335,25 +335,22 @@ socket.on("guest_to_admin_message", async (payload) => {
     console.error("Critical Database Error:", err.message);
   }
 });
+
 socket.on("admin_to_guest_message", async (payload) => {
   try {
     const { guestId, text } = payload; 
-        const db = await connectToDatabase();
-    console.log(`📡 DB Active on: ${db.connection.host}`);
+        await connectToDatabase(); 
 
-    if (!guestId || !text) {
-      return console.error("❌ Save Denied: Payload missing guestId or text");
-    }
-    const MessageModel = mongoose.models.SupportMessage || SupportMessage;
-    const savedMsg = await MessageModel.create({
+    if (!guestId || !text) return;
+    const savedMsg = await SupportMessage.create({
       guestId: String(guestId),
       text: text,
-      senderType: 'Admin', // If this fails, check if your schema expects 'admin' (lowercase)
+      senderType: 'Admin', // MUST match your schema enum ['Guest', 'Admin']
       isAdminRead: true
     });
 
-    console.log("✅ Database Success! Admin Message ID:", savedMsg._id);
-    socket.emit("admin_message_stored", savedMsg);
+    console.log("✅ SUCCESS: Admin message stored in DB:", savedMsg._id);
+
     io.to(guestId).emit("guest_receive_admin_message", {
       _id: savedMsg._id,
       text: savedMsg.text,
@@ -362,7 +359,7 @@ socket.on("admin_to_guest_message", async (payload) => {
     });
 
   } catch (err) {
-    console.error("❌ ADMIN SAVE FAILED:", err.message);
+    console.error("❌ DATABASE SAVE ERROR:", err.message);
   }
 });
 });
