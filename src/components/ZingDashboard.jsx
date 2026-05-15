@@ -110,43 +110,40 @@ useEffect(() => {
       return [{ _id: data.guestId, isGuest: true, messages: [] }, ...prev];
     });
   });
+socket.on("admin_receive_support_message", (data) => {
+  console.log("Admin received message:", data);
+  const guestIdentifier = data.guestId; 
+  const formattedMsg = {
+    _id: data._id, // The unique message ID
+    text: data.text,
+    isAdmin: data.senderType === "Admin", // Use senderType from your DB schema
+    timestamp: new Date(data.createdAt || Date.now()).toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    })
+  };
 
-  // 2. Handle Receiving Messages
-  socket.on("admin_receive_support_message", (data) => {
-    console.log("Admin received message:", data);
-
-    // Format the message to match your UI expectations
-    const formattedMsg = {
-      _id: data._id,
-      text: data.text,
-      isAdmin: data.isAdmin,
-      timestamp: new Date(data.timestamp).toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      })
-    };
-    setGuests(prev => {
-      const guestExists = prev.find(g => g._id === data.guestId);
-      
-      if (guestExists) {
-        return prev.map(g => g._id === data.guestId 
-          ? { ...g, messages: [...(g.messages || []), formattedMsg] } 
-          : g
-        );
-      } else {
-        return [{ _id: data.guestId, isGuest: true, messages: [formattedMsg] }, ...prev];
-      }
-    });
-    setActiveChat(prev => {
-      if (prev && prev._id === data.guestId) {
-        return {
-          ...prev,
-          messages: [...(prev.messages || []), formattedMsg]
-        };
-      }
-      return prev;
-    });
+  setGuests(prev => {
+    const guestExists = prev.find(g => g._id === guestIdentifier);
+    if (guestExists) {
+      return prev.map(g => g._id === guestIdentifier 
+        ? { ...g, messages: [...(g.messages || []), formattedMsg] } 
+        : g
+      );
+    } else {
+      return [{ _id: guestIdentifier, isGuest: true, messages: [formattedMsg] }, ...prev];
+    }
   });
+  setActiveChat(prev => {
+    if (prev && prev._id === guestIdentifier) {
+      return {
+        ...prev,
+        messages: [...(prev.messages || []), formattedMsg]
+      };
+    }
+    return prev;
+  });
+});
 
   return () => {
     socket.off("admin_new_guest_online");

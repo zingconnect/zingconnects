@@ -339,18 +339,21 @@ socket.on("guest_to_admin_message", async (payload) => {
 socket.on("admin_to_guest_message", async ({ guestId, text }) => {
   try {
     await connectToDatabase();
-    await SupportMessage.create({
+        const savedMsg = await SupportMessage.create({
       guestId,
       text,
       senderType: 'Admin'
     });
-    io.to(guestId).emit("guest_receive_support_message", {
-      text,
+    io.to(guestId).emit("guest_receive_admin_message", {
+      _id: savedMsg._id,
+      text: savedMsg.text,
       isAdmin: true,
-      timestamp: new Date()
+      timestamp: savedMsg.createdAt
     });
+    
+    console.log(`✅ Admin message sent to guest: ${guestId}`);
   } catch (err) {
-    console.error("Failed to save admin reply:", err);
+    console.error("❌ Failed to save/send admin reply:", err.message);
   }
 });
 });
@@ -2574,9 +2577,6 @@ app.post('/api/support/send', async (req, res) => {
       senderType: 'Guest',
       isAdminRead: false
     });
-
-    // Use the instance attached to the app settings or the request
-    // This is the safest way to access 'io' without changing the server export
     const socketIo = req.app.get('socketio') || req.io;
 
     if (socketIo) {
@@ -2595,6 +2595,16 @@ app.post('/api/support/send', async (req, res) => {
     res.status(200).json({ success: true, message: "Message Stored" });
   } catch (err) {
     console.error("API Save Error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/support/history/:guestId', async (req, res) => {
+  try {
+    const { guestId } = req.params;
+    const messages = await SupportMessage.find({ guestId }).sort({ createdAt: 1 });
+    res.json({ success: true, messages });
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });

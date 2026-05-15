@@ -85,10 +85,10 @@ const PricingCard = ({ plan }) => {
 
 export const PricingPage = () => {
   const navigate = useNavigate();
+  const chatRef = React.useRef(null);
   const [shouldRender, setShouldRender] = React.useState(false); 
 const [socket, setSocket] = React.useState(null);
 const [showServices, setShowServices] = React.useState(false);
-
  const [chatOpen, setChatOpen] = React.useState(false);
   const [supportMessage, setSupportMessage] = React.useState("");
   const [chatHistory, setChatHistory] = React.useState([
@@ -154,6 +154,25 @@ const newSocket = io("https://zingconnect.vercel.app", {
   };
 }, [guestId]);
 
+React.useEffect(() => {
+  if (!socket) return;
+  socket.on("guest_receive_admin_message", (data) => {
+    setChatHistory(prev => [...prev, {
+      text: data.text,
+      isBot: true, 
+      timestamp: new Date(data.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }]);
+  });
+  socket.on("connect", () => {
+    socket.emit("join-support-as-guest", guestId);
+  });
+
+  return () => {
+    socket.off("guest_receive_admin_message");
+    socket.off("connect");
+  };
+}, [socket, guestId]);
+
   React.useLayoutEffect(() => {
     const isIOSStandalone = window.navigator.standalone === true;
     const isPWA = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
@@ -165,6 +184,47 @@ const newSocket = io("https://zingconnect.vercel.app", {
       setShouldRender(true);
     }
   }, [navigate]);
+
+  React.useEffect(() => {
+  if (chatRef.current) {
+    chatRef.current.scrollTop = chatRef.current.scrollHeight;
+  }
+}, [chatHistory]);
+
+  React.useEffect(() => {
+    const fetchHistory = async () => {
+      if (!guestId) return;
+
+      try {
+        const response = await fetch(`https://zingconnect.vercel.app/api/support/history/${guestId}`);
+        const data = await response.json();
+
+        if (data.success && data.messages && data.messages.length > 0) {
+          const dbHistory = data.messages.map(m => ({
+            text: m.text,
+            isBot: m.senderType === 'Admin',
+            timestamp: new Date(m.createdAt).toLocaleTimeString([], { 
+              hour: '2-digit', 
+              minute: '2-digit' 
+            })
+          }));
+
+          setChatHistory([
+            { 
+              text: "Welcome back! 👋 Reconnecting you to your previous session.", 
+              isBot: true,
+              isInteractive: true // Keep the "Services" button available on reconnect
+            },
+            ...dbHistory
+          ]);
+        }
+      } catch (err) {
+        console.error("❌ Failed to load chat history:", err);
+      }
+    };
+
+    fetchHistory();
+  }, [guestId]); 
 
  const handleSendSupportMessage = async (e) => { // Added async
   if (e) e.preventDefault();
