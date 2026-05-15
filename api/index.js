@@ -1723,10 +1723,31 @@ app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => 
 // --- 2. CONFIRM UPLOAD & SAVE TO DB ---
 app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
+    // 1. Trigger the connection helper
     await connectToDatabase(); 
+
+    // 2. Resilience Loop: Wait for Mongoose to move from "Connecting" (2) to "Connected" (1)
+    // This is critical because bufferCommands: false won't let .save() wait on its own.
+    let connectionRetries = 0;
+    while (mongoose.connection.readyState !== 1 && connectionRetries < 5) {
+      console.log(`⏳ Waiting for DB stabilization... Attempt ${connectionRetries + 1}`);
+      await new Promise(resolve => setTimeout(resolve, 400)); // 400ms pause
+      connectionRetries++;
+    }
+
+    // Final guard check
+    if (mongoose.connection.readyState !== 1) {
+      throw new Error(`Database connection not ready. State: ${mongoose.connection.readyState}`);
+    }
+
     const { receiverId, text, fileUrl, fileType } = req.body;
-    const isAgent = req.user.role === 'agent';
     
+    // Basic validation
+    if (!receiverId || !fileUrl) {
+      return res.status(400).json({ success: false, message: "Missing receiverId or fileUrl" });
+    }
+
+    const isAgent = req.user.role === 'agent';
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: isAgent ? 'Agent' : 'User',
@@ -1743,9 +1764,15 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
-    res.status(201).json({ success: true, message: responseData });
+    // 5. Success response
+    res.status(201).json({ 
+      success: true, 
+      message: responseData 
+    });
+
   } catch (err) {
-    console.error("Confirmation Error:", err.message);
+    console.error("❌ Confirmation Route Error:", err.message);
+    
     res.status(500).json({ 
       success: false, 
       message: "Failed to save message", 
@@ -1753,7 +1780,6 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
   }
 });
-
 // --- DELETE MESSAGE ROUTE (SECURE) ---
 app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
   try {

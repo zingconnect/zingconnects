@@ -204,11 +204,25 @@ router.post('/get-upload-url', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 6. CONFIRM CLIENT-SIDE UPLOAD & SAVE ---
 router.post('/confirm-upload', authenticateToken, async (req, res) => {
   try {
-    const { receiverId, text, fileUrl, fileType } = req.body;
+    // 1. Ensure the connection handler is called
+    await connectToDatabase(); 
 
+    // 2. Resilience Guard: If connecting (2) or disconnected (0), wait up to 2 seconds
+    let retries = 0;
+    while (mongoose.connection.readyState !== 1 && retries < 4) {
+      console.log(`⏳ DB not ready (Status: ${mongoose.connection.readyState}). Retrying... ${retries + 1}`);
+      await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
+      retries++;
+    }
+
+    // Final check before proceeding
+    if (mongoose.connection.readyState !== 1) {
+      throw new Error(`Database connection failed to stabilize. Current State: ${mongoose.connection.readyState}`);
+    }
+
+    const { receiverId, text, fileUrl, fileType } = req.body;
     if (!receiverId || !fileUrl) {
       return res.status(400).json({ success: false, message: "Missing receiver ID or file path." });
     }
@@ -216,6 +230,7 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
     const senderModel = req.user.role === 'agent' ? 'Agent' : 'User';
 
+    // 3. Create the document
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: senderModel,
@@ -227,40 +242,24 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
       status: 'sent'
     });
 
+    // 4. Save to DB
     await newMessage.save();
 
-    // FIXED: Changed generateSignedUrl to getPrivateUrl
+    // 5. Generate presigned URL for the immediate frontend response
     const signedUrlForFrontend = await getPrivateUrl(fileUrl);
     
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
-    // --- PUSH NOTIFICATION ---
-    try {
-      const TargetModel = receiverModel === 'Agent' ? Agent : User;
-      const receiver = await TargetModel.findById(receiverId);
-      
-      if (receiver && receiver.pushSubscription) {
-        const payload = JSON.stringify({
-          title: `New ${fileType} from ${req.user.firstName || 'Zing'}`,
-          body: text ? text : (fileType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
-          data: { 
-            url: receiverModel === 'Agent' 
-              ? `/agent/dashboard?userId=${req.user.id}` 
-              : '/user/dashboard' 
-          }
-        });
-        await webpush.sendNotification(receiver.pushSubscription, payload).catch(() => {});
-      }
-    } catch (pushErr) {
-      console.error("Push Notification Failed:", pushErr);
-    }
-
     res.status(201).json({ success: true, message: responseData });
 
   } catch (err) {
-    console.error("CONFIRMATION ERROR:", err);
-    res.status(500).json({ success: false, message: "Failed to save message to database." });
+    console.error("❌ CONFIRMATION ERROR:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to save message to database.",
+      error: err.message 
+    });
   }
 });
 
