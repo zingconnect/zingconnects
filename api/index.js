@@ -1322,7 +1322,6 @@ app.post('/api/subscriptions/verify', async (req, res) => {
   }
 });
 
-
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -1332,12 +1331,8 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     await connectToDatabase();
     
     const agentId = req.user.id || req.user._id;
-
     if (!agentId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid Agent session. Missing ID." 
-      });
+      return res.status(400).json({ success: false, message: "Invalid Agent session." });
     }
 
     const users = await User.find({ connectedAgents: agentId })
@@ -1350,27 +1345,28 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
+          // --- FIX 1: Use the actual key extraction logic ---
           let fileKey = user.photoUrl;
-
-          if (user.photoUrl.includes('users/')) {
-            const urlParts = user.photoUrl.split('users/');
-            const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
-            fileKey = `users/${decodeURIComponent(rawFileName)}`;
+          if (fileKey.includes('.com/')) {
+            fileKey = fileKey.split('.com/')[1].split('?')[0];
           }
 
+          // --- FIX 2: Use your getS3Client() helper ---
+          const client = getS3Client(); 
           const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: fileKey,
+            Bucket: process.env.IDRIVE_BUCKET_NAME,
+            Key: decodeURIComponent(fileKey),
           });
 
-          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
         } catch (s3Err) {
           console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
         }
       }
 
+      // Fallback to UI Avatars if S3 fails or photoUrl is missing
       if (!finalPhotoUrl) {
-        finalPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}&background=random&color=fff&size=128`;
+        finalPhotoUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.firstName)}+${encodeURIComponent(user.lastName)}&background=random&color=fff&size=128`;
       }
 
       const lastSeen = user.lastActive || user.lastLogin;
@@ -1378,7 +1374,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 
       return {
         ...user,
-        photoUrl: finalPhotoUrl,
+        photoUrl: finalPhotoUrl, // This now contains the signed URL
         status: isOnline ? 'online' : 'offline'
       };
     }));
@@ -1393,7 +1389,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     console.error("CRITICAL ERROR FETCHING AGENT USERS:", err);
     res.status(500).json({ 
       success: false,
-      message: "Internal server error while retrieving user list",
+      message: "Internal server error",
       error: err.message
     });
   }
