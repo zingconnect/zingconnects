@@ -1615,15 +1615,25 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-// --- 6. UPLOAD MEDIA ROUTE (WITH PUSH) ---
+// --- 6. UPLOAD MEDIA ROUTE (WITH PUSH & EMAIL) ---
 app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
-    await connectToDatabase();
-    
-    // 1. Destructure 'text' (the caption) from the frontend
-    const { receiverId, text } = req.body; 
+    // 1. Trigger the connection helper
+    await connectToDatabase(); 
 
+    // 2. Resilience Loop for bufferCommands: false
+    let connectionRetries = 0;
+    while (mongoose.connection.readyState !== 1 && connectionRetries < 5) {
+      console.log(`⏳ DB stabilizing for upload... Attempt ${connectionRetries + 1}`);
+      await new Promise(resolve => setTimeout(resolve, 400)); 
+      connectionRetries++;
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      throw new Error(`Database connection not ready. State: ${mongoose.connection.readyState}`);
+    }
+
+    const { receiverId, text } = req.body; 
     if (!req.file) return res.status(400).json({ success: false, message: "No file provided" });
 
     const mimeType = req.file.mimetype;
@@ -1631,9 +1641,9 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     const fileExtension = req.file.originalname.split('.').pop();
     const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
 
-    // 2. Execute Upload to iDrive
+    // 3. Execute Upload to iDrive
     const parallelUploads3 = new Upload({
-      client: s3Client,
+      client: s3Client, // Ensure s3Client is imported/defined
       params: {
         Bucket: process.env.IDRIVE_BUCKET_NAME,
         Key: fileName,
@@ -1643,52 +1653,80 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     });
     await parallelUploads3.done();
 
-    const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
+    const isAgent = req.user.role === 'agent';
+    const receiverModel = isAgent ? 'User' : 'Agent';
+    const senderModel = isAgent ? 'Agent' : 'User';
 
-    // 3. Save Message to Database
+    // 4. Save Message to Database
     const newMessage = new Message({
       senderId: req.user.id,
-      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      senderModel,
       receiverId,
-      receiverModel: receiverModel,
+      receiverModel,
       text: text || "", 
       fileUrl: fileName, 
       fileType: detectedType,
       status: 'sent',
-      notificationSent: false // Default to false
+      notificationSent: false
     });
 
     await newMessage.save();
-    const responseData = newMessage.toObject();
-    responseData.fileUrl = await getPrivateUrl(fileName);
-    try {
-      const TargetModel = receiverModel === 'Agent' ? Agent : User;
-      const receiver = await TargetModel.findById(receiverId);
 
-      if (receiver && receiver.pushSubscription) {
+    // --- 5. NOTIFICATION LOGIC (PUSH & EMAIL) ---
+    const TargetModel = receiverModel === 'Agent' ? Agent : User;
+    const receiver = await TargetModel.findById(receiverId);
+    const sender = await (isAgent ? Agent : User).findById(req.user.id);
+
+    const io = req.app.get('socketio');
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+
+    // A. Web Push Notification
+    if (receiver?.pushSubscription) {
+      try {
         const payload = JSON.stringify({
-          title: `New ${detectedType} from ${req.user.firstName || 'Zing'}`,
-          body: text ? text : (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
+          title: `New ${detectedType} from ${sender.firstName || 'Zing'}`,
+          body: text || (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
           data: {
-            url: receiverModel === 'Agent' ? '/agent-dashboard' : '/user-dashboard'
+            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}`
           }
         });
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
-        responseData.notificationSent = true; 
-        
-        console.log(`[Push] Media notification sent for message: ${newMessage._id}`);
+      } catch (pushErr) {
+        console.error("Media Push delivery failed:", pushErr.message);
       }
-    } catch (pushErr) {
-      console.error("Media Push delivery failed:", pushErr.message);
+    }
+    if (!isOnline && receiver) {
+      try {
+        const COOLDOWN = 30 * 60 * 1000; // 30 mins
+        const now = Date.now();
+        const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+
+        if (now - lastEmail > COOLDOWN) {
+          await sendOfflineNotification(receiver, sender, text, receiverModel);
+          
+          await TargetModel.findByIdAndUpdate(receiverId, { 
+            lastNotificationEmail: new Date() 
+          });
+          console.log(`[Email] Offline media notification sent to ${receiver.email}`);
+        }
+      } catch (mailErr) {
+        console.error("Email Throttle Error:", mailErr.message);
+      }
+    }
+    if (isOnline) {
+      io.to(receiverId.toString()).emit("new-message", newMessage);
     }
 
-    // 6. Final Response
+    // 6. Response
+    const responseData = newMessage.toObject();
+    responseData.fileUrl = await getPrivateUrl(fileName);
+
     res.status(201).json({ success: true, message: responseData });
 
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
-    res.status(500).json({ success: false, message: "Upload failed" });
+    res.status(500).json({ success: false, message: "Upload failed", error: err.message });
   }
 });
 
