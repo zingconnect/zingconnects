@@ -341,16 +341,22 @@ socket.on("admin_to_guest_message", async (payload) => {
     const { guestId, text } = payload; 
         await connectToDatabase(); 
 
-    if (!guestId || !text) return;
+    if (!guestId || !text) {
+      return console.error("❌ Save Denied: Payload missing content.");
+    }
     const savedMsg = await SupportMessage.create({
       guestId: String(guestId),
       text: text,
-      senderType: 'Admin', // MUST match your schema enum ['Guest', 'Admin']
+      senderType: 'Admin', 
       isAdminRead: true
     });
 
-    console.log("✅ SUCCESS: Admin message stored in DB:", savedMsg._id);
+    console.log("✅ Admin Msg Stored:", savedMsg._id);
 
+    // 3. Emit success back to the dashboard
+    socket.emit("admin_message_stored", savedMsg);
+    
+    // 4. Notify the guest
     io.to(guestId).emit("guest_receive_admin_message", {
       _id: savedMsg._id,
       text: savedMsg.text,
@@ -359,7 +365,8 @@ socket.on("admin_to_guest_message", async (payload) => {
     });
 
   } catch (err) {
-    console.error("❌ DATABASE SAVE ERROR:", err.message);
+    // Check your Vercel logs for this output!
+    console.error("❌ DATABASE REJECTED ADMIN REPLY:", err.message);
   }
 });
 });

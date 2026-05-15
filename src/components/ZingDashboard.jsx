@@ -199,13 +199,13 @@ const handleAdminReply = () => {
   if (!supportMessage.trim() || !activeChat || !socket) return;
 
   const replyData = {
-    guestId: String(activeChat._id), // Cast to String to be safe
+    guestId: String(activeChat._id),
     text: supportMessage,
     senderType: "Admin" 
   };
   socket.emit("admin_to_guest_message", replyData);
   const localFormattedMsg = {
-    _id: Date.now().toString(), // Temporary ID
+    _id: Date.now().toString(),
     text: supportMessage,
     isAdmin: true,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
