@@ -1727,44 +1727,97 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     await connectToDatabase(); 
 
     // 2. Resilience Loop: Wait for Mongoose to move from "Connecting" (2) to "Connected" (1)
-    // This is critical because bufferCommands: false won't let .save() wait on its own.
     let connectionRetries = 0;
     while (mongoose.connection.readyState !== 1 && connectionRetries < 5) {
       console.log(`⏳ Waiting for DB stabilization... Attempt ${connectionRetries + 1}`);
-      await new Promise(resolve => setTimeout(resolve, 400)); // 400ms pause
+      await new Promise(resolve => setTimeout(resolve, 400)); 
       connectionRetries++;
     }
 
-    // Final guard check
     if (mongoose.connection.readyState !== 1) {
       throw new Error(`Database connection not ready. State: ${mongoose.connection.readyState}`);
     }
 
     const { receiverId, text, fileUrl, fileType } = req.body;
     
-    // Basic validation
     if (!receiverId || !fileUrl) {
       return res.status(400).json({ success: false, message: "Missing receiverId or fileUrl" });
     }
 
     const isAgent = req.user.role === 'agent';
+    const receiverModel = isAgent ? 'User' : 'Agent';
+    const senderModel = isAgent ? 'Agent' : 'User';
+
+    // 3. Save Message to Database
     const newMessage = new Message({
       senderId: req.user.id,
-      senderModel: isAgent ? 'Agent' : 'User',
+      senderModel: senderModel,
       receiverId,
-      receiverModel: isAgent ? 'User' : 'Agent',
+      receiverModel: receiverModel,
       text: text || "",
       fileUrl: fileUrl, 
       fileType: fileType,
-      status: 'sent'
+      status: 'sent',
+      notificationSent: false
     });
     await newMessage.save();
+
+    // --- 4. NOTIFICATION LOGIC (PUSH & EMAIL) ---
+    const TargetModel = receiverModel === 'Agent' ? Agent : User;
+    const receiver = await TargetModel.findById(receiverId);
+    const sender = await (isAgent ? Agent : User).findById(req.user.id);
+
+    const io = req.app.get('socketio');
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+
+    // A. Web Push (Always attempt)
+    if (receiver?.pushSubscription) {
+      try {
+        const payload = JSON.stringify({
+          title: `New ${fileType} from ${sender.firstName || 'Zing'}`,
+          body: text || `Sent an attachment`,
+          data: { 
+            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}` 
+          }
+        });
+        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+      } catch (pushErr) {
+        console.error("Push delivery failed:", pushErr.message);
+      }
+    }
+
+    // B. Email Notification (If offline and cooldown passed)
+    if (!isOnline && receiver) {
+      try {
+        const COOLDOWN = 30 * 60 * 1000; // 30 Minutes
+        const now = Date.now();
+        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+
+        if (now - lastEmailTime > COOLDOWN) {
+          // Pass the fileType context to sendOfflineNotification if you want specific wording
+          const emailText = text || `Sent a ${fileType} attachment`;
+          
+          await sendOfflineNotification(receiver, sender, emailText, receiverModel);
+          
+          await TargetModel.findByIdAndUpdate(receiverId, { 
+            lastNotificationEmail: new Date() 
+          });
+          console.log(`[Email] Offline notification for ${fileType} sent to ${receiver.email}`);
+        }
+      } catch (mailErr) {
+        console.error("Email Throttle Error:", mailErr.message);
+      }
+    }
+    if (isOnline) {
+      io.to(receiverId.toString()).emit("new-message", newMessage);
+    }
+
+    // 5. Final Response
     const signedUrlForFrontend = await getPrivateUrl(fileUrl);
-    
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 
-    // 5. Success response
     res.status(201).json({ 
       success: true, 
       message: responseData 
@@ -1772,7 +1825,6 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
 
   } catch (err) {
     console.error("❌ Confirmation Route Error:", err.message);
-    
     res.status(500).json({ 
       success: false, 
       message: "Failed to save message", 
@@ -1780,6 +1832,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
   }
 });
+
 // --- DELETE MESSAGE ROUTE (SECURE) ---
 app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
   try {
