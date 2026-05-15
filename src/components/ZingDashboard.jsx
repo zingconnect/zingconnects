@@ -102,6 +102,26 @@ useEffect(() => {
   }, [activeTab]);
 
 useEffect(() => {
+  if (activeTab === 'Chat Support') {
+    const fetchActiveGuests = async () => {
+      const token = localStorage.getItem('adminToken');
+      try {
+        const response = await fetch('https://zingconnect.vercel.app/api/admin/support/guests', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (data.success) {
+          setGuests(data.guests.map(g => ({ ...g, isGuest: true, messages: [] })));
+        }
+      } catch (err) {
+        console.error("Error fetching guest list:", err);
+      }
+    };
+    fetchActiveGuests();
+  }
+}, [activeTab]);
+
+useEffect(() => {
   if (!socket) return;
 
   // 1. Handle New Guest Joining

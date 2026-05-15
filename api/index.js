@@ -2609,6 +2609,24 @@ app.get('/api/support/history/:guestId', async (req, res) => {
   }
 });
 
+// --- BACKEND: Get list of all unique guests who messaged ---
+app.get('/api/admin/support/guests', async (req, res) => {
+  try {
+    const guests = await SupportMessage.aggregate([
+      { $sort: { createdAt: -1 } },
+      { $group: {
+          _id: "$guestId",
+          lastMessage: { $first: "$text" },
+          createdAt: { $first: "$createdAt" }
+      }},
+      { $sort: { createdAt: -1 } }
+    ]);
+    res.json({ success: true, guests });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
