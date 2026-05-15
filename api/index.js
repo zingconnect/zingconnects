@@ -55,10 +55,6 @@ const io = new Server(server, {
   allowEIO3: true
 });
 
-app.use((req, res, next) => {
-  req.io = io; 
-  next();
-});
 
 app.set('socketio', io);
 app.use('/api/calls', callRoutes);
@@ -943,9 +939,7 @@ app.get('/api/users/my-session', async (req, res) => {
       if (freshAgent) {
         const now = new Date();
         const lastActive = freshAgent.lastActive || freshAgent.createdAt;
-        
-        // Online if activity was within the last 2 minutes (120,000ms)
-        isOnline = lastActive && (now - new Date(lastActive)) < 120000;
+                isOnline = lastActive && (now - new Date(lastActive)) < 120000;
 
         if (isOnline) {
           lastSeenDisplay = "Online";
@@ -961,8 +955,6 @@ app.get('/api/users/my-session', async (req, res) => {
         }
       }
     }
-
-    // 4. IDrive / S3 Image Signing Logic
     let signedPhotoUrl = activeAgent?.photoUrl;
     if (activeAgent?.photoUrl && activeAgent.photoUrl.includes('idrivee2.com')) {
       try {
@@ -974,11 +966,8 @@ app.get('/api/users/my-session', async (req, res) => {
         signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       } catch (err) {
         console.error("Image signing failed:", err);
-        // Fallback to original URL if signing fails
       }
     }
-
-    // 5. Final Response
     res.json({
       success: true,
       user: {
@@ -1007,16 +996,19 @@ app.get('/api/users/my-session', async (req, res) => {
 
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
-    // Ensure DB connection
     await connectToDatabase();
+    
+    // 1. GET THE CLIENT FROM YOUR UTILITY
+    const s3Client = getS3Client(); 
+
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
 
     const updateData = {
       firstName,
       lastName,
-      phone, // New field saved here
+      phone,
       dob,
-      gender,
+      gender: gender ? gender.toLowerCase().trim() : "", // Fix for the Enum
       city,
       state,
       isProfileComplete: true,
@@ -1033,33 +1025,28 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
+
+      // 2. NOW THIS WILL WORK
       await s3Client.send(new PutObjectCommand(uploadParams));
       updateData.photoUrl = fileKey; 
-      console.log(`[Storage] Photo uploaded for user: ${req.user.id} with key: ${fileKey}`);
     }
+
+    // Use the User model imported at the top of your file
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
       updateData,
-      { new: true }
+      { new: true, runValidators: true } // runValidators ensures the gender enum is checked
     );
 
     if (!updatedUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "User account not found" 
-      });
+      return res.status(404).json({ success: false, message: "User account not found" });
     }
-    res.json({ 
-      success: true, 
-      message: "Onboarding complete", 
-      user: updatedUser 
-    });
+
+    res.json({ success: true, message: "Onboarding complete", user: updatedUser });
+
   } catch (err) {
-    console.error("CRITICAL ONBOARDING ERROR:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error during profile update" 
-    });
+    console.error("CRITICAL ONBOARDING ERROR:", err.message);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -1074,8 +1061,10 @@ app.get('/api/agents/:slug', async (req, res) => {
       return res.status(500).json({ message: "Configuration Error: Agent Model not found" });
     }
 
-    const agent = await AgentModel.findOne({ slug: req.params.slug }).select('-password').lean();
-    
+const agent = await AgentModel.findOne({ 
+  slug: { $regex: new RegExp(`^${req.params.slug}$`, 'i') } 
+}).select('-password').lean();
+
     if (!agent) {
       return res.status(404).json({ message: "Agent not found" });
     }

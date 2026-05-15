@@ -893,17 +893,20 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
     });
   }
 });
-
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
+    // 1. Ensure DB connection (Vital for Vercel Serverless)
+    await connectToDatabase();
+
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
-    
+
+    // 2. Prepare data with Enum fix (Force lowercase to match User Schema)
     const updateData = {
       firstName,
       lastName,
       dob,
       phone,
-      gender,
+      gender: gender ? gender.toLowerCase().trim() : "", 
       city,
       state,
       isProfileComplete: true,
@@ -911,7 +914,9 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     };
 
     if (req.file) {
-      // 1. Sanitize the filename
+      // 3. GET THE CLIENT (This was likely your 500 error cause)
+      const s3Client = getS3Client(); 
+
       const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
       const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
       
@@ -921,18 +926,15 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
-
-      // 2. Execute upload to IDrive
       await s3Client.send(new PutObjectCommand(uploadParams));      
       updateData.photoUrl = fileKey; 
       
-      console.log(`[Storage] Photo stored as key: ${fileKey}`);
+      console.log(`[Storage] Photo stored for User ${req.user.id}: ${fileKey}`);
     }
-
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id, 
       updateData,
-      { new: true }
+      { new: true, runValidators: true } 
     );
 
     if (!updatedUser) {
@@ -946,10 +948,15 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     });
 
   } catch (err) {
-    console.error("ONBOARDING ERROR:", err);
-    res.status(500).json({ success: false, message: "Server error during profile update" });
+    console.error("ONBOARDING ERROR:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error during profile update",
+      details: err.message // Temporary: remove this once you confirm it's fixed
+    });
   }
 });
+
 // --- GET AGENT'S CONNECTED USERS ---
 router.get('/my-users', authenticateToken, async (req, res) => {
   // Clear cache to ensure real-time status updates
