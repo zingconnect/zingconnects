@@ -52,7 +52,14 @@ const guestsOnlyThreads = (guests || []).map(g => ({
   subtitle: 'Public Visitor'
 }));
 
-// Updated Initial Stats Fetch
+// --- ADD THIS TO ZINGDASHBOARD ---
+useEffect(() => {
+  const newSocket = io("https://zingconnect.vercel.app"); // Your backend URL
+  setSocket(newSocket);
+
+  return () => newSocket.close();
+}, []);
+
 useEffect(() => {
   const fetchStats = async () => {
     const token = localStorage.getItem('adminToken');
@@ -156,46 +163,65 @@ socket.on("admin_receive_support_message", (data) => {
       return [{ _id: guestIdentifier, isGuest: true, messages: [formattedMsg] }, ...prev];
     }
   });
-  setActiveChat(prev => {
-    if (prev && prev._id === guestIdentifier) {
-      return {
-        ...prev,
-        messages: [...(prev.messages || []), formattedMsg]
-      };
-    }
-    return prev;
-  });
+ setActiveChat(prev => {
+      if (prev && prev._id === data.guestId) {
+        const newMessage = {
+          _id: data._id,
+          text: data.text,
+          isAdmin: false, // It's from a guest
+          timestamp: new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        const exists = prev.messages?.some(m => m._id === data._id);
+        if (exists) return prev;
+
+        return { ...prev, messages: [...(prev.messages || []), newMessage] };
+      }
+      return prev;
+    });
 });
+socket.on("guest_receive_admin_message", (data) => {
+     console.log("Admin message broadcast confirmation:", data);
+  });
 
   return () => {
-    socket.off("admin_new_guest_online");
     socket.off("admin_receive_support_message");
+    socket.off("guest_receive_admin_message");
   };
-}, [socket]); // Only re-run if socket instance changes
+}, [socket]);
+
+useEffect(() => {
+  if (socket && activeChat && activeChat.isGuest) {
+    socket.emit("admin_focus_guest", activeChat._id);
+  }
+}, [activeChat, socket]);
 
 const handleAdminReply = () => {
-    if (!supportMessage.trim() || !activeChat || !socket) return;
-    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const replyData = {
-      guestId: activeChat._id,
-      text: supportMessage,
-      isAdmin: true,
-      timestamp: timestamp
-    };
-    socket.emit("admin_to_guest_message", {
-        guestId: activeChat._id,
-        text: supportMessage
-    });
-    setActiveChat(prev => ({
-      ...prev,
-      messages: [...(prev.messages || []), replyData]
-    }));
-    setGuests(prev => prev.map(g => 
-        g._id === activeChat._id ? { ...g, messages: [...(g.messages || []), replyData] } : g
-    ));
+  if (!supportMessage.trim() || !activeChat || !socket) return;
 
-    setSupportMessage("");
+  const replyData = {
+    guestId: activeChat._id,
+    text: supportMessage,
+    senderType: "Admin" // Matches your DB schema requirements
   };
+  socket.emit("admin_to_guest_message", replyData);
+  const localFormattedMsg = {
+    _id: Date.now().toString(), // Temporary ID
+    text: supportMessage,
+    isAdmin: true,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+
+  setActiveChat(prev => ({
+    ...prev,
+    messages: [...(prev.messages || []), localFormattedMsg]
+  }));
+
+  setGuests(prev => prev.map(g => 
+    g._id === activeChat._id ? { ...g, messages: [...(g.messages || []), localFormattedMsg] } : g
+  ));
+
+  setSupportMessage("");
+};
 
 const handleViewAgent = async (agentId) => {
     setLoading(true);
