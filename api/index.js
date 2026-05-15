@@ -739,6 +739,7 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching profile" });
   }
 });
+
 app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1192,30 +1193,23 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
     });
   }
 });
-
-// GET current user's full profile data
 app.get('/api/users/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Find user and exclude sensitive fields like password if they existed
     const user = await User.findById(req.user.id);
     
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
-    let signedPhotoUrl = user.photoUrl;
-    if (user.photoUrl && user.photoUrl.includes('users/')) {
-      try {
-        const command = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME,
-          Key: user.photoUrl, // This is the fileKey we saved during onboarding
-        });
-        signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-      } catch (err) {
-        console.error("User photo signing failed:", err);
-      }
+    let signedPhotoUrl = null;
+    if (user.photoUrl) {
+      signedPhotoUrl = await getPrivateUrl(user.photoUrl);
     }
+    if (!signedPhotoUrl) {
+      signedPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName || 'User'}+${user.lastName || ''}&background=0D1117&color=fff&size=128`;
+    }
+
     res.json({ 
       success: true, 
       user: {
@@ -1224,18 +1218,10 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
       } 
     });
   } catch (err) {
-    console.error("Profile Fetch Error:", err);
+    console.error("Profile Fetch Error:", err.message);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
-// --- Utility Function to calculate Fixed Naira Amount ---
-const getNairaAmount = (usdAmount) => {
-  const FIXED_RATE = Number(process.env.USD_TO_NGN_RATE);
-  
-  return Math.ceil(usdAmount * FIXED_RATE);
-};
-
 // --- Route to get the "Price Tag" in Naira for the frontend ---
 app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
   const { planPrice } = req.params;
