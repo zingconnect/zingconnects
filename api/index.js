@@ -1404,7 +1404,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 30;
 
     const messages = await Message.find({
       $or: [
@@ -1412,33 +1412,24 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
         { senderId: otherUserId, receiverId: myId }
       ]
     })
-    .sort({ createdAt: -1 }) // Get newest first for pagination
+    .sort({ createdAt: -1 }) 
     .limit(limit)
     .lean();
 
-    // Reverse to chronological order for the UI
+    // Reverse for chronological UI display
     const chronologicalMessages = messages.reverse();
 
     const signedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      // 1. Handle File/Image signing
       if (m.fileUrl) {
-        let fileKey = m.fileUrl;
-        if (fileKey.startsWith('http')) {
-          const urlParts = fileKey.split('idrivee2.com/');
-          if (urlParts.length > 1) {
-            const pathParts = urlParts[1].split('/');
-            fileKey = pathParts.slice(1).join('/'); 
-          }
-        }
-        m.fileUrl = await getPrivateUrl(fileKey);
+        // Uses the helper that automatically handles full URLs vs Keys
+        m.fileUrl = await getPrivateUrl(m.fileUrl);
       }
-            
       return m;
     }));
 
     res.json({ success: true, messages: signedMessages });
   } catch (err) {
-    console.error("Chat Fetch Error:", err);
+    console.error("Chat Fetch Error:", err.message);
     res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });
