@@ -1150,8 +1150,6 @@ useEffect(() => {
             notificationSound.current.currentTime = 0;
             notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
           }
-
-          // Browser Notification (Branding Fix)
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName}`, {
               body: lastMsg.text || "Sent a file",
