@@ -99,40 +99,60 @@ useEffect(() => {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    if (!socket) return;
-    socket.on("admin_new_guest_online", (data) => {
-      setGuests(prev => {
-        if (prev.find(g => g._id === data.guestId)) return prev;
-        return [...prev, { _id: data.guestId, isGuest: true, messages: [] }];
-      });
+useEffect(() => {
+  if (!socket) return;
+
+  // 1. Handle New Guest Joining
+  socket.on("admin_new_guest_online", (data) => {
+    setGuests(prev => {
+      // Avoid duplicates
+      if (prev.find(g => g._id === data.guestId)) return prev;
+      return [{ _id: data.guestId, isGuest: true, messages: [] }, ...prev];
     });
-    socket.on("admin_receive_support_message", (data) => {
-      setGuests(prev => {
-        const existing = prev.find(g => g._id === data.guestId);
-        if (existing) {
-          return prev.map(g => g._id === data.guestId 
-            ? { ...g, messages: [...(g.messages || []), data] } 
-            : g
-          );
-        }
-        return [...prev, { _id: data.guestId, isGuest: true, messages: [data] }];
-      });
-      setActiveChat(prev => {
-        if (prev?._id === data.guestId) {
-          return {
-            ...prev,
-            messages: [...(prev.messages || []), data]
-          };
-        }
-        return prev;
-      });
-    });
-    return () => {
-      socket.off("admin_new_guest_online");
-      socket.off("admin_receive_support_message");
+  });
+
+  // 2. Handle Receiving Messages
+  socket.on("admin_receive_support_message", (data) => {
+    console.log("Admin received message:", data);
+
+    // Format the message to match your UI expectations
+    const formattedMsg = {
+      _id: data._id,
+      text: data.text,
+      isAdmin: data.isAdmin,
+      timestamp: new Date(data.timestamp).toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      })
     };
-  }, [socket]);
+    setGuests(prev => {
+      const guestExists = prev.find(g => g._id === data.guestId);
+      
+      if (guestExists) {
+        return prev.map(g => g._id === data.guestId 
+          ? { ...g, messages: [...(g.messages || []), formattedMsg] } 
+          : g
+        );
+      } else {
+        return [{ _id: data.guestId, isGuest: true, messages: [formattedMsg] }, ...prev];
+      }
+    });
+    setActiveChat(prev => {
+      if (prev && prev._id === data.guestId) {
+        return {
+          ...prev,
+          messages: [...(prev.messages || []), formattedMsg]
+        };
+      }
+      return prev;
+    });
+  });
+
+  return () => {
+    socket.off("admin_new_guest_online");
+    socket.off("admin_receive_support_message");
+  };
+}, [socket]); // Only re-run if socket instance changes
 
 const handleAdminReply = () => {
     if (!supportMessage.trim() || !activeChat || !socket) return;

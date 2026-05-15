@@ -47,9 +47,11 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-const server = http.createServer(app);
 const io = new Server(server, {
-  cors: corsOptions
+  path: '/api/socket.io', // THIS MUST MATCH FRONTEND
+  cors: corsOptions,
+  transports: ['polling', 'websocket'], // Allow both, but polling is the fallback
+  allowEIO3: true
 });
 
 app.set('socketio', io);
@@ -364,8 +366,11 @@ const addDays = (date, days) => {
   result.setDate(result.getDate() + days);
   return result;
 };
-
 app.use(async (req, res, next) => {
+  if (req.path.startsWith('/api/socket.io')) {
+    return next();
+  }
+
   try {
     const db = await connectToDatabase();
     if (!db) {
@@ -380,7 +385,6 @@ app.use(async (req, res, next) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });
-
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res) => {
     console.log("Registration Stage 1 (Complete Fields) started...");
 
@@ -2547,22 +2551,16 @@ app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
         subscriptionDate: agent.subscriptionDate,
         expiryDate: agent.expiryDate,
         subscriptionAmount: agent.subscriptionAmount || 0,
-        
-        // --- Voice & Masking ---
         voiceId: agent.voiceId, 
         unlockedVoiceIds: agent.unlockedVoiceIds || [], 
         voiceDisplayName: agent.voiceDisplayName || "Natural Voice",
         voicePackageActive: !!agent.voicePackageActive, 
         voicePackageExpiry: agent.voicePackageExpiry,
         voiceMaskingEnabled: !!agent.voiceMaskingEnabled,
-        
-        // --- Status ---
         isVerified: !!agent.isVerified,
         status: isOnline ? 'online' : 'offline',
         lastActive: agent.lastActive,
         createdAt: agent.createdAt,
-        
-        // Metadata from your data dump
         paymentDetails: agent.paymentDetails || {}
       }
     });
