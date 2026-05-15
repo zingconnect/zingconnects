@@ -352,12 +352,8 @@ socket.on("admin_to_guest_message", async (payload) => {
     });
 
     console.log("✅ Admin Msg Stored:", savedMsg._id);
-
-    // 3. Emit success back to the dashboard
     socket.emit("admin_message_stored", savedMsg);
-    
-    // 4. Notify the guest
-    io.to(guestId).emit("guest_receive_admin_message", {
+        io.to(guestId).emit("guest_receive_admin_message", {
       _id: savedMsg._id,
       text: savedMsg.text,
       isAdmin: true,
@@ -2639,15 +2635,11 @@ app.get('/api/admin/support/guests', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 app.get('/api/admin/support/messages/:guestId', async (req, res) => {
   try {
     const { guestId } = req.params;
-    
     await connectToDatabase(); 
-    const messages = await SupportMessage.find({ guestId }).sort({ createdAt: 1 });
-
-    // 3. Return successfully
+    const messages = await SupportMessage.find({ guestId: String(guestId) }).sort({ createdAt: 1 });
     res.status(200).json({ 
       success: true, 
       messages: messages.map(msg => ({
@@ -2661,7 +2653,6 @@ app.get('/api/admin/support/messages/:guestId', async (req, res) => {
       }))
     });
   } catch (err) {
-    console.error("❌ History Fetch Error:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

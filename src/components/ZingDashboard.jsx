@@ -503,28 +503,36 @@ const handleToggleVerification = async (agentId) => {
       
       <div className="flex-1 overflow-y-auto">
         {guestsOnlyThreads.map((user) => (
-          <div 
-            key={user._id}
-            onClick={async () => {
-              setActiveChat(user);
-              const token = localStorage.getItem('adminToken');
-              try {
-                const response = await fetch(`https://zingconnect.vercel.app/api/admin/support/messages/${user._id}`, {
-                  headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await response.json();
-                if (data.success) {
-                  setActiveChat(prev => ({ ...prev, messages: data.messages }));
-                  setGuests(prev => prev.map(g => g._id === user._id ? { ...g, messages: data.messages } : g));
-                }
-              } catch (err) {
-                console.error("Critical: Failed to sync support history", err);
-              }
-            }}
-            className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
-              activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
-            }`}
-          >
+        <div 
+  key={user._id}
+  onClick={async () => {
+    const chatIdentifier = user.guestId || user._id;     
+    setActiveChat(user);
+    const token = localStorage.getItem('adminToken');
+    try {
+      const response = await fetch(`https://zingconnect.vercel.app/api/admin/support/messages/${chatIdentifier}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();      
+      if (data.success) {
+        setActiveChat(prev => ({ 
+          ...prev, 
+          messages: data.messages 
+        }));
+        setGuests(prev => prev.map(g => 
+          (g.guestId === chatIdentifier || g._id === user._id) 
+            ? { ...g, messages: data.messages } 
+            : g
+        ));
+      }
+    } catch (err) {
+      console.error("Critical: Failed to sync support history", err);
+    }
+  }}
+  className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
+    activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
+  }`}
+>
             <div className="relative shrink-0">
               <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white border border-slate-100 shadow-sm">
                 <BsPeopleFill size={18} />
