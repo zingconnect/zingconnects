@@ -725,7 +725,6 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching profile" });
   }
 });
-
 app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -735,20 +734,22 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
     }
 
     const AgentModel = getAgentModel();
-    
-    // 1. Fetch Agent & Check Session Security
     const agent = await AgentModel.findById(req.user.id);
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
+
+    // Security Check
     if (req.user.sessionId && agent.currentSessionId && req.user.sessionId !== agent.currentSessionId) {
       return res.status(403).json({ 
         success: false, 
-        message: "Dual login detected. Account is active on another device.",
+        message: "Dual login detected.",
         reason: "dual_login" 
       });
     }
+
+    // Update activity and subscriptions
     agent.lastActive = new Date();
     const now = new Date();
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
@@ -758,33 +759,21 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
         agent.voicePackageActive = false;
     }
     await agent.save();
+
     const lastActiveDate = agent.lastActive || agent.createdAt;
     const isOnline = (now - new Date(lastActiveDate)) < (120000);
 
-    // 5. Safe S3 Signing
-    let signedPhotoUrl = agent.photoUrl;
-    if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
-      try {
-        if (typeof GetObjectCommand !== 'undefined' && typeof s3Client !== 'undefined') {
-          const fileKey = agent.photoUrl.split('.com/')[1];
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: decodeURIComponent(fileKey),
-          });
-          signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-        }
-      } catch (s3Err) {
-        console.error("IDrive Signing Error:", s3Err.message);
-        signedPhotoUrl = agent.photoUrl; 
-      }
+    // --- CORRECTED SIGNING LOGIC ---
+    let signedPhotoUrl = null;
+    if (agent.photoUrl) {
+      signedPhotoUrl = await getPrivateUrl(agent.photoUrl);
     }
 
-    // 6. Default Avatar Fallback
+    // Default Avatar Fallback
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-    // 7. Clean JSON Response
     res.json({
       success: true,
       agent: {
@@ -798,9 +787,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed, 
         subscriptionDate: agent.subscriptionDate || null,
-        subscriptionAmount: agent.subscriptionAmount || 0,
         expiryDate: agent.expiryDate || null,
-        paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" },
         voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
         voicePackageActive: !!agent.voicePackageActive, 
         status: isOnline ? 'online' : 'offline',
@@ -813,7 +800,6 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 // 3. Update Agent Plan Selection
 app.post('/api/agents/update-plan', authenticateToken, async (req, res) => {
   try {
@@ -916,22 +902,25 @@ app.get('/api/users/my-session', async (req, res) => {
 
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
     const user = await User.findByIdAndUpdate(
       decoded.id, 
       { lastActive: new Date() },
       { returnDocument: 'after' } 
     ).populate({
       path: 'connectedAgents',
-    select: 'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
+      select: 'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
     });
 
     if (!user) return res.status(404).json({ message: "User not found" });
+
     let activeAgent = user.connectedAgents && user.connectedAgents.length > 0 
       ? user.connectedAgents[user.connectedAgents.length - 1] 
       : null;
     
     let isOnline = false;
     let lastSeenDisplay = "Offline";
+    let signedPhotoUrl = null;
 
     if (activeAgent) {
       const freshAgent = await Agent.findById(activeAgent._id).lean();
@@ -939,7 +928,7 @@ app.get('/api/users/my-session', async (req, res) => {
       if (freshAgent) {
         const now = new Date();
         const lastActive = freshAgent.lastActive || freshAgent.createdAt;
-                isOnline = lastActive && (now - new Date(lastActive)) < 120000;
+        isOnline = lastActive && (now - new Date(lastActive)) < 120000;
 
         if (isOnline) {
           lastSeenDisplay = "Online";
@@ -954,20 +943,18 @@ app.get('/api/users/my-session', async (req, res) => {
           }
         }
       }
-    }
-    let signedPhotoUrl = activeAgent?.photoUrl;
-    if (activeAgent?.photoUrl && activeAgent.photoUrl.includes('idrivee2.com')) {
-      try {
-        const fileKey = activeAgent.photoUrl.split('.com/')[1];
-        const command = new GetObjectCommand({
-          Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-          Key: decodeURIComponent(fileKey),
-        });
-        signedPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-      } catch (err) {
-        console.error("Image signing failed:", err);
+
+      // --- CORRECTED SIGNING LOGIC ---
+      if (activeAgent.photoUrl) {
+        signedPhotoUrl = await getPrivateUrl(activeAgent.photoUrl);
       }
     }
+
+    // Fallback Avatar if no photo exists or signing failed
+    if (!signedPhotoUrl && activeAgent) {
+      signedPhotoUrl = `https://ui-avatars.com/api/?name=${activeAgent.firstName}+${activeAgent.lastName}&background=0D1117&color=fff&size=128`;
+    }
+
     res.json({
       success: true,
       user: {
@@ -977,7 +964,6 @@ app.get('/api/users/my-session', async (req, res) => {
         lastActive: user.lastActive
       },
       agent: activeAgent ? {
-        // Convert Mongoose doc to plain object for spreading
         ...(activeAgent.toObject ? activeAgent.toObject() : activeAgent),
         photoUrl: signedPhotoUrl,
         status: isOnline ? 'online' : 'offline',
@@ -987,25 +973,17 @@ app.get('/api/users/my-session', async (req, res) => {
 
   } catch (err) {
     console.error("Session Error:", err);
-    res.status(500).json({ 
-      message: "Session Error", 
-      error: err.message 
-    });
+    res.status(500).json({ message: "Session Error", error: err.message });
   }
 });
+
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
-    // 1. Ensure DB connection for Serverless environment
     await connectToDatabase();
-    
-    // 2. Initialize the S3 Client instance
-    const s3Client = getS3Client(); 
+        const s3Client = getS3Client(); 
 
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
-
-    // Use req.user.id or fallback to req.user._id depending on your middleware
     const userId = req.user?.id || req.user?._id;
-
     if (!userId) {
       return res.status(401).json({ success: false, message: "User identity not found in token" });
     }
