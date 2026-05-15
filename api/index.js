@@ -2639,6 +2639,32 @@ app.get('/api/admin/support/guests', async (req, res) => {
   }
 });
 
+app.get('/api/admin/support/messages/:guestId', async (req, res) => {
+  try {
+    const { guestId } = req.params;
+    
+    await connectToDatabase(); 
+    const messages = await SupportMessage.find({ guestId }).sort({ createdAt: 1 });
+
+    // 3. Return successfully
+    res.status(200).json({ 
+      success: true, 
+      messages: messages.map(msg => ({
+        _id: msg._id,
+        text: msg.text,
+        isAdmin: msg.senderType === 'Admin',
+        timestamp: new Date(msg.createdAt).toLocaleTimeString([], { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        })
+      }))
+    });
+  } catch (err) {
+    console.error("❌ History Fetch Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 const PORT = process.env.PORT || 5000;
