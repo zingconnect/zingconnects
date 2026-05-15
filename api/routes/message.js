@@ -126,6 +126,7 @@ router.post('/send', authenticateToken, async (req, res) => {
 // --- 3. SERVER-SIDE MULTIPART UPLOAD ---
 router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
+    await connectToDatabase();
     const { receiverId, text } = req.body; 
     if (!req.file) return res.status(400).json({ success: false, message: "No file provided" });
 
@@ -133,6 +134,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
     const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${req.file.originalname.split('.').pop()}`;
 
+    // Upload to S3
     const parallelUploads3 = new Upload({
       client: getS3Client(),
       params: {
@@ -144,7 +146,6 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     });
     await parallelUploads3.done();
 
-    const signedUrlForFrontend = await getPrivateUrl(fileName);
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
     const senderModel = req.user.role === 'agent' ? 'Agent' : 'User';
     
@@ -156,10 +157,37 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       text: text || "", 
       fileUrl: fileName, 
       fileType: detectedType,
-      status: 'sent'
+      status: 'sent',
+      notificationSent: false
     });
-
     await newMessage.save();
+
+    // --- NOTIFICATION LOGIC ---
+    const TargetModel = receiverModel === 'Agent' ? Agent : User;
+    const receiver = await TargetModel.findById(receiverId);
+    const sender = await (senderModel === 'Agent' ? Agent : User).findById(req.user.id);
+    const io = req.app.get('socketio');
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+    if (receiver?.pushSubscription) {
+      const payload = JSON.stringify({
+        title: `New ${detectedType} from ${sender.firstName || 'Zing'}`,
+        body: text || `Sent an ${detectedType}`,
+        data: { url: receiverModel === 'Agent' ? '/agent/dashboard' : '/user/dashboard' }
+      });
+      webpush.sendNotification(receiver.pushSubscription, payload).catch(e => console.error(e));
+    }
+    if (!isOnline && receiver) {
+      const COOLDOWN = 30 * 60 * 1000;
+      const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+      if (Date.now() - lastEmail > COOLDOWN) {
+        await sendOfflineNotification(receiver, sender, text, receiverModel);
+        await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
+      }
+    }
+
+    if (isOnline) { io.to(receiverId.toString()).emit("new-message", newMessage); }
+
+    const signedUrlForFrontend = await getPrivateUrl(fileName);
     res.status(201).json({ success: true, message: { ...newMessage.toObject(), fileUrl: signedUrlForFrontend } });
 
   } catch (err) {
@@ -167,7 +195,6 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
-
 // --- 4. MARK AS READ ---
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {
@@ -206,60 +233,64 @@ router.post('/get-upload-url', authenticateToken, async (req, res) => {
 
 router.post('/confirm-upload', authenticateToken, async (req, res) => {
   try {
-    // 1. Ensure the connection handler is called
     await connectToDatabase(); 
-
-    // 2. Resilience Guard: If connecting (2) or disconnected (0), wait up to 2 seconds
     let retries = 0;
     while (mongoose.connection.readyState !== 1 && retries < 4) {
-      console.log(`⏳ DB not ready (Status: ${mongoose.connection.readyState}). Retrying... ${retries + 1}`);
-      await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
+      await new Promise(resolve => setTimeout(resolve, 500));
       retries++;
     }
 
-    // Final check before proceeding
-    if (mongoose.connection.readyState !== 1) {
-      throw new Error(`Database connection failed to stabilize. Current State: ${mongoose.connection.readyState}`);
-    }
-
     const { receiverId, text, fileUrl, fileType } = req.body;
-    if (!receiverId || !fileUrl) {
-      return res.status(400).json({ success: false, message: "Missing receiver ID or file path." });
-    }
-
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
     const senderModel = req.user.role === 'agent' ? 'Agent' : 'User';
 
-    // 3. Create the document
     const newMessage = new Message({
       senderId: req.user.id,
-      senderModel: senderModel,
+      senderModel,
       receiverId,
-      receiverModel: receiverModel,
+      receiverModel,
       text: text || "",
-      fileUrl: fileUrl, 
-      fileType: fileType,
-      status: 'sent'
+      fileUrl, 
+      fileType,
+      status: 'sent',
+      notificationSent: false
     });
-
-    // 4. Save to DB
     await newMessage.save();
 
-    // 5. Generate presigned URL for the immediate frontend response
-    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
-    
-    const responseData = newMessage.toObject();
-    responseData.fileUrl = signedUrlForFrontend;
+    // --- NOTIFICATION LOGIC ---
+    const TargetModel = receiverModel === 'Agent' ? Agent : User;
+    const receiver = await TargetModel.findById(receiverId);
+    const sender = await (senderModel === 'Agent' ? Agent : User).findById(req.user.id);
+    const io = req.app.get('socketio');
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
-    res.status(201).json({ success: true, message: responseData });
+    // 1. Web Push
+    if (receiver?.pushSubscription) {
+      const payload = JSON.stringify({
+        title: `New ${fileType} from ${sender.firstName || 'Zing'}`,
+        body: text || `Sent an attachment`,
+        data: { url: receiverModel === 'Agent' ? '/agent/dashboard' : '/user/dashboard' }
+      });
+      webpush.sendNotification(receiver.pushSubscription, payload).catch(e => console.error(e));
+    }
+
+    // 2. Email if Offline
+    if (!isOnline && receiver) {
+      const COOLDOWN = 30 * 60 * 1000;
+      const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+      if (Date.now() - lastEmail > COOLDOWN) {
+        await sendOfflineNotification(receiver, sender, text, receiverModel);
+        await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
+      }
+    }
+
+    if (isOnline) { io.to(receiverId.toString()).emit("new-message", newMessage); }
+
+    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
+    res.status(201).json({ success: true, message: { ...newMessage.toObject(), fileUrl: signedUrlForFrontend } });
 
   } catch (err) {
-    console.error("❌ CONFIRMATION ERROR:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to save message to database.",
-      error: err.message 
-    });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
