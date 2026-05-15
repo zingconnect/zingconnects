@@ -2666,38 +2666,52 @@ app.get('/api/admin/support/messages/:guestId', async (req, res) => {
   }
 });
 
-
-/**
- * @route   POST /api/admin/broadcast-news
- * @desc    Send email updates to all or selected agents
- */
-app.post('api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
+// Ensure the route starts with /
+app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
+    
     const { target, emails, subject, message } = req.body;
 
+    // 1. Validation
     if (!subject || !message) {
-      return res.status(400).json({ success: false, message: "Subject and Message are required." });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Subject and Message content are required." 
+      });
     }
 
+    // 2. Determine Recipients
     let recipientEmails = [];
-
     if (target === 'all') {
-      // Fetch all registered agent emails from DB
       const allAgents = await Agent.find({}, 'email');
       recipientEmails = allAgents.map(a => a.email);
     } else {
-      // Use the specific list sent from the frontend
-      recipientEmails = emails;
+      recipientEmails = Array.isArray(emails) ? emails : [];
     }
 
     if (recipientEmails.length === 0) {
-      return res.status(400).json({ success: false, message: "No recipients found." });
+      return res.status(400).json({ 
+        success: false, 
+        message: "No valid recipients selected." 
+      });
     }
-   const baseUrl = "https://zingconnect.vercel.app";
-    const logoUrl = `${baseUrl}/logo-s.png`; // Points to your public/logo.png
+
+    // 3. Setup Transporter ONCE (Optimization)
+    // Moving this outside the .map() prevents 500 errors caused by socket saturation
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { 
+        user: process.env.EMAIL_USER, 
+        pass: process.env.EMAIL_PASS 
+      }
+    });
+
+    const baseUrl = "https://zingconnect.vercel.app";
+    const logoUrl = `${baseUrl}/logo-s.png`; 
     const brandColor = "#2563eb";
 
+    // 4. Map to Promises
     const emailPromises = recipientEmails.map(email => {
       const mailOptions = {
         from: `"ZingConnect Terminal" <${process.env.EMAIL_USER}>`,
@@ -2733,22 +2747,25 @@ app.post('api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res
           </div>
         `
       };
-            return nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
-      }).sendMail(mailOptions);
+
+      return transporter.sendMail(mailOptions);
     });
 
+    // 5. Execute Parallel Sends
     await Promise.all(emailPromises);
 
-    res.json({ 
+    return res.json({ 
       success: true, 
       message: `Announcement successfully dispatched to ${recipientEmails.length} agents.` 
     });
 
   } catch (err) {
     console.error("Broadcast API Error:", err.message);
-    res.status(500).json({ success: false, message: "Failed to send broadcast", details: err.message });
+    return res.status(500).json({ 
+      success: false, 
+      message: "Server failed to process broadcast dispatch", 
+      details: err.message 
+    });
   }
 });
 
