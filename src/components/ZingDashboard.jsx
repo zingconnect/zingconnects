@@ -45,10 +45,12 @@ const ZingDashboard = () => {
   const [supportMessage, setSupportMessage] = useState("");
   const navigate = useNavigate();
 
-  const allSupportThreads = [
-  ...guests.map(g => ({ ...g, isGuest: true })),
-  ...agents.map(a => ({ ...a, isGuest: false }))
-];
+const guestsOnlyThreads = (guests || []).map(g => ({
+  ...g,
+  isGuest: true,
+  displayName: `Guest #${g._id.slice(-4)}`,
+  subtitle: 'Public Visitor'
+}));
 
 // Updated Initial Stats Fetch
 useEffect(() => {
@@ -391,69 +393,59 @@ const handleToggleVerification = async (agentId) => {
       {/* --- CHAT SUPPORT TAB --- */}
 {activeTab === 'Chat Support' && (
   <div className="flex h-[calc(100vh-250px)] bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-slate-100">
- {/* Sidebar: Unified Support Inbox */}
-<div className="w-full md:w-80 border-r border-slate-50 flex flex-col">
-  <div className="p-6 border-b border-slate-50 bg-slate-50/30">
-    <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900">Support Inbox</h3>
-    <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Active Complaints & Inquiries</p>
-  </div>
-  <div className="flex-1 overflow-y-auto">
-    {[
-      ...(guests || []).map(g => ({ ...g, isGuest: true })),
-      ...(agents || []).map(a => ({ ...a, isGuest: false }))
-    ].map((user) => (
-     <div 
-  key={user._id}
-  onClick={async () => {
-    setActiveChat(user);
-    const token = localStorage.getItem('adminToken');
-    try {
-      const response = await fetch(`https://zingconnect.vercel.app/api/admin/support/messages/${user._id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();
-      if (data.success) {
-        setActiveChat(prev => ({
-          ...prev,
-          messages: data.messages 
-        }));
-                setGuests(prev => prev.map(g => 
-          g._id === user._id ? { ...g, messages: data.messages } : g
-        ));
-      }
-    } catch (err) {
-      console.error("Critical: Failed to sync support history", err);
-    }
-  }}
-  className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
-    activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
-  }`}
->
-        <div className="relative shrink-0">
-          {user.isGuest ? (
-            <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white border border-slate-100 shadow-sm">
-              <BsPeopleFill size={18} />
-            </div>
-          ) : (
-            <img src={user.photoUrl} className="w-10 h-10 rounded-2xl object-cover border border-slate-100" alt="" />
-          )}
-          <span className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full ${
-            user.isGuest ? 'bg-blue-400' : (user.isVerified ? 'bg-emerald-500' : 'bg-slate-300')
-          }`}></span>
-        </div>
-        
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-black text-slate-800 truncate">
-            {user.isGuest ? `Guest #${user._id.slice(-4)}` : `${user.firstName} ${user.lastName}`}
-          </p>
-          <p className="text-[9px] text-slate-400 truncate uppercase font-bold">
-            {user.isGuest ? 'Public Visitor' : (user.program || 'General Agent')}
-          </p>
-        </div>
+    
+    {/* Sidebar: ONLY Guest Support Inbox */}
+    <div className="w-full md:w-80 border-r border-slate-50 flex flex-col">
+      <div className="p-6 border-b border-slate-50 bg-slate-50/30">
+        <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-900">Support Inbox</h3>
+        <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Active Guest Inquiries</p>
       </div>
-    ))}
-  </div>
-</div>
+      
+      <div className="flex-1 overflow-y-auto">
+        {guestsOnlyThreads.map((user) => (
+          <div 
+            key={user._id}
+            onClick={async () => {
+              setActiveChat(user);
+              const token = localStorage.getItem('adminToken');
+              try {
+                const response = await fetch(`https://zingconnect.vercel.app/api/admin/support/messages/${user._id}`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();
+                if (data.success) {
+                  setActiveChat(prev => ({ ...prev, messages: data.messages }));
+                  setGuests(prev => prev.map(g => g._id === user._id ? { ...g, messages: data.messages } : g));
+                }
+              } catch (err) {
+                console.error("Critical: Failed to sync support history", err);
+              }
+            }}
+            className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
+              activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
+            }`}
+          >
+            <div className="relative shrink-0">
+              <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white border border-slate-100 shadow-sm">
+                <BsPeopleFill size={18} />
+              </div>
+              <span className="absolute -bottom-1 -right-1 w-3 h-3 border-2 border-white rounded-full bg-blue-400"></span>
+            </div>
+            
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-black text-slate-800 truncate">{user.displayName}</p>
+              <p className="text-[9px] text-slate-400 truncate uppercase font-bold">{user.subtitle}</p>
+            </div>
+          </div>
+        ))}
+        
+        {guestsOnlyThreads.length === 0 && (
+          <div className="p-10 text-center">
+            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Active Guests</p>
+          </div>
+        )}
+      </div>
+    </div>
 
   <div className="hidden md:flex flex-1 flex-col bg-slate-50/30">
   {activeChat ? (
