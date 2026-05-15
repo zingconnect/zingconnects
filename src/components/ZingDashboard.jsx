@@ -141,8 +141,6 @@ useEffect(() => {
 
 useEffect(() => {
   if (!socket) return;
-
-  // 1. Handle New Guest Joining
   socket.on("admin_new_guest_online", (data) => {
     setGuests(prev => {
       // Avoid duplicates
@@ -190,13 +188,25 @@ socket.on("admin_receive_support_message", (data) => {
       return prev;
     });
 });
-socket.on("guest_receive_admin_message", (data) => {
-     console.log("Admin message broadcast confirmation:", data);
+socket.on("admin_message_stored", (savedMsg) => {
+    console.log("✅ Server confirmed DB Save:", savedMsg._id);
+        setGuests(prev => prev.map(g => {
+      if (g.guestId === savedMsg.guestId || g._id === savedMsg.guestId) {
+        return {
+          ...g,
+          messages: g.messages.map(m => 
+            m._id.startsWith('temp-') && m.text === savedMsg.text ? savedMsg : m
+          )
+        };
+      }
+      return g;
+    }));
   });
 
   return () => {
+    socket.off("admin_new_guest_online");
     socket.off("admin_receive_support_message");
-    socket.off("guest_receive_admin_message");
+    socket.off("admin_message_stored"); // Clean up
   };
 }, [socket]);
 
@@ -208,29 +218,32 @@ useEffect(() => {
 
 const handleAdminReply = () => {
   if (!supportMessage.trim() || !activeChat || !socket) return;
-
+  const chatIdentifier = activeChat.guestId || activeChat._id;
   const replyData = {
-    guestId: String(activeChat._id),
+    guestId: String(chatIdentifier),
     text: supportMessage,
-    senderType: "Admin" 
+    senderType: "Admin" // Ensure this matches your Backend case-sensitivity
   };
   socket.emit("admin_to_guest_message", replyData);
   const localFormattedMsg = {
-    _id: Date.now().toString(),
+    _id: `temp-${Date.now()}`, // Prefix with temp to avoid key collisions
     text: supportMessage,
     isAdmin: true,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    timestamp: new Date().toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    })
   };
-
   setActiveChat(prev => ({
     ...prev,
     messages: [...(prev.messages || []), localFormattedMsg]
   }));
-
-  setGuests(prev => prev.map(g => 
-    g._id === activeChat._id ? { ...g, messages: [...(g.messages || []), localFormattedMsg] } : g
-  ));
-
+  setGuests(prev => prev.map(g => {
+    const isTarget = g.guestId === chatIdentifier || g._id === activeChat._id;
+    return isTarget 
+      ? { ...g, messages: [...(g.messages || []), localFormattedMsg] } 
+      : g;
+  }));
   setSupportMessage("");
 };
 
