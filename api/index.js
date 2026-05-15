@@ -335,23 +335,25 @@ socket.on("guest_to_admin_message", async (payload) => {
     console.error("Critical Database Error:", err.message);
   }
 });
-
 socket.on("admin_to_guest_message", async (payload) => {
+  console.log("📥 Admin Payload Received:", payload);
+  
   try {
-    const { guestId, text } = payload;
     await connectToDatabase(); 
+    const { guestId, text, senderType } = payload;
 
     if (!guestId || !text) {
-      return console.error("❌ Save Denied: Payload missing content.");
+      console.error("❌ Save Blocked: Missing guestId or text");
+      return;
     }
     const savedMsg = await SupportMessage.create({
       guestId: String(guestId),
       text: text,
-      senderType: 'Admin', // Ensure this matches your schema enum
+      senderType: senderType || 'Admin', 
       isAdminRead: true
     });
 
-    console.log("✅ Admin Msg Stored:", savedMsg._id);
+    console.log("✅ Database Save Successful:", savedMsg._id);
     socket.join(String(guestId));
     io.to(String(guestId)).emit("guest_receive_admin_message", {
       _id: savedMsg._id,
@@ -362,7 +364,7 @@ socket.on("admin_to_guest_message", async (payload) => {
     socket.emit("admin_message_stored", savedMsg);
 
   } catch (err) {
-    console.error("❌ DATABASE REJECTED ADMIN REPLY:", err.message);
+    console.error("❌ Mongoose Error Details:", err);
   }
 });
 });
@@ -2378,18 +2380,19 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
         { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
       ]),
       Agent.aggregate([
-        { 
-          $match: { 
-            isSubscribed: true, 
-            subscriptionDate: { $ne: null, $gte: sevenDaysAgo } 
-          } 
-        },
-        {
-          $group: {
-            _id: { $dayOfWeek: "$subscriptionDate" }, // Returns 1 (Sun) to 7 (Sat)
-            revenue: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } }
-          }
-        },
+      { 
+  $match: { 
+    isSubscribed: true, 
+    subscriptionDate: { $ne: null, $gte: sevenDaysAgo } 
+  } 
+},
+{
+  $group: {
+    // Ensure subscriptionDate exists before calling $dayOfWeek
+    _id: { $dayOfWeek: { $ifNull: ["$subscriptionDate", new Date()] } }, 
+    revenue: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } }
+  }
+},
         {
           $project: {
             revenue: 1,
