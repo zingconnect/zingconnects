@@ -337,34 +337,30 @@ socket.on("guest_to_admin_message", async (payload) => {
 });
 socket.on("admin_to_guest_message", async (payload) => {
   try {
-    // 1. Destructure exactly like the working Guest code
     const { guestId, text } = payload; 
-    
-    await connectToDatabase(); 
+    const db = await connectToDatabase();
+    console.log(`📡 Connected to: ${db.connection.host}`);
 
     if (!guestId || !text) {
-      return console.error("Admin Save Denied: Missing guestId or text content.");
+      return console.error("❌ Save Denied: Missing guestId or text");
     }
-
-    // 2. Explicitly define the Admin fields
     const savedMsg = await SupportMessage.create({
       guestId: String(guestId),
       text: text,
-      senderType: 'Admin', // Ensure this matches your Schema Enum ['Guest', 'Admin']
-      isAdminRead: true    // Admin already read their own message
+      senderType: 'Admin', // Ensure 'Admin' is capitalized in your Schema enum
+      isAdminRead: true
     });
-
-    console.log("Admin Database Success: stored under ID:", savedMsg._id);
-
-    // 3. Emit to the specific guest room
+    console.log("✅ Admin Msg Stored:", savedMsg._id);
+    socket.emit("admin_message_stored", savedMsg);
     io.to(guestId).emit("guest_receive_admin_message", {
       _id: savedMsg._id,
       text: savedMsg.text,
       isAdmin: true,
       timestamp: savedMsg.createdAt
     });
+
   } catch (err) {
-    console.error("Admin Socket Error:", err.message);
+    console.error("❌ Admin Socket Error:", err.message);
   }
 });
 });
