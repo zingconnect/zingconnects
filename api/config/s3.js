@@ -3,6 +3,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage"; 
 
 
+
 let _s3Client;
 
 export const getS3Client = () => {
@@ -20,7 +21,7 @@ export const getS3Client = () => {
 };
 
 // Re-export this for your auth.js registration logic
-export { PutObjectCommand } from "@aws-sdk/client-s3";
+export { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 
 export const getPrivateUrl = async (fileKey) => {
   if (!fileKey) return fileKey;

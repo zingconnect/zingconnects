@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { connectToDatabase } from '../config/db.js';
 import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import Agent from '../models/Agent.js';
 import User from '../models/User.js'; 
 
@@ -941,10 +942,7 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
-// --- GET AGENT'S CONNECTED USERS ---
 router.get('/my-users', authenticateToken, async (req, res) => {
-  // Clear cache to ensure real-time status updates
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -952,7 +950,6 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Get agent ID from the token (provided by authenticateToken middleware)
     const agentId = req.user?.id || req.user?._id;
 
     if (!agentId) {
@@ -962,7 +959,6 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       });
     }
 
-    // 1. Fetch users linked to this agent
     const users = await User.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
@@ -971,42 +967,45 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // 2. Handle S3 Image Signing (IDrive e2 / AWS S3)
+      // 1. Robust S3 Key Extraction & Signing
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
           let fileKey = user.photoUrl;
 
-          // Clean up URL to get the raw S3 Key
-          if (user.photoUrl.includes('users/')) {
-            const urlParts = user.photoUrl.split('users/');
-            const rawFileName = urlParts[urlParts.length - 1].split('?')[0]; 
-            fileKey = `users/${decodeURIComponent(rawFileName)}`;
+          // If the DB stores a full URL, strip it to get the Key
+          if (fileKey.includes('.com/')) {
+            fileKey = fileKey.split('.com/')[1].split('?')[0];
           }
+          
+          // Ensure "users/" prefix if it's a profile photo and missing the prefix
+          // (Only apply if your storage structure requires it)
+          const decodedKey = decodeURIComponent(fileKey);
 
+          const client = getS3Client(); // Use the helper to ensure client is initialized
           const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: fileKey,
+            Bucket: process.env.IDRIVE_BUCKET_NAME,
+            Key: decodedKey,
           });
 
-          // s3Client must be imported or available in this scope
-          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+          finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
         } catch (s3Err) {
-          console.error(`[S3 Error] ${user.email}:`, s3Err.message);
+          console.error(`[S3 Error] Photo failed for ${user.email}:`, s3Err.message);
         }
       }
 
-      // 3. Fallback to Avatar if photo doesn't exist
+      // 2. Fallback to UI Avatars
       if (!finalPhotoUrl) {
-        const initials = `${user.firstName || 'U'}+${user.lastName || ''}`;
-        finalPhotoUrl = `https://ui-avatars.com/api/?name=${initials}&background=random&color=fff&size=128`;
+        const nameParam = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
+        finalPhotoUrl = `https://ui-avatars.com/api/?name=${nameParam}&background=random&color=fff&size=128`;
       }
 
-      // 4. Presence Calculation (Online if active in last 2 minutes)
+      // 3. Presence Calculation
       const lastSeen = user.lastActive || user.lastLogin;
       const now = new Date();
-      const isOnline = lastSeen && (now - new Date(lastSeen)) < (2 * 60 * 1000);
+      // Using 5 minutes for a slightly more forgiving "Online" status
+      const isOnline = lastSeen && (now - new Date(lastSeen)) < (5 * 60 * 1000);
 
-      // 5. Human-Readable Status
+      // 4. Human-Readable Status
       let lastSeenText = "Offline";
       if (lastSeen) {
         const diffMins = Math.floor((now - new Date(lastSeen)) / 60000);

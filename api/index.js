@@ -1322,6 +1322,7 @@ app.post('/api/subscriptions/verify', async (req, res) => {
   }
 });
 
+// --- GET AGENT'S CONNECTED USERS ---
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -1330,51 +1331,61 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    const agentId = req.user.id || req.user._id;
+    // Safety check for user ID from middleware
+    const agentId = req.user?.id || req.user?._id;
+
     if (!agentId) {
-      return res.status(400).json({ success: false, message: "Invalid Agent session." });
+      return res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized: Missing agent session metadata." 
+      });
     }
 
+    // 1. Fetch connected users
     const users = await User.find({ connectedAgents: agentId })
-      .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
+      .select('firstName lastName email photoUrl lastActive lastLogin')
       .sort({ lastActive: -1 })
       .lean();
 
+    // 2. Process users and sign S3 URLs
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
-          // --- FIX 1: Use the actual key extraction logic ---
+          // Robust key extraction
           let fileKey = user.photoUrl;
           if (fileKey.includes('.com/')) {
             fileKey = fileKey.split('.com/')[1].split('?')[0];
           }
 
-          // --- FIX 2: Use your getS3Client() helper ---
+          // FIX: Use getS3Client() to ensure the client is initialized
           const client = getS3Client(); 
           const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME,
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: decodeURIComponent(fileKey),
           });
 
+          // Generate the temporary signed URL
           finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
         } catch (s3Err) {
-          console.error(`S3 Signing Error for user ${user._id}:`, s3Err.message);
+          console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
         }
       }
 
-      // Fallback to UI Avatars if S3 fails or photoUrl is missing
+      // 3. Fallback to dynamic avatars if no photo exists or signing fails
       if (!finalPhotoUrl) {
-        finalPhotoUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.firstName)}+${encodeURIComponent(user.lastName)}&background=random&color=fff&size=128`;
+        const name = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
+        finalPhotoUrl = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff&size=128`;
       }
 
+      // 4. Presence logic
       const lastSeen = user.lastActive || user.lastLogin;
       const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
 
       return {
         ...user,
-        photoUrl: finalPhotoUrl, // This now contains the signed URL
+        photoUrl: finalPhotoUrl,
         status: isOnline ? 'online' : 'offline'
       };
     }));
@@ -1389,7 +1400,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     console.error("CRITICAL ERROR FETCHING AGENT USERS:", err);
     res.status(500).json({ 
       success: false,
-      message: "Internal server error",
+      message: "Internal server error while retrieving user list",
       error: err.message
     });
   }
