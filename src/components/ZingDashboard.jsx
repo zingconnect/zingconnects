@@ -15,7 +15,8 @@ import {
   BsCheckCircleFill,
   BsHeadset, 
   BsSendFill,
-  BsPersonFill
+  BsPersonFill,
+  BsBellFill
 } from 'react-icons/bs';
 import { 
   AreaChart, 
@@ -41,7 +42,12 @@ const ZingDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [activeChat, setActiveChat] = useState(null);
   const [guests, setGuests] = React.useState([]);
-  const [socket, setSocket] = useState(null); // ADDED SOCKET STATE
+  const [socket, setSocket] = useState(null); 
+  const [broadcastTarget, setBroadcastTarget] = useState('all'); // 'all' or 'selected'
+const [selectedEmails, setSelectedEmails] = useState([]);
+const [newsSubject, setNewsSubject] = useState("");
+const [newsContent, setNewsContent] = useState("");
+const [sendingNews, setSendingNews] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const navigate = useNavigate();
 
@@ -52,6 +58,11 @@ const guestsOnlyThreads = (guests || []).map(g => ({
   subtitle: 'Public Visitor'
 }));
 
+const toggleEmailSelection = (email) => {
+  setSelectedEmails(prev => 
+    prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]
+  );
+};
 // --- ADD THIS TO ZINGDASHBOARD ---
 useEffect(() => {
   const newSocket = io("https://zingconnect.vercel.app"); // Your backend URL
@@ -223,6 +234,40 @@ const handleAdminReply = () => {
   setSupportMessage("");
 };
 
+const handleSendBroadcast = async () => {
+  setSendingNews(true);
+  const token = localStorage.getItem('adminToken');
+  
+  const payload = {
+    target: broadcastTarget, // "all" or "selected"
+    emails: broadcastTarget === 'selected' ? selectedEmails : [],
+    subject: newsSubject,
+    message: newsContent
+  };
+
+  try {
+    const response = await fetch('https://zingconnect.vercel.app/api/admin/broadcast-news', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      alert("News update sent successfully!");
+      setNewsContent("");
+      setNewsSubject("");
+    }
+  } catch (err) {
+    console.error("Broadcast failed:", err);
+  } finally {
+    setSendingNews(false);
+  }
+};
+
 const handleViewAgent = async (agentId) => {
     setLoading(true);
     const token = localStorage.getItem('adminToken');
@@ -264,6 +309,7 @@ const handleToggleVerification = async (agentId) => {
     { name: 'Dashboard', icon: <BsGrid1X2Fill /> },
     { name: 'Agents', icon: <BsPeopleFill /> },
   { name: 'Chat Support', icon: <BsHeadset /> }, 
+  { name: 'News Update', icon: <BsBellFill /> }, // NEW ITEM
     { name: 'Settings', icon: <BsGearFill /> },
   ];
 
@@ -572,6 +618,93 @@ const handleToggleVerification = async (agentId) => {
     </div>
   </div>
 )}
+
+{activeTab === 'News Update' && (
+  <div className="space-y-6">
+    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+      <div className="mb-8">
+        <h3 className="text-[11px] font-black uppercase tracking-widest flex items-center gap-2">
+          <BsBellFill className="text-blue-600" /> Broadcast Terminal
+        </h3>
+        <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Send system updates or subscription alerts to agents</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* LEFT: Configuration */}
+        <div className="space-y-4">
+          <div>
+            <label className="text-[9px] font-black uppercase text-slate-400 mb-2 block">Recipient Group</label>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setBroadcastTarget('all')}
+                className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${broadcastTarget === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-100 hover:bg-slate-50'}`}
+              >
+                All Agents
+              </button>
+              <button 
+                onClick={() => setBroadcastTarget('selected')}
+                className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${broadcastTarget === 'selected' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-100 hover:bg-slate-50'}`}
+              >
+                Selected ({selectedEmails.length})
+              </button>
+            </div>
+          </div>
+
+          {broadcastTarget === 'selected' && (
+            <div className="h-64 overflow-y-auto border border-slate-50 rounded-2xl p-2 bg-slate-50/30">
+              {agents.map(agent => (
+                <label key={agent._id} className="flex items-center gap-3 p-2 hover:bg-white rounded-lg cursor-pointer transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedEmails.includes(agent.email)}
+                    onChange={() => toggleEmailSelection(agent.email)}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                  />
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-700">{agent.firstName} {agent.lastName}</p>
+                    <p className="text-[8px] text-slate-400 font-medium">{agent.email}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: Message Composer */}
+        <div className="lg:col-span-2 space-y-4">
+          <div>
+            <label className="text-[9px] font-black uppercase text-slate-400 mb-2 block">Announcement Subject</label>
+            <input 
+              type="text"
+              placeholder="e.g., System Maintenance Schedule or Subscription Expiry"
+              className="w-full bg-slate-50 border-none p-4 rounded-2xl text-xs font-bold focus:ring-2 focus:ring-blue-500/20"
+              value={newsSubject}
+              onChange={(e) => setNewsSubject(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-[9px] font-black uppercase text-slate-400 mb-2 block">Message Content</label>
+            <textarea 
+              rows="8"
+              placeholder="Write your update here..."
+              className="w-full bg-slate-50 border-none p-4 rounded-2xl text-xs font-medium leading-relaxed focus:ring-2 focus:ring-blue-500/20"
+              value={newsContent}
+              onChange={(e) => setNewsContent(e.target.value)}
+            />
+          </div>
+          <button 
+            disabled={sendingNews || !newsContent || (broadcastTarget === 'selected' && selectedEmails.length === 0)}
+            onClick={handleSendBroadcast}
+            className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50"
+          >
+            {sendingNews ? 'Dispatching Emails...' : 'Send Broadcast Now'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
         </div>
       </main>
 

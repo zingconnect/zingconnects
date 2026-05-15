@@ -7,7 +7,7 @@ import { connectToDatabase } from '../config/db.js';
 import { getPrivateUrl } from '../config/s3.js';
 import { authenticateToken, isAdmin } from './auth.js';
 import SupportMessage from '../models/Support.js';
-
+import { sendOfflineNotification } from '../utils/mailer.js';
 
 const router = express.Router();
 
@@ -354,6 +354,96 @@ router.get('/support/messages/:guestId', authenticateToken, isAdmin, async (req,
   } catch (err) {
     console.error("Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error fetching messages" });
+  }
+});
+
+/**
+ * @route   POST /api/admin/broadcast-news
+ * @desc    Send email updates to all or selected agents
+ */
+router.post('/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { target, emails, subject, message } = req.body;
+
+    if (!subject || !message) {
+      return res.status(400).json({ success: false, message: "Subject and Message are required." });
+    }
+
+    let recipientEmails = [];
+
+    if (target === 'all') {
+      // Fetch all registered agent emails from DB
+      const allAgents = await Agent.find({}, 'email');
+      recipientEmails = allAgents.map(a => a.email);
+    } else {
+      // Use the specific list sent from the frontend
+      recipientEmails = emails;
+    }
+
+    if (recipientEmails.length === 0) {
+      return res.status(400).json({ success: false, message: "No recipients found." });
+    }
+
+    // Since we are using ES modules, we can't easily import 'transporter' if it's not exported.
+    // If you exported 'transporter' in mailer.js, use it. Otherwise, create a one-time transporter here:
+    // For this example, I'll assume you add an export to your mailer.js or just use the same config:
+    
+    const baseUrl = "https://zingconnect.vercel.app";
+    const logoUrl = `${baseUrl}/logo-s.png`; // Points to your public/logo.png
+    const brandColor = "#2563eb";
+
+    const emailPromises = recipientEmails.map(email => {
+      const mailOptions = {
+        from: `"ZingConnect Terminal" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: subject,
+        html: `
+          <div style="font-family: 'Helvetica', Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #f0f0f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+            <div style="background-color: #0f172a; padding: 25px; text-align: center;">
+              <img src="${logoUrl}" alt="ZingConnect Logo" width="150" style="display: block; margin: 0 auto 10px auto; max-width: 150px;">
+              <h1 style="color: white; font-size: 14px; margin: 0; letter-spacing: 3px; font-weight: 300; text-transform: uppercase;">
+                Official <span style="color: ${brandColor}; font-weight: bold;">Broadcast</span>
+              </h1>
+            </div>
+
+            <div style="padding: 40px 30px; background-color: #ffffff;">
+              <h2 style="color: #1e293b; font-size: 20px; margin-top: 0; border-left: 4px solid ${brandColor}; padding-left: 15px;">
+                ${subject}
+              </h2>
+              <p style="color: #475569; line-height: 1.8; font-size: 15px; white-space: pre-wrap;">${message}</p>
+              
+              <div style="margin-top: 40px; text-align: center;">
+                <a href="${baseUrl}/agent/login" 
+                   style="background-color: ${brandColor}; color: white; padding: 14px 35px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 13px; display: inline-block;">
+                   GO TO AGENT DASHBOARD
+                </a>
+              </div>
+            </div>
+
+            <div style="background-color: #f8fafc; padding: 25px; text-align: center; color: #94a3b8; font-size: 11px; border-top: 1px solid #f1f5f9;">
+              <p style="margin: 0 0 10px 0;">You are receiving this as a verified ZingConnect Agent.</p>
+              <strong>&copy; 2026 ZingConnect Infrastructure Team.</strong>
+            </div>
+          </div>
+        `
+      };
+            return nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+      }).sendMail(mailOptions);
+    });
+
+    await Promise.all(emailPromises);
+
+    res.json({ 
+      success: true, 
+      message: `Announcement successfully dispatched to ${recipientEmails.length} agents.` 
+    });
+
+  } catch (err) {
+    console.error("Broadcast API Error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to send broadcast", details: err.message });
   }
 });
 
