@@ -2666,14 +2666,13 @@ app.get('/api/admin/support/messages/:guestId', async (req, res) => {
   }
 });
 
-// Ensure the route starts with /
 app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
   try {
     await connectToDatabase();
     
     const { target, emails, subject, message } = req.body;
 
-    // 1. Validation
+    // 1. Input Validation
     if (!subject || !message) {
       return res.status(400).json({ 
         success: false, 
@@ -2681,24 +2680,26 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
       });
     }
 
-    // 2. Determine Recipients
+    // 2. Resolve Recipient List
     let recipientEmails = [];
     if (target === 'all') {
+      // Fetch only the email field for all agents
       const allAgents = await Agent.find({}, 'email');
       recipientEmails = allAgents.map(a => a.email);
     } else {
+      // Use the specific array provided by the frontend
       recipientEmails = Array.isArray(emails) ? emails : [];
     }
 
     if (recipientEmails.length === 0) {
       return res.status(400).json({ 
         success: false, 
-        message: "No valid recipients selected." 
+        message: "No valid recipients found." 
       });
     }
 
-    // 3. Setup Transporter ONCE (Optimization)
-    // Moving this outside the .map() prevents 500 errors caused by socket saturation
+    // 3. Initialize Transporter ONCE (Singleton Pattern)
+    // This fixes the 'nodemailer is not defined' error and optimizes performance
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: { 
@@ -2711,7 +2712,7 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
     const logoUrl = `${baseUrl}/logo-s.png`; 
     const brandColor = "#2563eb";
 
-    // 4. Map to Promises
+    // 4. Create Email Promises
     const emailPromises = recipientEmails.map(email => {
       const mailOptions = {
         from: `"ZingConnect Terminal" <${process.env.EMAIL_USER}>`,
@@ -2751,7 +2752,7 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
       return transporter.sendMail(mailOptions);
     });
 
-    // 5. Execute Parallel Sends
+    // 5. Fire all emails in parallel
     await Promise.all(emailPromises);
 
     return res.json({ 
