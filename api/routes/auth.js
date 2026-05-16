@@ -942,7 +942,9 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// --- GET AGENT'S CONNECTED USERS ---
 router.get('/my-users', authenticateToken, async (req, res) => {
+  // Clear cache to ensure real-time status updates
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -950,6 +952,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
+    // Get agent ID from the token (provided by authenticateToken middleware)
     const agentId = req.user?.id || req.user?._id;
 
     if (!agentId) {
@@ -959,6 +962,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       });
     }
 
+    // 1. Fetch users linked to this agent (Keeping all select fields intact for layout)
     const users = await User.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
@@ -967,7 +971,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // 1. Robust S3 Key Extraction & Signing
+      // 2. Handle S3 Image Signing (IDrive e2 / AWS S3)
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
           let fileKey = user.photoUrl;
@@ -977,14 +981,16 @@ router.get('/my-users', authenticateToken, async (req, res) => {
             fileKey = fileKey.split('.com/')[1].split('?')[0];
           }
           
-          // Ensure "users/" prefix if it's a profile photo and missing the prefix
-          // (Only apply if your storage structure requires it)
-          const decodedKey = decodeURIComponent(fileKey);
+          // FIX: Clean leading slashes and safely handle spaces/special characters
+          let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
+          
+          // Decode first to prevent double-encoding, then decode raw spaces if any exist safely
+          cleanKey = decodeURIComponent(cleanKey);
 
           const client = getS3Client(); // Use the helper to ensure client is initialized
           const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME,
-            Key: decodedKey,
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: cleanKey, // Sent exactly as S3 maps the storage system hierarchy
           });
 
           finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
@@ -993,19 +999,18 @@ router.get('/my-users', authenticateToken, async (req, res) => {
         }
       }
 
-      // 2. Fallback to UI Avatars
+      // 3. Fallback to UI Avatars if signing fails or photo doesn't exist
       if (!finalPhotoUrl) {
         const nameParam = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${nameParam}&background=random&color=fff&size=128`;
       }
 
-      // 3. Presence Calculation
+      // 4. Presence Calculation
       const lastSeen = user.lastActive || user.lastLogin;
       const now = new Date();
-      // Using 5 minutes for a slightly more forgiving "Online" status
       const isOnline = lastSeen && (now - new Date(lastSeen)) < (5 * 60 * 1000);
 
-      // 4. Human-Readable Status
+      // 5. Human-Readable Status
       let lastSeenText = "Offline";
       if (lastSeen) {
         const diffMins = Math.floor((now - new Date(lastSeen)) / 60000);
