@@ -25,6 +25,7 @@ import { Server } from 'socket.io';
 import http from 'http';
 import { connectToDatabase } from './config/db.js';
 import { getS3Client, getPrivateUrl, PutObjectCommand } from './config/s3.js';
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createLiveKitToken } from './utils/livekitHelper.js';
 import callRoutes from './routes/callRoutes.js';
 import Call from './models/Call.js'; 
@@ -1339,54 +1340,48 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
         message: "Unauthorized: Missing agent session metadata." 
       });
     }
-
-    // 1. ADDED 'city state' back to select so the frontend UI doesn't misbehave
     const users = await User.find({ connectedAgents: agentId })
-      .select('firstName lastName email photoUrl city state lastActive lastLogin')
+      .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
-
-    // 2. Process users and sign S3 URLs
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
-          let fileKey = user.photoUrl;
+          let fileKey = user.photoUrl;          
           if (fileKey.includes('.com/')) {
             fileKey = fileKey.split('.com/')[1].split('?')[0];
           }
+          let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
+                    try {
+            cleanKey = decodeURIComponent(cleanKey);
+          } catch (e) {
+          }
 
           const client = getS3Client(); 
-          
-          // FIX: Try matching raw key string first. If it has special symbols, 
-          // normalize it so the S3 client addresses the exact object path.
-          const cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
-
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: cleanKey, // Sent as stored without breaking on partial encodings
+            Key: cleanKey, 
           });
 
+          // Generate the temporary signed URL for iDrive e2
           finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
         } catch (s3Err) {
           console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
         }
       }
-
-      // 3. Fallback to dynamic avatars if no photo exists or signing fails
       if (!finalPhotoUrl) {
         const name = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff&size=128`;
       }
-
-      // 4. Presence logic
       const lastSeen = user.lastActive || user.lastLogin;
       const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
-
       return {
         ...user,
-        photoUrl: finalPhotoUrl,
+        photoUrl: finalPhotoUrl,   // standard property
+        avatar: finalPhotoUrl,     // fallback property in case frontend uses 'avatar'
+        avatarUrl: finalPhotoUrl,  // fallback property in case frontend uses 'avatarUrl'
         status: isOnline ? 'online' : 'offline'
       };
     }));

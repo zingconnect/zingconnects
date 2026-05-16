@@ -25,9 +25,6 @@ export const sendOfflineNotification = async (receiver, sender, text, receiverTy
   try {
     const baseUrl = "https://zingconnect.vercel.app";
     const brandColor = "#007bff"; 
-
-    // --- 1. IMPROVED MESSAGE DISPLAY ---
-    // This ensures the "Proper Message" you mentioned displays correctly
     let displayBody = text && text.trim() !== "" ? text : "";
     
     if (!displayBody) {
@@ -35,11 +32,8 @@ export const sendOfflineNotification = async (receiver, sender, text, receiverTy
       else if (fileType === 'video') displayBody = "Sent a video";
       else displayBody = "Sent a message";
     }
-
-    // --- 2. SIGNED URL FOR IMAGE DISPLAY ---
     let embeddedVisual = "";
     if (fileUrl && fileType === 'image') {
-       // We sign the URL here so Gmail can access the private iDrive file
        const signedViewUrl = await getPrivateUrl(fileUrl);
        embeddedVisual = `
         <div style="margin-top: 20px; border-radius: 8px; overflow: hidden; border: 1px solid #eee; background-color: #f9f9f9;">
