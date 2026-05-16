@@ -98,8 +98,6 @@ const authenticateToken = (req, res, next) => {
         if (!agent) {
           return res.status(404).json({ message: "Agent not found" });
         }
-
-        // Dual login check
         if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
           return res.status(401).json({ 
             success: false, 
@@ -107,15 +105,10 @@ const authenticateToken = (req, res, next) => {
             forceLogout: true 
           });
         }
-
-        // 🚀 FIX: Update lastActive atomically instead of using .save()
-        // This prevents the VersionError that was crashing your /api/agents/profile/me route!
         await AgentModel.findByIdAndUpdate(req.user.id, {
           $set: { lastActive: new Date() }
         });
       }
-
-      // 2. Logic for Admins: Serverless safe direct update
       if (decoded.role === 'admin') {
         const AdminModel = mongoose.models.Admin || Admin;
         await AdminModel.findByIdAndUpdate(req.user.id, { 
