@@ -209,6 +209,12 @@ const LocalUserMuteController = ({ isMuted, isMasked }) => {
   useEffect(() => {
     if (!localParticipant) return;
     const syncMic = async () => {
+      const roomState = localParticipant.room?.state;
+      
+      if (!roomState || roomState !== 'connected') {
+        console.log("⏳ LiveKit signaling engine is still connecting... holding mic synchronization.");
+        return; 
+      }
       const shouldPublish = !isMasked && !isMuted;
       try {
         await localParticipant.setMicrophoneEnabled(shouldPublish);
@@ -217,9 +223,12 @@ const LocalUserMuteController = ({ isMuted, isMasked }) => {
         console.error("❌ LiveKit Mic Sync Error:", err);
       }
     };
+    const delayTimer = setTimeout(() => {
+      syncMic();
+    }, 150);
 
-    syncMic();
-  }, [isMuted, isMasked, localParticipant]);
+    return () => clearTimeout(delayTimer);
+      }, [isMuted, isMasked, localParticipant, localParticipant?.room?.state]);
 
   return null;
 };
