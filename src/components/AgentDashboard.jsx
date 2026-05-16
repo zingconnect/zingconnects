@@ -227,20 +227,30 @@ const startStatusPolling = (roomName) => {
         headers: { 'Authorization': `Bearer ${token}` }
       });      
       const data = await res.json();
-            const isTimeout = (Date.now() - startTime) > 45000; 
-            if (data.success && (['ended', 'rejected', 'missed'].includes(data.status) || (isTimeout && data.status === 'calling'))) {
-        console.log("🚫 Call timed out or was rejected by status check.");
-        clearInterval(pollInterval);
-        handleEndCall(); 
+      const isTimeout = (Date.now() - startTime) > 45000; 
+      if (data.success) {
+        if (data.status === 'connected') {
+          console.log("⚡ Call connection confirmed by server! Clearing poller to streamline LiveKit media stream...");
+          clearInterval(pollInterval);
+          
+          peerConnectedRef.current = true;
+          setPeerConnected(true);
+          setCallStatus('connected'); // Pulls the Agent out of the 'ringing/calling' screen layout
+          return; // Exit execution safely
+        }
+        if (['ended', 'rejected', 'missed'].includes(data.status) || (isTimeout && data.status === 'calling')) {
+          console.log("🚫 Call timed out, ended, or was rejected by status check.");
+          clearInterval(pollInterval);
+          handleEndCall(); 
+        }
       }
     } catch (err) {
       console.error("Poller Error:", err);
     }
-  }, 4000); 
+  }, 3000); 
   
   if (pollingIntervalRef) pollingIntervalRef.current = pollInterval;
 };
-
 const handleAcceptCall = async () => {
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();

@@ -822,18 +822,17 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. Audio Context Resume (Instant unlock)
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (AudioContext) {
     const audioCtx = new AudioContext();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume().catch(e => console.warn("Context unlock blocked:", e));
+    }
   }
-
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
     ringtoneAudio.current.currentTime = 0;
   }
-
   const token = localStorage.getItem('userToken');
   const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
 
@@ -841,21 +840,12 @@ const handleAcceptCall = async () => {
     console.error("❌ No Call ID found.");
     return;
   }
-
   try {
-    // 2. Lock UI Transition
     setIsEnding(true); 
     isTransitioningRef.current = true;
-    
     setCallStatus('connecting');
     setIsIncomingCall(false);
     setShowFullScreenCall(true);
-
-    const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId)?.toString();
-    if (socket && agentId) {
-      socket.emit("call-accepted", { to: agentId, callId });
-    }
-
     const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
       method: 'POST',
       headers: {
@@ -863,26 +853,22 @@ const handleAcceptCall = async () => {
         'Authorization': `Bearer ${token}`
       }
     });
-
     const data = await response.json();    
-    if (data.lkToken) {
+    if (data.success && data.lkToken) {
       console.log("✅ Secure LiveKit token received.");
-
-      // 🔥 Set the logic gates
+      const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId)?.toString();
+      if (socket && agentId) {
+        socket.emit("answer-call", { to: agentId, callId: data.roomName, myId: agentId });
+      }
       peerConnectedRef.current = true; 
       setPeerConnected(true);
-      
       setLiveKitToken(data.lkToken); 
       setCallStatus('connected'); 
-
-      setTimeout(() => {
-        setIsEnding(false);
-        isTransitioningRef.current = false;
-        console.log("🔓 Transition lock released.");
-      }, 1500); 
-
+      setIsEnding(false);
+      isTransitioningRef.current = false;
+      console.log("🔓 LiveKit Media pipeline connected instantly.");
     } else {
-      throw new Error("LiveKit token missing");
+      throw new Error(data.message || "LiveKit token missing from server engine");
     }
 
   } catch (err) {
