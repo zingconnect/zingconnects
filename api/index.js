@@ -24,7 +24,8 @@ import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
 import { connectToDatabase } from './config/db.js';
-import { getS3Client, getPrivateUrl, PutObjectCommand } from './config/s3.js';
+import { getS3Client, getPrivateUrl, PutObjectCommand, GetObjectCommand } from './config/s3.js'; 
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createLiveKitToken } from './utils/livekitHelper.js';
 import callRoutes from './routes/callRoutes.js';
 import Call from './models/Call.js'; 
@@ -1339,7 +1340,6 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 // --- GET AGENT'S CONNECTED USERS ---
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -1357,10 +1357,12 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
         message: "Unauthorized: Missing agent session metadata." 
       });
     }
-    const users = await User.find({ connectedAgents: agentId })
+    const ActiveUserModel = mongoose.models.User || User;
+    const users = await ActiveUserModel.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
+
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
@@ -1371,47 +1373,53 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
             fileKey = fileKey.split('.com/')[1].split('?')[0];
           }
           let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
-                    try {
+          
+          try {
             cleanKey = decodeURIComponent(cleanKey);
           } catch (e) {
+            // Keep going if decode fails
           }
 
+          // 🚀 3. Safe invocation using the constructor re-exported from s3.js
           const client = getS3Client(); 
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: cleanKey, 
           });
 
-          // Generate the temporary signed URL for iDrive e2
+          // Generate the temporary signed URL for IDrive e2
           finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
         } catch (s3Err) {
           console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
         }
       }
+
       if (!finalPhotoUrl) {
         const name = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff&size=128`;
       }
+
       const lastSeen = user.lastActive || user.lastLogin;
       const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
+
       return {
         ...user,
-        photoUrl: finalPhotoUrl,   // standard property
-        avatar: finalPhotoUrl,     // fallback property in case frontend uses 'avatar'
-        avatarUrl: finalPhotoUrl,  // fallback property in case frontend uses 'avatarUrl'
+        photoUrl: finalPhotoUrl,   
+        avatar: finalPhotoUrl,     
+        avatarUrl: finalPhotoUrl,  
         status: isOnline ? 'online' : 'offline'
       };
     }));
 
-    res.json({
+    return res.json({
       success: true,
       count: processedUsers.length,
       users: processedUsers
     });
 
   } catch (err) {
-    console.error("CRITICAL ERROR FETCHING AGENT USERS:", err);
-    res.status(500).json({ 
+    console.error("🔴 CRITICAL ERROR FETCHING AGENT USERS:", err);
+    return res.status(500).json({ 
       success: false,
       message: "Internal server error while retrieving user list",
       error: err.message
@@ -1971,17 +1979,15 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     }
   }
 });
-
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    // Normalize user ID
-    const rawId = (req.user?._id || req.user?.id || req.user?.userId)?.toString();
-    
-    // Look for calls created in the last 60 seconds to avoid stale popups
-    const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+        const rawId = (req.user?._id || req.user?.id || req.user?.userId)?.toString();
+        const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+    const ActiveCallModel = mongoose.models.Call || Call;
+    const ActiveUserModel = mongoose.models.User || User; 
 
-    let incoming = await Call.findOne({ 
+    let incoming = await ActiveCallModel.findOne({ 
       receiver: rawId,
       status: { $in: ['calling', 'ringing'] },
       active: true,
@@ -1991,17 +1997,16 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     .populate('caller', 'firstName lastName photoUrl'); 
 
     if (!incoming) return res.json({ hasIncomingCall: false });
+    
     let finalPhotoUrl = null;
     if (incoming.caller?.photoUrl) {
       finalPhotoUrl = await getPrivateUrl(incoming.caller.photoUrl);
     }
-
-    // Default Fallback
     if (!finalPhotoUrl) {
       finalPhotoUrl = `https://ui-avatars.com/api/?name=${incoming.caller?.firstName || 'User'}&background=0D1117&color=fff`;
     }
 
-    res.json({
+    return res.json({
       hasIncomingCall: true,
       callId: incoming._id,
       status: incoming.status, 
@@ -2014,8 +2019,8 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Poll Route Error:", err.message);
-    res.status(500).json({ hasIncomingCall: false });
+    console.error("🔴 CRITICAL INCOMING CALL POLL ROUTE ERROR:", err.message);
+    return res.status(500).json({ hasIncomingCall: false, error: err.message });
   }
 });
 
@@ -2023,8 +2028,6 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const { callId, signal } = req.body;
-
-    // 1. SAFE ID EXTRACTION
     const userPayload = req.user;
     const myId = (userPayload?._id || userPayload?.id || userPayload?.userId || userPayload?.sub)?.toString();
 
@@ -2032,19 +2035,13 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
       console.error("❌ Signal Update: No user ID found in request");
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
-
-    // 2. FIND THE CALL
     const call = await Call.findById(callId);
     if (!call) {
       return res.status(404).json({ success: false, message: "Call not found" });
     }
-    
-    // 3. IDENTIFY ROLE & NORMALIZE SIGNAL
-    const isAnswer = call.receiver.toString() === myId;
+        const isAnswer = call.receiver.toString() === myId;
     const processedSignal = typeof signal === 'object' ? JSON.stringify(signal) : signal;
-    
-    // 4. PREPARE UPDATE DATA
-    const updateData = isAnswer 
+        const updateData = isAnswer 
       ? { 
           answerSignal: processedSignal, 
           status: 'connected', 
@@ -2055,12 +2052,9 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
         };
 
     const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
-
-    // 5. RETRIEVE SOCKET.IO FROM APP INSTANCE
     const socketIo = req.app.get('socketio');
 
     if (socketIo) {
-      // FIX: Use 'isAnswer' (defined above) and 'processedSignal'
       const targetId = isAnswer ? updatedCall.caller.toString() : updatedCall.receiver.toString();
       const eventName = isAnswer ? "call-accepted" : "incoming-call";
       
@@ -2074,8 +2068,6 @@ app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
     } else {
       console.error("❌ Socket.io instance not found on req.app. Check app.set('socketio', io) in server.js");
     }
-
-    // 6. FINAL RESPONSE
     res.json({ 
       success: true, 
       status: updatedCall.status,

@@ -10,7 +10,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { connectToDatabase } from '../config/db.js';
-import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
+import { getS3Client, getPrivateUrl, PutObjectCommand, GetObjectCommand } from '../config/s3.js';
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import Agent from '../models/Agent.js';
 import User from '../models/User.js'; 
@@ -947,7 +947,7 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// --- GET AGENT'S CONNECTED USERS ---
+// --- GET AGENT'S CONNECTED USERS (ROUTER VERSION) ---
 router.get('/my-users', authenticateToken, async (req, res) => {
   // Clear cache to ensure real-time status updates
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -955,6 +955,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Expires', '0');
 
   try {
+    // 🚀 1. Enforce active database connection tunnel instantly
     await connectToDatabase();
     
     // Get agent ID from the token (provided by authenticateToken middleware)
@@ -967,8 +968,11 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       });
     }
 
-    // 1. Fetch users linked to this agent (Keeping all select fields intact for layout)
-    const users = await User.find({ connectedAgents: agentId })
+    // 🚀 2. SERVERLESS SAFEGUARD: Dynamically resolve User model to prevent context loss
+    const ActiveUserModel = mongoose.models.User || User;
+
+    // Fetch users linked to this agent (Keeping all select fields intact for layout)
+    const users = await ActiveUserModel.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
@@ -976,7 +980,7 @@ router.get('/my-users', authenticateToken, async (req, res) => {
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // 2. Handle S3 Image Signing (IDrive e2 / AWS S3)
+      // 3. Handle S3 Image Signing (IDrive e2 / AWS S3)
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
           let fileKey = user.photoUrl;
@@ -992,10 +996,11 @@ router.get('/my-users', authenticateToken, async (req, res) => {
           // Decode first to prevent double-encoding, then decode raw spaces if any exist safely
           cleanKey = decodeURIComponent(cleanKey);
 
-          const client = getS3Client(); // Use the helper to ensure client is initialized
+          // 🚀 4. Use constructors safely since they are imported at the top of your router file
+          const client = getS3Client(); 
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: cleanKey, // Sent exactly as S3 maps the storage system hierarchy
+            Key: cleanKey, 
           });
 
           finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
@@ -1004,18 +1009,18 @@ router.get('/my-users', authenticateToken, async (req, res) => {
         }
       }
 
-      // 3. Fallback to UI Avatars if signing fails or photo doesn't exist
+      // 5. Fallback to UI Avatars if signing fails or photo doesn't exist
       if (!finalPhotoUrl) {
         const nameParam = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${nameParam}&background=random&color=fff&size=128`;
       }
 
-      // 4. Presence Calculation
+      // 6. Presence Calculation
       const lastSeen = user.lastActive || user.lastLogin;
       const now = new Date();
       const isOnline = lastSeen && (now - new Date(lastSeen)) < (5 * 60 * 1000);
 
-      // 5. Human-Readable Status
+      // 7. Human-Readable Status
       let lastSeenText = "Offline";
       if (lastSeen) {
         const diffMins = Math.floor((now - new Date(lastSeen)) / 60000);
@@ -1034,12 +1039,14 @@ router.get('/my-users', authenticateToken, async (req, res) => {
       return {
         ...user,
         photoUrl: finalPhotoUrl,
+        avatar: finalPhotoUrl,     // Fallback frontend object data property
+        avatarUrl: finalPhotoUrl,  // Fallback frontend object data property
         status: isOnline ? 'online' : 'offline',
         lastSeenText: lastSeenText
       };
     }));
 
-    res.json({
+    return res.json({
       success: true,
       count: processedUsers.length,
       users: processedUsers
@@ -1047,13 +1054,14 @@ router.get('/my-users', authenticateToken, async (req, res) => {
 
   } catch (err) {
     console.error("AGENT USERS FETCH ERROR:", err);
-    res.status(500).json({ 
+    return res.status(500).json({ 
       success: false, 
       message: "Server failed to retrieve user list",
       error: err.message
     });
   }
 });
+
 
 router.post('/unlock-voice-package', authenticateToken, async (req, res) => {
   const { transactionId, voiceId, duration } = req.body;
