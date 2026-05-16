@@ -739,7 +739,6 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching profile" });
   }
 });
-
 app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -755,7 +754,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // Security Check
+    // 1. Dual Login Security Check
     if (req.user.sessionId && agent.currentSessionId && req.user.sessionId !== agent.currentSessionId) {
       return res.status(403).json({ 
         success: false, 
@@ -763,9 +762,6 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
         reason: "dual_login" 
       });
     }
-
-    // Update activity and subscriptions
-    agent.lastActive = new Date();
     const now = new Date();
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
@@ -773,15 +769,24 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
     if (agent.voicePackageActive && agent.voicePackageExpiry && now > new Date(agent.voicePackageExpiry)) {
         agent.voicePackageActive = false;
     }
-    await agent.save();
 
     const lastActiveDate = agent.lastActive || agent.createdAt;
-    const isOnline = (now - new Date(lastActiveDate)) < (120000);
-
-    // --- CORRECTED SIGNING LOGIC ---
+    const isOnline = (now - new Date(lastActiveDate)) < 120000;
     let signedPhotoUrl = null;
     if (agent.photoUrl) {
-      signedPhotoUrl = await getPrivateUrl(agent.photoUrl);
+      try {
+        if (agent.photoUrl.startsWith('http')) {
+          const urlParts = agent.photoUrl.split('.com/');
+          const rawKey = urlParts[1] || agent.photoUrl.split('/').slice(3).join('/');
+          signedPhotoUrl = await getPrivateUrl(rawKey);
+        } else {
+          signedPhotoUrl = await getPrivateUrl(agent.photoUrl);
+        }
+      } catch (s3Error) {
+        console.error("Non-blocking S3 URL signing failure:", s3Error.message);
+        // Fall back gracefully instead of throwing a 500 server crash
+        signedPhotoUrl = null; 
+      }
     }
 
     // Default Avatar Fallback
@@ -789,7 +794,8 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-    res.json({
+    // 4. Return Normalized Client Presentation Payload
+    return res.status(200).json({
       success: true,
       agent: {
         _id: agent._id,
@@ -811,25 +817,36 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res) => {
     });
 
   } catch (err) {
-    console.error("CRITICAL ROUTE ERROR:", err.message);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    console.error("🔴 CRITICAL PROFILE ROUTE EXCEPTION:", err);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Internal server error", 
+      error: err.message 
+    });
   }
 });
+
 // 3. Update Agent Plan Selection
 app.post('/api/agents/update-plan', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    const { plan } = req.body; // e.g., "PRO"
+    const { plan } = req.body; 
 
-    const updatedAgent = await Agent.findByIdAndUpdate(
+    const AgentModel = getAgentModel(); 
+    const updatedAgent = await AgentModel.findByIdAndUpdate(
       req.user.id,
       { plan: plan },
       { new: true }
     );
 
-    res.json({ success: true, plan: updatedAgent.plan });
+    if (!updatedAgent) {
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+
+    return res.json({ success: true, plan: updatedAgent.plan });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Failed to update plan" });
+    console.error("Plan update failure:", err.message);
+    return res.status(500).json({ success: false, message: "Failed to update plan" });
   }
 });
 
