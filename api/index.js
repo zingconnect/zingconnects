@@ -25,7 +25,6 @@ import { Server } from 'socket.io';
 import http from 'http';
 import { connectToDatabase } from './config/db.js';
 import { getS3Client, getPrivateUrl, PutObjectCommand } from './config/s3.js';
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createLiveKitToken } from './utils/livekitHelper.js';
 import callRoutes from './routes/callRoutes.js';
 import Call from './models/Call.js'; 
