@@ -648,33 +648,39 @@ useEffect(() => {
     }
   };
 }, [socket, callStatus, isSpeakerOn]);
-
 const unlockAudio = () => {
   setAudioUnlocked(true);
   console.log("Initializing secure audio channels for Agent...");
+  
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (AudioContext) {
     const tempCtx = new AudioContext();
     if (tempCtx.state === 'suspended') tempCtx.resume();
   }
+
+  // 🚀 FIX: Append unique cache-busting keys so the Service Worker drops cache control
+  const cacheBuster = `?t=${Date.now()}`;
   const audioRefs = [
-    { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
-    { ref: callingAudio, src: '/sounds/calling.wav' },
-    { ref: notificationSound, src: '/sounds/notification.mp3' }
+    { ref: ringtoneAudio, src: `/sounds/ringtone.mp3${cacheBuster}` },
+    { ref: callingAudio, src: `/sounds/calling.wav${cacheBuster}` },
+    { ref: notificationSound, src: `/sounds/notification.mp3${cacheBuster}` }
   ];
 
   audioRefs.forEach(({ ref, src }) => {
     const el = ref.current;
     if (el) {
-      el.muted = true; // Temporary mute to allow auto-play "blessing"
+      el.muted = true;
+      el.crossOrigin = "anonymous"; 
       el.src = src;
+      el.load(); 
       el.play().then(() => {
         el.pause();
         el.muted = false; // Now it is unblocked and ready for real calls
         el.currentTime = 0;
-      }).catch(err => console.warn(`Priming skipped for ${src}`));
+      }).catch(err => console.warn(`Priming skipped for ${src}`, err.message));
     }
   });
+
   let remoteAudio = document.getElementById('remoteAudio');
   if (!remoteAudio) {
     remoteAudio = document.createElement('audio');
@@ -683,7 +689,9 @@ const unlockAudio = () => {
     remoteAudio.style.display = 'none';
     document.body.appendChild(remoteAudio);
   }
+  
   remoteAudio.play().then(() => remoteAudio.pause()).catch(() => {});
+  
   if (socket && agentData?._id) {
     socket.emit("join-private-room", agentData._id);
   }
@@ -691,6 +699,7 @@ const unlockAudio = () => {
   document.removeEventListener('click', unlockAudio);
   document.removeEventListener('touchstart', unlockAudio);
 };
+
 useEffect(() => {
   if (localAudioRef.current && localStream) {
     localAudioRef.current.srcObject = localStream;
