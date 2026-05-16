@@ -1323,13 +1323,16 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 // --- GET AGENT'S CONNECTED USERS ---
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+
   try {
     await connectToDatabase();
+    
     const agentId = req.user?.id || req.user?._id;
 
     if (!agentId) {
@@ -1344,6 +1347,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
       .lean();
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
+
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
           let fileKey = user.photoUrl;          
@@ -1351,23 +1355,21 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
             fileKey = fileKey.split('.com/')[1].split('?')[0];
           }
           let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
-          
-          try {
+                    try {
             cleanKey = decodeURIComponent(cleanKey);
           } catch (e) {
           }
-          if (typeof getS3Client === 'function' && typeof GetObjectCommand !== 'undefined' && typeof getSignedUrl === 'function') {
-            const client = getS3Client(); 
-            const command = new GetObjectCommand({
-              Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-              Key: cleanKey, 
-            });
-            finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
-          } else {
-            console.error(`[Configuration Error] S3 SDK modules are missing or not imported in this file context.`);
-          }
+
+          const client = getS3Client(); 
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: cleanKey, 
+          });
+
+          // Generate the temporary signed URL for iDrive e2
+          finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
         } catch (s3Err) {
-          console.error(`[S3 Error] Failed to sign photo for user ${user._id}:`, s3Err.message);
+          console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
         }
       }
       if (!finalPhotoUrl) {
@@ -1376,7 +1378,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
       }
       const lastSeen = user.lastActive || user.lastLogin;
       const isOnline = lastSeen && new Date(lastSeen) > new Date(Date.now() - 5 * 60 * 1000);
-
       return {
         ...user,
         photoUrl: finalPhotoUrl,   // standard property
@@ -1386,8 +1387,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
       };
     }));
 
-    // Securely return status 200 array
-    return res.status(200).json({
+    res.json({
       success: true,
       count: processedUsers.length,
       users: processedUsers
@@ -1395,10 +1395,10 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 
   } catch (err) {
     console.error("CRITICAL ERROR FETCHING AGENT USERS:", err);
-    return res.status(200).json({ 
-      success: false, 
-      message: "Internal server handling fell back to safe configuration state",
-      users: [] 
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error while retrieving user list",
+      error: err.message
     });
   }
 });
