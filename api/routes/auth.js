@@ -31,7 +31,7 @@ const transporter = nodemailer.createTransport({
 });
 
 const getAgentModel = () => {
-  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+  return mongoose.models.Agent || Agent;
 };
 
 export const authenticateToken = (req, res, next) => {
@@ -352,12 +352,17 @@ if (!AgentModel) throw new Error("Agent Model not initialized");
   }
 });
 
-// --- 3. AGENT LOGIN ---
 router.post('/login', async (req, res) => {
   try {
+    // 🚀 CRITICAL FIX: Explicitly open the database connection tunnel first!
+    await connectToDatabase();
+
     const AgentModel = getAgentModel();
-    if (!AgentModel) throw new Error("Agent Model not initialized");
     const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email and password are required" });
+    }
 
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
@@ -371,7 +376,7 @@ router.post('/login', async (req, res) => {
     if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
     const newSessionId = crypto.randomUUID();
-        agent.currentSessionId = newSessionId;
+    agent.currentSessionId = newSessionId;
     await agent.save();
 
     const token = jwt.sign(
@@ -385,7 +390,7 @@ router.post('/login', async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    res.json({ 
+    return res.json({ 
       success: true, 
       token, 
       slug: agent.slug,
@@ -396,7 +401,7 @@ router.post('/login', async (req, res) => {
 
   } catch (err) {
     console.error("Login Error:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
   }
 });
 

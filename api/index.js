@@ -72,7 +72,7 @@ webpush.setVapidDetails(
 const upload = multer({ storage: multer.memoryStorage() });
 
 const getAgentModel = () => {
-  return mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+  return mongoose.models.Agent || Agent;
 };
 
 const authenticateToken = (req, res, next) => {
@@ -2831,8 +2831,22 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
   }
 });
 
-
-app.get('/health', (req, res) => res.status(200).send('OK'));
+app.get('/api/health', async (req, res) => {
+  try {
+    await connectToDatabase();
+    return res.status(200).json({ 
+      success: true, 
+      status: "Online", 
+      database: "Connected" 
+    });
+  } catch (err) {
+    return res.status(500).json({ 
+      success: false, 
+      status: "Degraded", 
+      error: err.message 
+    });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 
