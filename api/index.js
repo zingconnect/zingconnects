@@ -1433,17 +1433,26 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   }
 });
 
+// --- GET CHAT MESSAGES BETWEEN TWO USERS (SERVERLESS SAFE) ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
+    // 🚀 1. Enforce active database connection tunnel instantly
     await connectToDatabase();
+    
     const myId = req.user.id;
     const { otherUserId } = req.params;
     const limit = parseInt(req.query.limit) || 30;
 
-    const messages = await Message.find({
+    // 🚀 2. SERVERLESS SAFEGUARD: Dynamically load model context from the Mongoose registry
+    const ActiveMessageModel = mongoose.models.Message || Message;
+
+    // 🚀 3. Defensive Check: Account for both 'senderId' and object-reference 'sender' variations
+    const messages = await ActiveMessageModel.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
-        { senderId: otherUserId, receiverId: myId }
+        { senderId: otherUserId, receiverId: myId },
+        { sender: myId, receiver: otherUserId },
+        { sender: otherUserId, receiver: myId }
       ]
     })
     .sort({ createdAt: -1 }) 
@@ -1453,18 +1462,31 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     // Reverse for chronological UI display
     const chronologicalMessages = messages.reverse();
 
+    // 🚀 4. Safely apply your s3.js getPrivateUrl wrapper
     const signedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      if (m.fileUrl) {
-        // Uses the helper that automatically handles full URLs vs Keys
-        m.fileUrl = await getPrivateUrl(m.fileUrl);
+      if (m.fileUrl && typeof m.fileUrl === 'string') {
+        try {
+          m.fileUrl = await getPrivateUrl(m.fileUrl);
+        } catch (s3Err) {
+          console.error(`[S3 Chat Error] Failed to sign message attachment ${m._id}:`, s3Err.message);
+        }
       }
       return m;
     }));
 
-    res.json({ success: true, messages: signedMessages });
+    return res.json({ 
+      success: true, 
+      count: signedMessages.length,
+      messages: signedMessages 
+    });
+
   } catch (err) {
-    console.error("Chat Fetch Error:", err.message);
-    res.status(500).json({ success: false, message: "Error loading chat" });
+    console.error("🔴 CRITICAL CHAT FETCH EXCEPTION:", err.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Internal server error loading chat",
+      error: err.message
+    });
   }
 });
 
