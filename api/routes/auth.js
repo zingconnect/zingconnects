@@ -33,7 +33,6 @@ const transporter = nodemailer.createTransport({
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
-
 export const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -48,17 +47,18 @@ export const authenticateToken = (req, res, next) => {
 
     try {
       if (decoded.role === 'agent') {
-        const AgentModel = mongoose.models.Agent || mongoose.model('Agent'); 
-        const agent = await AgentModel.findById(req.user.id).select('currentSessionId lastActive');
-        
+        const AgentModel = mongoose.models.Agent || mongoose.model('Agent');         
+        const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
         if (agent && agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
           return res.status(401).json({ success: false, message: "Session Mismatch", forceLogout: true });
         }
-        if (agent) {
-          agent.lastActive = new Date();
-          await agent.save();
+                if (agent) {
+          await AgentModel.findByIdAndUpdate(req.user.id, {
+            $set: { lastActive: new Date() }
+          });
         }
       }
+      
       if (decoded.role === 'admin') {
         const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
         await AdminModel.findByIdAndUpdate(req.user.id, { lastLogin: new Date() });
@@ -66,8 +66,9 @@ export const authenticateToken = (req, res, next) => {
 
       next();
     } catch (dbErr) {
-      console.error("Auth DB Error:", dbErr);
-      return res.status(500).json({ message: "Internal Auth Error" });
+      console.error("🔴 Auth DB Error:", dbErr.message);
+      // Non-blocking fallback: let the route fail or succeed rather than crashing the middleware container
+      next(); 
     }
   });
 };
