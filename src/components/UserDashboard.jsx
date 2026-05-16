@@ -808,15 +808,7 @@ useEffect(() => {
 const toggleMute = () => {
   setIsMuted(prev => {
     const newState = !prev;
-  const stream = localStream || userStreamRef.current;  
-    if (stream) {
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !newState; // Track enabled = not muted
-      });
-      console.log(`Mic ${newState ? 'disabled' : 'enabled'}`);
-    } else {
-      console.warn("No active stream found to mute");
-    }
+    console.log(`🎤 Mic state updated: ${newState ? 'MUTING' : 'UNMUTING'}`);
     return newState;
   });
 };
@@ -2400,24 +2392,23 @@ return (
     </div>
   </div>
 )}
-    {liveKitToken && (
-<LiveKitRoom
+{liveKitToken && (
+  <LiveKitRoom
     video={false}
-    audio={true}
+    audio={true} // 👈 LiveKit manages the hardware microphone stream cleanly here
     token={liveKitToken}
     serverUrl={import.meta.env.VITE_LIVEKIT_URL}
     connect={!!liveKitToken}
-    // Optimization: Reduces bandwidth jitter which causes the "Websocket error"
     options={{
       publishDefaults: {
         audioPreset: { maxBitrate: 32000 },
-        dtx: true, 
+        dtx: true, // Stops transmitting packets during silence to save bandwidth
       },
       adaptiveStream: true,
     }}
     onConnected={async () => {
       console.log("⚡ ZingConnect: Audio Bridge Established.");
-            try {
+      try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         if (ctx.state === 'suspended') await ctx.resume();
       } catch (e) {
@@ -2440,6 +2431,7 @@ return (
       }
     }}
   >
+    {/* 🚀 Render the Audio Session containing the renderer and track sync controller */}
     <AudioSession 
       isMuted={isMuted} 
       isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} 
