@@ -1055,9 +1055,7 @@ router.post('/unlock-voice-package', authenticateToken, async (req, res) => {
 
   try {
     const Agent = getAgentModel();
-
     const response = await flw.Transaction.verify({ id: transactionId });
-
     if (response.data.status === "successful") {
       let daysToAdd = 30;
       if (duration === '6 Months Identity') daysToAdd = 180;
