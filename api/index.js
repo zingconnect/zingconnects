@@ -382,25 +382,25 @@ const addDays = (date, days) => {
   result.setDate(result.getDate() + days);
   return result;
 };
+// Locate this block inside your index.js and replace it with this version:
 app.use(async (req, res, next) => {
   if (req.path.startsWith('/api/socket.io')) {
     return next();
   }
-
   try {
-    const db = await connectToDatabase();
-    if (!db) {
-      return res.status(503).json({ 
-        success: false, 
-        message: "Database connection temporarily unavailable" 
-      });
-    }
+    await connectToDatabase();
     next();
   } catch (error) {
-    console.error("Middleware DB Error:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    console.error("CRITICAL MIDDLEWARE DB TIMEOUT:", error.message);
+    
+    // Send immediate response so Vercel does not hang for 10000ms
+    return res.status(503).json({ 
+      success: false, 
+      message: "Database connectivity issue detected. Request aborted safely." 
+    });
   }
 });
+
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res) => {
     console.log("Registration Stage 1 (Complete Fields) started...");
 
