@@ -469,11 +469,16 @@ const startVoiceConversion = async (existingStream) => {
 
 const LocalUserMuteController = ({ isMuted, isMasked }) => {
   const { localParticipant } = useLocalParticipant();
+  const room = useRoomContext(); // Access core engine connection states
+
   useEffect(() => {
-    if (!localParticipant) return;
+    if (!localParticipant || !room) return;
     const syncMic = async () => {
+      if (room.state !== 'connected') {
+        console.log(`⏳ LiveKit Engine is ${room.state} - Stalling mic track synchronization...`);
+        return;
+      }
       const shouldPublish = !isMasked && !isMuted;
-      
       try {
         await localParticipant.setMicrophoneEnabled(shouldPublish);
         console.log(`🎙️ Agent Mic Sync: ${shouldPublish ? 'ON' : 'OFF (Masked/Muted)'}`);
@@ -482,12 +487,66 @@ const LocalUserMuteController = ({ isMuted, isMasked }) => {
       }
     };
     syncMic();
-  }, [isMuted, isMasked, localParticipant]);
+    const handleStateChange = () => {
+      if (room.state === 'connected') syncMic();
+    };
+
+    room.on('connectionStateChanged', handleStateChange);
+    return () => {
+      room.off('connectionStateChanged', handleStateChange);
+    };
+  }, [isMuted, isMasked, localParticipant, room, room?.state]);
 
   return null;
 };
 
-const AudioSession = ({ isMuted, isMasked }) => {
+const AudioSession = ({ 
+  isMuted, 
+  isMasked, 
+  isIncomingCall, 
+  setCallStatus, 
+  setPeerConnected, 
+  ringtoneAudio, 
+  callingAudio 
+}) => {
+  const room = useRoomContext();
+
+  useEffect(() => {
+    if (!room) return;
+    const handleConnectionEngineState = async () => {
+      console.log(`📡 ZingConnect Room Context State Changed: ${room.state}`);
+      if (room.state === 'connected') {
+        console.log("⚡ ZingConnect: Audio Bridge Fully Established via Context.");
+                try {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) {
+            const ctx = new AudioContext();
+            if (ctx.state === 'suspended') await ctx.resume();
+          }
+        } catch (e) { 
+          console.error("Audio Context Wake-up failed", e); 
+        }
+        if (isIncomingCall) {
+          if (ringtoneAudio.current) {
+            ringtoneAudio.current.pause();
+            ringtoneAudio.current.currentTime = 0;
+          }
+        } else {
+          if (callingAudio.current) {
+            callingAudio.current.pause();
+            callingAudio.current.currentTime = 0;
+          }
+        }
+        setCallStatus('connected');
+        setPeerConnected(true);
+      }
+    };
+    room.on('connectionStateChanged', handleConnectionEngineState);
+    if (room.state === 'connected') handleConnectionEngineState();
+    return () => {
+      room.off('connectionStateChanged', handleConnectionEngineState);
+    };
+  }, [room, isIncomingCall, setCallStatus, setPeerConnected, ringtoneAudio, callingAudio]);
   return (
     <>
       <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
@@ -495,6 +554,7 @@ const AudioSession = ({ isMuted, isMasked }) => {
     </>
   );
 };
+
 const stopVoiceConversion = () => {
   if (aiMediaRecorderRef.current) {
     if (aiMediaRecorderRef.current.state !== "inactive") aiMediaRecorderRef.current.stop();
@@ -1758,14 +1818,14 @@ return (
 <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
   <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
 
-   {/* --- CALL ENGINE (FIXED POSITIONING & DESIGN STABILITY) --- */}
-{callStatus !== 'idle' && (
+{/* --- CALL ENGINE (FIXED POSITIONING & DESIGN STABILITY) --- */}
+{callStatus !== 'idle' && lkToken && (
   <LiveKitRoom
     video={false}
     audio={true} 
     token={lkToken}
     serverUrl={import.meta.env.VITE_LIVEKIT_URL}
-    connect={!!lkToken} 
+    connect={true} 
     options={{
         publishDefaults: {
             audioPreset: { maxBitrate: 48000 },
@@ -1773,32 +1833,18 @@ return (
         },
         adaptiveStream: true,
     }}
-    onConnected={async () => {
-        console.log("⚡ ZingConnect: Audio Bridge Established.");
-                try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            await ctx.resume();
-        } catch (e) { console.error("Audio Wake-up failed", e); }
-
-        if (isIncomingCall) {
-            setCallStatus('connected');
-            setPeerConnected(true);
-            if (ringtoneAudio.current) {
-                ringtoneAudio.current.pause();
-                ringtoneAudio.current.currentTime = 0;
-            }
-        } else {
-            setCallStatus('connected');
-            if (callingAudio.current) {
-                callingAudio.current.pause();
-                callingAudio.current.currentTime = 0;
-            }
-        }
-    }}
-    onDisconnected={handleEndCall}>
+    onDisconnected={handleEndCall}
+  >
+    {/* AudioSession now contextually controls audio synchronization safely */}
     <AudioSession 
         isMuted={isMuted} 
-        isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'}  />
+        isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'}
+        isIncomingCall={isIncomingCall}
+        setCallStatus={setCallStatus}
+        setPeerConnected={setPeerConnected}
+        ringtoneAudio={ringtoneAudio}
+        callingAudio={callingAudio}
+    />
 
 {/* 1. IN-CHAT STATUS BAR */}
 {!showFullScreenCall && (
@@ -1842,6 +1888,7 @@ return (
     </div>
   </div>
 )}
+
    {/* 2. FULLSCREEN OVERLAY */}
 {showFullScreenCall && (
   <div className="fixed inset-0 z-[40000] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white animate-in fade-in zoom-in duration-300">
@@ -1952,7 +1999,6 @@ return (
 )}
   </LiveKitRoom>
 )}
-
     {/* --- CONNECTION STATUS OVERLAY --- */}
     {(connectionStatus === 'offline' || connectionStatus === 'connecting') && (
       <div className={`fixed top-0 left-0 w-full z-[50000] py-1.5 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-300 ${connectionStatus === 'offline' ? 'bg-[#ea0038]' : 'bg-[#0052FF]'}`}>
