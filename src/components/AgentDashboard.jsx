@@ -496,7 +496,6 @@ const LocalUserMuteController = ({ isMuted, isMasked }) => {
 
   return null;
 };
-
 const AudioSession = ({ 
   isMuted, 
   isMasked, 
@@ -514,7 +513,7 @@ const AudioSession = ({
       console.log(`📡 ZingConnect Room Context State Changed: ${room.state}`);
       if (room.state === 'connected') {
         console.log("⚡ ZingConnect: Audio Bridge Fully Established via Context.");
-                try {
+        try {
           const AudioContext = window.AudioContext || window.webkitAudioContext;
           if (AudioContext) {
             const ctx = new AudioContext();
@@ -528,22 +527,26 @@ const AudioSession = ({
             ringtoneAudio.current.pause();
             ringtoneAudio.current.currentTime = 0;
           }
+          setCallStatus('connected');
+          setPeerConnected(true);
         } else {
           if (callingAudio.current) {
             callingAudio.current.pause();
             callingAudio.current.currentTime = 0;
           }
+          console.log("🔒 Outgoing LiveKit media layer ready. Keeping state at Ringing/Calling until User answers via socket...");
         }
-        setCallStatus('connected');
-        setPeerConnected(true);
       }
     };
+
     room.on('connectionStateChanged', handleConnectionEngineState);
     if (room.state === 'connected') handleConnectionEngineState();
+
     return () => {
       room.off('connectionStateChanged', handleConnectionEngineState);
     };
   }, [room, isIncomingCall, setCallStatus, setPeerConnected, ringtoneAudio, callingAudio]);
+
   return (
     <>
       <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
@@ -551,7 +554,6 @@ const AudioSession = ({
     </>
   );
 };
-
 const stopVoiceConversion = () => {
   if (aiMediaRecorderRef.current) {
     if (aiMediaRecorderRef.current.state !== "inactive") aiMediaRecorderRef.current.stop();
@@ -998,6 +1000,7 @@ useEffect(() => {
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
 }, [agentData?._id, selectedUser?._id, callStatus]);
 
+
 useEffect(() => {
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
   const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
@@ -1005,11 +1008,8 @@ useEffect(() => {
   if (!token || !currentCallId || typeof currentCallId !== 'string' || callStatus === 'idle') {
     return;
   }
-
   const syncStatus = async () => {
-    // Only poll if we are in an active calling state
     if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
-
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
         headers: { 
@@ -1017,23 +1017,22 @@ useEffect(() => {
           'Content-Type': 'application/json' 
         }
       });
-
       const contentType = res.headers.get("content-type");
-      // Stop the "Unexpected token <" error by checking for JSON
       if (!res.ok || !contentType?.includes("application/json")) {
         if (res.status === 404) handleEndCall();
         return;
       }
-
       const data = await res.json();
-
       if (data?.status === 'ringing' && callStatus === 'calling') {
         setCallStatus('ringing');
       }
-      
-      if (data?.status === 'connected' && callStatus !== 'connected') {
-         setCallStatus('connected');
-         setPeerConnected(true);
+            if (data?.status === 'connected' && callStatus !== 'connected') {
+        if (isIncomingCall) {
+          setCallStatus('connected');
+          setPeerConnected(true);
+        } else {
+          console.log("📡 DB is connected, but Agent is dialing out. Awaiting explicit user socket acceptance...");
+        }
       }
 
       if (data && ['ended', 'declined', 'missed', 'rejected'].includes(data.status)) {
@@ -1043,10 +1042,9 @@ useEffect(() => {
       console.warn("ZingConnect Sync Jitter:", e.message);
     }
   };
-
   const interval = setInterval(syncStatus, 3000);
   return () => clearInterval(interval);
-}, [callStatus, activeCall?.roomName, activeCall?.callId, activeCall?._id, handleEndCall]);
+}, [callStatus, activeCall?.roomName, activeCall?.callId, activeCall?._id, handleEndCall, isIncomingCall]); 
 
 useEffect(() => {
   if (!socket) return;
@@ -1827,33 +1825,34 @@ return (
         serverUrl={import.meta.env.VITE_LIVEKIT_URL}
         connect={true} 
         options={{
-            publishDefaults: {
-                audioPreset: { maxBitrate: 48000 },
-                dtx: true, // Discontinuous Transmission: saves bandwidth during silence
-            },
-            adaptiveStream: true,
+          publishDefaults: {
+            audioPreset: { maxBitrate: 48000 },
+            dtx: true, // Discontinuous Transmission: saves bandwidth during silence
+          },
+          adaptiveStream: true,
         }}
         onDisconnected={handleEndCall}
       >
         {/* AudioSession now contextually controls audio synchronization safely */}
         <AudioSession 
-            isMuted={isMuted} 
-            isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'}
-            isIncomingCall={isIncomingCall}
-            setCallStatus={setCallStatus}
-            setPeerConnected={setPeerConnected}
-            ringtoneAudio={ringtoneAudio}
-            callingAudio={callingAudio}
+          isMuted={isMuted} 
+          isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'}
+          isIncomingCall={isIncomingCall}
+          setCallStatus={setCallStatus}
+          setPeerConnected={setPeerConnected}
+          ringtoneAudio={ringtoneAudio}
+          callingAudio={callingAudio}
         />
       </LiveKitRoom>
     )}
 
     {/* B. IN-CHAT STATUS BAR */}
-    {/* Displays mini-status controls once actively connecting or connected, but stays hidden during ringing states */}
-    {!showFullScreenCall && callStatus !== 'ringing' && (
+    {/* Displays mini-status controls once actively connecting or connected. */}
+    {/* ✅ FIX: Stays hidden during 'calling' and 'ringing' states to avoid overlay mismatches */}
+    {!showFullScreenCall && !['calling', 'ringing'].includes(callStatus) && (
       <div className="absolute top-0 left-0 w-full z-[150] animate-in slide-in-from-top duration-300">
         <div className={`h-[55px] md:h-[65px] flex items-center justify-between px-6 shadow-lg backdrop-blur-md transition-all duration-300 ${
-          callStatus === 'connected' ? 'bg-green-400/95 text-white' : 'bg-blue-600/95 text-white'
+          callStatus === 'connected' ? 'bg-green-500/95 text-white' : 'bg-blue-600/95 text-white'
         }`}>
           <div className="flex items-center gap-3">
             <div className="flex gap-1">
@@ -1891,6 +1890,7 @@ return (
         </div>
       </div>
     )}
+
 
     {/* C. FULLSCREEN OVERLAY */}
     {/* Forces itself into view instantly if callStatus is 'ringing' or if expanded manually */}
