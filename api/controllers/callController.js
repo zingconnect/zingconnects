@@ -5,6 +5,9 @@ import Agent from '../models/Agent.js';
 import Message from '../models/Message.js';
 import { createLiveKitToken } from '../utils/livekitHelper.js';
 
+// ==========================================
+// 📞 1. INITIATION (DIAL OUT)
+// ==========================================
 export const startCall = async (req, res) => {
   console.log("--- 📞 START CALL REQUEST RECEIVED ---");
   try {
@@ -20,24 +23,9 @@ export const startCall = async (req, res) => {
     const callerId = String(req.user.id || req.user._id).trim();
     const targetId = String(receiverId).trim();
 
-    // 2. Generate Room Name & LiveKit Token
+    // Generate pristine tracking layout identifier
     const roomName = `room_${Date.now()}_${callerId.slice(-4)}`;
     console.log(`> Room: ${roomName} | From: ${callerId} | To: ${targetId}`);
-
-    let token;
-    try {
-      token = await createLiveKitToken(roomName, callerId);
-      console.log("✅ LiveKit Token generated successfully");
-    } catch (lkErr) {
-      console.error("🔥 LiveKit Helper Error:", lkErr.message);
-      return res.status(500).json({ 
-        success: false, 
-        message: "LiveKit Token Generation Failed", 
-        error: lkErr.message 
-      });
-    }
-
-    // 3. Create DB record. This uses the default export which points to the active DB.
     let newCall;
     try {
       newCall = await Call.create({
@@ -47,7 +35,7 @@ export const startCall = async (req, res) => {
         receiver: targetId,
         receiverModel: req.user.role === 'agent' ? 'User' : 'Agent',
         voiceId: voiceId || null,
-        status: 'ringing',
+        status: 'calling',
         active: true 
       });
       console.log("✅ DB: Call record saved strictly before response");
@@ -56,6 +44,7 @@ export const startCall = async (req, res) => {
       return res.status(500).json({ success: false, message: "Database failure, call cannot start" });
     }
 
+    // Immediately push event down the socket wire to alert the client device layout
     const io = req.app.get('socketio');
     if (io) {
       io.to(targetId).emit("incoming-call", {
@@ -72,7 +61,6 @@ export const startCall = async (req, res) => {
     console.log("🚀 Success response sent to Client");
     return res.status(201).json({ 
       success: true, 
-      lkToken: token, 
       roomName: roomName,
       callId: newCall._id 
     });
@@ -89,6 +77,9 @@ export const startCall = async (req, res) => {
   }
 };
 
+// ==========================================
+// ✅ 2. LIFECYCLE: ACCEPT ACTIVE CALL
+// ==========================================
 export const acceptCall = async (req, res) => {
   try {
     await connectToDatabase();
@@ -102,10 +93,10 @@ export const acceptCall = async (req, res) => {
     
     const updatedCall = await Call.findOneAndUpdate(
       { 
-        $or: [
-          { roomName: callId }, 
-          { _id: isObjectId ? callId : null }
-        ] 
+        $and: [
+          { $or: [{ roomName: callId }, { _id: isObjectId ? callId : null }] },
+          { receiver: myId }
+        ]
       },
       { status: 'connected', startTime: new Date(), active: true },
       { new: true }
@@ -116,9 +107,11 @@ export const acceptCall = async (req, res) => {
       return res.status(404).json({ success: false, message: "Call record not found" });
     }
 
+    // ✅ FIX: Minting the secure LiveKit audio token happens right here on demand.
     const roomName = updatedCall.roomName;
     const token = await createLiveKitToken(roomName, myId);
 
+    // Proxy layout clearing parameters over web sockets to synchronize screens instantly
     const io = req.app.get('socketio');
     if (io) {
       io.to(updatedCall.caller.toString()).emit("call-accepted", { 
@@ -140,82 +133,9 @@ export const acceptCall = async (req, res) => {
   }
 };
 
-export const answerCallSignal = async (req, res) => {
-  try {
-    await connectToDatabase();
-    const { callId, signal } = req.body;
-    const myId = (req.user.id || req.user._id).toString();
-
-    const updatedCall = await Call.findByIdAndUpdate(
-      callId, 
-      { answerSignal: signal, status: 'connected', startTime: Date.now() }, 
-      { new: true }
-    );
-
-    if (!updatedCall) return res.status(404).json({ message: "Call not found" });
-
-    const io = req.app.get('socketio');
-    if (io) {
-      io.to(updatedCall.caller.toString()).emit("call-accepted", {
-        signal: signal,
-        callId: callId
-      });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-export const updateCallSignal = async (req, res) => {
-  try {
-    await connectToDatabase();
-    const { callId, signal } = req.body;
-    
-    const myId = (req.user._id || req.user.id || req.user.userId).toString();
-    const signalString = typeof signal === 'object' ? JSON.stringify(signal) : signal;
-
-    const call = await Call.findOne({ _id: callId, active: true });
-    if (!call) return res.status(404).json({ success: false, message: "Call not found" });
-
-    const isAnswering = call.receiver.toString() === myId;
-
-    const updateData = isAnswering 
-      ? { 
-          answerSignal: signal, 
-          status: 'connected', 
-          startTime: Date.now() 
-        } 
-      : { signal: signal };
-
-    const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
-    const socketIo = req.app.get('socketio');
-    
-    if (socketIo) {
-      const targetId = isAnswering ? updatedCall.caller.toString() : updatedCall.receiver.toString();
-      const eventName = isAnswering ? "call-accepted" : "incoming-call";
-      
-      console.log(`📡 Emitting ${eventName} to target: ${targetId}`);
-      
-      socketIo.to(targetId).emit(eventName, { 
-        signal: signalString, 
-        callId: updatedCall._id 
-      });
-    }
-
-    res.json({ 
-      success: true, 
-      status: updatedCall.status,
-      signal: isAnswering ? updatedCall.answerSignal : updatedCall.signal 
-    });
-
-  } catch (error) {
-    console.error("🔥 Signal Update Crash:", error.message);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
+// ==========================================
+// 🔍 3. DISCOVERY: ACCELERATED BACKGROUND POLLING
+// ==========================================
 export const checkIncomingCall = async (req, res) => {
   try {
     await connectToDatabase(); 
@@ -238,7 +158,6 @@ export const checkIncomingCall = async (req, res) => {
       hasIncomingCall: true,
       callId: incoming._id,
       status: incoming.status,
-      signal: incoming.signal,
       roomName: incoming.roomName, 
       voiceId: incoming.voiceId, 
       callerData: {
@@ -253,17 +172,25 @@ export const checkIncomingCall = async (req, res) => {
   }
 };
 
+// ==========================================
+// 📊 4. DISCOVERY: FETCH CALL METRICS
+// ==========================================
 export const getCallStatus = async (req, res) => {
   try {
     await connectToDatabase();
-    const { callId } = req.params; // Using roomName as callId for sharding efficiency
+    const { callId } = req.params;
 
     console.log(`🔍 Querying status for Room: ${callId}`);
 
-    // Lean queries are faster for high-frequency polling
-    const call = await Call.findOne({ roomName: callId })
-      .select('status active startTime voiceId')
-      .lean();
+    const isObjectId = mongoose.Types.ObjectId.isValid(callId);
+    const call = await Call.findOne({
+      $or: [
+        { roomName: callId },
+        { _id: isObjectId ? callId : null }
+      ]
+    })
+    .select('status active startTime voiceId')
+    .lean();
 
     if (!call) {
       return res.status(200).json({ 
@@ -290,6 +217,9 @@ export const getCallStatus = async (req, res) => {
   }
 };
 
+// ==========================================
+// 📴 5. LIFECYCLE: UNIFIED TERMINATION PIPELINE
+// ==========================================
 export const endCall = async (req, res) => {
   try {
     await connectToDatabase();
@@ -326,6 +256,7 @@ export const endCall = async (req, res) => {
       ? Math.floor((new Date() - new Date(call.startTime)) / 1000) 
       : 0;
 
+    // Single point of logging to guarantee zero duplicated logs in the message panel
     const callLogEntry = new Message({
       senderId: call.caller,
       senderModel: call.callerModel,
@@ -362,9 +293,11 @@ export const endCall = async (req, res) => {
   }
 };
 
+// ==========================================
+// 🕒 6. UTILITY: FALLBACK TIMEOUT LOGGER
+// ==========================================
 export const logMissedCall = async (callId, req = null) => {
   try {
-    // Ensure we are connected if called as a standalone utility
     await connectToDatabase();
 
     const call = await Call.findByIdAndUpdate(

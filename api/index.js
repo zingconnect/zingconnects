@@ -146,175 +146,104 @@ const isAdmin = (req, res, next) => {
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
   socket.on("join-main-room", async (userId) => {
-  if (userId) {
-    socket.userId = userId; // Store this for the disconnect event later
-    socket.join(userId.toString());
+    if (userId) {
+      socket.userId = userId; // Encapsulate ID context directly onto the socket instance
+      socket.join(userId.toString());
+      
+      try {
         await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
-    io.emit("user_status_update", { 
-      userId, 
-      isOnline: true, 
-      lastSeen: new Date() 
-    });
-    
-    console.log(`User ${userId} is online.`);
-  }
-});
-socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName }) => {
-  if (!userToCall || !roomName) return;
-  try {
-    let signedUrl = photoUrl;
-    if (photoUrl && !photoUrl.startsWith('http')) {
-      signedUrl = await getPrivateUrl(photoUrl);
-    }
-    io.to(userToCall.toString()).emit("incoming-call", { 
-      fromId, 
-      fromName, 
-      photoUrl: signedUrl, 
-      roomName: roomName.trim() 
-    });
-    User.findById(userToCall).select('pushSubscription').lean().then(user => {
-      if (user?.pushSubscription) {
-        const payload = JSON.stringify({
-          title: "Incoming Secure Call",
-          body: `${fromName} is calling you...`,
-          data: { url: `/dashboard/call/${roomName}` }
+        io.emit("user_status_update", { 
+          userId, 
+          isOnline: true, 
+          lastSeen: new Date() 
         });
-        webpush.sendNotification(user.pushSubscription, payload)
-          .catch(e => console.error("Push failed:", e));
+        console.log(`User ${userId} is online.`);
+      } catch (err) {
+        console.error("❌ Join Room DB Sync Failed:", err.message);
       }
-    });
-
-  } catch (err) {
-    console.error("❌ Socket Call Signal Failed:", err.message);
-  }
-});
-socket.on("answer-call", async ({ to, callId, myId }) => {
-  if (!callId || !myId) return;
+    }
+  });
   
-  // Ensure the room name and identity are clean strings
-  const roomName = String(callId).trim();
-  const participantId = String(myId).trim();
-
-  try {
-    // This is the CRITICAL part that clears the "faded" state
-    const token = await createLiveKitToken(roomName, participantId);
-    
-    // Send token back to the person who just answered
-    socket.emit("livekit-token", { token, roomName });
-
-    // Notify the original caller that the call is now live
-    if (to) {
-      io.to(to.toString()).emit("call-accepted", { 
-        callId: roomName,
-        roomName: roomName 
+socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName, voiceId }) => {
+    if (!userToCall || !roomName) return;
+    try {
+      let signedUrl = photoUrl;
+      if (photoUrl && !photoUrl.startsWith('http')) {
+        signedUrl = await getPrivateUrl(photoUrl);
+      }
+      io.to(userToCall.toString()).emit("incoming-call", { 
+        fromId, 
+        fromName, 
+        photoUrl: signedUrl, 
+        roomName: roomName.trim(),
+        voiceId: voiceId || null
       });
+      User.findById(userToCall).select('pushSubscription').lean().then(user => {
+        if (user?.pushSubscription) {
+          const payload = JSON.stringify({
+            title: "Incoming Secure Call",
+            body: `${fromName} is calling you...`,
+            data: { url: `/dashboard/call/${roomName}` }
+          });
+          webpush.sendNotification(user.pushSubscription, payload)
+            .catch(e => console.error("Push failed:", e));
+        }
+      });
+
+    } catch (err) {
+      console.error("❌ Socket Call Signal Failed:", err.message);
     }
+  });
 
-    // Update DB in background so we don't slow down the audio connection
-    Call.findByIdAndUpdate(callId, { 
-      status: 'connected',
-      startTime: new Date() 
-    }).catch(err => console.error("❌ DB Update Fail:", err.message));
+socket.on("answer-call", ({ to, callId, roomName }) => {
+    if (!to || !roomName) return;
+    const cleanRoom = String(roomName).trim();
+    console.log(`📡 Handshake Accepted: Relaying call-accepted to Caller room ${to}`);
+    io.to(to.toString()).emit("call-accepted", { 
+      callId,
+      roomName: cleanRoom 
+    });
+  });
 
-  } catch (err) {
-    console.error("❌ Socket Answer Error:", err.message);
-    socket.emit("call-error", { message: "Failed to join audio room" });
+ // Keep this exact short block in your socket initialization layer
+socket.on("end-call", ({ to, callId }) => {
+  if (to) {
+    const targetRoom = to.toString().trim();
+    console.log(`📴 Relaying call-ended termination sequence to: ${targetRoom}`);
+        io.to(targetRoom).emit("call-ended", { callId });
+    io.to(targetRoom).emit("end-call", { callId }); 
   }
 });
 
- socket.on("end-call", async ({ to, callId }) => {
-  try {
-    if (callId) {
-      // 1. Force the database to stop the poller from finding this call again
-      const endedCall = await Call.findByIdAndUpdate(callId, { 
-        status: 'ended', 
-        endTime: new Date(), // Use new Date() for Mongoose consistency
-        active: false // CRITICAL: This is what stops the ghost ringing
-      }, { new: true });
-
-      if (endedCall) {
-        const durationSeconds = endedCall.startTime 
-          ? Math.floor((Date.now() - new Date(endedCall.startTime)) / 1000) 
-          : 0;
-
-        const callLogEntry = new Message({
-          senderId: endedCall.caller,
-          senderModel: endedCall.callerModel,
-          receiverId: endedCall.receiver,
-          receiverModel: endedCall.receiverModel,
-          fileType: 'call_log',
-          text: `Voice Call Ended (${durationSeconds}s)`, 
-          callMetadata: {
-            callId: endedCall._id,
-            status: 'ended',
-            duration: durationSeconds
-          }
-        });
-
-        await callLogEntry.save();
-        io.to(endedCall.caller.toString()).emit("new-message", callLogEntry);
-        io.to(endedCall.receiver.toString()).emit("new-message", callLogEntry);
-      }
-    }
+socket.on("reject-call", ({ to, callId }) => {
     if (to) {
       const targetRoom = to.toString().trim();
-      io.to(targetRoom).emit("call-ended", { callId });
-      io.to(targetRoom).emit("end-call", { callId }); // Some frontends use this name
+      console.log(`❌ Relaying call-rejected state directly to: ${targetRoom}`);
+      io.to(targetRoom).emit("call-rejected", { callId });
+      io.to(targetRoom).emit("call-ended", { callId }); // Extra safety clearance rule
     }
-  } catch (err) {
-    console.error("❌ Socket End Call Error:", err);
-  }
-});
+  });
 
-socket.on("reject-call", async ({ to, fromId, callId }) => {
-  try {
-    if (callId) {
-      const call = await Call.findByIdAndUpdate(
-        callId, 
-        { status: 'rejected', active: false }, // Set active: false here too!
-        { new: true }
-      );
-
-      if (call) {
-        const missedCallLog = new Message({
-          senderId: fromId,
-          senderModel: call.receiverModel,
-          receiverId: to,
-          receiverModel: call.callerModel,
-          fileType: 'call_log',
-          text: 'Call Rejected',
-          callMetadata: { callId: callId, status: 'rejected' }
+  // --- DISCONNECTION LIFECYCLE FALLBACK ---
+  socket.on("disconnect", async () => {
+    console.log("Socket disconnected:", socket.id);
+    if (socket.userId) {
+      try {
+        const lastSeen = new Date();
+        await User.findByIdAndUpdate(socket.userId, { 
+          isOnline: false, 
+          lastSeen 
         });
-        
-        await missedCallLog.save();
-        io.to(to.toString()).emit("new-message", missedCallLog);
-        io.to(fromId.toString()).emit("new-message", missedCallLog);
+        io.emit("user_status_update", { 
+          userId: socket.userId, 
+          isOnline: false, 
+          lastSeen 
+        });
+      } catch (err) {
+        console.error("❌ Offline State Sync Failed:", err.message);
       }
     }
-        if (to) {
-      io.to(to.toString()).emit("call-rejected", { callId });
-      io.to(to.toString()).emit("call-ended", { callId }); // Extra safety
-    }
-  } catch (err) {
-    console.error("❌ Reject Log Error:", err);
-  }
-});
-
-socket.on("disconnect", async () => {
-  console.log("Socket disconnected:", socket.id);
-  if (socket.userId) {
-    const lastSeen = new Date();
-    await User.findByIdAndUpdate(socket.userId, { 
-      isOnline: false, 
-      lastSeen 
-    });
-    io.emit("user_status_update", { 
-      userId: socket.userId, 
-      isOnline: false, 
-      lastSeen 
-    });
-  }
-});
+  });
 
 socket.on("join-support-as-guest", (guestId) => {
   if (guestId) {
@@ -1964,6 +1893,9 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// 📞 1. INITIATE SECURE DIAL OUT
+// ==========================================
 app.post('/api/calls/start', authenticateToken, async (req, res) => {
   console.log("--- 📞 CALL START INITIATED ---");
   try {
@@ -1974,40 +1906,42 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 
     const callerId = String(req.user.id || req.user._id).trim();
     const targetId = String(receiverId).trim();
+    
+    // Create a pristine tracking identifier for the session context
     const roomName = `room_${Date.now()}_${callerId.slice(-4)}`;
-    const token = await createLiveKitToken(roomName, callerId);
+    
     await connectToDatabase();
     const CallModel = mongoose.models.Call || mongoose.model('Call');
     
+    // ✅ FIX: Status initialized to 'calling'. No token generated yet to prevent premature expiration.
     const newCall = await CallModel.create({
       roomName,
       caller: callerId,
       callerModel: req.user.role === 'agent' ? 'Agent' : 'User',
       receiver: targetId,
       receiverModel: req.user.role === 'agent' ? 'User' : 'Agent',
-      status: 'ringing',
+      status: 'calling', 
       active: true
     });
 
     console.log("✅ DB: Call record created strictly before response");
 
-    // 3. Emit Socket Event
+    // Push state changes instantly down the socket wire to alert the device
     const io = req.app.get('socketio');
     if (io) {
       io.to(targetId).emit("incoming-call", {
         fromId: callerId,
         fromName: req.user.firstName || "Secure Caller",
         roomName: roomName,
+        callId: newCall._id,
         voiceId: voiceId || null
       });
     }
 
-    // 4. Send Success Response including the DB _id
     res.status(201).json({
       success: true,
-      lkToken: token,
       roomName: roomName,
-      callId: newCall._id // Use this ID for polling
+      callId: newCall._id 
     });
 
   } catch (err) {
@@ -2017,13 +1951,16 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     }
   }
 });
+
+// ==========================================
+// 🔍 2. INCOMING BACKGROUND POLLING ENGINE
+// ==========================================
 app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-        const rawId = (req.user?._id || req.user?.id || req.user?.userId)?.toString();
-        const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
-    const ActiveCallModel = mongoose.models.Call || Call;
-    const ActiveUserModel = mongoose.models.User || User; 
+    const rawId = (req.user?._id || req.user?.id || req.user?.userId)?.toString();
+    const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+    const ActiveCallModel = mongoose.models.Call || mongoose.model('Call');
 
     let incoming = await ActiveCallModel.findOne({ 
       receiver: rawId,
@@ -2048,7 +1985,7 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
       hasIncomingCall: true,
       callId: incoming._id,
       status: incoming.status, 
-      roomName: incoming._id.toString(),
+      roomName: incoming.roomName, // Ensure standard room structural mapping passes here
       voiceId: incoming.voiceId,
       callerData: {
         fromName: incoming.caller ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() : "Secure Caller",
@@ -2062,69 +1999,18 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
   }
 });
 
-app.patch('/api/calls/update-signal', authenticateToken, async (req, res) => {
-  try {
-    await connectToDatabase();
-    const { callId, signal } = req.body;
-    const userPayload = req.user;
-    const myId = (userPayload?._id || userPayload?.id || userPayload?.userId || userPayload?.sub)?.toString();
-
-    if (!myId) {
-      console.error("❌ Signal Update: No user ID found in request");
-      return res.status(401).json({ success: false, message: "Unauthorized" });
-    }
-    const call = await Call.findById(callId);
-    if (!call) {
-      return res.status(404).json({ success: false, message: "Call not found" });
-    }
-        const isAnswer = call.receiver.toString() === myId;
-    const processedSignal = typeof signal === 'object' ? JSON.stringify(signal) : signal;
-        const updateData = isAnswer 
-      ? { 
-          answerSignal: processedSignal, 
-          status: 'connected', 
-          startTime: Date.now() 
-        } 
-      : { 
-          signal: processedSignal 
-        };
-
-    const updatedCall = await Call.findByIdAndUpdate(callId, updateData, { new: true });
-    const socketIo = req.app.get('socketio');
-
-    if (socketIo) {
-      const targetId = isAnswer ? updatedCall.caller.toString() : updatedCall.receiver.toString();
-      const eventName = isAnswer ? "call-accepted" : "incoming-call";
-      
-      console.log(`📡 Relaying ${eventName} to target: ${targetId}`);
-      
-      socketIo.to(targetId).emit(eventName, { 
-        signal: processedSignal, 
-        callId: updatedCall._id,
-        fromName: req.user.firstName || "Secure Connection"
-      });
-    } else {
-      console.error("❌ Socket.io instance not found on req.app. Check app.set('socketio', io) in server.js");
-    }
-    res.json({ 
-      success: true, 
-      status: updatedCall.status,
-      signal: isAnswer ? updatedCall.answerSignal : updatedCall.signal 
-    });
-
-  } catch (err) {
-    console.error("🔥 Signal Update Route Error:", err.message);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
+// ==========================================
+// ✅ 3. ACCEPT INCOMING AUDIO STREAM
+// ==========================================
 app.post('/api/calls/accept/:callId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const callId = req.params.callId || req.body.callId;
     const myId = (req.user.id || req.user._id).toString();
     const isObjectId = mongoose.Types.ObjectId.isValid(callId);
-    const call = await Call.findOneAndUpdate(
+    
+    const ActiveCallModel = mongoose.models.Call || mongoose.model('Call');
+    const call = await ActiveCallModel.findOneAndUpdate(
       { 
         $and: [
           { $or: [{ roomName: callId }, { _id: isObjectId ? callId : null }] },
@@ -2139,8 +2025,11 @@ app.post('/api/calls/accept/:callId', authenticateToken, async (req, res) => {
       console.error(`❌ Accept failed: Call ${callId} not found for user ${myId}`);
       return res.status(404).json({ success: false, message: "Call not found." });
     }
+
+    // ✅ FIX: Minting the secure token here guarantees fresh execution variables
     const roomName = call.roomName; 
     const token = await createLiveKitToken(roomName, myId);
+    
     const io = req.app.get('socketio');
     if (io) {
       io.to(call.caller.toString()).emit("call-accepted", { 
@@ -2160,20 +2049,23 @@ app.post('/api/calls/accept/:callId', authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// 📴 4. UNIFIED CALL TERMINATION LOGS
+// ==========================================
 app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    // Supporting both params and body covers all frontend fetch variations
     const myId = (req.user.id || req.user._id || req.user.userId).toString();
     const callId = req.params.callId || req.body.callId; 
 
     const isObjectId = mongoose.Types.ObjectId.isValid(callId);
+    const ActiveCallModel = mongoose.models.Call || mongoose.model('Call');
 
     let query = {
       $and: [
         { $or: [{ roomName: callId }, { _id: isObjectId ? callId : null }] },
         { $or: [{ caller: myId }, { receiver: myId }] },
-        { active: true } // Only target the live call to prevent updating history
+        { active: true } 
       ]
     };
 
@@ -2184,23 +2076,22 @@ app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
       };
     }
 
-    const call = await Call.findOneAndUpdate(
+    const call = await ActiveCallModel.findOneAndUpdate(
       query,
       { 
         status: 'ended', 
         endTime: new Date(), 
-        active: false // CRITICAL: This stops the background poller loop
+        active: false // Clear the flag instantly to stop polling artifacts
       },
       { new: true, sort: { createdAt: -1 } }
     );
 
     if (call) {
-      // 1. Calculate Duration for the Log
       const durationSeconds = call.startTime 
         ? Math.floor((new Date() - new Date(call.startTime)) / 1000) 
         : 0;
 
-      // 2. Create Chat Log Entry (Keeps UI synced and shows call history)
+      // Single-source tracking writes history entry to DB explicitly here
       const callLogEntry = new Message({
         senderId: call.caller,
         senderModel: call.callerModel,
@@ -2216,6 +2107,7 @@ app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
         }
       });
       await callLogEntry.save();
+      
       const io = req.app.get('socketio');
       if (io) {
         const otherId = call.caller.toString() === myId 
@@ -2239,14 +2131,19 @@ app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// 📊 5. FETCH STATUS TRACKING METRICS
+// ==========================================
 app.get('/api/calls/status/:callId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const { callId } = req.params;
-    let call = await Call.findOne({ roomName: callId }).select('status active startTime');
+    const ActiveCallModel = mongoose.models.Call || mongoose.model('Call');
+    
+    let call = await ActiveCallModel.findOne({ roomName: callId }).select('status active startTime');
 
     if (!call && mongoose.Types.ObjectId.isValid(callId)) {
-      call = await Call.findById(callId).select('status active startTime');
+      call = await ActiveCallModel.findById(callId).select('status active startTime');
     }
     if (!call) {
       return res.json({ 
@@ -2257,7 +2154,6 @@ app.get('/api/calls/status/:callId', authenticateToken, async (req, res) => {
       });
     }
 
-    // 4. Return the actual state
     res.json({ 
       success: true, 
       status: call.status, 
@@ -2275,31 +2171,36 @@ app.get('/api/calls/status/:callId', authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// 🕒 6. PORTAL CALL HISTORY ANALYTICS
+// ==========================================
 app.get('/api/calls/history/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
-    
-    const agentId = req.user.id;
+    const agentId = req.user.id || req.user._id;
+    const ActiveCallModel = mongoose.models.Call || mongoose.model('Call');
 
-    // Find calls where this agent is either the caller or receiver
-    // We populate the 'receiver' or 'caller' to get the other person's name/photo
-    const calls = await Call.find({
+    const calls = await ActiveCallModel.find({
       $or: [
         { caller: agentId },
         { receiver: agentId }
       ]
     })
-    .sort({ createdAt: -1 }) // Newest first
-    .limit(50) // Limit to last 50 calls for performance
+    .sort({ createdAt: -1 }) 
+    .limit(50) 
     .lean();
+
     const formattedCalls = await Promise.all(calls.map(async (call) => {
-      const isCaller = call.caller.toString() === agentId;
-            let participantData;
+      const isCaller = call.caller.toString() === agentId.toString();
+      let participantData;
+      
+      // Map across dynamic model structures securely
       if (isCaller) {
         participantData = await User.findById(call.receiver).select('firstName lastName photoUrl').lean();
       } else {
         participantData = await User.findById(call.caller).select('firstName lastName photoUrl').lean();
       }
+      
       let duration = "00:00";
       if (call.startTime && call.endTime) {
         const diff = Math.floor((new Date(call.endTime) - new Date(call.startTime)) / 1000);
@@ -2325,6 +2226,7 @@ app.get('/api/calls/history/me', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error fetching history" });
   }
 });
+
 
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
