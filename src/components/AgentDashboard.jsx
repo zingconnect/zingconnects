@@ -4,7 +4,8 @@ import {
   useTracks,
   RoomAudioRenderer,
   useLocalParticipant,
-  StartAudio
+  StartAudio,
+  useRoomContext
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
@@ -19,10 +20,6 @@ import {
   BsTelephoneFill, BsTelephoneXFill,BsMicMuteFill, BsXLg, BsGearFill, BsPlusLg, BsPlus, BsSend,  BsSendFill, BsPaperclip,
   BsCameraFill  
 } from 'react-icons/bs';
-
-window.global = window;
-window.process = { env: {} };
-window.Buffer = Buffer;
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
