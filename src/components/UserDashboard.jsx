@@ -2404,7 +2404,7 @@ return (
 {liveKitToken && (
   <LiveKitRoom
     video={false}
-    audio={true} // 👈 LiveKit manages the hardware microphone stream cleanly here
+    audio={true} // LiveKit manages the hardware microphone stream cleanly here
     token={liveKitToken}
     serverUrl={import.meta.env.VITE_LIVEKIT_URL}
     connect={!!liveKitToken}
@@ -2416,7 +2416,9 @@ return (
       adaptiveStream: true,
     }}
     onConnected={async () => {
-      console.log("⚡ ZingConnect: Audio Bridge Established.");
+      console.log("⚡ ZingConnect: Audio Bridge Handshake Established.");
+      
+      // Wake up client-side audio hardware safely
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         if (ctx.state === 'suspended') await ctx.resume();
@@ -2424,30 +2426,31 @@ return (
         console.warn("Manual audio wake-up failed", e);
       }
 
-      if (isIncomingCall || peerConnectedRef.current) {
-        setCallStatus('connected');
-        setPeerConnected(true);
-        if (ringtoneAudio.current) {
-          ringtoneAudio.current.pause();
-          ringtoneAudio.current.currentTime = 0;
-        }
+      // 🚀 FIXED: Removed setCallStatus and setPeerConnected from here.
+      // Changing parent layout state here was forcing a dashboard re-render,
+      // which instantly closed the underlying live WebSockets.
+      if (ringtoneAudio.current) {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.currentTime = 0;
       }
     }}
     onDisconnected={() => {
-      if (!isEnding && callStatus === 'connected') {
-        console.log("📡 LiveKit connection lost. Cleaning up session.");
+      // 🚀 FIXED: Use callStatusRef.current instead of the stale callStatus state variable.
+      // This stops your system from triggering an accidental call drop sequence 
+      // while the components are mounting.
+      if (!isEnding && callStatusRef.current === 'connected') {
+        console.log("📡 LiveKit connection truly lost. Cleaning up session.");
         handleEndCall();
       }
     }}
   >
-    {/* 🚀 Render the Audio Session containing the renderer and track sync controller */}
+    {/* Render the Audio Session containing the renderer and track sync controller */}
     <AudioSession 
       isMuted={isMuted} 
       isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} 
     />
   </LiveKitRoom>
 )}
-
     </div>
   );
 };
