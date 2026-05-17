@@ -1522,28 +1522,38 @@ useEffect(() => {
       });
       const userData = await userRes.json();
       if (userData.success) setUsers(userData.users);
-
-      // Only refresh messages if the tab is visible to save battery
       if (selectedUser?._id && document.visibilityState === 'visible') {
         const msgRes = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const msgData = await msgRes.json();
-        if (msgData.success) {
-          // Only update if the last message ID changed to prevent re-renders
+        
+        if (msgData.success && Array.isArray(msgData.messages)) {
+          const incomingMsgs = msgData.messages;
+          const targetLatestMsg = incomingMsgs[incomingMsgs.length - 1];
+          if (targetLatestMsg && targetLatestMsg.senderModel === 'User' && targetLatestMsg._id !== lastNotifiedId.current) {
+            lastNotifiedId.current = targetLatestMsg._id;
+            
+            if (notificationSound.current) {
+              notificationSound.current.currentTime = 0;
+              notificationSound.current.play().catch(() => {});
+            }
+          }
+
           setMessages(prev => {
-            const isNew = msgData.messages.length !== prev.length || 
-                         (msgData.messages[0]?._id !== prev[0]?._id);
-            return isNew ? msgData.messages : prev;
+            const isNew = incomingMsgs.length !== prev.length || 
+                          (incomingMsgs[0]?._id !== prev[0]?._id) ||
+                          (incomingMsgs[incomingMsgs.length - 1]?._id !== prev[prev.length - 1]?._id);
+            return isNew ? incomingMsgs : prev;
           });
         }
       }
-    } catch (err) { console.warn("Refresh jitter"); }
+    } catch (err) { console.warn("Refresh jitter fallback skipped"); }
   };
 
   const interval = setInterval(refreshData, 5000);
   return () => clearInterval(interval);
-}, [isSubscribed, selectedUser?._id, callStatus]); // Removed messages.length
+}, [isSubscribed, selectedUser?._id, callStatus]);
 
 useEffect(() => {
   const setupNotifications = async () => {
@@ -1608,15 +1618,23 @@ useEffect(() => {
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
+
   const handleIncomingMessage = (data) => {
-    const isChattingWithSender = selectedUser && data.senderId === selectedUser._id;
+    console.log("📥 Real-time Socket Message Detected:", data);
+
+    // 1. Core Safeguard: Drop duplicates by tracking message ID explicitly
+    if (data._id && data._id === lastNotifiedId.current) return;
+    lastNotifiedId.current = data._id;
+
+    const isChattingWithSender = selectedUser && (data.senderId === selectedUser._id || data.senderId === selectedUser.id);
+    
     if (isChattingWithSender) {
       setMessages((prev) => {
-        if (prev.find(m => m._id === data._id)) return prev;
+        if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
 
-      // Mark as read immediately
+      // Mark as read immediately on backend
       const token = localStorage.getItem('agentToken');
       fetch(`/api/messages/mark-read/${selectedUser._id}`, {
         method: 'PATCH',
@@ -1626,19 +1644,19 @@ useEffect(() => {
     if (data.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
-        notificationSound.current.play().catch(() => 
-          console.log("🔊 Audio blocked: Tap the screen once to enable sounds.")
+        notificationSound.current.play().catch((err) => 
+          console.warn("🔊 Notification audio context autoplay restricted:", err.message)
         );
       }
+      
       if ('vibrate' in navigator) {
-        navigator.vibrate([200, 100, 200]); // Double pulse for better alert
+        navigator.vibrate([200, 100, 200]); // Double pulse haptic alert
       }
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-
       if (Notification.permission === "granted" && shouldShowPopup) {
         const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
           body: data.text || "Sent a file",
-          icon: data.senderPhoto || '/favicon.ico', // Use the actual sender's photo from the data
+          icon: data.senderPhoto || '/favicon.ico',
           tag: 'zing-msg',
           renotify: true
         });
@@ -1649,6 +1667,7 @@ useEffect(() => {
       }
     }
   };
+
   socket.on('new-message', handleIncomingMessage);
   return () => {
     socket.off('new-message', handleIncomingMessage);
