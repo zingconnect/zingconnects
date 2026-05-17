@@ -1112,11 +1112,17 @@ useEffect(() => {
 
   useEffect(() => {
   const token = localStorage.getItem('userToken');
-  if (!token || !agent?._id) return;
+  const targetAgentId = agent?._id || agent?.id;
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  
+  if (!token || !targetAgentId) return;
 
- const fetchMessages = async () => {
+  let isFirstLoad = true;
+
+  const fetchMessages = async () => {
     try {
-      const response = await fetch(`/api/messages/${agent._id}`, {
+      // Added your ?limit=50 param to optimize historical fetching payload sizes
+      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -1125,11 +1131,12 @@ useEffect(() => {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
 
+        // 1. Silent Notification & Seen Logic
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
           lastMsg.status !== 'seen' && 
-          lastMsg._id !== lastNotifiedId.current // Check against the Ref
+          lastMsg._id !== lastNotifiedId.current
         ) {
           lastNotifiedId.current = lastMsg._id;
           if (notificationSound.current) {
@@ -1137,41 +1144,61 @@ useEffect(() => {
             notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
           }
           if (Notification.permission === "granted") {
-            new Notification(`Agent ${agent.firstName}`, {
+            new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
               body: lastMsg.text || "Sent a file",
-              icon: '/logo-s.png', // Point to your brand logo in public folder
-              tag: 'zing-msg'    // Grouping tag to prevent spam
+              icon: '/logo-s.png',
+              tag: 'zing-msg'
             });
           }
 
-          // Mark as Read (Silent Background update)
-          fetch(`/api/messages/mark-read/${agent._id}`, {
+          fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
-setMessages(prev => {
-        const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
-        const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
-        const uniqueInFlight = inFlight.filter(m => 
-          !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
-        );
-        const newCombined = [...incomingMessages, ...uniqueInFlight];
-        if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
-          return prev;
-        }
-        return newCombined;
-      });
-    }
-  } catch (err) {
-    console.error("Polling error:", err);
-  }
-};
 
+        // 2. State Sync: Merge incoming messages with local in-flight ones
+        setMessages(prev => {
+          const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
+          const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
+          const uniqueInFlight = inFlight.filter(m => 
+            !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
+          );
+          const newCombined = [...incomingMessages, ...uniqueInFlight];
+          
+          if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
+            return prev;
+          }
+          return newCombined;
+        });
+
+        // 3. Smart Viewport Anchoring
+        setTimeout(() => {
+          if (isFirstLoad) {
+            // Instant snap on mount so user doesn't see scroll animation lag
+            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+            isFirstLoad = false;
+          } else {
+            // Smooth adjustment for passive incoming messages while chatting
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }, 100);
+      }
+    } catch (err) {
+      console.error("ZingConnect Sync Jitter:", err);
+    } finally {
+      if (isFirstLoad) setLoading(false);
+    }
+  };
+
+  // Immediate invocation on change/mount
   fetchMessages();
+  
+  // Set up background long-poll tracker
   const interval = setInterval(fetchMessages, 5000); 
+  
   return () => clearInterval(interval);
-}, [agent?._id]);
+}, [agent?._id, agent?.id]);
 
   const agentStatus = getStatusInfo(agent);
 
@@ -1327,6 +1354,7 @@ const handleFinalSend = async () => {
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
+    senderModel: 'User',
     text: savedCaption,
     fileUrl: previewUrl, // Use the local blob URL for preview
     fileType: detectedType,
@@ -1842,8 +1870,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
-
-        <main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
+<main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
   {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
@@ -1858,126 +1885,129 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </p>
   </div>
 
+  {/* 3. Message List */}
+  {messages.map((m) => {
+    const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
 
-{/* 3. Message List */}
-{messages.map((m) => {
-const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
+    // Handle Secure LiveKit Room Call Events
+    if (m.fileType === 'voice_call') {
+      return (
+        <CallStatusMessage 
+          key={msgKey}
+          status={m.status} // 'ringing', 'missed', 'ended'
+          time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        />
+      );
+    }
 
-  if (m.fileType === 'voice_call') {
+    // Determine Message Ownership Correctly (Fixes the Optimistic Media Left-Side Skew)
+    const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
+
     return (
-      <CallStatusMessage 
-        key={msgKey}
-        status={m.status} // 'ringing', 'missed', 'ended'
-        time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      />
-    );
-  }
-
-return (
-    <div 
-      key={msgKey} 
-      className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
-        m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-      } mb-3`}
-    >
-      {/* Media Handling */}
-      {(m.fileType === 'image' || m.fileType === 'video') && (
-        <div className="relative mb-2 mt-1 group">
-          {m.fileType === 'image' ? (
-            <>
-              <img 
-                src={m.fileUrl} 
-                alt="attachment" 
-                onClick={() => setFullscreenImage(m.fileUrl)} 
-                className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
-                onError={(e) => {
-                  e.target.onerror = null;
-                  e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
-                }}
-              />
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
-                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-              >
-                <BsDownload size={14} />
-              </button>
-            </>
-          ) : (
-            <div className="relative">
-              <video 
-                className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
-                onClick={() => setFullscreenVideo(m.fileUrl)}
-              >
-                <source src={m.fileUrl} type="video/mp4" />
-              </video>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
-                  <BsPlayFill size={30} />
+      <div 
+        key={msgKey} 
+        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
+          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+        } mb-3`}
+      >
+        {/* Media Handling */}
+        {(m.fileType === 'image' || m.fileType === 'video') && (
+          <div className="relative mb-2 mt-1 group">
+            {m.fileType === 'image' ? (
+              <>
+                <img 
+                  src={m.fileUrl} 
+                  alt="attachment" 
+                  onClick={() => setFullscreenImage(m.fileUrl)} 
+                  className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+                  }}
+                />
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
+                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                >
+                  <BsDownload size={14} />
+                </button>
+              </>
+            ) : (
+              <div className="relative">
+                <video 
+                  className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
+                  onClick={() => setFullscreenVideo(m.fileUrl)}
+                >
+                  <source src={m.fileUrl} type="video/mp4" />
+                </video>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
+                    <BsPlayFill size={30} />
+                  </div>
                 </div>
-              </div>
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
-                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
-              >
-                <BsDownload size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Text Content (Caption) */}
-      {m.text && (
-        <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
-          {m.text}
-        </p>
-      )}
-
-      {/* Time / Status Bar */}
-      <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
-        <span className="text-[9px] text-gray-400 font-bold uppercase">
-          {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-
-        {/* WhatsApp Reliability Logic: Only show for User messages */}
-        {m.senderModel === 'User' && (
-          <div className="flex items-center ml-1">
-            
-            {/* 1. SENDING STATE (Network Active) */}
-            {m.status === 'sending' && (
-              <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-            )}
-
-            {/* 2. FAILED STATE (Bad Network) */}
-            {m.status === 'failed' && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleResend(m); }}
-                className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
-              >
-                <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
-                <BsPlusLg className="rotate-45" size={10} />
-              </button>
-            )}
-
-            {/* 3. SUCCESS STATE (Checkmarks) */}
-            {(!m.status || m.status === 'sent' || m.status === 'seen') && (
-              <div className="flex items-center">
-                {m.status === 'seen' ? (
-                  <BsCheckAll className="text-blue-500" size={16} title="Read" />
-                ) : (
-                  <BsCheckAll className="text-gray-400" size={16} title="Sent" />
-                )}
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
+                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
+                >
+                  <BsDownload size={14} />
+                </button>
               </div>
             )}
           </div>
         )}
-      </div>
-    </div>
-  );
-})}
 
-{/* Increased height to ensure the keyboard doesn't hide the last message */}
-<div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
+        {/* Text Content (Caption / Standard Message) */}
+        {m.text && (
+          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+            {m.text}
+          </p>
+        )}
+
+        {/* Time / Status Bar */}
+        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
+          <span className="text-[9px] text-gray-400 font-bold uppercase">
+            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+
+          {/* Verification Delivery Checks (Only for Local User Submissions) */}
+          {isMe && (
+            <div className="flex items-center ml-1">
+              
+              {/* 1. SENDING STATE (iDrive E2 Pipe Active) */}
+              {m.status === 'sending' && (
+                <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+              )}
+
+              {/* 2. FAILED STATE */}
+              {m.status === 'failed' && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleResend(m); }}
+                  className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
+                >
+                  <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
+                  <BsPlusLg className="rotate-45" size={10} />
+                </button>
+              )}
+
+              {/* 3. SUCCESS DELIVERED STATES */}
+              {(!m.status || m.status === 'sent' || m.status === 'seen') && (
+                <div className="flex items-center">
+                  {m.status === 'seen' ? (
+                    <BsCheckAll className="text-blue-500" size={16} title="Read" />
+                  ) : (
+                    <BsCheckAll className="text-gray-400" size={16} title="Sent" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  })}
+
+  {/* Auto-scroll viewport Anchor */}
+  <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}

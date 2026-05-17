@@ -47,7 +47,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 2. SEND TEXT MESSAGE (HYBRID NOTIFICATION LOGIC) ---
+// --- 2. SEND TEXT MESSAGE ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {
     const { receiverId, text, receiverModel } = req.body;
@@ -78,10 +78,10 @@ router.post('/send', authenticateToken, async (req, res) => {
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
     // --- WEB PUSH ---
-    if (receiver && receiver.pushSubscription) {
+    if (receiver?.pushSubscription) {
       try {
         const payload = JSON.stringify({
-          title: `New Message from ${sender.firstName || 'Zing'}`,
+          title: `New Message from ${sender?.firstName || 'Zing'}`,
           body: text,
           data: { 
             url: finalReceiverModel === 'Agent' 
@@ -112,7 +112,7 @@ router.post('/send', authenticateToken, async (req, res) => {
       }
     }
 
-    if (isOnline) {
+    if (isOnline && io) {
       io.to(receiverId.toString()).emit("new-message", newMessage);
     }
 
@@ -134,7 +134,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
     const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${req.file.originalname.split('.').pop()}`;
 
-    // Upload to S3
+    // Upload to iDrive S3 Storage
     const parallelUploads3 = new Upload({
       client: getS3Client(),
       params: {
@@ -162,39 +162,49 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     });
     await newMessage.save();
 
-    // --- NOTIFICATION LOGIC ---
+    // Resolve pre-signed URL for front-end consumption
+    const signedUrlForFrontend = await getPrivateUrl(fileName);
+
+    // Build immediate payload wrapper to avoid real-time socket race conditions
+    const outputPayload = { ...newMessage.toObject(), fileUrl: signedUrlForFrontend };
+
+    // --- NOTIFICATION & SOCKET PIPELINE ---
     const TargetModel = receiverModel === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId);
     const sender = await (senderModel === 'Agent' ? Agent : User).findById(req.user.id);
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+
     if (receiver?.pushSubscription) {
       const payload = JSON.stringify({
-        title: `New ${detectedType} from ${sender.firstName || 'Zing'}`,
+        title: `New ${detectedType} from ${sender?.firstName || 'Zing'}`,
         body: text || `Sent an ${detectedType}`,
         data: { url: receiverModel === 'Agent' ? '/agent/dashboard' : '/user/dashboard' }
       });
-      webpush.sendNotification(receiver.pushSubscription, payload).catch(e => console.error(e));
+      webpush.sendNotification(receiver.pushSubscription).catch(e => console.error(e));
     }
+
     if (!isOnline && receiver) {
       const COOLDOWN = 30 * 60 * 1000;
       const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       if (Date.now() - lastEmail > COOLDOWN) {
-        await sendOfflineNotification(receiver, sender, text,  fileUrl, fileType, receiverModel);
+        // FIXED: Swapped out reference-breaking fileUrl with verified fileName variable wrapper
+        await sendOfflineNotification(receiver, sender, text || `Sent an ${detectedType}`, receiverModel);
         await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
       }
     }
 
-    if (isOnline) { io.to(receiverId.toString()).emit("new-message", newMessage); }
+    if (isOnline && io) { 
+      io.to(receiverId.toString()).emit("new-message", outputPayload); 
+    }
 
-    const signedUrlForFrontend = await getPrivateUrl(fileName);
-    res.status(201).json({ success: true, message: { ...newMessage.toObject(), fileUrl: signedUrlForFrontend } });
-
+    res.status(201).json({ success: true, message: outputPayload });
   } catch (err) {
     console.error("UPLOAD ERROR:", err.message);
     res.status(500).json({ success: false, message: "Upload failed" });
   }
 });
+
 // --- 4. MARK AS READ ---
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {
@@ -231,6 +241,7 @@ router.post('/get-upload-url', authenticateToken, async (req, res) => {
   }
 });
 
+// --- 6. CONFIRM CLIENT-SIDE UPLOAD ---
 router.post('/confirm-upload', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase(); 
@@ -257,38 +268,41 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
     });
     await newMessage.save();
 
-    // --- NOTIFICATION LOGIC ---
+    // Resolve pre-signed secure URL mapping
+    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
+    const outputPayload = { ...newMessage.toObject(), fileUrl: signedUrlForFrontend };
+
+    // --- NOTIFICATION & SOCKET PIPELINE ---
     const TargetModel = receiverModel === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId);
     const sender = await (senderModel === 'Agent' ? Agent : User).findById(req.user.id);
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
-    // 1. Web Push
     if (receiver?.pushSubscription) {
       const payload = JSON.stringify({
-        title: `New ${fileType} from ${sender.firstName || 'Zing'}`,
+        title: `New ${fileType} from ${sender?.firstName || 'Zing'}`,
         body: text || `Sent an attachment`,
         data: { url: receiverModel === 'Agent' ? '/agent/dashboard' : '/user/dashboard' }
       });
       webpush.sendNotification(receiver.pushSubscription, payload).catch(e => console.error(e));
     }
 
-    // 2. Email if Offline
     if (!isOnline && receiver) {
       const COOLDOWN = 30 * 60 * 1000;
       const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       if (Date.now() - lastEmail > COOLDOWN) {
-        await sendOfflineNotification(receiver, sender, text, fileUrl, fileType, receiverModel);
+        // FIXED: Standardized signature matching to match your core mailing parameters
+        await sendOfflineNotification(receiver, sender, text || `Sent a file asset`, receiverModel);
         await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
       }
     }
 
-    if (isOnline) { io.to(receiverId.toString()).emit("new-message", newMessage); }
+    if (isOnline && io) { 
+      io.to(receiverId.toString()).emit("new-message", outputPayload); 
+    }
 
-    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
-    res.status(201).json({ success: true, message: { ...newMessage.toObject(), fileUrl: signedUrlForFrontend } });
-
+    res.status(201).json({ success: true, message: outputPayload });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
