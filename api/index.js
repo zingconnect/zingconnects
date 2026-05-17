@@ -1,10 +1,14 @@
+import dotenv from 'dotenv';
+dotenv.config(); 
+
 console.log("--- ATTEMPTING TO START SERVER ---");
+
+// 2. Standard Third-Party and Vendor Package Imports
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import path from 'path'; // <--- Kept this one
-import fs from 'fs';   // <--- Kept this one
+import path from 'path'; 
+import fs from 'fs';   
 import jwt from 'jsonwebtoken'; 
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -14,29 +18,35 @@ import nodemailer from 'nodemailer';
 import Flutterwave from 'flutterwave-node-v3';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
+import webpush from 'web-push';
+import { Server } from 'socket.io';
+import http from 'http';
+
+// 3. Database & Shared Configurations
+import { connectToDatabase } from './config/db.js';
+import { getS3Client, getPrivateUrl, PutObjectCommand, GetObjectCommand } from './config/s3.js'; 
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+
+// 4. Local Utility Framework Helpers (Now fully hydrated with process.env keys)
+import { createLiveKitToken } from './utils/livekitHelper.js';
+import { sendOfflineNotification } from './utils/mailer.js';
+
+// 5. Schema Data Models
 import Agent from './models/Agent.js';
 import User from './models/User.js'; 
 import Message from './models/Message.js';
 import Admin from './models/Admin.js';
-import authRoutes from './routes/auth.js';
-import messageRoutes from './routes/message.js'; 
-import webpush from 'web-push';
-import { Server } from 'socket.io';
-import http from 'http';
-import { connectToDatabase } from './config/db.js';
-import { getS3Client, getPrivateUrl, PutObjectCommand, GetObjectCommand } from './config/s3.js'; 
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createLiveKitToken } from './utils/livekitHelper.js';
-import callRoutes from './routes/callRoutes.js';
 import Call from './models/Call.js'; 
-import { sendOfflineNotification } from './utils/mailer.js';
-import adminRoutes from './routes/admin.js'; 
 import SupportMessage from './models/Support.js';
 
-
-dotenv.config();
+// 6. Express Routing Modules
+import authRoutes from './routes/auth.js';
+import messageRoutes from './routes/message.js'; 
+import callRoutes from './routes/callRoutes.js';
+import adminRoutes from './routes/admin.js'; 
 
 const app = express();
+
 
 const corsOptions = {
   origin: "https://zingconnect.vercel.app",
