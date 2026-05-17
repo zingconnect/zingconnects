@@ -209,12 +209,6 @@ const LocalUserMuteController = ({ isMuted, isMasked }) => {
   useEffect(() => {
     if (!localParticipant) return;
     const syncMic = async () => {
-      const roomState = localParticipant.room?.state;
-      
-      if (!roomState || roomState !== 'connected') {
-        console.log("⏳ LiveKit signaling engine is still connecting... holding mic synchronization.");
-        return; 
-      }
       const shouldPublish = !isMasked && !isMuted;
       try {
         await localParticipant.setMicrophoneEnabled(shouldPublish);
@@ -223,12 +217,9 @@ const LocalUserMuteController = ({ isMuted, isMasked }) => {
         console.error("❌ LiveKit Mic Sync Error:", err);
       }
     };
-    const delayTimer = setTimeout(() => {
-      syncMic();
-    }, 150);
 
-    return () => clearTimeout(delayTimer);
-      }, [isMuted, isMasked, localParticipant, localParticipant?.room?.state]);
+    syncMic();
+  }, [isMuted, isMasked, localParticipant]);
 
   return null;
 };
@@ -817,7 +808,15 @@ useEffect(() => {
 const toggleMute = () => {
   setIsMuted(prev => {
     const newState = !prev;
-    console.log(`🎤 Mic state updated: ${newState ? 'MUTING' : 'UNMUTING'}`);
+  const stream = localStream || userStreamRef.current;  
+    if (stream) {
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = !newState; // Track enabled = not muted
+      });
+      console.log(`Mic ${newState ? 'disabled' : 'enabled'}`);
+    } else {
+      console.warn("No active stream found to mute");
+    }
     return newState;
   });
 };
@@ -2401,56 +2400,53 @@ return (
     </div>
   </div>
 )}
-{liveKitToken && (
-  <LiveKitRoom
+    {liveKitToken && (
+<LiveKitRoom
     video={false}
-    audio={true} // LiveKit manages the hardware microphone stream cleanly here
+    audio={true}
     token={liveKitToken}
     serverUrl={import.meta.env.VITE_LIVEKIT_URL}
     connect={!!liveKitToken}
+    // Optimization: Reduces bandwidth jitter which causes the "Websocket error"
     options={{
       publishDefaults: {
         audioPreset: { maxBitrate: 32000 },
-        dtx: true, // Stops transmitting packets during silence to save bandwidth
+        dtx: true, 
       },
       adaptiveStream: true,
     }}
     onConnected={async () => {
-      console.log("⚡ ZingConnect: Audio Bridge Handshake Established.");
-      
-      // Wake up client-side audio hardware safely
-      try {
+      console.log("⚡ ZingConnect: Audio Bridge Established.");
+            try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         if (ctx.state === 'suspended') await ctx.resume();
       } catch (e) {
         console.warn("Manual audio wake-up failed", e);
       }
 
-      // 🚀 FIXED: Removed setCallStatus and setPeerConnected from here.
-      // Changing parent layout state here was forcing a dashboard re-render,
-      // which instantly closed the underlying live WebSockets.
-      if (ringtoneAudio.current) {
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.currentTime = 0;
+      if (isIncomingCall || peerConnectedRef.current) {
+        setCallStatus('connected');
+        setPeerConnected(true);
+        if (ringtoneAudio.current) {
+          ringtoneAudio.current.pause();
+          ringtoneAudio.current.currentTime = 0;
+        }
       }
     }}
     onDisconnected={() => {
-      // 🚀 FIXED: Use callStatusRef.current instead of the stale callStatus state variable.
-      // This stops your system from triggering an accidental call drop sequence 
-      // while the components are mounting.
-      if (!isEnding && callStatusRef.current === 'connected') {
-        console.log("📡 LiveKit connection truly lost. Cleaning up session.");
+      if (!isEnding && callStatus === 'connected') {
+        console.log("📡 LiveKit connection lost. Cleaning up session.");
         handleEndCall();
       }
     }}
   >
-    {/* Render the Audio Session containing the renderer and track sync controller */}
     <AudioSession 
       isMuted={isMuted} 
       isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} 
     />
   </LiveKitRoom>
 )}
+
     </div>
   );
 };
