@@ -1,19 +1,11 @@
-import { 
-  LiveKitRoom, 
-  AudioConference, 
-  useTracks,
-  RoomAudioRenderer,
-  useLocalParticipant,
-  StartAudio,
-  useRoomContext
-} from '@livekit/components-react';
-import { Track } from 'livekit-client';
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import Peer from 'simple-peer/simplepeer.min.js'; 
 import { Buffer } from 'buffer'; 
+import {  LiveKitRoom, AudioConference, useTracks, RoomAudioRenderer, useLocalParticipant, StartAudio, useRoomContext
+} from '@livekit/components-react';
+import { Track } from 'livekit-client';
 import { 
   BsSearch, BsThreeDotsVertical, BsCheckAll,BsCheck,BsPersonCircle, BsChevronLeft, BsShieldLockFill,  BsCreditCard2BackFill, BsChevronDown,
   BsShieldFillExclamation, BsCheckCircleFill, BsVolumeUpFill, BsDownload, BsTelephoneOutboundFill, BsPlayFill, BsMicFill,
@@ -146,7 +138,9 @@ const handleStartCall = async (targetUserId) => {
   
   setIsEnding(true); 
   if (isTransitioningRef) isTransitioningRef.current = true;
-  setCallStatus('calling'); 
+  
+  // FIXED: Standardize outbound call initiation state
+  setCallStatus('ringing'); 
   setIsIncomingCall(false);
   setShowFullScreenCall(true); 
   
@@ -184,6 +178,7 @@ const handleStartCall = async (targetUserId) => {
 
     setActiveCall(callMetadata);
     if (activeCallRef) activeCallRef.current = callMetadata;
+    
     if (socket) {
       socket.emit("call-user", { 
         userToCall: targetUserId.toString(),
@@ -193,8 +188,9 @@ const handleStartCall = async (targetUserId) => {
         roomName: data.roomName
       });
     }
+    
     setLkToken(data.lkToken);
-    console.log("✅ ZingConnect: Waiting for User to Accept...");
+    console.log("✅ ZingConnect: Outbound call routing successfully. Poller active.");
 
     startStatusPolling(data.roomName);
     setIsEnding(false); 
@@ -224,9 +220,10 @@ const startStatusPolling = (roomName) => {
         headers: { 'Authorization': `Bearer ${token}` }
       });      
       const data = await res.json();
-            const isTimeout = (Date.now() - startTime) > 45000; 
-            if (data.success && (['ended', 'rejected', 'missed'].includes(data.status) || (isTimeout && data.status === 'calling'))) {
-        console.log("🚫 Call timed out or was rejected by status check.");
+      const isTimeout = (Date.now() - startTime) > 45000; 
+      
+      if (data.success && (['ended', 'rejected', 'missed'].includes(data.status) || (isTimeout && data.status === 'calling'))) {
+        console.log("🚫 Call timed out or changed state in remote polling engine.");
         clearInterval(pollInterval);
         handleEndCall(); 
       }
@@ -242,7 +239,6 @@ const handleAcceptCall = async () => {
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
     ringtoneAudio.current.currentTime = 0;
-    console.log("🔇 Ringtone silenced manually.");
   }
   
   const token = localStorage.getItem('agentToken');
@@ -257,6 +253,7 @@ const handleAcceptCall = async () => {
   try {
     setCallStatus('connecting'); 
     setShowFullScreenCall(true);
+    
     const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
       method: 'POST',
       headers: { 
@@ -264,15 +261,18 @@ const handleAcceptCall = async () => {
         'Content-Type': 'application/json'
       }
     });
+    
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.message || `Vercel Server Error: ${res.status}`);
+      throw new Error(errorData.message || `Server Error: ${res.status}`);
     }
+    
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (AudioContext) {
       const tempCtx = new AudioContext();
       if (tempCtx.state === 'suspended') await tempCtx.resume();
     }
+    
     const data = await res.json();
     if (data.success && data.lkToken) {
       setIsIncomingCall(false);
@@ -280,7 +280,8 @@ const handleAcceptCall = async () => {
         callingAudio.current.pause();
         callingAudio.current.currentTime = 0;
       }
-            setActiveCall(prev => ({ 
+      
+      setActiveCall(prev => ({ 
         ...prev,
         ...data.call, 
         callId: data.roomName || data.call?.roomName, 
@@ -288,12 +289,12 @@ const handleAcceptCall = async () => {
         toId: remoteUserId,
         status: 'connected' 
       }));
-      setTimeout(() => {
-        setLkToken(data.lkToken);
-        setCallStatus('connected'); 
-        setPeerConnected(true);
-        console.log("✅ ZingConnect: Secure Room Joined:", data.roomName);
-      }, 400);
+
+      // FIXED: Dropped artificial timeouts that spoofed the state machine.
+      // Setting the token lets <LiveKitRoom> connect safely. 
+      // rely on LiveKit room hooks (onConnected) to set status to 'connected' safely.
+      setLkToken(data.lkToken);
+      console.log("📡 Core Token Applied. Handing connection off to LiveKit Room wrapper.");
 
     } else {
       throw new Error("No LiveKit token returned.");
@@ -309,10 +310,7 @@ const handleAcceptCall = async () => {
 const handleEndCall = useCallback(async () => {
   console.log("📴 ZingConnect: Initiating Safe Shutdown...");
   
-  // 1. Resolve 'myId' using the local agentData state
   const myId = agentData?._id?.toString();
-
-  // 2. Capture snapshots from Refs (most reliable) or State
   const currentCall = activeCallRef.current || activeCall;
   const currentIncoming = activeCallerRef.current || activeCaller;
   
@@ -321,7 +319,6 @@ const handleEndCall = useCallback(async () => {
                         currentCall?._id || 
                         currentIncoming?.callId;
 
-  // 3. Find the Remote Party ID
   const potentialTargets = [
     currentCall?.toId,
     currentCall?.fromId,
@@ -337,7 +334,6 @@ const handleEndCall = useCallback(async () => {
     return cid !== myId;
   });
 
-  // 4. Stop all Polling
   [pollingIntervalRef, pollingRef].forEach(ref => {
     if (ref?.current) {
       clearInterval(ref.current);
@@ -345,23 +341,22 @@ const handleEndCall = useCallback(async () => {
     }
   });
 
-  // 5. Emit Socket Signal
   if (socket && targetId) {
     const finalTarget = String(targetId).trim();
     console.log(`📡 Signaling END to Remote Party: ${finalTarget}`);
     socket.emit("end-call", { to: finalTarget, callId: currentCallId });
     socket.emit("call-ended", { to: finalTarget, callId: currentCallId });
   } else {
-    console.error("❌ Ghosting Risk: No targetId found to signal.");
+    console.warn("⚠️ Pipeline Warn: Direct clean execution down pathway without peer connection metadata.");
   }
 
-  // 6. Cleanup Audio
   [ringtoneAudio, callingAudio, notificationSound].forEach(ref => {
     if (ref?.current) {
       ref.current.pause();
       ref.current.currentTime = 0;
     }
   });
+  
   setCallStatus('idle');
   setLkToken(null);
   setActiveCall(null);
@@ -370,8 +365,10 @@ const handleEndCall = useCallback(async () => {
   setShowFullScreenCall(false);
   setCallTime(0);
   setPeerConnected(false);
-    activeCallRef.current = null;
-  activeCallerRef.current = null;
+  
+  if (activeCallRef) activeCallRef.current = null;
+  if (activeCallerRef) activeCallerRef.current = null;
+  
   const token = localStorage.getItem('agentToken');
   if (currentCallId && token) {
     fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
@@ -387,7 +384,7 @@ const handleEndCall = useCallback(async () => {
 
 const handleRejectCall = async () => {
   console.log("🚫 Agent rejecting incoming call...");
-    const targetId = activeCaller?.fromId || activeCall?.caller || activeCall?.fromId;
+  const targetId = activeCaller?.fromId || activeCall?.caller || activeCall?.fromId;
   const callId = activeCaller?.callId || activeCall?._id;
 
   if (socket && targetId) {
@@ -466,15 +463,18 @@ const startVoiceConversion = async (existingStream) => {
 
 const LocalUserMuteController = ({ isMuted, isMasked }) => {
   const { localParticipant } = useLocalParticipant();
-  const room = useRoomContext(); // Access core engine connection states
+  const room = useRoomContext();
 
   useEffect(() => {
     if (!localParticipant || !room) return;
+    
     const syncMic = async () => {
       if (room.state !== 'connected') {
         console.log(`⏳ LiveKit Engine is ${room.state} - Stalling mic track synchronization...`);
         return;
       }
+      
+      // If AI Masking is active, handle track publishing separately or mute mic track contextually
       const shouldPublish = !isMasked && !isMuted;
       try {
         await localParticipant.setMicrophoneEnabled(shouldPublish);
@@ -483,19 +483,22 @@ const LocalUserMuteController = ({ isMuted, isMasked }) => {
         console.error("❌ Agent Mic Sync Error:", err);
       }
     };
+
     syncMic();
+
     const handleStateChange = () => {
       if (room.state === 'connected') syncMic();
     };
 
-    room.on('connectionStateChanged', handleStateChange);
+    room.on(RoomEvent.ConnectionStateChanged, handleStateChange);
     return () => {
-      room.off('connectionStateChanged', handleStateChange);
+      room.off(RoomEvent.ConnectionStateChanged, handleStateChange);
     };
-  }, [isMuted, isMasked, localParticipant, room, room?.state]);
+  }, [isMuted, isMasked, localParticipant, room]);
 
   return null;
 };
+
 const AudioSession = ({ 
   isMuted, 
   isMasked, 
@@ -509,10 +512,13 @@ const AudioSession = ({
 
   useEffect(() => {
     if (!room) return;
+
     const handleConnectionEngineState = async () => {
       console.log(`📡 ZingConnect Room Context State Changed: ${room.state}`);
+      
       if (room.state === 'connected') {
         console.log("⚡ ZingConnect: Audio Bridge Fully Established via Context.");
+        
         try {
           const AudioContext = window.AudioContext || window.webkitAudioContext;
           if (AudioContext) {
@@ -522,6 +528,7 @@ const AudioSession = ({
         } catch (e) { 
           console.error("Audio Context Wake-up failed", e); 
         }
+
         if (isIncomingCall) {
           if (ringtoneAudio.current) {
             ringtoneAudio.current.pause();
@@ -530,20 +537,34 @@ const AudioSession = ({
           setCallStatus('connected');
           setPeerConnected(true);
         } else {
-          if (callingAudio.current) {
-            callingAudio.current.pause();
-            callingAudio.current.currentTime = 0;
+          const hasRemoteAudio = Array.from(room.remoteParticipants.values()).some(p => p.isMicrophoneEnabled);
+          if (hasRemoteAudio) {
+            handleRemotePartyConnected();
+          } else {
+            console.log("🔒 Outgoing channel ready. Ringing active. Awaiting user track publication...");
           }
-          console.log("🔒 Outgoing LiveKit media layer ready. Keeping state at Ringing/Calling until User answers via socket...");
         }
       }
     };
+    const handleRemotePartyConnected = () => {
+      console.log("🔒 ZingConnect Handshake Verified: Remote audio track captured.");
+      if (callingAudio.current) {
+        callingAudio.current.pause();
+        callingAudio.current.currentTime = 0;
+      }
+      setCallStatus('connected');
+      setPeerConnected(true);
+    };
+    room.on(RoomEvent.ConnectionStateChanged, handleConnectionEngineState);
+    room.on(RoomEvent.TrackSubscribed, handleRemotePartyConnected);
 
-    room.on('connectionStateChanged', handleConnectionEngineState);
-    if (room.state === 'connected') handleConnectionEngineState();
+    if (room.state === 'connected') {
+      handleConnectionEngineState();
+    }
 
     return () => {
-      room.off('connectionStateChanged', handleConnectionEngineState);
+      room.off(RoomEvent.ConnectionStateChanged, handleConnectionEngineState);
+      room.off(RoomEvent.TrackSubscribed, handleRemotePartyConnected);
     };
   }, [room, isIncomingCall, setCallStatus, setPeerConnected, ringtoneAudio, callingAudio]);
 
@@ -554,6 +575,7 @@ const AudioSession = ({
     </>
   );
 };
+
 const stopVoiceConversion = () => {
   if (aiMediaRecorderRef.current) {
     if (aiMediaRecorderRef.current.state !== "inactive") aiMediaRecorderRef.current.stop();
@@ -1812,7 +1834,9 @@ if (loading) return (
 return (
 <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
   <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
+
 {/* --- CALL ENGINE (FIXED POSITIONING & DESIGN STABILITY) --- */}
+
 {callStatus !== 'idle' && (
   <>
     {/* A. LIVEKIT WEB RTC ENGINE LAYER */}
@@ -2372,93 +2396,101 @@ return (
               <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Message" className="w-full bg-input-bg text-text-main px-3 py-1.5 rounded-full text-[14px] outline-none  shadow-sm" />
               <button type="submit" disabled={!newMessage.trim() || isUploading} className={`p-2 rounded-full shadow-sm ${newMessage.trim() ? 'bg-blue-600 text-white' : 'bg-gray-300 text-white'}`}><BsSend size={15} /></button>
             </form>
-          </footer>
-        </>
-      ) : (
-      <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30 text-text-main">
+        </footer>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30 text-text-main">
             <BsShieldLockFill size={40} className="mb-4" />
-          <h1 className="text-2xl font-black uppercase tracking-widest text-blue-950">ZingConnect</h1>
-          <p className="text-[10px] font-bold uppercase tracking-widest">Secure Terminal</p>
-        </div>
-      )}
+            <h1 className="text-2xl font-black uppercase tracking-widest text-blue-950">ZingConnect</h1>
+            <p className="text-[10px] font-bold uppercase tracking-widest">Secure Terminal</p>
+          </div>
+        )}
 
-  {showUserModal && selectedUser && (
-  <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
-    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
-    <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
-      <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
-      <div className="px-6 pb-8 flex flex-col items-center">
-        <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem]  overflow-hidden bg-gray-100">
-          <img 
-            src={selectedUser.photoUrl} 
-            className="w-full h-full object-cover" 
-            alt="Profile" 
-            onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
-          />
-        </div>
-        <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
-        <p className="text-[10px] font-bold text-blue-600 uppercase mb-6">Verified Client</p>
-        
-        <div className="w-full space-y-2.5">
-          {/* Email */}
-          <div className="bg-slate-50 p-3 rounded-2xl ">
-            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Email Address</p>
-            <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
-          </div>
+        {/* --- USER DETAILS MODAL --- */}
+        {showUserModal && selectedUser && (
+          <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
+            <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
+              <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
+              <div className="px-6 pb-8 flex flex-col items-center">
+                <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-gray-100">
+                  <img 
+                    src={selectedUser.photoUrl} 
+                    className="w-full h-full object-cover" 
+                    alt="Profile" 
+                    onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
+                  />
+                </div>
+                <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
+                <p className="text-[10px] font-bold text-blue-600 uppercase mb-6">Verified Client</p>
+                
+                <div className="w-full space-y-2.5">
+                  {/* Email */}
+                  <div className="bg-slate-50 p-3 rounded-2xl">
+                    <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Email Address</p>
+                    <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
+                  </div>
 
-          {/* Phone */}
-          <div className="bg-slate-50 p-3 rounded-2xl">
-            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Phone Number</p>
-            <p className="text-[11px] font-bold text-slate-700">
-              {selectedUser.phoneNumber || selectedUser.phone || 'No Phone Registered'}
-            </p>
-          </div>
+                  {/* Phone */}
+                  <div className="bg-slate-50 p-3 rounded-2xl">
+                    <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Phone Number</p>
+                    <p className="text-[11px] font-bold text-slate-700">
+                      {selectedUser.phoneNumber || selectedUser.phone || 'No Phone Registered'}
+                    </p>
+                  </div>
 
-          {/* UPDATED: Address + City + State */}
-          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Location Details</p>
-            <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
-              {selectedUser.address && <span>{selectedUser.address}<br /></span>}
-              <span className="text-blue-600">
-                {selectedUser.city || ''}
-                {selectedUser.city && selectedUser.state ? ', ' : ''}
-                {selectedUser.state || ''}
-              </span>
-              {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
-            </p>
-          </div>
-        </div>
-        
-        <button 
-          onClick={() => setShowUserModal(false)}
-          className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
-        >
-          Close Profile
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
-      {previewUrl && (
-        <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col">
-          <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white">
-            <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-2 hover:bg-white/10 rounded-full"><BsXLg size={24} /></button>
-            <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">Media Preview</span>
-            <div className="w-10" />
-          </div>
-          <div className="flex-1 flex items-center justify-center p-4">
-            {previewFile?.type.startsWith('video') ? <video src={previewUrl} controls className="max-w-full max-h-[65vh] rounded-2xl" /> : <img src={previewUrl} className="max-w-full max-h-[65vh] rounded-2xl object-contain" alt="Preview" />}
-          </div>
-          <div className="p-6 bg-slate-900">
-            <div className="max-w-4xl mx-auto flex items-center gap-4">
-              <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none" />
-              <button onClick={handleFinalSend} className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center"><BsSend size={28} className="text-white" /></button>
+                  {/* Location Details */}
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Location Details</p>
+                    <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
+                      {selectedUser.address && <span>{selectedUser.address}<br /></span>}
+                      <span className="text-blue-600">
+                        {selectedUser.city || ''}
+                        {selectedUser.city && selectedUser.state ? ', ' : ''}
+                        {selectedUser.state || ''}
+                      </span>
+                      {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
+                    </p>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setShowUserModal(false)}
+                  className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
+                >
+                  Close Profile
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </main>
-  </div>
-);
+        )}
+
+        {/* --- MEDIA PREVIEW OVERLAY --- */}
+        {previewUrl && (
+          <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col">
+            <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white">
+              <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-2 hover:bg-white/10 rounded-full"><BsXLg size={24} /></button>
+              <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">Media Preview</span>
+              <div className="w-10" />
+            </div>
+            <div className="flex-1 flex items-center justify-center p-4">
+              {previewFile?.type.startsWith('video') ? (
+                <video src={previewUrl} controls className="max-w-full max-h-[65vh] rounded-2xl" />
+              ) : (
+                <img src={previewUrl} className="max-w-full max-h-[65vh] rounded-2xl object-contain" alt="Preview" />
+              )}
+            </div>
+            <div className="p-6 bg-slate-900">
+              <div className="max-w-4xl mx-auto flex items-center gap-4">
+                <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none" />
+                <button onClick={handleFinalSend} className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center"><BsSend size={28} className="text-white" /></button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
 };
+
+export default AgentDashboard;

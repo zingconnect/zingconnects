@@ -1,10 +1,5 @@
 import { 
-  LiveKitRoom, 
-  AudioConference, 
-  useTracks,
-  RoomAudioRenderer,
-  StartAudio,
-  useLocalParticipant
+  LiveKitRoom, AudioConference, useTracks,RoomAudioRenderer, StartAudio, useLocalParticipant
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { Buffer } from 'buffer';
@@ -491,6 +486,7 @@ useEffect(() => {
     setIsIncomingCall(true); 
     setCallStatus('ringing');
   };
+
   const handleCallAccepted = (acceptData) => {
     console.log("📡 Outbound Call Accepted by Agent:", acceptData);
     if (acceptData.lkToken) {
@@ -709,9 +705,7 @@ useEffect(() => {
   if (!token) return;
 
   const checkCalls = async () => {
-    // 1. STACKED GUARDS: 
-    // We check callStatusRef (real-time state) and our Transition Lock.
-    // If we are already ringing, connecting, or ending, we ABORT the poll immediately.
+    
     if (
       callStatusRef.current !== 'idle' || 
       isEnding || 
@@ -822,6 +816,7 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
+  // 1. Audio Pipeline Wake-up
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (AudioContext) {
     const audioCtx = new AudioContext();
@@ -829,23 +824,27 @@ const handleAcceptCall = async () => {
       await audioCtx.resume().catch(e => console.warn("Context unlock blocked:", e));
     }
   }
+
+  // 2. Kill Local Ringtone
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
     ringtoneAudio.current.currentTime = 0;
   }
+
   const token = localStorage.getItem('userToken');
   const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
 
   if (!callId) {
-    console.error("❌ No Call ID found.");
+    console.error("❌ ZingConnect: No valid Call ID found for acceptance.");
     return;
   }
   try {
-    setIsEnding(true); 
+    setIsEnding(false); 
     isTransitioningRef.current = true;
-    setCallStatus('connecting');
-    setIsIncomingCall(false);
+        setCallStatus('connecting');
     setShowFullScreenCall(true);
+
+    console.log(`📡 Sending acceptance to server engine for room/call: ${callId}...`);
     const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
       method: 'POST',
       headers: {
@@ -853,29 +852,34 @@ const handleAcceptCall = async () => {
         'Authorization': `Bearer ${token}`
       }
     });
+
     const data = await response.json();    
     if (data.success && data.lkToken) {
-      console.log("✅ Secure LiveKit token received.");
-      const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId)?.toString();
+      console.log("✅ Secure LiveKit token verified and cached locally.");
+            const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
+      
       if (socket && agentId) {
-        socket.emit("answer-call", { to: agentId, callId: data.roomName, myId: agentId });
+        socket.emit("answer-call", { 
+          to: agentId, 
+          callId: data.roomName || callId, 
+          myId: userData?._id?.toString() 
+        });
       }
       peerConnectedRef.current = true; 
       setPeerConnected(true);
-      setLiveKitToken(data.lkToken); 
-      setCallStatus('connected'); 
-      setIsEnding(false);
-      isTransitioningRef.current = false;
-      console.log("🔓 LiveKit Media pipeline connected instantly.");
+            setLiveKitToken(data.lkToken); 
+            isTransitioningRef.current = false;
+      setIsIncomingCall(false); // Move incoming flag change here post-auth verification
+      
     } else {
-      throw new Error(data.message || "LiveKit token missing from server engine");
+      throw new Error(data.message || "LiveKit RTC token missing from server engine");
     }
 
   } catch (err) {
-    console.error("❌ Accept Call Failed:", err);
+    console.error("❌ ZingConnect acceptance runtime exception:", err);
     setIsEnding(false); 
     isTransitioningRef.current = false;
-    handleEndCall();
+    handleEndCall(); // Safely fall back to structural teardown logic
   }
 };
 
@@ -1224,38 +1228,69 @@ const handleFileChange = (e) => {
   e.target.value = ""; 
 };
 
-const handleSendWithPreview = async () => {
-  if (!selectedFile || isUploading) return;
+const handleFinalSend = async () => {
+  // Guard clause using the unified state names from your UI preview template
+  if (!previewFile || isUploading) return;
   setIsUploading(true);
+
+  const token = localStorage.getItem('userToken');
+  // Dynamic fallback targeting your active agent profile state
+  const targetReceiverId = agent?._id || selectedUser?._id;
+
+  if (!targetReceiverId) {
+    console.error("❌ ZingConnect: Cannot send media. No target receiver agent ID found.");
+    setIsUploading(false);
+    return;
+  }
 
   try {
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    // Appends the raw file object caught by your input fields
+    formData.append('file', previewFile);
     
-    const uploadRes = await axios.post('/api/upload', formData);
+    console.log("📦 Routing asset pipe through secure upload engine...");
+    
+    // Fixed: Absolute environment pathing + Auth headers included
+    const uploadRes = await axios.post(
+      `${import.meta.env.VITE_API_URL}/api/upload`, 
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
     const { fileUrl, fileType } = uploadRes.data;
     const payload = {
-      receiverId: selectedUser._id,
-      text: caption.trim(), // The caption typed in the preview
+      receiverId: targetReceiverId,
+      text: caption.trim(), 
       fileUrl: fileUrl,
-      fileType: fileType,
-      senderModel: 'User' // or 'User' depending on the dashboard
+      fileType: fileType, 
+      senderModel: 'User' 
     };
-    socket.emit('sendMessage', payload);
+    if (socket) {
+      socket.emit('sendMessage', payload);
+      console.log("⚡ Media packet emitted to WebSocket gateway.");
+    }
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl); 
+    }
     setPreviewUrl(null);
-    setSelectedFile(null);
+    setPreviewFile(null); 
     setCaption("");
+    
   } catch (error) {
-    console.error("Failed to send media:", error);
+    console.error("❌ ZingConnect media transmission failure:", error);
+    alert("Failed to upload asset pipeline. Please try again.");
   } finally {
     setIsUploading(false);
   }
 };
+
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
-  
-  // Basic validation for the new phone field
-  if (!formData.phone || formData.phone.length < 10) {
+    if (!formData.phone || formData.phone.length < 10) {
     alert("Please enter a valid phone number with country code.");
     return;
   }
@@ -2430,42 +2465,44 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   </div>
 )}
-    {liveKitToken && (
-<LiveKitRoom
+
+{liveKitToken && (
+  <LiveKitRoom
     video={false}
     audio={true}
     token={liveKitToken}
     serverUrl={import.meta.env.VITE_LIVEKIT_URL}
     connect={!!liveKitToken}
-    // Optimization: Reduces bandwidth jitter which causes the "Websocket error"
     options={{
       publishDefaults: {
-        audioPreset: { maxBitrate: 32000 },
-        dtx: true, 
+        audioPreset: { maxBitrate: 32000 }, 
+        dtx: true,                          
       },
       adaptiveStream: true,
     }}
     onConnected={async () => {
-      console.log("⚡ ZingConnect: Audio Bridge Established.");
-            try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        if (ctx.state === 'suspended') await ctx.resume();
-      } catch (e) {
-        console.warn("Manual audio wake-up failed", e);
-      }
-
-      if (isIncomingCall || peerConnectedRef.current) {
-        setCallStatus('connected');
-        setPeerConnected(true);
-        if (ringtoneAudio.current) {
-          ringtoneAudio.current.pause();
-          ringtoneAudio.current.currentTime = 0;
+      console.log("⚡ ZingConnect: Audio Bridge Established via WebRTC Mesh.");
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          const ctx = new AudioContext();
+          if (ctx.state === 'suspended') await ctx.resume();
         }
+      } catch (e) {
+        console.warn("⚠️ ZingConnect: Manual audio wake-up failed:", e);
       }
+      if (ringtoneAudio.current) {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.currentTime = 0;
+      }
+      peerConnectedRef.current = true;
+      setPeerConnected(true);
+      setCallStatus('connected');
+      setIsIncomingCall(false); // Clear the flag since the call lifecycle is now active
     }}
     onDisconnected={() => {
-      if (!isEnding && callStatus === 'connected') {
-        console.log("📡 LiveKit connection lost. Cleaning up session.");
+      if (!isEnding) {
+        console.log("📡 ZingConnect: LiveKit connection lost. Cleaning up session.");
         handleEndCall();
       }
     }}
@@ -2480,3 +2517,5 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   );
 };
+
+export default UserDashboard;
