@@ -73,24 +73,28 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     };
   }, [hasInteracted, unlockAudio]);
 
-  // Teardown Local Audio Session
-  const terminateLocalSession = useCallback(() => {
-    setIsEnding(true);
-    if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
-    
-    [ringtoneAudio, callingAudio].forEach(ref => { 
-      if (ref?.current) { ref.current.pause(); ref.current.currentTime = 0; } 
-    });
+const terminateLocalSession = useCallback(() => {
+  setIsEnding(true);
+  if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
+  
+  [ringtoneAudio, callingAudio].forEach(ref => { 
+    if (ref?.current) { ref.current.pause(); ref.current.currentTime = 0; } 
+  });
+  if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+    audioCtxRef.current.close().catch(() => {});
+    audioCtxRef.current = null;
+  }
+  nextStartTimeRef.current = 0;
 
-    setLiveKitToken(null);
-    setCallStatus('idle');
-    setIsIncomingCall(false);
-    setActiveCall(null);
-    setActiveCaller(null);
-    setCallTime(0);
-    setPeerConnected(false);
-    setTimeout(() => setIsEnding(false), 2000);
-  }, []);
+  setLiveKitToken(null);
+  setCallStatus('idle');
+  setIsIncomingCall(false);
+  setActiveCall(null);
+  setActiveCaller(null);
+  setCallTime(0);
+  setPeerConnected(false);
+  setTimeout(() => setIsEnding(false), 2000);
+}, []);
 
   // Safety Status Poller
   const startStatusPolling = useCallback((roomName) => {
@@ -390,46 +394,52 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     }
   }, [isSpeakerOn, activeCall?.voiceId, callStatus]);
 
-  // Inbound Fallback Polling Mechanism
-  useEffect(() => {
-    const token = localStorage.getItem('userToken');
-    if (!token) return;
-  
-    const checkCalls = async () => {
-      if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return; 
-  
-      try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
-          headers: { 
-            'Authorization': `Bearer ${token}`, 
-            'Cache-Control': 'no-cache' 
+ useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token) return;
+
+  // Stop polling entirely if the user is engaged in a call state
+  if (callStatus !== 'idle' || isEnding || isTransitioningRef.current) return;
+
+  const checkCalls = async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Cache-Control': 'no-cache' 
+        }
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+
+      if (data && data.hasIncomingCall) {
+        // Double check ref before state update to block race conditions
+        if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
+
+        setActiveCall({
+          callId: data.callId,
+          fromId: data.callerData?.callerId || data.fromId,
+          roomName: data.roomName || data.callId,
+          callerData: data.callerData,
+          voiceId: data.voiceId,
+          from: {
+            firstName: data.callerData?.fromName?.split(' ')[0] || "Incoming",
+            lastName: data.callerData?.fromName?.split(' ')[1] || "Call",
+            photoUrl: data.callerData?.photoUrl
           }
         });
-        if (!response.ok) return;
-        const data = await response.json();
-  
-        if (data && data.hasIncomingCall) {
-          if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
-  
-          setActiveCall({
-            callId: data.callId,
-            fromId: data.callerData?.callerId || data.fromId,
-            roomName: data.roomName || data.callId,
-            callerData: data.callerData,
-            voiceId: data.voiceId
-          });
-          
-          setIsIncomingCall(true); 
-          setCallStatus('ringing');
-        }
-      } catch (err) {
-        console.warn("User Polling error:", err);
+        
+        setIsIncomingCall(true); 
+        setCallStatus('ringing');
       }
-    };
+    } catch (err) {
+      console.warn("User Polling error:", err);
+    }
+  };
 
-    const interval = setInterval(checkCalls, 4000); 
-    return () => clearInterval(interval);
-  }, [isEnding]);
+  const interval = setInterval(checkCalls, 4000); 
+  return () => clearInterval(interval);
+}, [isEnding, callStatus]);
 
   // Real-time AI Voice Conversion Node Linker
   useEffect(() => {
