@@ -189,9 +189,9 @@ useEffect(() => {
   };
 }, [previewUrl]);
 
-
 useEffect(() => {
   if (!socket) return;
+  
   socket.on("new-message", (msg) => {
     setMessages(prev => {
       const isDuplicate = prev.some(m => m._id === msg._id || m.tempId === msg._id);
@@ -201,9 +201,19 @@ useEffect(() => {
       }
       return [...prev, msg];
     });
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    const container = chatContainerRef.current;
+    if (container) {
+      if (isAdjustingScrollRef.current) return;
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+      if (isNearBottom) {
+        setTimeout(() => {
+          if (!isAdjustingScrollRef.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }, 50);
+      }
+    }
   });
-
   socket.on("message-deleted", (deletedId) => {
     setMessages(prev => prev.filter(m => (m._id || m.id) !== deletedId));
   });
@@ -408,18 +418,26 @@ const fetchOlderMessages = async () => {
           const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
           return [...uniqueHistorical, ...prev];
         });
-        if (chatContainerRef.current) {
-          const freshHeight = chatContainerRef.current.scrollHeight;
-          chatContainerRef.current.scrollTop = previousScrollTop + (freshHeight - previousScrollHeight);
-        }
-        setTimeout(() => {
+
+        // 🚀 CRITICAL MOBILE ENGINE LOCK:
+        // Adjust the scroll offset inside the engine's animation frame to eliminate layout jumps.
+        requestAnimationFrame(() => {
           if (chatContainerRef.current) {
-            const finalHeight = chatContainerRef.current.scrollHeight;
-            const delta = finalHeight - previousScrollHeight;
+            const freshHeight = chatContainerRef.current.scrollHeight;
+            const delta = freshHeight - previousScrollHeight;
             chatContainerRef.current.scrollTop = previousScrollTop + delta;
           }
-          isAdjustingScrollRef.current = false;
-        }, 45);
+          
+          // Secondary fallback for slower rendering devices (e.g., older iOS/WebKit engines)
+          setTimeout(() => {
+            if (chatContainerRef.current) {
+              const finalHeight = chatContainerRef.current.scrollHeight;
+              const finalDelta = finalHeight - previousScrollHeight;
+              chatContainerRef.current.scrollTop = previousScrollTop + finalDelta;
+            }
+            isAdjustingScrollRef.current = false;
+          }, 35);
+        });
       } else {
         isAdjustingScrollRef.current = false;
       }
@@ -433,6 +451,7 @@ const fetchOlderMessages = async () => {
     setIsFetchingOlder(false);
   }
 };
+
 const handleChatScroll = (e) => {
   const container = e.currentTarget;
   const currentScrollTop = container.scrollTop;
@@ -1004,10 +1023,16 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
+
 <main 
-  ref={chatContainerRef}
+ref={chatContainerRef}
   onScroll={handleChatScroll}
   className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
+  style={{
+    scrollAnchor: 'none',             
+    overscrollBehaviorY: 'contain',   
+    WebkitOverflowScrolling: 'touch'  
+  }}
 >
   {/* 1. Background Pattern */}
   <div 
