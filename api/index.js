@@ -1372,60 +1372,55 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   }
 });
 
-// --- GET CHAT MESSAGES BETWEEN TWO USERS (SERVERLESS SAFE) ---
+// --- UPDATED: GET CHAT MESSAGES WITH CURSOR PAGINATION & SANITIZATION ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
-    // 🚀 1. Enforce active database connection tunnel instantly
     await connectToDatabase();
-    
     const myId = req.user.id;
     const { otherUserId } = req.params;
-    const limit = parseInt(req.query.limit) || 30;
-
-    // 🚀 2. SERVERLESS SAFEGUARD: Dynamically load model context from the Mongoose registry
-    const ActiveMessageModel = mongoose.models.Message || Message;
-
-    // 🚀 3. Defensive Check: Account for both 'senderId' and object-reference 'sender' variations
-    const messages = await ActiveMessageModel.find({
+        const { beforeId, limit } = req.query;
+    const maxMessages = parseInt(limit, 10) || 50;
+    const baseQuery = {
       $or: [
         { senderId: myId, receiverId: otherUserId },
-        { senderId: otherUserId, receiverId: myId },
-        { sender: myId, receiver: otherUserId },
-        { sender: otherUserId, receiver: myId }
+        { senderId: otherUserId, receiverId: myId }
       ]
-    })
-    .sort({ createdAt: -1 }) 
-    .limit(limit)
-    .lean();
-
-    // Reverse for chronological UI display
+    };
+    if (beforeId && mongoose.Types.ObjectId.isValid(beforeId)) {
+      baseQuery._id = { $lt: new mongoose.Types.ObjectId(beforeId) };
+    }
+    const messages = await Message.find(baseQuery)
+      .sort({ createdAt: -1 }) 
+      .limit(maxMessages)
+      .lean();
     const chronologicalMessages = messages.reverse();
-
-    // 🚀 4. Safely apply your s3.js getPrivateUrl wrapper
     const signedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      if (m.fileUrl && typeof m.fileUrl === 'string') {
+      if (m.fileUrl) {
+        let fileKey = m.fileUrl;
+        if (fileKey.startsWith('http')) {
+          const urlParts = fileKey.split('idrivee2.com/');
+          if (urlParts.length > 1) {
+            const pathParts = urlParts[1].split('/');
+            fileKey = pathParts.slice(1).join('/'); 
+          }
+        }
         try {
-          m.fileUrl = await getPrivateUrl(m.fileUrl);
-        } catch (s3Err) {
-          console.error(`[S3 Chat Error] Failed to sign message attachment ${m._id}:`, s3Err.message);
+          m.fileUrl = await getPrivateUrl(fileKey);
+        } catch (s3Error) {
+          console.error(`S3 signing failure for key ${fileKey}:`, s3Error.message);
         }
       }
       return m;
     }));
 
-    return res.json({ 
+    res.json({ 
       success: true, 
-      count: signedMessages.length,
-      messages: signedMessages 
+      messages: signedMessages,
+      hasMore: signedMessages.length === maxMessages 
     });
-
   } catch (err) {
-    console.error("🔴 CRITICAL CHAT FETCH EXCEPTION:", err.message);
-    return res.status(500).json({ 
-      success: false, 
-      message: "Internal server error loading chat",
-      error: err.message
-    });
+    console.error("Chat Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });
 
@@ -1610,6 +1605,7 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 // --- 6. UPLOAD MEDIA ROUTE (WITH PUSH & EMAIL) ---
 app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {

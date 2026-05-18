@@ -88,10 +88,14 @@ export const UserDashboard = () => {
   const messagesEndRef = useRef(null);
   const userStreamRef = useRef(null); 
   const activeCallRef = useRef(null);
+  const chatContainerRef = useRef(null);
   const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
 
-  // --- 1. CORE COMPONENT STATE (Must be declared before the hook executes!) ---
-  const [agent, setAgent] = useState(null);
+const [hasMore, setHasMore] = useState(true);
+const [isFetchingOlder, setIsFetchingOlder] = useState(false);
+const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+
+const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
@@ -293,14 +297,10 @@ useEffect(() => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-  
   if (!token || !targetAgentId) return;
-
-  let isFirstLoad = true;
-
+  let isFirstLoad = !isInitialLoadComplete;
   const fetchMessages = async () => {
     try {
-      // Added your ?limit=50 param to optimize historical fetching payload sizes
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -309,8 +309,6 @@ useEffect(() => {
       if (response.ok && data.success) {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
-
-        // 1. Silent Notification & Seen Logic
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
@@ -329,39 +327,38 @@ useEffect(() => {
               tag: 'zing-msg'
             });
           }
-
           fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
-
-        // 2. State Sync: Merge incoming messages with local in-flight ones
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
+          const historicalLocal = prev.filter(m => m._id && !incomingMessages.some(incoming => incoming._id === m._id));
           const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
           const uniqueInFlight = inFlight.filter(m => 
             !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
           );
-          const newCombined = [...incomingMessages, ...uniqueInFlight];
-          
-          if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
-            return prev;
-          }
-          return newCombined;
+          return [...historicalLocal, ...incomingMessages, ...uniqueInFlight];
         });
-
-        // 3. Smart Viewport Anchoring
-        setTimeout(() => {
-          if (isFirstLoad) {
-            // Instant snap on mount so user doesn't see scroll animation lag
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-            isFirstLoad = false;
-          } else {
-            // Smooth adjustment for passive incoming messages while chatting
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (isFirstLoad) {
+          setTimeout(() => {
+            if (chatContainerRef.current) {
+              chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+            }
+            setIsInitialLoadComplete(true);
+          }, 100);
+        } else {
+          const container = chatContainerRef.current;
+          if (container) {
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 350;
+            if (isNearBottom) {
+              setTimeout(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+              }, 50);
+            }
           }
-        }, 100);
+        }
       }
     } catch (err) {
       console.error("ZingConnect Sync Jitter:", err);
@@ -370,14 +367,58 @@ useEffect(() => {
     }
   };
 
-  // Immediate invocation on change/mount
   fetchMessages();
-  
-  // Set up background long-poll tracker
   const interval = setInterval(fetchMessages, 5000); 
-  
   return () => clearInterval(interval);
-}, [agent?._id, agent?.id]);
+}, [agent?._id, agent?.id, isInitialLoadComplete]);
+
+const fetchOlderMessages = async () => {
+  if (isFetchingOlder || !hasMore || !agent?._id) return;
+
+  const token = localStorage.getItem('userToken');
+  const targetAgentId = agent._id || agent.id;
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
+  if (!oldestMessage) return;
+
+  setIsFetchingOlder(true);
+    const container = chatContainerRef.current;
+  const previousScrollHeight = container ? container.scrollHeight : 0;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      if (data.messages.length < 30) {
+        setHasMore(false); 
+      }
+      if (data.messages.length > 0) {
+        setMessages(prev => {
+          const currentIds = new Set(prev.map(m => m._id));
+          const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
+          return [...uniqueHistorical, ...prev];
+        });
+        setTimeout(() => {
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight - previousScrollHeight;
+          }
+        }, 0);
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load older historical slices:", err);
+  } finally {
+    setIsFetchingOlder(false);
+  }
+};
+
+const handleChatScroll = (e) => {
+  if (e.currentTarget.scrollTop <= 5) {
+    fetchOlderMessages();
+  }
+};
 
   const agentStatus = getStatusInfo(agent);
 
@@ -941,12 +982,24 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
-<main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
+<main 
+  ref={chatContainerRef}
+  onScroll={handleChatScroll}
+  className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
+>
   {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
     style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
   />
+
+  {/* --- INFINITE SCROLL HISTORICAL LOADING INDICATOR --- */}
+  {isFetchingOlder && (
+    <div className="self-center z-20 my-2 px-3 py-1.5 bg-[#005c4b] text-white rounded-full text-[10px] font-bold tracking-wider flex items-center gap-2 shadow-md border border-emerald-500/20 animate-pulse">
+      <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      <span>LOADING OLDER MESSAGES...</span>
+    </div>
+  )}
 
   {/* 2. Encryption Notice */}
   <div className="self-center z-10 my-4 px-4 py-1.5 bg-[#fff9c2] rounded-lg shadow-sm border border-yellow-100 flex items-center gap-2 max-w-[90%]">
@@ -1005,12 +1058,13 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
               </>
             ) : (
               <div className="relative">
+                {/* Fixed src inside video element tag ensures smooth re-indexing when scrolling prepends nodes */}
                 <video 
+                  key={`video-${msgKey}`}
+                  src={m.fileUrl}
                   className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
                   onClick={() => setFullscreenVideo(m.fileUrl)}
-                >
-                  <source src={m.fileUrl} type="video/mp4" />
-                </video>
+                />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
                     <BsPlayFill size={30} />
