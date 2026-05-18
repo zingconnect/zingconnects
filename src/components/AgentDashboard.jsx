@@ -415,17 +415,13 @@ const stopHold = () => {
 };
 
 const startVoiceConversion = async (existingStream) => {
-  let aiStream = null; // Declare here so it's available for the return
+  let aiStream = null; 
   
   try {
     const sourceStream = existingStream || userStreamRef.current;
     if (!sourceStream) return null;
-
-    // Initialize the stream
     aiStream = new MediaStream(sourceStream.getAudioTracks().map(t => t.clone()));    
-    
-    // Mute the original track so the user doesn't hear both voices
-    sourceStream.getAudioTracks().forEach(track => { track.enabled = false; });
+        sourceStream.getAudioTracks().forEach(track => { track.enabled = false; });
 
     socket.emit("start-voice-conversion", { 
       voiceId: selectedVoiceId || activeCall?.voiceId,
@@ -437,7 +433,6 @@ const startVoiceConversion = async (existingStream) => {
 
     const mediaRecorder = new MediaRecorder(aiStream, { mimeType: 'audio/webm;codecs=opus' });
     aiMediaRecorderRef.current = mediaRecorder;
-
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0 && socket) {
         const reader = new FileReader();

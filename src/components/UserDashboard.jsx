@@ -2498,7 +2498,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       peerConnectedRef.current = true;
       setPeerConnected(true);
       setCallStatus('connected');
-      setIsIncomingCall(false); // Clear the flag since the call lifecycle is now active
+      setIsIncomingCall(false); 
     }}
     onDisconnected={() => {
       if (!isEnding) {
