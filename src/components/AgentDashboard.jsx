@@ -234,21 +234,20 @@ export const AgentDashboard = () => {
     
     if (pollingIntervalRef) pollingIntervalRef.current = pollInterval;
   };
+const handleAcceptCall = async () => {
+  if (ringtoneAudio.current) {
+    ringtoneAudio.current.pause();
+    ringtoneAudio.current.currentTime = 0;
+  }
+  
+  const token = localStorage.getItem('agentToken');
+  const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId || activeCaller?._id;
+  const remoteUserId = activeCaller?.fromId || activeCaller?.callerId || activeCall?.fromId || activeCall?.caller;
 
-  const handleAcceptCall = async () => {
-    if (ringtoneAudio.current) {
-      ringtoneAudio.current.pause();
-      ringtoneAudio.current.currentTime = 0;
-    }
-    
-    const token = localStorage.getItem('agentToken');
-    const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId || activeCaller?._id;
-    const remoteUserId = activeCaller?.fromId || activeCaller?.callerId || activeCall?.fromId || activeCall?.caller;
-
-    if (!callId) {
-      console.error("❌ ZingConnect Error: No Call ID found.");
-      return;
-    }
+  if (!callId) {
+    console.error("❌ ZingConnect Error: No Call ID found.");
+    return;
+  }
 
   try {
     setCallStatus('connecting'); 
@@ -275,7 +274,6 @@ export const AgentDashboard = () => {
     
     const data = await res.json();
     if (data.success && data.lkToken) {
-      setIsIncomingCall(false);
       if (callingAudio.current) {
         callingAudio.current.pause();
         callingAudio.current.currentTime = 0;
@@ -290,6 +288,14 @@ export const AgentDashboard = () => {
         status: 'connected' 
       }));
 
+      if (socket && remoteUserId) {
+        socket.emit("accept-call", {
+          to: remoteUserId.toString(),
+          roomName: data.roomName,
+          callId: callId
+        });
+      }
+      setIsIncomingCall(true); 
       setLkToken(data.lkToken);
       console.log("📡 Core Token Applied. Handing connection off to LiveKit Room wrapper.");
 
@@ -297,12 +303,12 @@ export const AgentDashboard = () => {
       throw new Error("No LiveKit token returned.");
     }
 
-    } catch (err) {
-      console.error("❌ ZingConnect Connection Failed:", err);
-      setCallStatus('idle');
-      handleEndCall(); 
-    }
-  };
+  } catch (err) {
+    console.error("❌ ZingConnect Connection Failed:", err);
+    setCallStatus('idle');
+    handleEndCall(); 
+  }
+};
 
   const handleEndCall = useCallback(async () => {
     console.log("📴 ZingConnect: Initiating Safe Shutdown...");
@@ -510,84 +516,83 @@ export const AgentDashboard = () => {
   };
 
   const AudioSession = ({ 
-    isMuted, 
-    isMasked, 
-    isIncomingCall, 
-    setCallStatus, 
-    setPeerConnected, 
-    ringtoneAudio, 
-    callingAudio 
-  }) => {
-    const room = useRoomContext();
+  isMuted, 
+  isMasked, 
+  isIncomingCall, 
+  setCallStatus, 
+  setPeerConnected, 
+  ringtoneAudio, 
+  callingAudio 
+}) => {
+  const room = useRoomContext();
 
-    useEffect(() => {
-      if (!room) return;
+  useEffect(() => {
+    if (!room) return;
 
-      const handleConnectionEngineState = async () => {
-        console.log(`📡 ZingConnect Room Context State Changed: ${room.state}`);
-        
-        if (room.state === 'connected') {
-          console.log("⚡ ZingConnect: Audio Bridge Fully Established via Context.");
-          
-          try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (AudioContext) {
-              const ctx = new AudioContext();
-              if (ctx.state === 'suspended') await ctx.resume();
-            }
-          } catch (e) { 
-            console.error("Audio Context Wake-up failed", e); 
-          }
-
-          if (isIncomingCall) {
-            if (ringtoneAudio.current) {
-              ringtoneAudio.current.pause();
-              ringtoneAudio.current.currentTime = 0;
-            }
-            setCallStatus('connected');
-            setPeerConnected(true);
-          } else {
-            const hasRemoteAudio = Array.from(room.remoteParticipants.values()).some(p => p.isMicrophoneEnabled);
-            if (hasRemoteAudio) {
-              handleRemotePartyConnected();
-            } else {
-              console.log("🔒 Outgoing channel ready. Ringing active. Awaiting user track publication...");
-            }
-          }
-        }
-      };
-
-      const handleRemotePartyConnected = () => {
-        console.log("🔒 ZingConnect Handshake Verified: Remote audio track captured.");
-        if (callingAudio.current) {
-          callingAudio.current.pause();
-          callingAudio.current.currentTime = 0;
-        }
-        setCallStatus('connected');
-        setPeerConnected(true);
-      };
-
-      // FIXED: Standard string literal fallbacks to safeguard build stability
-      room.on('connectionStateChanged', handleConnectionEngineState);
-      room.on('trackSubscribed', handleRemotePartyConnected);
-
+    const handleConnectionEngineState = async () => {
+      console.log(`📡 ZingConnect Room Context State Changed: ${room.state}`);
+      
       if (room.state === 'connected') {
-        handleConnectionEngineState();
+        console.log("⚡ ZingConnect: Audio Bridge Fully Established via Context.");
+        
+        try {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) {
+            const ctx = new AudioContext();
+            if (ctx.state === 'suspended') await ctx.resume();
+          }
+        } catch (e) { 
+          console.error("Audio Context Wake-up failed", e); 
+        }
+
+        if (isIncomingCall) {
+          console.log("📥 Inbound call verified. Transitioning view to connected call.");
+          if (ringtoneAudio.current) {
+            ringtoneAudio.current.pause();
+            ringtoneAudio.current.currentTime = 0;
+          }
+          setCallStatus('connected');
+          setPeerConnected(true);
+        } else {
+          const hasRemoteAudio = Array.from(room.remoteParticipants.values()).some(p => p.isMicrophoneEnabled);
+          if (hasRemoteAudio) {
+            handleRemotePartyConnected();
+          } else {
+            console.log("🔒 Outgoing channel ready. Ringing active. Awaiting user track publication...");
+          }
+        }
       }
+    };
+    const handleRemotePartyConnected = () => {
+      console.log("🔒 ZingConnect Handshake Verified: Remote audio track captured.");
+      if (callingAudio.current) {
+        callingAudio.current.pause();
+        callingAudio.current.currentTime = 0;
+      }
+      setCallStatus('connected');
+      setPeerConnected(true);
+    };
 
-      return () => {
-        room.off('connectionStateChanged', handleConnectionEngineState);
-        room.off('trackSubscribed', handleRemotePartyConnected);
-      };
-    }, [room, isIncomingCall, setCallStatus, setPeerConnected, ringtoneAudio, callingAudio]);
+    room.on('connectionStateChanged', handleConnectionEngineState);
+    room.on('trackSubscribed', handleRemotePartyConnected);
 
-    return (
-      <>
-        <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
-        <RoomAudioRenderer />
-      </>
-    );
-  };
+    if (room.state === 'connected') {
+      handleConnectionEngineState();
+    }
+
+    return () => {
+      room.off('connectionStateChanged', handleConnectionEngineState);
+      room.off('trackSubscribed', handleRemotePartyConnected);
+    };
+  }, [room, isIncomingCall, setCallStatus, setPeerConnected, ringtoneAudio, callingAudio]);
+
+  return (
+    <>
+      <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
+      <RoomAudioRenderer />
+    </>
+  );
+};
 
   /* --- GLOBALLY BOUND ASYNC EFFECT LIFECYCLES --- */
   useEffect(() => {
