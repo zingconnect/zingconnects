@@ -27,7 +27,7 @@ import 'react-phone-input-2/lib/style.css';
 import { 
   BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill,
   BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
-  BsPlayFill, BsXLg, BsX 
+  BsPlayFill, BsXLg, BsX, BsReplyFill
 } from 'react-icons/bs';
 
 
