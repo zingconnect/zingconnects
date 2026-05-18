@@ -122,17 +122,13 @@ export const UserDashboard = () => {
     state: ''
   });
 
-  const { 
+ const { 
     callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
     callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
     isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
     lastNotifiedId, notificationSound, ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
     handleEndCall, terminateLocalSession, unlockAudio 
   } = useUserZingCall(socket, userData, agent, messagesEndRef);
-
-    useEffect(() => {
-    callStatusRef.current = callStatus;
-  }, [callStatus]);
 
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
@@ -156,7 +152,11 @@ export const UserDashboard = () => {
     }
   };
   
-
+  useEffect(() => {
+    if (callStatusRef) {
+      callStatusRef.current = callStatus;
+    }
+  }, [callStatus, callStatusRef]);
 
 useEffect(() => {
   if ('serviceWorker' in navigator) {
