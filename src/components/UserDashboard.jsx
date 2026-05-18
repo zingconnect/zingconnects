@@ -86,18 +86,11 @@ export const UserDashboard = () => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const serverUrl = import.meta.env.VITE_LIVEKIT_URL
-
   const userStreamRef = useRef(null); 
   const activeCallRef = useRef(null);
+  const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
 
-
-  const { callStatus, setCallStatus,  activeCall,  setActiveCall,   activeCaller,   setActiveCaller,   isMuted,   setIsMuted,  isSpeakerOn,  setIsSpeakerOn,
-   callTime,  setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
-  isIncomingCall,  setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
-  lastNotifiedId, notificationSound, ringtoneAudio, callingAudio,aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
-  handleEndCall,terminateLocalSession,  unlockAudio } = useUserZingCall({ socket, userData, agent });
-
+  // --- 1. CORE COMPONENT STATE (Must be declared before the hook executes!) ---
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -117,7 +110,7 @@ export const UserDashboard = () => {
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   
-  const API_BASE_URL = import.meta.env.VITE_API_URL
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -129,10 +122,17 @@ export const UserDashboard = () => {
     state: ''
   });
 
+  const { 
+    callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
+    callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
+    isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
+    lastNotifiedId, notificationSound, ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
+    handleEndCall, terminateLocalSession, unlockAudio 
+  } = useUserZingCall(socket, userData, agent, messagesEndRef);
+
     useEffect(() => {
     callStatusRef.current = callStatus;
   }, [callStatus]);
-
 
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
