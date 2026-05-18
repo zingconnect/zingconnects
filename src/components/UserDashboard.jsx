@@ -1023,24 +1023,17 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
-
 <main 
-ref={chatContainerRef}
+  ref={chatContainerRef}
   onScroll={handleChatScroll}
   className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
-  style={{
-    scrollAnchor: 'none',             
-    overscrollBehaviorY: 'contain',   
-    WebkitOverflowScrolling: 'touch'  
-  }}
+  style={{ scrollAnchor: 'none', overscrollBehaviorY: 'contain', WebkitOverflowScrolling: 'touch' }}
 >
-  {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
     style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
   />
 
-  {/* --- INFINITE SCROLL HISTORICAL LOADING INDICATOR --- */}
   {isFetchingOlder && (
     <div className="self-center z-20 my-2 px-3 py-1.5 bg-[#005c4b] text-white rounded-full text-[10px] font-bold tracking-wider flex items-center gap-2 shadow-md border border-emerald-500/20 animate-pulse">
       <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1048,7 +1041,6 @@ ref={chatContainerRef}
     </div>
   )}
 
-  {/* 2. Encryption Notice */}
   <div className="self-center z-10 my-4 px-4 py-1.5 bg-[#fff9c2] rounded-lg shadow-sm border border-yellow-100 flex items-center gap-2 max-w-[90%]">
     <BsShieldLockFill size={10} className="text-gray-600" />
     <p className="text-[9px] md:text-[10px] text-gray-600 text-center font-medium leading-tight">
@@ -1056,32 +1048,23 @@ ref={chatContainerRef}
     </p>
   </div>
 
-  {/* 3. Message List */}
   {messages.map((m) => {
     const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
 
-    // Handle Secure LiveKit Room Call Events
     if (m.fileType === 'voice_call') {
       return (
         <CallStatusMessage 
           key={msgKey}
-          status={m.status} // 'ringing', 'missed', 'ended'
+          status={m.status}
           time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         />
       );
     }
 
-    // Determine Message Ownership Correctly (Fixes the Optimistic Media Left-Side Skew)
     const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
 
     return (
-      <div 
-        key={msgKey} 
-        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
-          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-        } mb-3`}
-      >
-        {/* Media Handling */}
+      <MessageBubble key={msgKey} m={m} isMe={isMe} onReply={setReplyingTo}>
         {(m.fileType === 'image' || m.fileType === 'video') && (
           <div className="relative mb-2 mt-1 group">
             {m.fileType === 'image' ? (
@@ -1105,7 +1088,6 @@ ref={chatContainerRef}
               </>
             ) : (
               <div className="relative">
-                {/* Fixed src inside video element tag ensures smooth re-indexing when scrolling prepends nodes */}
                 <video 
                   key={`video-${msgKey}`}
                   src={m.fileUrl}
@@ -1128,29 +1110,23 @@ ref={chatContainerRef}
           </div>
         )}
 
-        {/* Text Content (Caption / Standard Message) */}
         {m.text && (
           <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
             {m.text}
           </p>
         )}
 
-        {/* Time / Status Bar */}
         <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
           <span className="text-[9px] text-gray-400 font-bold uppercase">
             {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
 
-          {/* Verification Delivery Checks (Only for Local User Submissions) */}
           {isMe && (
             <div className="flex items-center ml-1">
-              
-              {/* 1. SENDING STATE (iDrive E2 Pipe Active) */}
               {m.status === 'sending' && (
                 <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
               )}
 
-              {/* 2. FAILED STATE */}
               {m.status === 'failed' && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); handleResend(m); }}
@@ -1161,7 +1137,6 @@ ref={chatContainerRef}
                 </button>
               )}
 
-              {/* 3. SUCCESS DELIVERED STATES */}
               {(!m.status || m.status === 'sent' || m.status === 'seen') && (
                 <div className="flex items-center">
                   {m.status === 'seen' ? (
@@ -1174,11 +1149,10 @@ ref={chatContainerRef}
             </div>
           )}
         </div>
-      </div>
+      </MessageBubble>
     );
   })}
 
-  {/* Auto-scroll viewport Anchor */}
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
@@ -1189,12 +1163,8 @@ ref={chatContainerRef}
     <div className="p-4 flex justify-between items-center text-white">
       <button 
         onClick={() => { 
-          URL.revokeObjectURL(previewUrl);
-          setPreviewUrl(null); 
-          setPreviewFile(null); // Ensure this matches your state name
-        }} 
-        className="p-2 hover:bg-white/10 rounded-full transition-colors"
-      >
+          URL.revokeObjectURL(previewUrl); setPreviewUrl(null);  setPreviewFile(null);    }} 
+        className="p-2 hover:bg-white/10 rounded-full transition-colors">
         <BsChevronLeft size={24} />
       </button>
       <span className="font-bold uppercase tracking-widest text-[10px]">Preview Media</span>
@@ -1204,40 +1174,21 @@ ref={chatContainerRef}
     {/* Dynamic Media Preview Container */}
     <div className="flex-1 flex items-center justify-center p-4">
       {previewFile?.type?.startsWith('video/') ? (
-        <video 
-          key={previewUrl}
-          src={previewUrl} 
-          controls 
-          autoPlay 
-          muted
-          playsInline
-          className="max-h-full max-w-full rounded-lg shadow-2xl bg-black"
-        />
+        <video key={previewUrl} src={previewUrl} controls autoPlay muted playsInline
+          className="max-h-full max-w-full rounded-lg shadow-2xl bg-black" />
       ) : (
-        <img 
-          src={previewUrl} 
-          alt="Preview" 
-          className="max-h-full max-w-full object-contain rounded-lg shadow-2xl" 
-        />
+        <img   src={previewUrl} alt="Preview" 
+          className="max-h-full max-w-full object-contain rounded-lg shadow-2xl"  />
       )}
     </div>
 
     {/* Caption Input Area */}
     <div className="p-4 bg-black/40 backdrop-blur-md">
       <div className="max-w-4xl mx-auto flex items-end gap-3 bg-white/10 p-2 rounded-2xl border border-white/20">
-        <input
-          type="text"
-          placeholder="Add a caption..."
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
-          autoFocus
-        />
+        <input type="text" placeholder="Add a caption..." value={caption} onChange={(e) => setCaption(e.target.value)}
+          className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm" autoFocus />
         <button 
-          onClick={handleFinalSend}
-          disabled={isUploading}
-          className="bg-blue-600 text-white p-4 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg"
-        >
+          onClick={handleFinalSend} disabled={isUploading} className="bg-blue-600 text-white p-4 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg">
           {isUploading ? (
             <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
           ) : (
@@ -1248,7 +1199,6 @@ ref={chatContainerRef}
     </div>
   </div>
 )}
-
 <footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
     
     {/* --- 1. REPLY PREVIEW PANEL --- */}
@@ -1294,65 +1244,33 @@ ref={chatContainerRef}
 
   {/* --- MAIN INPUT CONTROLS --- */}
   <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
-    <input 
-      type="file" 
-      ref={fileInputRef} 
-      onChange={handleFileUpload} 
-      accept="image/*,video/*" 
-      className="hidden" 
-    />
-    <input 
-      type="file" 
-      ref={cameraInputRef} 
-      onChange={handleFileUpload} 
-      accept="image/*,video/*" 
-      capture="environment" 
-      className="hidden" 
-    />
+    <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
+    <input  type="file"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden"/>
 
     <div className="flex gap-1 md:gap-2 text-gray-500">
-      <button 
-        type="button"
-        onClick={() => fileInputRef.current.click()} 
-        disabled={isUploading}
-        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
-      >
+      <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
         <BsPaperclip size={22} />
       </button>
 
-      <button 
-        type="button"
-        onClick={() => cameraInputRef.current.click()} 
-        disabled={isUploading}
-        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
-      >
+      <button  type="button" onClick={() => cameraInputRef.current.click()}  disabled={isUploading}
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
         <BsCameraFill size={22} />
       </button>
     </div>
     
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
       <div className="flex-1 relative flex items-center">
-        <input 
-          value={newMessage} 
-          onChange={(e) => setNewMessage(e.target.value)} 
-          disabled={isUploading}
+        <input value={newMessage}  onChange={(e) => setNewMessage(e.target.value)} disabled={isUploading}
           placeholder={isUploading ? "Uploading file..." : (replyingTo ? "Write a reply..." : "Type your secure message")} 
           className={`w-full bg-white px-4 py-2.5 md:py-3 text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20 transition-all ${
-            replyingTo ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-full'
-          }`}
-        />
+            replyingTo ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-full'}`}/>
       </div>
-      
-      {/* ALWAYS SHOW SEND BUTTON, REMOVED MIC TOGGLE */}
-      <button 
-        type="submit" 
-        disabled={!newMessage.trim() && !isUploading}
+            <button type="submit"  disabled={!newMessage.trim() && !isUploading}
         className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${
           newMessage.trim() 
             ? "bg-blue-600 text-white" 
-            : "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"
-        }`}
-      >
+            : "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"}`}>
         <BsSendFill size={16} className="ml-0.5" />
       </button>
     </form>
@@ -1360,10 +1278,8 @@ ref={chatContainerRef}
 </footer>
       </div>
 
-  {/* --- 3. SECURITY ONBOARDING --- */}
 {!hasInteracted && (
   <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
-    {/* Changed container wrapper from a button to a semantic layout div */}
     <div className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100">
       <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
         <BsShieldLockFill className="text-blue-600" size={28} />
@@ -1389,40 +1305,24 @@ ref={chatContainerRef}
 )}
     {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
 {fullscreenImage && (
-  <div 
-    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
-    onClick={() => setFullscreenImage(null)}
-  >
+  <div className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
+    onClick={() => setFullscreenImage(null)} >
     {/* Top Navigation Bar */}
     <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
-      <button 
-        onClick={() => setFullscreenImage(null)}
-        className="text-white/70 hover:text-white transition-colors"
-      >
+      <button onClick={() => setFullscreenImage(null)} className="text-white/70 hover:text-white transition-colors">
         <BsChevronLeft size={30} />
       </button>
 
       {/* DOWNLOAD BUTTON */}
-      <button 
-        onClick={(e) => { 
-          e.stopPropagation(); // Stops the overlay from closing when downloading
-          handleDownload(fullscreenImage, 'image'); 
-        }}
-        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all"
-      >
+      <button onClick={(e) => { e.stopPropagation(); handleDownload(fullscreenImage, 'image'); }}
+        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all">
         <BsDownload size={18} />
         <span>Save to Device</span>
       </button>
     </div>
 
     {/* The Image */}
-    <img 
-      src={fullscreenImage} 
-      className="max-w-[95%] max-h-[85%] object-contain shadow-2xl" 
-      alt="Full view" 
-      onClick={(e) => e.stopPropagation()} // Prevents closing if the user clicks the image itself
-    />
-    
+    <img src={fullscreenImage}  className="max-w-[95%] max-h-[85%] object-contain shadow-2xl" alt="Full view" onClick={(e) => e.stopPropagation()} />
     <p className="absolute bottom-10 text-white/40 text-[10px] uppercase tracking-[0.2em] font-medium">
       Secure Preview Mode
     </p>
@@ -1431,27 +1331,17 @@ ref={chatContainerRef}
 
 {/* --- FULLSCREEN VIDEO OVERLAY --- */}
 {fullscreenVideo && (
-  <div 
-    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
-    onClick={() => setFullscreenVideo(null)} // Click background to close
-  >
+  <div className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
+    onClick={() => setFullscreenVideo(null)}>
     {/* Top Navigation Bar */}
     <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
-      <button 
-        onClick={() => setFullscreenVideo(null)}
-        className="text-white/70 hover:text-white transition-colors"
-      >
+      <button onClick={() => setFullscreenVideo(null)} className="text-white/70 hover:text-white transition-colors">
         <BsChevronLeft size={30} />
       </button>
 
       {/* DOWNLOAD BUTTON */}
-      <button 
-        onClick={(e) => { 
-          e.stopPropagation(); // Prevents overlay from closing
-          handleDownload(fullscreenVideo, 'video'); 
-        }}
-        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all"
-      >
+      <button onClick={(e) => { e.stopPropagation(); handleDownload(fullscreenVideo, 'video'); }}
+        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all">
         <BsDownload size={18} />
         <span>Save Video</span>
       </button>
@@ -1463,7 +1353,7 @@ ref={chatContainerRef}
       controls 
       autoPlay 
       className="max-w-[95%] max-h-[85%] shadow-2xl rounded-lg" 
-      onClick={(e) => e.stopPropagation()} // Clicking video won't close overlay
+      onClick={(e) => e.stopPropagation()} 
     >
       Your browser does not support the video tag.
     </video>

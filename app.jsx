@@ -1,6 +1,7 @@
 import React, { useLayoutEffect } from 'react'; 
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-
+// 🚀 ADDED 'Outlet' TO THE IMPORT DESTRUCTURING BELOW
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { UserCallProvider } from './context/UserCallContext'; 
 import { PricingPage } from './components/PricingPage';
 import { Registration } from './components/Registration';
 import { VerifyOTP } from './components/VerifyOTP'; 
@@ -28,15 +29,13 @@ const PWAController = ({ children }) => {
     const target = urlSlug || storageSlug;
 
     const isAtRoot = location.pathname === '/' || location.pathname === '/pricing';
-    
     const isAdminPath = location.pathname.startsWith('/admin');
 
-   if (isStandalone && isAtRoot && target && !isAdminPath) {
-  navigate(`/${target}`, { replace: true });
-} else {
-  setIsChecking(false);
-}
-
+    if (isStandalone && isAtRoot && target && !isAdminPath) {
+      navigate(`/${target}`, { replace: true });
+    } else {
+      setIsChecking(false);
+    }
   }, [navigate, location.pathname]);
 
   if (isChecking && (window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
@@ -76,6 +75,15 @@ const ThemeInitializer = () => {
   return null;
 };
 
+// Moving the Layout Component definition up here ensures clean execution order
+const UserProtectedLayout = () => {
+  return (
+    <UserCallProvider>
+      <Outlet />
+    </UserCallProvider>
+  );
+};
+
 function App() {
   return (
     <Router>
@@ -93,17 +101,18 @@ function App() {
           <Route path="/agent/profile" element={<AgentProfile />} />
           <Route path="/agent/call-settings" element={<CallSetting />} />
 
-          {/* --- 3. PROTECTED USER ROUTES --- */}
-          <Route path="/user/dashboard" element={<UserDashboard />} />
-          <Route path="/user/profile" element={<UserProfile />} />
+          {/* --- 3. PROTECTED USER ROUTES (WITH THE WRAPPER INFUSED) --- */}
+          {/* 🚀 THE LAYOUT ROUTE NOW WRAPS INDIVIDUAL PATHS AS CHILDS */}
+          <Route element={<UserProtectedLayout />}>
+            <Route path="/user/dashboard" element={<UserDashboard />} />
+            <Route path="/user/profile" element={<UserProfile />} />
+          </Route>
 
           {/* --- 4. ADMINISTRATOR ROUTES --- */}
-          {/* These MUST come before the dynamic /:slug route */}
           <Route path="/admin/terminal" element={<ZingAdmin />} /> 
           <Route path="/admin/dashboard" element={<ZingDashboard />} />
 
           {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
-          {/* This acts as a catch-all for strings, so it stays near the bottom */}
           <Route path="/:slug" element={<AgentSlug />} />
           
           {/* --- 6. GLOBAL FALLBACK --- */}

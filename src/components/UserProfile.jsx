@@ -1,59 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BsChevronLeft, BsCameraFill, BsShieldCheck, BsPencilSquare, BsCheckLg } from 'react-icons/bs';
+import { useGlobalCall } from '../context/UserCallContext'; // 🚀 IMPORT THE ENGINE
 
 export const UserProfile = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Consume data instantly from our global context pipeline
+  const { userData, setUserData } = useGlobalCall(); 
+  
+  const [loading, setLoading] = useState(!userData);
   const [isEditing, setIsEditing] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  // Form State
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    dob: '',
-    gender: '',
-    city: '',
-    state: ''
+    firstName: userData?.firstName || '',
+    lastName: userData?.lastName || '',
+    phone: userData?.phone || '',
+    dob: userData?.dob || '',
+    gender: userData?.gender || '',
+    city: userData?.city || '',
+    state: userData?.state || ''
   });
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
+  // Sync state if global polling fetches new user records in the background
   useEffect(() => {
-    fetchProfile();
-  }, []);
-
-  const fetchProfile = async () => {
-    try {
-      const token = localStorage.getItem('userToken');
-      const res = await fetch('/api/users/me', { 
-        headers: { 'Authorization': `Bearer ${token}` }
+    if (userData) {
+      setFormData({
+        firstName: userData.firstName || '',
+        lastName: userData.lastName || '',
+        phone: userData.phone || '',
+        dob: userData.dob || '',
+        gender: userData.gender || '',
+        city: userData.city || '',
+        state: userData.state || ''
       });
-      const data = await res.json();
-      if (res.ok) {
-        setProfile(data.user);
-        // Sync form data with fetched profile
-        setFormData({
-          firstName: data.user.firstName || '',
-          lastName: data.user.lastName || '',
-          phone: data.user.phone || '',
-          dob: data.user.dob || '',
-          gender: data.user.gender || '',
-          city: data.user.city || '',
-          state: data.user.state || ''
-        });
-      }
-    } catch (err) {
-      console.error("Failed to fetch profile:", err);
-    } finally {
       setLoading(false);
     }
-  };
+  }, [userData]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -73,13 +60,11 @@ export const UserProfile = () => {
     const token = localStorage.getItem('userToken');
     const data = new FormData();
 
-    // Append text fields
     Object.keys(formData).forEach(key => data.append(key, formData[key]));
-    // Append photo if changed
     if (selectedFile) data.append('photo', selectedFile);
 
     try {
-      const res = await fetch('/api/users/update-profile', { // Ensure this matches your route
+      const res = await fetch('/api/users/update-profile', { 
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` },
         body: data
@@ -87,7 +72,7 @@ export const UserProfile = () => {
 
       if (res.ok) {
         const result = await res.json();
-        setProfile(result.user);
+        setUserData(result.user); // Sync back to global context
         setIsEditing(false);
         setSelectedFile(null);
         alert("Profile updated successfully!");
@@ -141,7 +126,7 @@ export const UserProfile = () => {
             onClick={() => isEditing && fileInputRef.current.click()}
           >
             <img 
-              src={previewUrl || profile?.photoUrl || '/default-avatar.png'} 
+              src={previewUrl || userData?.photoUrl || '/default-avatar.png'} 
               alt="User" 
               className="w-full h-full object-cover" 
             />
@@ -155,7 +140,7 @@ export const UserProfile = () => {
           
           {!isEditing && (
             <>
-              <h2 className="mt-3 text-xl font-bold text-gray-800">{profile?.firstName} {profile?.lastName}</h2>
+              <h2 className="mt-3 text-xl font-bold text-gray-800">{userData?.firstName} {userData?.lastName}</h2>
               <div className="flex items-center gap-1 text-green-500 text-[10px] font-bold uppercase tracking-widest mt-1">
                 <BsShieldCheck size={12} /> Verified Profile
               </div>
@@ -165,35 +150,10 @@ export const UserProfile = () => {
 
         {/* Form Container */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
-          <EditableItem 
-            label="First Name" 
-            name="firstName" 
-            value={formData.firstName} 
-            isEditing={isEditing} 
-            onChange={handleInputChange} 
-          />
-          <EditableItem 
-            label="Last Name" 
-            name="lastName" 
-            value={formData.lastName} 
-            isEditing={isEditing} 
-            onChange={handleInputChange} 
-          />
-          <EditableItem 
-            label="Phone Number" 
-            name="phone" 
-            value={formData.phone} 
-            isEditing={isEditing} 
-            onChange={handleInputChange} 
-          />
-          <EditableItem 
-            label="Date of Birth" 
-            name="dob" 
-            type="date"
-            value={formData.dob} 
-            isEditing={isEditing} 
-            onChange={handleInputChange} 
-          />
+          <EditableItem label="First Name" name="firstName" value={formData.firstName} isEditing={isEditing} onChange={handleInputChange} />
+          <EditableItem label="Last Name" name="lastName" value={formData.lastName} isEditing={isEditing} onChange={handleInputChange} />
+          <EditableItem label="Phone Number" name="phone" value={formData.phone} isEditing={isEditing} onChange={handleInputChange} />
+          <EditableItem label="Date of Birth" name="dob" type="date" value={formData.dob} isEditing={isEditing} onChange={handleInputChange} />
           
           <div className="border-b border-gray-50 pb-3 last:border-0 last:pb-0">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter mb-1">Gender</p>
@@ -210,7 +170,7 @@ export const UserProfile = () => {
                 <option value="other">Other</option>
               </select>
             ) : (
-              <p className="text-sm font-semibold text-gray-700 capitalize">{profile?.gender || '—'}</p>
+              <p className="text-sm font-semibold text-gray-700 capitalize">{userData?.gender || '—'}</p>
             )}
           </div>
 
