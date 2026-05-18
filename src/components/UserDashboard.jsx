@@ -1023,8 +1023,9 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
+
 <main 
-  ref={chatContainerRef}
+ref={chatContainerRef}
   onScroll={handleChatScroll}
   className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
   style={{
@@ -1033,11 +1034,13 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     WebkitOverflowScrolling: 'touch'  
   }}
 >
+  {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
     style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
   />
 
+  {/* --- INFINITE SCROLL HISTORICAL LOADING INDICATOR --- */}
   {isFetchingOlder && (
     <div className="self-center z-20 my-2 px-3 py-1.5 bg-[#005c4b] text-white rounded-full text-[10px] font-bold tracking-wider flex items-center gap-2 shadow-md border border-emerald-500/20 animate-pulse">
       <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1045,6 +1048,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   )}
 
+  {/* 2. Encryption Notice */}
   <div className="self-center z-10 my-4 px-4 py-1.5 bg-[#fff9c2] rounded-lg shadow-sm border border-yellow-100 flex items-center gap-2 max-w-[90%]">
     <BsShieldLockFill size={10} className="text-gray-600" />
     <p className="text-[9px] md:text-[10px] text-gray-600 text-center font-medium leading-tight">
@@ -1052,28 +1056,32 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </p>
   </div>
 
+  {/* 3. Message List */}
   {messages.map((m) => {
     const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
 
+    // Handle Secure LiveKit Room Call Events
     if (m.fileType === 'voice_call') {
       return (
         <CallStatusMessage 
           key={msgKey}
-          status={m.status} 
+          status={m.status} // 'ringing', 'missed', 'ended'
           time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         />
       );
     }
 
+    // Determine Message Ownership Correctly (Fixes the Optimistic Media Left-Side Skew)
     const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
 
     return (
-      <MessageBubble 
+      <div 
         key={msgKey} 
-        m={m} 
-        isMe={isMe} 
-        onReply={setReplyingTo}
+        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
+          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+        } mb-3`}
       >
+        {/* Media Handling */}
         {(m.fileType === 'image' || m.fileType === 'video') && (
           <div className="relative mb-2 mt-1 group">
             {m.fileType === 'image' ? (
@@ -1097,6 +1105,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
               </>
             ) : (
               <div className="relative">
+                {/* Fixed src inside video element tag ensures smooth re-indexing when scrolling prepends nodes */}
                 <video 
                   key={`video-${msgKey}`}
                   src={m.fileUrl}
@@ -1119,23 +1128,29 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </div>
         )}
 
+        {/* Text Content (Caption / Standard Message) */}
         {m.text && (
           <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
             {m.text}
           </p>
         )}
 
+        {/* Time / Status Bar */}
         <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
           <span className="text-[9px] text-gray-400 font-bold uppercase">
             {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
 
+          {/* Verification Delivery Checks (Only for Local User Submissions) */}
           {isMe && (
             <div className="flex items-center ml-1">
+              
+              {/* 1. SENDING STATE (iDrive E2 Pipe Active) */}
               {m.status === 'sending' && (
                 <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
               )}
 
+              {/* 2. FAILED STATE */}
               {m.status === 'failed' && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); handleResend(m); }}
@@ -1146,6 +1161,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
                 </button>
               )}
 
+              {/* 3. SUCCESS DELIVERED STATES */}
               {(!m.status || m.status === 'sent' || m.status === 'seen') && (
                 <div className="flex items-center">
                   {m.status === 'seen' ? (
@@ -1158,12 +1174,14 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
             </div>
           )}
         </div>
-      </MessageBubble>
+      </div>
     );
   })}
 
+  {/* Auto-scroll viewport Anchor */}
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
+
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
 {previewUrl && !showOnboarding && (
     <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
@@ -1349,7 +1367,8 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 
       {/* DOWNLOAD BUTTON */}
       <button onClick={(e) => { e.stopPropagation(); handleDownload(fullscreenVideo, 'video'); }}
-        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all">
+        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all"
+      >
         <BsDownload size={18} />
         <span>Save Video</span>
       </button>
@@ -1361,7 +1380,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       controls 
       autoPlay 
       className="max-w-[95%] max-h-[85%] shadow-2xl rounded-lg" 
-      onClick={(e) => e.stopPropagation()} 
+      onClick={(e) => e.stopPropagation()} // Clicking video won't close overlay
     >
       Your browser does not support the video tag.
     </video>
