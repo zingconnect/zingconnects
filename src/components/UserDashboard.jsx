@@ -129,13 +129,16 @@ const [agent, setAgent] = useState(null);
     state: ''
   });
 
- const { 
-    callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
-    callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
-    isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
-    lastNotifiedId, notificationSound, ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
-    handleEndCall, terminateLocalSession, unlockAudio 
-    } = useUserZingCall(socket, userData, agent, messagesEndRef, chatContainerRef); 
+const { 
+  callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
+  callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
+  isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
+  lastNotifiedId, ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
+  handleEndCall, terminateLocalSession, unlockAudio 
+} = useUserZingCall(socket, userData, agent); 
+
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
+  const totalMessagesCountRef = useRef(messages.length);
 
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
@@ -266,6 +269,68 @@ useEffect(() => {
     setupNotifications();
   }
 }, []);
+
+ useEffect(() => {
+  if (!socket) return;
+
+  // 1. Clean Socket Message Receiver (Data Core Only)
+  const handleNewMessage = (msg) => {
+    setMessages(prev => {
+      // Fast duplicate checking
+      if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
+      return [...prev, msg];
+    });
+  };
+
+  // 2. Clean Deletion Handler
+  const handleMessageDeleted = (id) => {
+    setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
+  };
+
+  // Bind Listeners
+  socket.on("new-message", handleNewMessage);
+  socket.on("message-deleted", handleMessageDeleted);
+
+  // Unbind Listeners on Unmount
+  return () => { 
+    socket.off("new-message", handleNewMessage); 
+    socket.off("message-deleted", handleMessageDeleted); 
+  };
+}, [socket]); // 👈 CRITICAL: Completely removed messagesEndRef dependency here!
+
+ useEffect(() => {
+  if (!messages || messages.length === 0) {
+    totalMessagesCountRef.current = 0;
+    return;
+  }
+  if (messages.length > totalMessagesCountRef.current) {
+    const latestMsg = messages[messages.length - 1];
+    if (latestMsg && latestMsg.senderModel === "Agent") {
+      if (notificationSound && notificationSound.current) {
+        notificationSound.current.play().catch((e) => {
+          console.log("Audio framework awaiting gesture interaction:", e.message);
+        });
+      }
+    }
+    const container = chatContainerRef.current;
+    if (container && !isAdjustingScrollRef.current) {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160;
+      
+      if (isNearBottom) {
+        setTimeout(() => {
+          if (messagesEndRef && messagesEndRef.current) {
+            try {
+              messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+            } catch (err) {
+              console.warn("Suppressed layout scroll jitter.");
+            }
+          }
+        }, 60);
+      }
+    }
+  }
+  totalMessagesCountRef.current = messages.length;
+}, [messages]);
 
 // 1. CLEAN TRACKING HOOK FOR INITIAL SESSIONS ONLY
 useEffect(() => {

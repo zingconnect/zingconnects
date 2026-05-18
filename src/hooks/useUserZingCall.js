@@ -35,7 +35,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   // Sound Assets
   const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3'));
   const callingAudio = useRef(new Audio('/sounds/calling.wav'));
-  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
 
   // Sync state variables to references for asynchronous callback closures
   useEffect(() => { if (callStatusRef) callStatusRef.current = callStatus; }, [callStatus]);
@@ -551,34 +550,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     return () => { if (timer) clearInterval(timer); };
   }, [callStatus]);
 
-  useEffect(() => {
-    if (!socket) return;
-    const handleNewMessage = (msg) => {
-      setMessages(prev => {
-        if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
-        if (msg.senderModel === 'Agent' && notificationSound && notificationSound.current) { 
-          notificationSound.current.play().catch(() => {}); 
-        }
-        return [...prev, msg];
-      });
-      setTimeout(() => {
-        if (messagesEndRef && typeof messagesEndRef.current !== 'undefined' && messagesEndRef.current !== null) {
-          try {
-            messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-          } catch (scrollError) {
-            console.warn("📡 ZingConnect Sync Jitter: Handled scrolling offset drop gracefully.");
-          }
-        }
-      }, 100);
-    };
-    const handleMessageDeleted = (id) => setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
-    socket.on("new-message", handleNewMessage);
-    socket.on("message-deleted", handleMessageDeleted);
-    return () => { 
-      socket.off("new-message", handleNewMessage); 
-      socket.off("message-deleted", handleMessageDeleted); 
-    };
-  }, [socket, messagesEndRef]);
+
 
   useEffect(() => {
     if (ringtoneAudio && ringtoneAudio.current) ringtoneAudio.current.loop = true; 
