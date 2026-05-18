@@ -106,20 +106,7 @@ export const UserDashboard = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
-  const [hasInteracted, setHasInteracted] = useState(false);
-  const [liveKitToken, setLiveKitToken] = useState(null);
-  
-
-  const [callStatus, setCallStatus] = useState('idle'); 
-  const [activeCall, setActiveCall] = useState(null); 
-  const [activeCaller, setActiveCaller] = useState(null); 
-  const [localStream, setLocalStream] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-  const [callTime, setCallTime] = useState(0);
-  const [peerConnected, setPeerConnected] = useState(false);
-  const [isEnding, setIsEnding] = useState(false);
-  
+  const [hasInteracted, setHasInteracted] = useState(false);  
 
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -131,7 +118,6 @@ export const UserDashboard = () => {
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   const [showFullScreenCall, setShowFullScreenCall] = useState(false);
-  const [isIncomingCall, setIsIncomingCall] = useState(false);
   
   const API_BASE_URL = import.meta.env.VITE_API_URL
 
