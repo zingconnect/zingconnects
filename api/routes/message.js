@@ -15,25 +15,34 @@ import { sendOfflineNotification } from '../utils/mailer.js';
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- 1. GET CHAT HISTORY ---
+// --- 1. GET CHAT HISTORY (WITH PAGINATION AND TIMELINE CURSORS) ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
+    const { beforeId, limit } = req.query;
 
-    const messages = await Message.find({
+    // Build standard query criteria matching messages between the two users
+    const query = {
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    })
-    .sort({ createdAt: -1 })
-    .limit(parseInt(req.query.limit) || 20)
-    .lean();
+    };
+    if (beforeId && mongoose.isValidObjectId(beforeId)) {
+      const referenceMsg = await Message.findById(beforeId);
+      if (referenceMsg) {
+        query.createdAt = { $lt: referenceMsg.createdAt };
+      }
+    }
 
+    const parsedLimit = parseInt(limit) || 20;
+    const messages = await Message.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parsedLimit)
+      .lean();
     const displayMessages = messages.reverse();
-
     const finalMessages = await Promise.all(displayMessages.map(async (m) => {
       if (m.fileUrl && (m.fileType === 'image' || m.fileType === 'video')) {
         m.fileUrl = await getPrivateUrl(m.fileUrl);
@@ -43,6 +52,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
 
     res.json({ success: true, messages: finalMessages });
   } catch (err) {
+    console.error("History retrieval error:", err);
     res.status(500).json({ success: false, message: "Error loading chat history" });
   }
 });
