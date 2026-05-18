@@ -1,3 +1,7 @@
+import { 
+  LiveKitRoom, AudioConference, useTracks,RoomAudioRenderer, StartAudio, useLocalParticipant
+} from '@livekit/components-react';
+import { Track } from 'livekit-client';
 import { Buffer } from 'buffer';
 if (typeof window !== 'undefined') {
   window.Buffer = Buffer;
@@ -11,7 +15,7 @@ if (typeof window !== 'undefined') {
     removeListener: () => [],
   };
 }
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
@@ -20,23 +24,9 @@ import { useDrag } from "@use-gesture/react";
 import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import { 
-  BsTelephoneFill, 
-  BsPlusLg, 
-  BsSendFill, 
-  BsCheckAll,
-  BsChevronLeft,
-  BsShieldLockFill,
-  BsGearFill,
-  BsArrowRight,
-  BsCameraFill,
-  BsMicFill,   
-  BsVolumeUpFill,
-  BsMicMuteFill,   
-  BsPaperclip,
-  BsDownload,
-  BsPlayFill,
-  BsXLg, // ADD THIS
-  BsX // ADD THIS AS BACKUP
+  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill,
+  BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
+  BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
 
 
@@ -98,14 +88,22 @@ export const UserDashboard = () => {
 const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
 const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
 const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
+  const serverUrl = import.meta.env.VITE_LIVEKIT_URL
+
   
   
   const connectionRef = useRef(null);
+  const pollingRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const userStreamRef = useRef(null); 
+  const activeCallRef = useRef(null);
   const remoteStreamRef = useRef(null); 
   const lastNotifiedId = useRef(null);
   const callStatusRef = useRef('idle');
+  const isTransitioningRef = useRef(false);
+  const peerConnectedRef = useRef(false);
+  const audioCtxRef = useRef(null);
+const nextStartTimeRef = useRef(0);
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -114,6 +112,8 @@ const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const [newMessage, setNewMessage] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
   const [hasInteracted, setHasInteracted] = useState(false);
+  const [liveKitToken, setLiveKitToken] = useState(null);
+  
 
   const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
@@ -123,6 +123,8 @@ const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [callTime, setCallTime] = useState(0);
   const [peerConnected, setPeerConnected] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+  
 
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -134,6 +136,7 @@ const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   const [showFullScreenCall, setShowFullScreenCall] = useState(false);
+  const [isIncomingCall, setIsIncomingCall] = useState(false);
   
   const API_BASE_URL = import.meta.env.VITE_API_URL
 
@@ -151,15 +154,6 @@ const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
     callStatusRef.current = callStatus;
   }, [callStatus]);
 
-const isIncomingCall = 
-  callStatus === 'ringing' && 
-  activeCall?.fromId !== (userData?._id || userData?.id) &&
-  activeCall?.fromId !== undefined; // Extra check to prevent ghost ringing
-  console.log("System Check:", {
-    connection: connectionStatus,
-    callStatus: callStatus,
-    isIncoming: isIncomingCall
-  });
 
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
@@ -182,64 +176,150 @@ const isIncomingCall =
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
-  const unlockAudio = () => {
-  setHasInteracted(true);
-  console.log("Initializing secure audio channels for mobile...");
-
-  // 1. Force Resume the AudioContext (Critical for iOS/Chrome mobile)
+  
+const unlockAudio = useCallback(() => {
+  if (hasInteracted) return;
+  console.log("🔓 Unlocking secure audio channels...");
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (AudioContext) {
     const tempCtx = new AudioContext();
-    if (tempCtx.state === 'suspended') {
-      tempCtx.resume().then(() => console.log("AudioContext resumed."));
-    }
+    if (tempCtx.state === 'suspended') tempCtx.resume();
   }
+  const silentPlayer = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+  silentPlayer.play()
+    .then(() => {
+      silentPlayer.pause();
+      setHasInteracted(true); 
+      console.log("✅ Audio hardware primed.");
+    })
+    .catch(err => console.warn("⚠️ Audio priming deferred:", err));
+  const remoteAudio = document.getElementById('remoteAudio');
+  if (remoteAudio) {
+    remoteAudio.play().then(() => remoteAudio.pause()).catch(() => {});
+  }
+}, [hasInteracted]);
 
-  // 2. Prime standard UI sounds
-  const audioRefs = [
-    { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
-    { ref: callingAudio, src: '/sounds/calling.wav' },
-    { ref: notificationSound, src: '/sounds/notification.mp3' }
-  ];
-  audioRefs.forEach(({ ref, src }) => {
-    const el = ref.current;
-    if (el) {
-      el.muted = true; // Start muted for priming
-      el.src = src;
-      el.load(); // Force the browser to load the asset
-      el.play()
-        .then(() => {
-          el.pause();
-          el.muted = false; // Now it's unblocked and unmuted
-          el.currentTime = 0;
-        })
-        .catch(err => console.warn(`Priming skipped for ${src}:`, err));
-    }
-  });
+const LocalUserMuteController = ({ isMuted, isMasked }) => {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    if (!localParticipant) return;
+    const syncMic = async () => {
+      const shouldPublish = !isMasked && !isMuted;
+      try {
+        await localParticipant.setMicrophoneEnabled(shouldPublish);
+        console.log(`🎤 ZingConnect Mic Sync: ${shouldPublish ? 'PUBLISHING' : 'MUTED/MASKED'}`);
+      } catch (err) {
+        console.error("❌ LiveKit Mic Sync Error:", err);
+      }
+    };
+
+    syncMic();
+  }, [isMuted, isMasked, localParticipant]);
+
+  return null;
+};
+
+const AudioSession = ({ isMuted, isMasked }) => {
+  return (
+    <>
+      <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
+      <RoomAudioRenderer />
+    </>
+  );
+};
+useEffect(() => {
+  if (!hasInteracted) {
+    window.addEventListener('click', unlockAudio);
+    window.addEventListener('touchstart', unlockAudio);
+  }
+  return () => {
+    window.removeEventListener('click', unlockAudio);
+    window.removeEventListener('touchstart', unlockAudio);
+  };
+}, [hasInteracted, unlockAudio]);
+
+useEffect(() => {
   let remoteAudio = document.getElementById('remoteAudio');
   if (!remoteAudio) {
     remoteAudio = document.createElement('audio');
     remoteAudio.id = 'remoteAudio';
-    remoteAudio.setAttribute('playsinline', 'true'); // Required for iOS PWA
+    remoteAudio.setAttribute('playsinline', 'true');
     remoteAudio.style.display = 'none';
     document.body.appendChild(remoteAudio);
   }
-    remoteAudio.play()
-    .then(() => {
-      remoteAudio.pause();
-      remoteAudio.muted = false; 
-    })
-    .catch(() => console.log("Voice channel primed for incoming streams."));
 
-  // 4. Socket & Event Cleanup
-  const currentAgentId = agent?._id || agent?.id;
-  if (socket && currentAgentId) {
-    socket.emit("join-private-room", currentAgentId);
+  // 2. Prime UI Assets
+  const assets = [
+    { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
+    { ref: callingAudio, src: '/sounds/calling.wav' },
+    { ref: notificationSound, src: '/sounds/notification.mp3' }
+  ];
+
+  assets.forEach(({ ref, src }) => {
+    const el = ref.current;
+    if (el) {
+      el.muted = true;
+      el.src = src;
+      el.load();
+      el.play().then(() => {
+        el.pause();
+        el.muted = false;
+        el.currentTime = 0;
+      }).catch(e => console.log("Asset priming deferred"));
+    }
+  });
+
+  // 3. Socket Room Join
+  if (socket && agent?._id) {
+    socket.emit("join-private-room", agent._id);
   }
+}, [agent?._id]); // Runs when agent data loads
+
+const terminateLocalSession = useCallback(() => {
+  console.log("🧹 Executing Full Local Cleanup...");
+    setIsEnding(true);
   
-  document.removeEventListener('click', unlockAudio);
-  document.removeEventListener('touchstart', unlockAudio);
-};
+  [ringtoneAudio, callingAudio].forEach(ref => {
+    if (ref?.current) {
+      ref.current.pause();
+      ref.current.currentTime = 0;
+    }
+  });
+
+  setLiveKitToken(null);
+  setCallStatus('idle');
+  setIsIncomingCall(false);
+  setActiveCall(null);
+  setCallTime(0);
+  setShowFullScreenCall(false);
+  setPeerConnected(false);
+
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    setLocalStream(null);
+  }
+  setTimeout(() => {
+    setIsEnding(false);
+  }, 3000);
+}, [localStream, ringtoneAudio, callingAudio]);
+
+useEffect(() => {
+  activeCallRef.current = activeCall;
+}, [activeCall]);
+
+useEffect(() => {
+  socket.on("voice-state-updated", (data) => {
+    if (data.mode === 'natural') {
+      const remoteAudio = document.getElementById('remoteAudio');
+      if (remoteAudio) {
+        remoteAudio.muted = false; // Force unmute the WebRTC stream
+        remoteAudio.volume = isSpeakerOn ? 1.0 : 0.7;
+        console.log("🔊 Switch to Natural: WebRTC Unmuted");
+      }
+    }
+  });
+  return () => socket.off("voice-state-updated");
+}, [socket, isSpeakerOn]);
 
 useEffect(() => {
   if ('serviceWorker' in navigator) {
@@ -262,29 +342,50 @@ useEffect(() => {
 useEffect(() => {
   if (!socket) return;
 
-  const handleAiAudioChunk = (base64Audio) => {
-    if (callStatusRef.current !== 'connected') return;
+  if (!audioCtxRef.current) {
+    audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  
+  const audioCtx = audioCtxRef.current;
+
+  const handleAiAudioChunk = async (base64Audio) => {
+    const isNaturalMode = activeCall?.voiceId === 'natural' || !activeCall?.voiceId;
+    if (callStatus !== 'connected' || isNaturalMode) return;
 
     try {
-      const audioData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
-      const blob = new Blob([audioData], { type: 'audio/mpeg' });
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.volume = 1.0; 
-      audio.play().finally(() => {
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      });
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+      const binaryString = window.atob(base64Audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+      const gainNode = audioCtx.createGain();
+      gainNode.gain.value = isSpeakerOn ? 1.0 : 0.7;
+      gainNode.connect(audioCtx.destination);
+      
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(gainNode);
+
+      const currentTime = audioCtx.currentTime;
+      if (nextStartTimeRef.current < currentTime) {
+        nextStartTimeRef.current = currentTime;
+      }
+      
+      source.start(nextStartTimeRef.current);
+      nextStartTimeRef.current += audioBuffer.duration;
     } catch (err) {
-      console.error("AI Audio Playback Error:", err);
+      console.error("AI Audio Stream Error:", err);
     }
   };
 
   socket.on("ai-audio-chunk", handleAiAudioChunk);
+  return () => socket.off("ai-audio-chunk", handleAiAudioChunk);
+}, [socket, callStatus, isSpeakerOn, activeCall?.voiceId]);
 
-  return () => {
-    socket.off("ai-audio-chunk", handleAiAudioChunk);
-  };
-}, [socket]);
 
 useEffect(() => {
   if (!hasInteracted) {
@@ -297,166 +398,207 @@ useEffect(() => {
   };
 }, [hasInteracted, agent?._id]); // Re-bind if agent loads later
 
+const handleEndCall = useCallback(async () => {
+  console.log("📴 Initiating Call End Sequence...");
+  
+  // 1. Clear Timeouts and Pollers
+  if (connectionTimeoutRef.current) {
+    clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = null;
+  }
+  if (pollingRef.current) {
+    console.log("🛑 Stopping background status polling...");
+    clearInterval(pollingRef.current);
+    pollingRef.current = null;
+  }
+  const myId = userData?._id || userData?.id;
+  const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
+  const token = localStorage.getItem('userToken');
+  const targetId = activeCall?.fromId === myId 
+    ? activeCall?.toId 
+    : activeCall?.fromId;
+  try {
+    if (currentCallId && token) {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log("✅ Server notified: Call marked as inactive.");
+    }
+    if (socket && targetId) {
+      socket.emit("end-call", { 
+        to: targetId.toString().trim(), 
+        callId: currentCallId 
+      });
+      socket.off("ai-audio-chunk");
+    }
+  } catch (err) {
+    console.warn("⚠️ Error during end-call handshake:", err);
+  } finally {
+    terminateLocalSession();
+  }
+}, [socket, userData, activeCall, terminateLocalSession]);
+
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
   const myId = userData._id.toString();
   socket.emit("join-main-room", myId);
 
-  // --- HANDLER: INCOMING CALL ---
   const handleIncomingCall = (data) => {
-    if (callStatusRef.current !== 'idle') {
-      console.log("☎️ Line busy, rejecting incoming call from:", data.fromId);
+    // 🔥 RESET GATES for the new call
+    peerConnectedRef.current = false;
+    setPeerConnected(false);
+
+    if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) {
+      console.log("☎️ Line busy or transitioning, rejecting incoming call from:", data.fromId);
       socket.emit("user-busy", { to: data.fromId, callId: data.callId });
       return; 
     }
-    
+
+    console.log("📥 Incoming Secure Call detected:", data.callId);
+
+    const ringTimeout = setTimeout(() => {
+      if (callStatusRef.current === 'ringing') {
+        console.log("⏰ Call timed out: No answer after 45s.");
+        handleEndCall();
+      }
+    }, 45000);
+
     socket.emit("confirm-ringing", { to: data.fromId });
-    console.log("📥 Incoming Secure Call detected. Syncing Voice Identity...");
 
     setActiveCall({ 
       callId: data.callId || data._id,
-      fromId: data.fromId,           
+      roomName: data.callId || data.roomName,
+      fromId: data.fromId || data.callerData?.callerId || data.from?._id,
       isInitiator: false,           
-      signal: data.signal,           
-      voiceId: data.voiceId || "nPczCjzB2QC9zZ6ULpFM", 
-      recipientName: data.fromName || "Secure Agent", 
-      photoUrl: data.photoUrl || "/default-agent.png",
+      voiceId: data.voiceId, 
       callerData: {
-        fromName: data.fromName || "Secure Agent",
-        photoUrl: data.photoUrl || "/default-agent.png",
+        fromName: data.fromName || data.callerData?.fromName || "Secure Agent",
+        photoUrl: data.photoUrl || data.callerData?.photoUrl || "/default-agent.png",
         callerId: data.fromId
       }
     });
 
+    setIsIncomingCall(true); 
     setCallStatus('ringing');
-    // Note: setIsIncomingCall removed because you use a derived constant
   };
 
-  // --- HANDLER: CALL ACCEPTED ---
   const handleCallAccepted = (acceptData) => {
     console.log("📡 Outbound Call Accepted by Agent:", acceptData);
-    const remoteAnswer = acceptData.signal || acceptData.answerSignal;
-
-    if (remoteAnswer && connectionRef.current) {
-      try {
-        const parsedSignal = typeof remoteAnswer === 'string' 
-          ? JSON.parse(remoteAnswer) 
-          : remoteAnswer;
-        
-        connectionRef.current.signal(parsedSignal);
-        setCallStatus('connecting'); 
-      } catch (err) {
-        console.error("❌ Handshake signaling failed:", err);
-        handleEndCall();
-      }
+    if (acceptData.lkToken) {
+      // 🔥 Mark peer as ready so the LiveKitRoom bridge can activate immediately
+      peerConnectedRef.current = true;
+      setPeerConnected(true);
+      setLiveKitToken(acceptData.lkToken);
+      setCallStatus('connected');
     }
   };
+  const handleRemoteEnd = (data) => {
+    const currentCallId = (activeCallRef.current?.callId || activeCallRef.current?._id || "").toString();
+    const incomingCallId = (data?.callId || data?.roomName || "").toString();
 
-  // --- HANDLER: REMOTE END ---
-  const handleRemoteEnd = () => {
+    if (incomingCallId && currentCallId && incomingCallId !== currentCallId) {
+      console.warn("⏭️ Ignoring end-signal: ID mismatch", { incoming: incomingCallId, current: currentCallId });
+      return;
+    }
+
     console.log("📞 Remote peer disconnected. Shutting down locally.");
     handleEndCall();
   };
 
-  // Register all listeners
   socket.on("incoming-call", handleIncomingCall);
   socket.on("call-accepted", handleCallAccepted);
   socket.on("end-call", handleRemoteEnd);
+  socket.on("call-ended", handleRemoteEnd);
+  socket.on("call-rejected", handleRemoteEnd);
 
   return () => {
     socket.off("incoming-call", handleIncomingCall);
     socket.off("call-accepted", handleCallAccepted);
     socket.off("end-call", handleRemoteEnd);
+    socket.off("call-ended", handleRemoteEnd);
+    socket.off("call-rejected", handleRemoteEnd);
   };
-}, [socket, userData?._id, handleEndCall]);
+}, [socket, userData?._id, handleEndCall, isEnding]);
 
-const handleEndCall = useCallback(() => {
-  console.log("📴 Initiating Shutdown Sequence...");
-  
-  // 1. Clear timeouts
-  if (connectionTimeoutRef.current) {
-    clearTimeout(connectionTimeoutRef.current);
-    connectionTimeoutRef.current = null;
-  }
+useEffect(() => {
+  if (!socket) return;
 
-  // 2. Identify the peer to notify
-  const myId = userData?._id || userData?.id;
-  const targetId = activeCall?.fromId === myId
-    ? activeCall?.receiverId 
-    : activeCall?.fromId;
-
-  const currentCallId = activeCall?.callId || activeCall?._id;
-
-  // 3. Notify Socket and stop audio listeners
-  if (socket && targetId) {
-    console.log(`📡 Sending termination signal to peer: ${targetId}`);
-    socket.emit("end-call", { to: targetId, callId: currentCallId });
-    socket.off("ai-audio-chunk");
-  }
-
-  // 4. WebRTC Cleanup
-  if (connectionRef.current) {
-    console.log("🧹 Executing Local Hardware Cleanup...");
-    connectionRef.current.removeAllListeners();
-    try {
-      connectionRef.current.destroy();
-    } catch (e) {
-      console.warn("Peer already destroyed");
+  const handleRemoteDisconnect = (data) => {
+    const currentCallId = activeCall?.callId || activeCall?._id;
+    const incomingSignalCallId = data?.callId;
+    if (incomingSignalCallId && currentCallId && String(incomingSignalCallId) !== String(currentCallId)) {
+      console.warn("⚠️ ZingConnect: Received end signal for a different session. Ignoring.");
+      return;
     }
-    connectionRef.current = null;
-  }
-
-  // 5. Media Stream Cleanup
-  const streams = [userStreamRef?.current, localStream];
-  streams.forEach(stream => {
-    if (stream && typeof stream.getTracks === 'function') {
-      stream.getTracks().forEach(track => {
-        track.stop();
-        console.log(`✅ ${track.kind} hardware released.`);
-      });
+    console.log("📴 ZingConnect: Remote peer disconnected. Cleaning up...");
+        if (aiMediaRecorderRef?.current) {
+      try {
+        if (aiMediaRecorderRef.current.state !== 'inactive') {
+          aiMediaRecorderRef.current.stop();
+        }
+        aiMediaRecorderRef.current.stream?.getTracks().forEach(t => {
+          t.stop();
+          console.log("🚫 Media track stopped.");
+        });
+      } catch (e) { 
+        console.warn("ZingConnect: Cleanup jitter", e); 
+      }
+      aiMediaRecorderRef.current = null;
     }
-  });
-
-  if (userStreamRef) userStreamRef.current = null;
-  setLocalStream(null);
-
-  // 6. Audio Element Cleanup
-  const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio) {
-    remoteAudio.pause();
-    remoteAudio.srcObject = null;
-    remoteAudio.src = "";
-    remoteAudio.load();
-  }
-
-  // 7. Reset UI State
-  setCallStatus('idle');
-  setPeerConnected(false);
-  setShowFullScreenCall(false);
-  setActiveCall(null);
-  setActiveCaller(null);
-  setCallTime(0);
-
-  console.log("✅ Hardware and UI reset complete. System Idle.");
-}, [socket, userData?._id, userData?.id, activeCall, localStream]);
-
+    [ringtoneAudio, callingAudio].forEach(ref => {
+      if (ref?.current) {
+        ref.current.pause();
+        ref.current.currentTime = 0;
+      }
+    });
+    setCallStatus('idle');
+    setLkToken(null);           // Disconnects LiveKit
+    setActiveCall(null);
+    setActiveCaller(null);
+    setPeerConnected(false);
+    setShowFullScreenCall(false);
+    setCallTime(0); 
+    if (typeof setIsVoiceConversionActive === 'function') {
+      setIsVoiceConversionActive(false);
+    }
+  };
+  socket.on("call-ended", handleRemoteDisconnect);
+  socket.on("end-call", handleRemoteDisconnect);
+  socket.on("call-rejected", handleRemoteDisconnect);
+  return () => {
+    socket.off("call-ended", handleRemoteDisconnect);
+    socket.off("end-call", handleRemoteDisconnect);
+    socket.off("call-rejected", handleRemoteDisconnect);
+  };
+}, [
+  socket, 
+  activeCall?.callId, 
+  activeCall?._id, 
+]);
 useEffect(() => {
   let timer;
   if (callStatus === 'connected') {
-    const serverStart = activeCall?.startTime || activeCall?.call?.startTime; 
-    const start = serverStart ? new Date(serverStart).getTime() : Date.now();
-
+    setCallTime(0);
+    const localStart = Date.now();
     timer = setInterval(() => {
       const now = Date.now();
-      const diff = Math.floor((now - start) / 1000);
-      setCallTime(diff > 0 ? diff : 0);
+      const secondsPassed = Math.floor((now - localStart) / 1000);
+      setCallTime(Math.max(0, secondsPassed));
     }, 1000);
-  } else {
+    console.log("⏱️ Call timer started.");
+  } else if (callStatus === 'idle') {
     setCallTime(0);
   }
-  return () => clearInterval(timer);
-}, [callStatus, activeCall?.startTime, activeCall?.call?.startTime]);
+
+  return () => {
+    if (timer) clearInterval(timer);
+  };
+}, [callStatus]);
 
 useEffect(() => {
   return () => {
@@ -469,57 +611,62 @@ const formatTime = (seconds) => {
   const secs = seconds % 60;
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
-
 useEffect(() => {
   const token = localStorage.getItem('userToken');
-  if (!token || !activeCall?.callId) return;
-
+  const currentCallId = activeCall?.callId || activeCall?._id;
+    if (!token || !currentCallId || callStatus === 'idle' || callStatus === 'connected' || isEnding) return;
+  const syncSessionStart = Date.now();
   const syncStatus = async () => {
-    // ONLY poll if we are still waiting (ringing)
-    if (callStatus !== 'ringing') return;
-
+    if (isEnding || callStatus === 'connected') return;
     try {
-      const res = await fetch(`/api/calls/status/${activeCall.callId}`, {
-        headers: { 'Authorization': 'Bearer ' + token }
-      });
-      const data = await res.json();
-
-      // COLLISION GUARD: Only signal if the peer isn't already processing/connected
-      if (data.status === 'connected' && data.answerSignal) {
-        const isAlreadyConnected = connectionRef.current?.connected;
-        const isStable = connectionRef.current?._pc?.signalingState === 'stable';
-
-        if (!isAlreadyConnected && !isStable) {
-          console.log("🔄 Fallback: Answer Signal found. Finalizing...");
-          const parsedAnswer = typeof data.answerSignal === 'string' 
-            ? JSON.parse(data.answerSignal) 
-            : data.answerSignal;
-          
-          connectionRef.current.signal(parsedAnswer);
-          setCallStatus('connecting');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Cache-Control': 'no-cache' 
         }
+      });      
+      if (res.status === 404) {
+        if (Date.now() - syncSessionStart > 15000) {
+          console.log("⚠️ Call record missing after long grace period.");
+          handleEndCall();
+        }
+        return;
       }
-
-      if (['ended', 'declined', 'missed'].includes(data.status)) {
+      const data = await res.json();
+      if (!data) return;
+      const terminalStates = ['ended', 'declined', 'missed', 'rejected'];
+      if (terminalStates.includes(data.status) || data.active === false) {
+        const timeElapsed = Date.now() - syncSessionStart;
+                if (timeElapsed < 30000 && callStatus === 'ringing') {
+          return;
+        }
+        console.log("🔴 DB Sync: Server confirmed call is truly over.");
         handleEndCall();
+        return;
+      }
+      if (data.status === 'connected' && callStatus === 'ringing') {
+        console.log("📡 DB Sync: Agent connected.");
+        setCallStatus('connected');
       }
     } catch (e) {
-      console.warn("User status sync failed:", e);
+      console.warn("Sync Polling jitter:", e);
     }
   };
-
-  const interval = setInterval(syncStatus, 3000);
+  const interval = setInterval(syncStatus, 5000); 
   return () => clearInterval(interval);
-}, [callStatus, activeCall?.callId]);
+}, [callStatus, activeCall?.callId, activeCall?._id, isEnding]); 
+
 useEffect(() => {
   if (!socket) return;
-
   const handleRemoteEnd = (data) => {
-    const currentCallId = activeCall?.callId || activeCall?._id;
-    
+    const currentCallId = (activeCall?.callId || activeCall?._id || "").toString();
+    const incomingCallId = (data?.callId || "").toString();
     console.log("📡 Signal Received:", data);
-        if (data?.callId && currentCallId && data.callId !== currentCallId) {
-      console.warn("Ignored signal: ID mismatch", { received: data.callId, current: currentCallId });
+    if (incomingCallId && currentCallId && incomingCallId !== currentCallId) {
+      console.warn("Ignored signal: ID mismatch", { 
+        received: incomingCallId, 
+        current: currentCallId 
+      });
       return;
     }
     console.log("☎️ Remote cleanup triggered (End/Reject). Resetting UI...");
@@ -527,83 +674,79 @@ useEffect(() => {
   };
   socket.on("call-ended", handleRemoteEnd);
   socket.on("end-call", handleRemoteEnd);
-  socket.on("call-rejected", handleRemoteEnd); 
+  socket.on("call-rejected", handleRemoteEnd);
+
   return () => {
     socket.off("call-ended", handleRemoteEnd);
     socket.off("end-call", handleRemoteEnd);
     socket.off("call-rejected", handleRemoteEnd);
   };
-}, [socket, activeCall?.callId, activeCall?._id, handleEndCall]); // Added handleEndCall to deps
+  }, [socket, activeCall?.callId, activeCall?._id]);
 
 useEffect(() => {
   const audio = document.getElementById('remoteAudio');
   if (!audio) return;
+  const isUsingAI = activeCall?.voiceId && activeCall.voiceId !== "natural";
 
-  audio.volume = isSpeakerOn ? 1.0 : 0.2;
-  if (audio.setSinkId) {
-    if (isSpeakerOn) {
-      audio.setSinkId('')
-        .catch(err => console.warn("Audio route error:", err));
-    } else {
-      console.log("Speaker off: Audio volume reduced.");
+  if (isUsingAI) {
+    audio.muted = true;
+    audio.volume = 0;
+  } else {
+    audio.muted = false;
+    audio.volume = isSpeakerOn ? 1.0 : 0.2;
+        if (audio.setSinkId && isSpeakerOn) {
+      audio.setSinkId('').catch(err => console.warn("Audio route error:", err));
     }
   }
-}, [isSpeakerOn]);
+}, [isSpeakerOn, activeCall?.voiceId, callStatus]);
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return;
 
   const checkCalls = async () => {
-    // Only check for new calls if the system is currently idle
-    if (callStatus !== 'idle') return; 
+    
+    if (
+      callStatusRef.current !== 'idle' || 
+      isEnding || 
+      isTransitioningRef.current
+    ) {
+      return; 
+    }
 
     try {
-      const response = await fetch('/api/calls/check-incoming', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
         headers: { 
           'Authorization': `Bearer ${token}`, 
           'Cache-Control': 'no-cache' 
         }
       });
+      if (!response.ok) return;
 
-      // --- FIX 1: PARSE RESPONSE TO DEFINE 'data' ---
       const data = await response.json();
 
       if (data && data.hasIncomingCall) {
-        const callTime = new Date(data.createdAt).getTime();
-        const now = Date.now();
-        const ageInSeconds = (now - callTime) / 1000;
+        if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
 
-        // Auto-reject calls older than 60 seconds
-        if (ageInSeconds > 60) return;
-        const rawPhoto = data.callerData?.photoUrl || data.from?.photoUrl || data.agentData?.photoUrl;
-        const photo = rawPhoto || "/default-agent.png";
-        const name = data.callerData?.fromName || 
-                     (data.from?.firstName ? `${data.from.firstName} ${data.from.lastName}` : "Secure Caller");
-
-        setActiveCall({
+        console.log("📡 Poller found incoming call, triggering UI...");
+                setActiveCall({
           callId: data.callId,
-          fromId: data.callerData?.callerId || data.from?._id,
-          signal: data.signal,
-          callerData: {
-            fromName: name,
-            photoUrl: photo,
-            callerId: data.callerData?.callerId || data.from?._id
-          }
+          fromId: data.callerData?.callerId || data.fromId,
+          roomName: data.roomName || data.callId,
+          callerData: data.callerData,
+          voiceId: data.voiceId // Ensure voice identity carries over
         });
+        
+        setIsIncomingCall(true); 
         setCallStatus('ringing');
-        if (typeof setIsIncomingCall === 'function') {
-          setIsIncomingCall(true);
-        }
       }
     } catch (err) {
-      console.warn("User Dashboard Polling error:", err);
+      console.warn("User Polling error:", err);
     }
   };
-
-  const interval = setInterval(checkCalls, 3000); 
+  const interval = setInterval(checkCalls, 4000); 
   return () => clearInterval(interval);
-}, [callStatus, userData?._id, setIsIncomingCall]); // Added setIsIncomingCall to dependency array for safety
+}, [userData?._id, isEnding]);
 
 useEffect(() => {
   // 1. Set looping once
@@ -615,9 +758,7 @@ useEffect(() => {
       if (callStatus === 'ringing' && isIncomingCall) {
         callingAudio.current.pause();
         callingAudio.current.currentTime = 0;
-        
-        // DO NOT clear .src, just play if the src is already set from unlockAudio
-        await ringtoneAudio.current.play();
+                await ringtoneAudio.current.play();
         console.log("🔊 Playing Ringtone");
       } 
       // Outgoing Call Logic
@@ -675,143 +816,70 @@ const toggleMute = () => {
 };
 
 const handleAcceptCall = async () => {
-  // 1. MOBILE OPTIMIZATION: Unlock Audio Context immediately on user gesture
+  // 1. Audio Pipeline Wake-up
   const AudioContext = window.AudioContext || window.webkitAudioContext;
-  const audioCtx = new AudioContext();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (AudioContext) {
+    const audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume().catch(e => console.warn("Context unlock blocked:", e));
+    }
+  }
 
-  // 2. Stop ringtone immediately
+  // 2. Kill Local Ringtone
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
-    ringtoneAudio.current.src = "";
     ringtoneAudio.current.currentTime = 0;
   }
 
   const token = localStorage.getItem('userToken');
-  const callId = activeCall?.callId || activeCall?._id;
-  const activeVoice = activeCall?.voiceId || "nPczCjzB2QC9zZ6ULpFM"; 
+  const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
 
+  if (!callId) {
+    console.error("❌ ZingConnect: No valid Call ID found for acceptance.");
+    return;
+  }
   try {
-    console.log("🔗 Fast Handshake: Accepting call for Voice:", activeVoice);
-    setCallStatus('connecting');
+    setIsEnding(false); 
+    isTransitioningRef.current = true;
+        setCallStatus('connecting');
     setShowFullScreenCall(true);
 
-    // 3. Prioritize signal from props to avoid unnecessary DB fetch latency
-    let incomingSignal = activeCall?.signal;
-    if (!incomingSignal) {
-      const res = await fetch(`/api/calls/status/${callId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      incomingSignal = data.signal || data.answerSignal;
+    console.log(`📡 Sending acceptance to server engine for room/call: ${callId}...`);
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    const data = await response.json();    
+    if (data.success && data.lkToken) {
+      console.log("✅ Secure LiveKit token verified and cached locally.");
+            const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
+      
+      if (socket && agentId) {
+        socket.emit("answer-call", { 
+          to: agentId, 
+          callId: data.roomName || callId, 
+          myId: userData?._id?.toString() 
+        });
+      }
+      peerConnectedRef.current = true; 
+      setPeerConnected(true);
+            setLiveKitToken(data.lkToken); 
+            isTransitioningRef.current = false;
+      setIsIncomingCall(false); // Move incoming flag change here post-auth verification
+      
+    } else {
+      throw new Error(data.message || "LiveKit RTC token missing from server engine");
     }
 
-    if (!incomingSignal) throw new Error("Handshake signal missing.");
-
-    // 4. Capture User Audio early
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { 
-        echoCancellation: true, 
-        noiseSuppression: true, 
-        autoGainControl: true 
-      }
-    });
-    userStreamRef.current = stream;
-
-    const PeerConstructor = Peer.default || Peer;
-    const peer = new PeerConstructor({
-      initiator: false, 
-      trickle: true, // 🔥 CRITICAL: Enable Trickle ICE for faster mobile connections
-      stream: stream,
-      config: { 
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ] 
-      }
-    });
-    peer.on('signal', async (data) => {
-      const targetId = activeCall?.fromId || activeCall?.callerData?.callerId;
-      if (targetId) {
-        socket.emit("answer-call", { 
-          to: targetId.toString(), 
-          signal: data, 
-          callId,
-          voiceId: activeVoice
-        });
-        
-        // Reliability backup for major signal changes (SDP)
-        if (data.type === 'answer') {
-          fetch('/api/calls/update-signal', {
-            method: 'PATCH',
-            headers: { 
-              'Authorization': `Bearer ${token}`, 
-              'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({ callId, signal: data })
-          }).catch(e => console.warn("Signal DB backup failed:", e));
-        }
-      }
-    });
-    peer.on('stream', (remoteStream) => {
-      console.log("🔈 WebRTC Connected.");
-      
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.setAttribute('playsinline', 'true'); // Required for iOS
-        audio.setAttribute('autoplay', 'true');
-        document.body.appendChild(audio);
-      }
-
-      // Voice Masking Logic
-      const isAiCall = !!activeCall?.voiceId; 
-      if (isAiCall) {
-        audio.srcObject = remoteStream;
-        audio.muted = true; 
-        remoteStream.getAudioTracks().forEach(track => track.enabled = false);
-
-socket.off("ai-audio-chunk"); 
-socket.on("ai-audio-chunk", (base64Audio) => {
-  try {
-    const audioEl = document.getElementById('remoteAudio');
-    if (!audioEl) return;
-    const audioData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
-    const blob = new Blob([audioData], { type: 'audio/mpeg' });
-    const url = URL.createObjectURL(blob);
-    audioEl.src = url;
-    audioEl.muted = false;
-    audioEl.volume = isSpeakerOn ? 1.0 : 0.5;
-
-    audioEl.play().finally(() => {
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    });
   } catch (err) {
-    console.error("AI Audio Processing Error:", err);
-  }
-});
-      } else {
-        audio.srcObject = remoteStream;
-        audio.muted = false;
-        audio.volume = 1.0;
-      }
-      
-      setCallStatus('connected');
-      setPeerConnected(true);
-    });
-
-    peer.on('close', () => terminateLocalSession());
-    const parsedSignal = typeof incomingSignal === 'string' 
-      ? JSON.parse(incomingSignal) 
-      : incomingSignal;
-      
-    peer.signal(parsedSignal);
-    connectionRef.current = peer;
-
-  } catch (err) {
-    console.error("❌ Handshake Failed:", err);
-    handleEndCall();
+    console.error("❌ ZingConnect acceptance runtime exception:", err);
+    setIsEnding(false); 
+    isTransitioningRef.current = false;
+    handleEndCall(); // Safely fall back to structural teardown logic
   }
 };
 
@@ -820,161 +888,105 @@ useEffect(() => {
 
   const myId = userData._id.toString();
   socket.emit("join-main-room", myId);
-  const onIncoming = async (data) => {
-    const callId = data.callId || data._id;
+
+ const onIncoming = async (data) => {
+  if (callStatusRef.current !== 'idle' || isEnding) return;
+
+  const roomName = data.callId || data.roomName;
+    setActiveCall({
+    ...data,
+    roomName: roomName,
+    fromId: data.fromId || data.callerData?.callerId
+  });
+  setIsIncomingCall(true);
+  setCallStatus('ringing');
+  if (socket) {
+    socket.emit("confirm-ringing", { to: data.fromId || data.callerData?.callerId });
+  }
+  try {
     const token = localStorage.getItem('userToken');
-    console.log("📞 Incoming signal received. Validating with DB...");
-    try {
-      const res = await fetch(`/api/calls/status/${callId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const statusData = await res.json();
-      if (statusData && ['ended', 'declined', 'missed', 'rejected'].includes(statusData.status)) {
-        console.warn("🛑 Blocked Ghost Call: Call is already dead in Database.");
-        return; 
-      }
-      socket.emit("user-is-ringing", { to: data.fromId }); 
-      setActiveCall(data);
-      setCallStatus('ringing');
-      
-      if (typeof setIsIncomingCall === 'function') setIsIncomingCall(true);
-      
-    } catch (err) {
-      console.error("Failed to validate incoming call status:", err);
-    }
-  };
-  const onRemoteEnd = (data) => {
-    console.log("📡 Remote termination signal received:", data);
-    const currentCallId = activeCall?.callId || activeCall?._id;
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const statusData = await res.json();
     
-    if (data?.callId && currentCallId && data.callId !== currentCallId) {
-      console.log("⏭️ Ignoring end signal for different call session.");
-      return;
+    if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
+      handleEndCall(); 
     }
-    handleEndCall(); 
-  };
+  } catch (err) {
+    console.warn("Incoming check jitter ignored.");
+  }
+};
+
+const onRemoteEnd = (data) => {
+  const currentId = activeCallRef.current?.roomName || 
+                    activeCallRef.current?.callId || 
+                    activeCallRef.current?._id;
+  const incomingId = data?.callId || data?.roomName || data?._id;
+
+  console.log("📴 Signal Received:", { incomingId, currentId });
+  if (!currentId) {
+    if (callStatus !== 'idle') {
+       console.log("Cleaning up zombie UI session");
+       handleEndCall();
+    }
+    return;
+  }
+  if (incomingId && currentId && String(incomingId) !== String(currentId)) {
+    console.warn("⏭️ Ignoring end signal: Session mismatch", { incomingId, currentId });
+    return;
+  }
+
+  // 5. Final Execution
+  console.log("✅ Call termination confirmed via Socket.");
+  handleEndCall();
+};
   socket.on("incoming-call", onIncoming);
   socket.on("call-ended", onRemoteEnd);
   socket.on("end-call", onRemoteEnd);
-  socket.on("call-rejected", onRemoteEnd); 
+  socket.on("call-rejected", onRemoteEnd);
+  socket.on("call-accepted", (data) => {
+     if (data.signal || data.answerSignal) {
+     }
+  });
+
   return () => {
-  console.log("🛠️ Cleaning up Socket listeners and forcing hardware release...");
-  socket.off("incoming-call", onIncoming);
-  socket.off("call-ended", onRemoteEnd);
-  socket.off("end-call", onRemoteEnd);
-  socket.off("call-rejected", onRemoteEnd);
-  terminateLocalSession(); 
-};
-}, [socket, userData?._id, activeCall?.callId, activeCall?._id, handleEndCall]);
-
-const terminateLocalSession = () => {
-  console.log("🧹 Executing Local Hardware Cleanup...");
-  const audios = [ringtoneAudio, callingAudio];
-  audios.forEach(audioRef => {
-    if (audioRef?.current) {
-      try {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      } catch (e) {
-        console.warn("Audio pause jitter:", e.message);
-      }
-    }
-  });
-  const streams = [userStreamRef?.current, localStream];
-  streams.forEach(stream => {
-    if (stream && typeof stream.getTracks === 'function') {
-      stream.getTracks().forEach(track => {
-        track.stop();
-        console.log(`Stopped hardware track: ${track.kind}`);
-      });
-    }
-  });
-  if (userStreamRef) userStreamRef.current = null;
-  if (typeof setLocalStream === 'function') setLocalStream(null);
-  const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio) {
-    remoteAudio.pause();
-    remoteAudio.srcObject = null;
-    remoteAudio.src = ""; 
-    remoteAudio.load(); // Forces the browser to dump the buffer
-    console.log("✅ Remote audio hardware released.");
-  }
-  if (connectionRef.current) {
-    try {
-      connectionRef.current.removeAllListeners();
-      connectionRef.current.destroy();
-    } catch (e) {
-      console.warn("Peer cleanup notice:", e.message);
-    }
-    connectionRef.current = null;
-  }
-  if (typeof setCallStatus === 'function') setCallStatus('idle');
-  if (typeof setActiveCall === 'function') setActiveCall(null);
-  if (typeof setPeerConnected === 'function') setPeerConnected(false);
-  if (typeof setIsIncomingCall === 'function') setIsIncomingCall(false);
-  if (typeof setCallTime === 'function') setCallTime(0);
-    if (typeof setShowFullScreenCall === 'function') {
-    setShowFullScreenCall(false);
-  }
-
-  console.log("✅ Hardware and UI reset complete. System Idle.");
-};
-
-
-async function handleEndCall() {
-  console.log("📴 Initiating Shutdown Sequence...");
-
-  const targetId = activeCall?.fromId || activeCall?.agentId || activeCall?.receiverId || activeCall?.callerData?.callerId;
-  const currentCallId = activeCall?.callId || activeCall?._id;
-  const token = localStorage.getItem('userToken');
-  if (socket && targetId) {
-    console.log(`📡 Notifying peer ${targetId} of termination.`);
-    socket.emit("end-call", { to: targetId, callId: currentCallId });
-        socket.off("ai-audio-chunk");
+    socket.off("incoming-call", onIncoming);
+    socket.off("call-ended", onRemoteEnd);
+    socket.off("end-call", onRemoteEnd);
+    socket.off("call-rejected", onRemoteEnd);
     socket.off("call-accepted");
-  }
-  if (typeof isVoiceConversionActive !== 'undefined' && isVoiceConversionActive) {
-    if (typeof stopVoiceConversion === 'function') stopVoiceConversion();
-  }
+  };
+}, [socket, userData?._id, handleEndCall]);
 
-  if (currentCallId && token) {
-    fetch('/api/calls/end', {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify({ callId: currentCallId })
-    }).catch(err => console.error("Database Termination Error:", err));
-  }
-  setCallStatus('idle');
-  setCallTime(0);
-  setActiveCall(null);
-  setPeerConnected(false);
-  
-  if (typeof setIsIncomingCall === 'function') setIsIncomingCall(false);
-  if (typeof setIsVoiceConversionActive === 'function') setIsVoiceConversionActive(false);
-  if (typeof setShowFullScreenCall === 'function') setShowFullScreenCall(false);
-  terminateLocalSession();  
-  console.log("✅ Cleanup Complete. System Idle.");
-}
 
 async function handleRejectCall() {
   console.log("🚫 User rejecting Agent call...");
-  const callId = activeCall?.callId || activeCall?._id;
-const targetId = activeCall?.fromId === userData?._id 
-  ? activeCall?.receiverId // If I started it, target the receiver
-  : activeCall?.fromId;    // If I received it, target the initiator
+  const currentCall = activeCallRef.current || activeCall;
   
-  if (socket && targetId) {
-    // Notify the Agent specifically that the call was rejected
+  if (!currentCall) {
+    console.warn("⚠️ Reject failed: No active call found in state/ref");
+    handleEndCall(); 
+    return;
+  }
+  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
+    const myId = userData?._id?.toString();
+  const initiatorId = currentCall.fromId?.toString();
+  const receiverId = currentCall.receiverId?.toString() || currentCall.toId?.toString();
+  const targetId = (initiatorId === myId) ? receiverId : initiatorId;
+
+  console.log("📡 Emitting reject-call to:", targetId, "for room:", callId);
+
+  if (socket && targetId && callId) {
     socket.emit("reject-call", { 
       to: targetId, 
-      fromId: userData?._id, 
-      callId 
+      fromId: myId, 
+      callId: String(callId).trim() 
     });
+  } else {
+    console.error("❌ Missing Socket, Target, or CallID", { targetId, callId });
   }
-    handleEndCall();
+  handleEndCall();
 }
 
 useEffect(() => {
@@ -1045,6 +1057,26 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
+  const handleVoiceUpdate = (data) => {
+    const remoteAudio = document.getElementById('remoteAudio');
+    if (!remoteAudio) return;
+    if (data.mode === 'natural' || !data.voiceId) {
+      console.log("🔊 Switch to Natural: Unmuting WebRTC Stream");
+      remoteAudio.muted = false;
+      remoteAudio.volume = isSpeakerOn ? 1.0 : 0.7;
+      remoteAudio.play().catch(e => console.warn("Audio resume failed:", e));
+    } else {
+      console.log("🔇 Switch to AI: Muting WebRTC Stream");
+      remoteAudio.muted = true;
+      remoteAudio.volume = 0;
+    }
+  };
+
+  socket.on("voice-state-updated", handleVoiceUpdate);
+  return () => socket.off("voice-state-updated", handleVoiceUpdate);
+}, [socket, isSpeakerOn]);
+
+useEffect(() => {
     // Timeout ensures the DOM has rendered the new message before scrolling
     const timer = setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1084,11 +1116,17 @@ useEffect(() => {
 
   useEffect(() => {
   const token = localStorage.getItem('userToken');
-  if (!token || !agent?._id) return;
+  const targetAgentId = agent?._id || agent?.id;
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  
+  if (!token || !targetAgentId) return;
 
- const fetchMessages = async () => {
+  let isFirstLoad = true;
+
+  const fetchMessages = async () => {
     try {
-      const response = await fetch(`/api/messages/${agent._id}`, {
+      // Added your ?limit=50 param to optimize historical fetching payload sizes
+      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -1097,55 +1135,74 @@ useEffect(() => {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
 
+        // 1. Silent Notification & Seen Logic
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
           lastMsg.status !== 'seen' && 
-          lastMsg._id !== lastNotifiedId.current // Check against the Ref
+          lastMsg._id !== lastNotifiedId.current
         ) {
           lastNotifiedId.current = lastMsg._id;
           if (notificationSound.current) {
             notificationSound.current.currentTime = 0;
             notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
           }
-
-          // Browser Notification (Branding Fix)
           if (Notification.permission === "granted") {
-            new Notification(`Agent ${agent.firstName}`, {
+            new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
               body: lastMsg.text || "Sent a file",
-              icon: '/logo-s.png', // Point to your brand logo in public folder
-              tag: 'zing-msg'    // Grouping tag to prevent spam
+              icon: '/logo-s.png',
+              tag: 'zing-msg'
             });
           }
 
-          // Mark as Read (Silent Background update)
-          fetch(`/api/messages/mark-read/${agent._id}`, {
+          fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
-setMessages(prev => {
-        const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
-        const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
-        const uniqueInFlight = inFlight.filter(m => 
-          !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
-        );
-        const newCombined = [...incomingMessages, ...uniqueInFlight];
-        if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
-          return prev;
-        }
-        return newCombined;
-      });
-    }
-  } catch (err) {
-    console.error("Polling error:", err);
-  }
-};
 
+        // 2. State Sync: Merge incoming messages with local in-flight ones
+        setMessages(prev => {
+          const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
+          const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
+          const uniqueInFlight = inFlight.filter(m => 
+            !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
+          );
+          const newCombined = [...incomingMessages, ...uniqueInFlight];
+          
+          if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
+            return prev;
+          }
+          return newCombined;
+        });
+
+        // 3. Smart Viewport Anchoring
+        setTimeout(() => {
+          if (isFirstLoad) {
+            // Instant snap on mount so user doesn't see scroll animation lag
+            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+            isFirstLoad = false;
+          } else {
+            // Smooth adjustment for passive incoming messages while chatting
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }, 100);
+      }
+    } catch (err) {
+      console.error("ZingConnect Sync Jitter:", err);
+    } finally {
+      if (isFirstLoad) setLoading(false);
+    }
+  };
+
+  // Immediate invocation on change/mount
   fetchMessages();
+  
+  // Set up background long-poll tracker
   const interval = setInterval(fetchMessages, 5000); 
+  
   return () => clearInterval(interval);
-}, [agent?._id]);
+}, [agent?._id, agent?.id]);
 
   const agentStatus = getStatusInfo(agent);
 
@@ -1171,38 +1228,9 @@ const handleFileChange = (e) => {
   e.target.value = ""; 
 };
 
-const handleSendWithPreview = async () => {
-  if (!selectedFile || isUploading) return;
-  setIsUploading(true);
-
-  try {
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    
-    const uploadRes = await axios.post('/api/upload', formData);
-    const { fileUrl, fileType } = uploadRes.data;
-    const payload = {
-      receiverId: selectedUser._id,
-      text: caption.trim(), // The caption typed in the preview
-      fileUrl: fileUrl,
-      fileType: fileType,
-      senderModel: 'User' // or 'User' depending on the dashboard
-    };
-    socket.emit('sendMessage', payload);
-    setPreviewUrl(null);
-    setSelectedFile(null);
-    setCaption("");
-  } catch (error) {
-    console.error("Failed to send media:", error);
-  } finally {
-    setIsUploading(false);
-  }
-};
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
-  
-  // Basic validation for the new phone field
-  if (!formData.phone || formData.phone.length < 10) {
+    if (!formData.phone || formData.phone.length < 10) {
     alert("Please enter a valid phone number with country code.");
     return;
   }
@@ -1301,6 +1329,7 @@ const handleFinalSend = async () => {
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
+    senderModel: 'User',
     text: savedCaption,
     fileUrl: previewUrl, // Use the local blob URL for preview
     fileType: detectedType,
@@ -1381,162 +1410,119 @@ const handleDownload = async (url, type) => {
   }
 };
 
-const handleStartCall = async () => {
-  // 1. Buffer Polyfill
-  if (typeof window !== 'undefined' && !window.Buffer) {
-    const { Buffer } = await import('buffer');
-    window.Buffer = Buffer;
-  }
+const startStatusPolling = (roomName) => {
+  const token = localStorage.getItem('userToken');
+  const startTime = Date.now(); // Mark when polling started
 
+  if (pollingRef.current) clearInterval(pollingRef.current);
+
+  const pollInterval = setInterval(async () => {
+    if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.status === 404) {
+        if (Date.now() - startTime > 8000) {
+          console.warn("🏳️ Polling: Call record missing.");
+          handleEndCall();
+        }
+        return;
+      }
+      const data = await res.json();
+      const terminalStates = ['ended', 'rejected', 'missed', 'declined'];
+
+      if (terminalStates.includes(data.status) || data.active === false) {
+        if (Date.now() - startTime > 5000) {
+          console.log("🏳️ Polling: Remote side terminated call.");
+          handleEndCall();
+        }
+      }
+    } catch (err) {
+      console.warn("Status sync jitter:", err.message);
+    }
+  }, 4000);
+
+  pollingRef.current = pollInterval;
+};
+const handleStartCall = async () => {
+  // 1. Validation and Setup
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
 
   if (!currentAgentId || !currentUserId) {
     alert("Profile data still loading. Please try again.");
     return;
   }
 
+  // UI State: Move to calling immediately
   setCallStatus('calling'); 
   setShowFullScreenCall(true);
 
   try {
-    // 2. Capture Local Media
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, 
-      video: false 
+    // 2. Request a Secure LiveKit Room from Backend
+    const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({ 
+        receiverId: currentAgentId, 
+        receiverModel: 'Agent',
+        voiceId: "natural" 
+      })
     });
 
-    userStreamRef.current = stream;
-    setLocalStream(stream);
+    const data = await res.json();
 
-    // 3. Initialize Peer
-    const { default: SimplePeer } = await import('simple-peer');
-    const peer = new SimplePeer({
-      initiator: true,
-      trickle: false,
-      stream: stream,
-      config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-    });
+    if (!data.success) {
+      throw new Error(data.message || "Agent unavailable");
+    }
 
-    connectionRef.current = peer;
+    // 3. Resolve Photo URL
+    const photoPath = userData?.photoUrl;
+    const fullPhotoUrl = photoPath?.startsWith('http') 
+      ? photoPath 
+      : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
 
-    // 4. Offer Generation
-    peer.on('signal', async (signalData) => {
-      console.log("📤 WebRTC Offer generated.");
-      
-      const API_BASE_URL = window.location.origin.includes('localhost') 
-        ? "http://localhost:5000" 
-        : "https://zingconnect.vercel.app";
-
-      try {
-        const res = await fetch('/api/calls/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ 
-            receiverId: currentAgentId, 
-            receiverModel: 'Agent',
-            signal: signalData 
-          })
-        });
-
-        const data = await res.json();
-        if (!data.success) throw new Error(data.message || "Agent unavailable");
-
-        const photoPath = userData?.photoUrl;
-        const fullPhotoUrl = photoPath?.startsWith('http') 
-          ? photoPath 
-          : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
-
-        setActiveCall({ 
-          callId: data.callId,
-          toId: currentAgentId.toString(), // Use toId for consistency in handleEndCall
-          fromId: currentUserId,
-          isInitiator: true,
-          signal: signalData,
-          callerData: {
-            fromName: `${userData?.firstName} ${userData?.lastName}`,
-            photoUrl: fullPhotoUrl,
-            callerId: currentUserId
-          }
-        });
-
-        socket.emit("call-user", {
-          userToCall: currentAgentId.toString(),
-          fromId: currentUserId,
-          fromName: `${userData?.firstName} ${userData?.lastName}`,
-          photoUrl: fullPhotoUrl,
-          callId: data.callId,
-          signal: signalData 
-        });
-
-        // Move to ringing once backend confirms receipt
-        setCallStatus('ringing'); 
-      } catch (apiErr) {
-        console.error("❌ Failed to initiate call:", apiErr);
-        handleEndCall();
+    // 4. Set Active Call Metadata IMMEDIATELY (Updates UI)
+    setActiveCall({ 
+      callId: data.roomName, 
+      roomName: data.roomName,
+      toId: currentAgentId.toString(),
+      fromId: currentUserId,
+      isInitiator: true,
+      callerData: {
+        fromName: `${userData?.firstName} ${userData?.lastName}`,
+        photoUrl: fullPhotoUrl,
+        callerId: currentUserId
       }
     });
-
-    // 5. Handle Acceptance
-    socket.off("call-accepted").on("call-accepted", (acceptData) => {
-      console.log("📡 Agent accepted.");
-      const remoteAnswer = acceptData.signal || acceptData.answerSignal;
-
-      if (remoteAnswer && connectionRef.current) {
-        try {
-          const parsedSignal = typeof remoteAnswer === 'string' 
-            ? JSON.parse(remoteAnswer) 
-            : remoteAnswer;
-          
-          connectionRef.current.signal(parsedSignal);
-          setCallStatus('connecting'); 
-        } catch (err) {
-          console.error("❌ Handshake failed:", err);
-        }
-      }
+    socket.emit("call-agent", { 
+      agentToCall: currentAgentId.toString(),
+      fromId: currentUserId,
+      fromName: `${userData?.firstName} ${userData?.lastName}`,
+      photoUrl: fullPhotoUrl,
+      callId: data.roomName
     });
+    setCallStatus('ringing'); 
+    setTimeout(() => {
+      if (data.lkToken) {
+        console.log("🚀 ZingConnect: Initializing Secure Media Handshake...");
+        setLiveKitToken(data.lkToken); 
+      }
+    }, 500);
 
-    // 6. Connected Stream
-    peer.on('stream', (remoteStream) => {
-      console.log("🔈 Connection established.");
-      
-      // ✅ Use the Ref to clear the timeout
-      if (connectionTimeoutRef.current) {
-        clearTimeout(connectionTimeoutRef.current);
-        connectionTimeoutRef.current = null;
-      }
-      
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-      }
-      
-      audio.srcObject = remoteStream;
-      audio.muted = true; // Muted because we use AI audio chunks
-      
-      setCallStatus('connected');
-      setPeerConnected(true);
-    });
-    connectionTimeoutRef.current = setTimeout(() => {
-      if (connectionRef.current && !connectionRef.current.connected) {
-        console.warn("⏳ Call timed out: No answer from agent.");
-        handleEndCall();
-        alert("Agent did not answer. Connection timed out.");
-      }
-    }, 35000); 
-
-    peer.on('error', (err) => {
-      console.error("❌ Peer Error:", err);
-      handleEndCall();
-    });
+    // 7. Start the Safety Poller
+    startStatusPolling(data.roomName);
 
   } catch (err) {
-    console.error("❌ Call initialization failed:", err);
-    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+    console.error("❌ ZingConnect: Call initialization failed:", err);
     handleEndCall();
   }
 };
@@ -1603,6 +1589,17 @@ const handleResend = (msg) => {
   } else {
     setNewMessage(msg.text);
   }
+};
+
+function AudioTracks({ active }) {
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Microphone, filter: (track) => track.isRemote },
+    ],
+    { updateOnlyOnChanges: true },
+  );
+
+  return null; // This component doesn't need to render anything visual
 };
 
 const MessageBubble = ({ m, isMe, onReply, children }) => {
@@ -1848,8 +1845,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
-
-        <main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
+<main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
   {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
@@ -1864,126 +1860,129 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </p>
   </div>
 
+  {/* 3. Message List */}
+  {messages.map((m) => {
+    const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
 
-{/* 3. Message List */}
-{messages.map((m) => {
-const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
+    // Handle Secure LiveKit Room Call Events
+    if (m.fileType === 'voice_call') {
+      return (
+        <CallStatusMessage 
+          key={msgKey}
+          status={m.status} // 'ringing', 'missed', 'ended'
+          time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        />
+      );
+    }
 
-  if (m.fileType === 'voice_call') {
+    // Determine Message Ownership Correctly (Fixes the Optimistic Media Left-Side Skew)
+    const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
+
     return (
-      <CallStatusMessage 
-        key={msgKey}
-        status={m.status} // 'ringing', 'missed', 'ended'
-        time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      />
-    );
-  }
-
-return (
-    <div 
-      key={msgKey} 
-      className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
-        m.senderModel === 'User' ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-      } mb-3`}
-    >
-      {/* Media Handling */}
-      {(m.fileType === 'image' || m.fileType === 'video') && (
-        <div className="relative mb-2 mt-1 group">
-          {m.fileType === 'image' ? (
-            <>
-              <img 
-                src={m.fileUrl} 
-                alt="attachment" 
-                onClick={() => setFullscreenImage(m.fileUrl)} 
-                className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
-                onError={(e) => {
-                  e.target.onerror = null;
-                  e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
-                }}
-              />
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
-                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-              >
-                <BsDownload size={14} />
-              </button>
-            </>
-          ) : (
-            <div className="relative">
-              <video 
-                className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
-                onClick={() => setFullscreenVideo(m.fileUrl)}
-              >
-                <source src={m.fileUrl} type="video/mp4" />
-              </video>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
-                  <BsPlayFill size={30} />
+      <div 
+        key={msgKey} 
+        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
+          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+        } mb-3`}
+      >
+        {/* Media Handling */}
+        {(m.fileType === 'image' || m.fileType === 'video') && (
+          <div className="relative mb-2 mt-1 group">
+            {m.fileType === 'image' ? (
+              <>
+                <img 
+                  src={m.fileUrl} 
+                  alt="attachment" 
+                  onClick={() => setFullscreenImage(m.fileUrl)} 
+                  className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+                  }}
+                />
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
+                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                >
+                  <BsDownload size={14} />
+                </button>
+              </>
+            ) : (
+              <div className="relative">
+                <video 
+                  className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
+                  onClick={() => setFullscreenVideo(m.fileUrl)}
+                >
+                  <source src={m.fileUrl} type="video/mp4" />
+                </video>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
+                    <BsPlayFill size={30} />
+                  </div>
                 </div>
-              </div>
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
-                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
-              >
-                <BsDownload size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Text Content (Caption) */}
-      {m.text && (
-        <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
-          {m.text}
-        </p>
-      )}
-
-      {/* Time / Status Bar */}
-      <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
-        <span className="text-[9px] text-gray-400 font-bold uppercase">
-          {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-
-        {/* WhatsApp Reliability Logic: Only show for User messages */}
-        {m.senderModel === 'User' && (
-          <div className="flex items-center ml-1">
-            
-            {/* 1. SENDING STATE (Network Active) */}
-            {m.status === 'sending' && (
-              <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-            )}
-
-            {/* 2. FAILED STATE (Bad Network) */}
-            {m.status === 'failed' && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleResend(m); }}
-                className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
-              >
-                <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
-                <BsPlusLg className="rotate-45" size={10} />
-              </button>
-            )}
-
-            {/* 3. SUCCESS STATE (Checkmarks) */}
-            {(!m.status || m.status === 'sent' || m.status === 'seen') && (
-              <div className="flex items-center">
-                {m.status === 'seen' ? (
-                  <BsCheckAll className="text-blue-500" size={16} title="Read" />
-                ) : (
-                  <BsCheckAll className="text-gray-400" size={16} title="Sent" />
-                )}
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
+                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
+                >
+                  <BsDownload size={14} />
+                </button>
               </div>
             )}
           </div>
         )}
-      </div>
-    </div>
-  );
-})}
 
-{/* Increased height to ensure the keyboard doesn't hide the last message */}
-<div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
+        {/* Text Content (Caption / Standard Message) */}
+        {m.text && (
+          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+            {m.text}
+          </p>
+        )}
+
+        {/* Time / Status Bar */}
+        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
+          <span className="text-[9px] text-gray-400 font-bold uppercase">
+            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+
+          {/* Verification Delivery Checks (Only for Local User Submissions) */}
+          {isMe && (
+            <div className="flex items-center ml-1">
+              
+              {/* 1. SENDING STATE (iDrive E2 Pipe Active) */}
+              {m.status === 'sending' && (
+                <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+              )}
+
+              {/* 2. FAILED STATE */}
+              {m.status === 'failed' && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleResend(m); }}
+                  className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
+                >
+                  <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
+                  <BsPlusLg className="rotate-45" size={10} />
+                </button>
+              )}
+
+              {/* 3. SUCCESS DELIVERED STATES */}
+              {(!m.status || m.status === 'sent' || m.status === 'seen') && (
+                <div className="flex items-center">
+                  {m.status === 'seen' ? (
+                    <BsCheckAll className="text-blue-500" size={16} title="Read" />
+                  ) : (
+                    <BsCheckAll className="text-gray-400" size={16} title="Sent" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  })}
+
+  {/* Auto-scroll viewport Anchor */}
+  <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
@@ -2054,48 +2053,47 @@ return (
 )}
 
 <footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
-  {/* --- REPLY PREVIEW PANEL --- */}
-  {replyingTo && (
-    <div className="px-2 md:px-6 pt-2">
-      <div className="bg-white/60 backdrop-blur-sm rounded-t-2xl border-l-4 border-blue-600 flex items-center justify-between overflow-hidden shadow-sm animate-in slide-in-from-bottom-2 duration-200">
-        <div className="p-3 flex-1 min-w-0">
-          <div className="flex items-center justify-between">
+    
+    {/* --- 1. REPLY PREVIEW PANEL --- */}
+    {replyingTo && (
+      <div className="px-2 md:px-6 pt-2">
+        <div className="bg-white/80 backdrop-blur-md rounded-t-2xl border-l-4 border-blue-600 flex items-center justify-between overflow-hidden shadow-sm animate-in slide-in-from-bottom-2 duration-200">
+          <div className="p-3 flex-1 min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-600 truncate">
-              Replying to {replyingTo.senderModel === 'User' ? 'You' : `${agent?.firstName || 'Agent'}`}
+              Replying to {replyingTo.senderModel === 'User' ? 'You' : (agent?.firstName || 'Agent')}
+            </p>
+            <p className="text-[13px] text-slate-600 truncate mt-0.5 leading-tight">
+              {replyingTo.fileType === 'image' ? (
+                <span className="flex items-center gap-1 font-medium text-blue-500"><BsCameraFill size={12}/> Photo</span>
+              ) : replyingTo.fileType === 'video' ? (
+                <span className="flex items-center gap-1 font-medium text-blue-500"><BsPlayFill size={14}/> Video</span>
+              ) : (
+                replyingTo.text
+              )}
             </p>
           </div>
-          <p className="text-[13px] text-slate-600 truncate mt-0.5 leading-tight">
-            {replyingTo.fileType === 'image' ? (
-              <span className="flex items-center gap-1"><BsCameraFill size={12}/> Photo</span>
-            ) : replyingTo.fileType === 'video' ? (
-              <span className="flex items-center gap-1"><BsPlayFill size={14}/> Video</span>
-            ) : (
-              replyingTo.text
-            )}
-          </p>
+
+          {replyingTo.fileUrl && (
+            <div className="w-12 h-12 bg-gray-100 shrink-0 ml-2">
+              {replyingTo.fileType === 'image' ? (
+                <img src={replyingTo.fileUrl} className="w-full h-full object-cover opacity-90" alt="Reply thumb" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-slate-800 text-white">
+                  <BsPlayFill size={20} />
+                </div>
+              )}
+            </div>
+          )}
+
+          <button 
+            onClick={() => setReplyingTo(null)}
+            className="p-3 text-slate-400 hover:text-red-500 transition-colors"
+          >
+            <BsPlusLg className="rotate-45" size={18} />
+          </button>
         </div>
-
-        {replyingTo.fileUrl && (
-          <div className="w-12 h-12 bg-gray-200">
-            {replyingTo.fileType === 'image' ? (
-              <img src={replyingTo.fileUrl} className="w-full h-full object-cover opacity-80" alt="reply-thumb" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-slate-800 text-white">
-                <BsPlayFill size={20} />
-              </div>
-            )}
-          </div>
-        )}
-
-        <button 
-          onClick={() => setReplyingTo(null)}
-          className="p-3 text-slate-400 hover:text-blue-600 transition-colors"
-        >
-          <BsPlusLg className="rotate-45" size={18} />
-        </button>
       </div>
-    </div>
-  )}
+    )}
 
   {/* --- MAIN INPUT CONTROLS --- */}
   <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
@@ -2165,25 +2163,26 @@ return (
 </footer>
       </div>
 
-      {!hasInteracted && (
-        <button 
-          onClick={unlockAudio} 
-          className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
-        >
-          <div className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100">
-             <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
-               <BsShieldLockFill className="text-blue-600" size={28} />
-             </div>
-             <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
-             <p className="text-gray-500 text-sm font-semibold leading-relaxed">
-               Tap to authenticate your session and enable secure message alerts.
-             </p>
-             <div className="bg-blue-600 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-blue-200">
-               SYNC & ENTER
-             </div>
-          </div>
-        </button>
-      )}
+    {/* --- 3. SECURITY ONBOARDING --- */}
+  {!hasInteracted && (
+    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+      <button 
+        onClick={unlockAudio} 
+        className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100 active:scale-95 transition-transform"
+      >
+        <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+          <BsShieldLockFill className="text-blue-600" size={28} />
+        </div>
+        <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
+        <p className="text-gray-500 text-sm font-semibold leading-relaxed">
+          Tap to authenticate your session and enable secure message alerts.
+        </p>
+        <div className="bg-blue-600 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg">
+          SYNC & ENTER
+        </div>
+      </button>
+    </div>
+  )}
 
     {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
 {fullscreenImage && (
@@ -2407,6 +2406,56 @@ return (
   </div>
 )}
 
+{liveKitToken && (
+  <LiveKitRoom
+    video={false}
+    audio={true}
+    token={liveKitToken}
+    serverUrl={import.meta.env.VITE_LIVEKIT_URL}
+    connect={!!liveKitToken}
+    options={{
+      publishDefaults: {
+        audioPreset: { maxBitrate: 32000 }, 
+        dtx: true,                          
+      },
+      adaptiveStream: true,
+    }}
+    onConnected={async () => {
+      console.log("⚡ ZingConnect: Audio Bridge Established via WebRTC Mesh.");
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          const ctx = new AudioContext();
+          if (ctx.state === 'suspended') await ctx.resume();
+        }
+      } catch (e) {
+        console.warn("⚠️ ZingConnect: Manual audio wake-up failed:", e);
+      }
+      if (ringtoneAudio.current) {
+        ringtoneAudio.current.pause();
+        ringtoneAudio.current.currentTime = 0;
+      }
+      peerConnectedRef.current = true;
+      setPeerConnected(true);
+      setCallStatus('connected');
+      setIsIncomingCall(false); 
+    }}
+    onDisconnected={() => {
+      if (!isEnding) {
+        console.log("📡 ZingConnect: LiveKit connection lost. Cleaning up session.");
+        handleEndCall();
+      }
+    }}
+  >
+    <AudioSession 
+      isMuted={isMuted} 
+      isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} 
+    />
+  </LiveKitRoom>
+)}
+
     </div>
   );
 };
+
+export default UserDashboard;
