@@ -38,9 +38,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
 
   // Sync state variables to references for asynchronous callback closures
-  useEffect(() => { callStatusRef.current = callStatus; }, [callStatus]);
-  useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
-  useEffect(() => { peerConnectedRef.current = peerConnected; }, [peerConnected]);
+  useEffect(() => { if (callStatusRef) callStatusRef.current = callStatus; }, [callStatus]);
+  useEffect(() => { if (activeCallRef) activeCallRef.current = activeCall; }, [activeCall]);
+  useEffect(() => { if (peerConnectedRef) peerConnectedRef.current = peerConnected; }, [peerConnected]);
 
   // Secure Audio Subsystem Awake Handle
   const unlockAudio = useCallback(() => {
@@ -78,10 +78,10 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
 
   const terminateLocalSession = useCallback(() => {
     setIsEnding(true);
-    if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
-    if (connectionTimeoutRef.current) { clearTimeout(connectionTimeoutRef.current); connectionTimeoutRef.current = null; }
+    if (pollingRef && pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
+    if (connectionTimeoutRef && connectionTimeoutRef.current) { clearTimeout(connectionTimeoutRef.current); connectionTimeoutRef.current = null; }
     
-    if (aiMediaRecorderRef.current) {
+    if (aiMediaRecorderRef && aiMediaRecorderRef.current) {
       try {
         if (aiMediaRecorderRef.current.state !== 'inactive') {
           aiMediaRecorderRef.current.stop();
@@ -94,13 +94,13 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     }
 
     [ringtoneAudio, callingAudio].forEach(ref => { 
-      if (ref?.current) { ref.current.pause(); ref.current.currentTime = 0; } 
+      if (ref && ref.current) { ref.current.pause(); ref.current.currentTime = 0; } 
     });
-    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+    if (audioCtxRef && audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
       audioCtxRef.current.close().catch(() => {});
       audioCtxRef.current = null;
     }
-    nextStartTimeRef.current = 0;
+    if (nextStartTimeRef) nextStartTimeRef.current = 0;
 
     setLiveKitToken(null);
     setCallStatus('idle');
@@ -117,9 +117,10 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   const handleEndCall = useCallback(async () => {
     console.log("📴 Initiating Call End Sequence...");
     const myId = userData?._id || userData?.id;
-    const currentCallId = activeCallRef.current?.callId || activeCallRef.current?._id || activeCallRef.current?.roomName;
+    const currentCall = activeCallRef ? activeCallRef.current : null;
+    const currentCallId = currentCall?.callId || currentCall?._id || currentCall?.roomName;
     const token = localStorage.getItem('userToken');
-    const targetId = activeCallRef.current?.fromId === myId ? activeCallRef.current?.toId : activeCallRef.current?.fromId;
+    const targetId = currentCall?.fromId === myId ? currentCall?.toId : currentCall?.fromId;
 
     try {
       if (currentCallId && token) {
@@ -144,10 +145,11 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   const startStatusPolling = useCallback((roomName) => {
     const token = localStorage.getItem('userToken');
     const startTime = Date.now();
-    if (pollingRef.current) clearInterval(pollingRef.current);
+    if (pollingRef && pollingRef.current) clearInterval(pollingRef.current);
 
     pollingRef.current = setInterval(async () => {
-      if (callStatusRef.current === 'idle' || isEnding) return;
+      const currentStatus = callStatusRef ? callStatusRef.current : 'idle';
+      if (currentStatus === 'idle' || isEnding) return;
       try {
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -242,7 +244,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
 
   // Structural Reject Method
   const handleRejectCall = useCallback(async () => {
-    const currentCall = activeCallRef.current;
+    const currentCall = activeCallRef ? activeCallRef.current : null;
     if (!currentCall) { terminateLocalSession(); return; }
 
     const callId = currentCall.callId || currentCall._id || currentCall.roomName;
@@ -258,11 +260,12 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   // User Accepts Inbound Call Pipeline
   const handleAcceptCall = useCallback(async () => {
     const token = localStorage.getItem('userToken');
-    const callId = activeCallRef.current?.callId || activeCallRef.current?._id || activeCallRef.current?.roomName;
+    const currentCall = activeCallRef ? activeCallRef.current : null;
+    const callId = currentCall?.callId || currentCall?._id || currentCall?.roomName;
     if (!callId) return;
 
     try {
-      isTransitioningRef.current = true;
+      if (isTransitioningRef) isTransitioningRef.current = true;
       setCallStatus('connecting');
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
@@ -272,20 +275,20 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       const data = await response.json();
       
       if (data.success && data.lkToken) {
-        const agentId = activeCallRef.current?.fromId?.toString();
+        const agentId = currentCall?.fromId?.toString();
         if (socket && agentId) {
           socket.emit("answer-call", { to: agentId, callId: data.roomName || callId, myId: userData?._id?.toString() });
         }
         setPeerConnected(true);
         setLiveKitToken(data.lkToken);
-        isTransitioningRef.current = false;
+        if (isTransitioningRef) isTransitioningRef.current = false;
         setIsIncomingCall(false);
         setCallStatus('connected');
       } else { 
         throw new Error(); 
       }
     } catch {
-      isTransitioningRef.current = false;
+      if (isTransitioningRef) isTransitioningRef.current = false;
       handleEndCall();
     }
   }, [userData, socket, handleEndCall]);
@@ -315,7 +318,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     ];
   
     assets.forEach(({ ref, src }) => {
-      const el = ref.current;
+      const el = ref ? ref.current : null;
       if (el) {
         el.muted = true;
         el.src = src;
@@ -341,10 +344,13 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     socket.emit("join-main-room", myId);
   
     const onIncoming = async (data) => {
-      peerConnectedRef.current = false;
+      if (peerConnectedRef) peerConnectedRef.current = false;
       setPeerConnected(false);
 
-      if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) {
+      const currentStatus = callStatusRef ? callStatusRef.current : 'idle';
+      const currentTransition = isTransitioningRef ? isTransitioningRef.current : false;
+
+      if (currentStatus !== 'idle' || isEnding || currentTransition) {
         console.log("☎️ Line busy or transitioning, rejecting incoming call from:", data.fromId);
         socket.emit("user-busy", { to: data.fromId, callId: data.callId });
         return;
@@ -353,13 +359,20 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       console.log("📥 Incoming Secure Call detected:", data.callId);
       const roomName = data.callId || data.roomName;
 
-      // Ring timeout handler
-      connectionTimeoutRef.current = setTimeout(() => {
-        if (callStatusRef.current === 'ringing') {
-          console.log("⏰ Call timed out: No answer after 45s.");
-          handleEndCall();
-        }
-      }, 45000);
+      // Clean up past reference timeouts before binding a new tracking window
+      if (connectionTimeoutRef && connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+
+      if (connectionTimeoutRef) {
+        connectionTimeoutRef.current = setTimeout(() => {
+          const freshStatus = callStatusRef ? callStatusRef.current : 'idle';
+          if (freshStatus === 'ringing') {
+            console.log("⏰ Call timed out: No answer after 45s.");
+            handleEndCall();
+          }
+        }, 45000);
+      }
 
       setActiveCall({
         callId: data.callId || data._id,
@@ -380,7 +393,8 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     };
   
     const onRemoteEnd = (data) => {
-      const currentId = activeCallRef.current?.roomName || activeCallRef.current?.callId || activeCallRef.current?._id;
+      const currentCall = activeCallRef ? activeCallRef.current : null;
+      const currentId = currentCall?.roomName || currentCall?.callId || currentCall?._id;
       const incomingId = data?.callId || data?.roomName || data?._id;
   
       if (incomingId && currentId && String(incomingId) !== String(currentId)) {
@@ -395,7 +409,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     const onAnswerReceived = (d) => {
       console.log("📡 Outbound Call Accepted by Agent:", d);
       if (d.lkToken) {
-        peerConnectedRef.current = true;
+        if (peerConnectedRef) peerConnectedRef.current = true;
         setPeerConnected(true);
         setLiveKitToken(d.lkToken);
         setCallStatus('connected');
@@ -409,6 +423,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     socket.on("answer-call", onAnswerReceived);
   
     return () => {
+      if (connectionTimeoutRef && connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
       socket.off("incoming-call", onIncoming);
       socket.off("call-ended", onRemoteEnd);
       socket.off("end-call", onRemoteEnd);
@@ -435,8 +452,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   // Fallback Poller for API Incoming Checks
   useEffect(() => {
     const token = localStorage.getItem('userToken');
+    const currentTransition = isTransitioningRef ? isTransitioningRef.current : false;
     if (!token) return;
-    if (callStatus !== 'idle' || isEnding || isTransitioningRef.current) return;
+    if (callStatus !== 'idle' || isEnding || currentTransition) return;
 
     const checkCalls = async () => {
       try {
@@ -447,7 +465,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         const data = await response.json();
 
         if (data && data.hasIncomingCall) {
-          if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
+          const freshStatus = callStatusRef ? callStatusRef.current : 'idle';
+          const freshTransition = isTransitioningRef ? isTransitioningRef.current : false;
+          if (freshStatus !== 'idle' || isEnding || freshTransition) return;
 
           setActiveCall({
             callId: data.callId,
@@ -483,7 +503,8 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     const audioCtx = audioCtxRef.current;
 
     const handleAiAudioChunk = async (base64Audio) => {
-      const isNaturalMode = activeCallRef.current?.voiceId === 'natural' || !activeCallRef.current?.voiceId;
+      const currentCall = activeCallRef ? activeCallRef.current : null;
+      const isNaturalMode = currentCall?.voiceId === 'natural' || !currentCall?.voiceId;
       if (callStatus !== 'connected' || isNaturalMode) return;
 
       try {
@@ -503,11 +524,11 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         source.buffer = audioBuffer;
         source.connect(gainNode);
 
-        if (nextStartTimeRef.current < audioCtx.currentTime) {
+        if (nextStartTimeRef && nextStartTimeRef.current < audioCtx.currentTime) {
           nextStartTimeRef.current = audioCtx.currentTime;
         }
         source.start(nextStartTimeRef.current);
-        nextStartTimeRef.current += audioBuffer.duration;
+        if (nextStartTimeRef) nextStartTimeRef.current += audioBuffer.duration;
       } catch (err) { 
         console.error("User AI voice matrix error:", err); 
       }
@@ -536,12 +557,16 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     const handleNewMessage = (msg) => {
       setMessages(prev => {
         if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
-        if (msg.senderModel === 'Agent' && notificationSound.current) { 
+        if (msg.senderModel === 'Agent' && notificationSound && notificationSound.current) { 
           notificationSound.current.play().catch(() => {}); 
         }
         return [...prev, msg];
       });
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      setTimeout(() => {
+        if (messagesEndRef && messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
     };
 
     const handleMessageDeleted = (id) => setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
@@ -554,20 +579,22 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     };
   }, [socket, messagesEndRef]);
 
-  // Sound Ringer Loop Control
   useEffect(() => {
-    ringtoneAudio.current.loop = true; 
-    callingAudio.current.loop = true;
+    if (ringtoneAudio && ringtoneAudio.current) ringtoneAudio.current.loop = true; 
+    if (callingAudio && callingAudio.current) callingAudio.current.loop = true;
     
+    const rAudio = ringtoneAudio ? ringtoneAudio.current : null;
+    const cAudio = callingAudio ? callingAudio.current : null;
+
     if (callStatus === 'ringing' && isIncomingCall) { 
-      callingAudio.current.pause(); 
-      ringtoneAudio.current.play().catch(() => {}); 
+      if (cAudio) cAudio.pause(); 
+      if (rAudio) rAudio.play().catch(() => {}); 
     } else if (callStatus === 'calling' || (callStatus === 'ringing' && !isIncomingCall)) { 
-      ringtoneAudio.current.pause(); 
-      callingAudio.current.play().catch(() => {}); 
+      if (rAudio) rAudio.pause(); 
+      if (cAudio) cAudio.play().catch(() => {}); 
     } else { 
-      ringtoneAudio.current.pause(); 
-      callingAudio.current.pause(); 
+      if (rAudio) rAudio.pause(); 
+      if (cAudio) cAudio.pause(); 
     }
   }, [callStatus, isIncomingCall]);
 
