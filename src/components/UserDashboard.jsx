@@ -89,11 +89,12 @@ export const UserDashboard = () => {
   const userStreamRef = useRef(null); 
   const activeCallRef = useRef(null);
   const chatContainerRef = useRef(null);
-  const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
+  const isAdjustingScrollRef = useRef(false);
 
 const [hasMore, setHasMore] = useState(true);
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
 const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+
 
 const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
@@ -115,6 +116,8 @@ const [agent, setAgent] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   
   const API_BASE_URL = import.meta.env.VITE_API_URL;
+  const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
+
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -254,51 +257,47 @@ useEffect(() => {
   }
 }, []);
 
+// 1. CLEAN TRACKING HOOK FOR INITIAL SESSIONS ONLY
+useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token) return navigate('/');
+
+  const fetchUserSession = async () => {
+    try {
+      const response = await fetch('/api/users/my-session', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        setAgent(data.agent); 
+        setUserData(data.user); 
+        
+        if (!data.user.isProfileComplete) {
+          setShowOnboarding(true);
+        }
+      }
+    } catch (err) {
+      console.error("Session fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchUserSession();
+  const interval = setInterval(fetchUserSession, 30000); 
+  return () => clearInterval(interval);
+}, [navigate]);
 
 useEffect(() => {
-    // Timeout ensures the DOM has rendered the new message before scrolling
-    const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [messages]);
-  useEffect(() => {
-    const token = localStorage.getItem('userToken');
-    if (!token) return navigate('/');
-
-    const fetchUserSession = async () => {
-  try {
-    const response = await fetch('/api/users/my-session', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    
-    if (response.ok) {
-      setAgent(data.agent); 
-      setUserData(data.user); 
-      
-      if (!data.user.isProfileComplete) {
-        setShowOnboarding(true);
-      }
-    }
-  } catch (err) {
-    console.error("Session fetch error:", err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-    fetchUserSession();
-    const interval = setInterval(fetchUserSession, 30000); 
-    return () => clearInterval(interval);
-  }, [navigate]);
-
-  useEffect(() => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  
   if (!token || !targetAgentId) return;
+
   let isFirstLoad = !isInitialLoadComplete;
+
   const fetchMessages = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
@@ -327,6 +326,7 @@ useEffect(() => {
               tag: 'zing-msg'
             });
           }
+
           fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
@@ -347,14 +347,18 @@ useEffect(() => {
               chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
             }
             setIsInitialLoadComplete(true);
-          }, 100);
+          }, 120);
         } else {
           const container = chatContainerRef.current;
           if (container) {
-            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 350;
+            if (isAdjustingScrollRef.current) return;
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+            
             if (isNearBottom) {
               setTimeout(() => {
-                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                if (!isAdjustingScrollRef.current) {
+                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }
               }, 50);
             }
           }
@@ -373,13 +377,14 @@ useEffect(() => {
 }, [agent?._id, agent?.id, isInitialLoadComplete]);
 
 const fetchOlderMessages = async () => {
-  if (isFetchingOlder || !hasMore || !agent?._id) return;
-
+  if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
+  
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent._id || agent.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-    const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
+  const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
   if (!oldestMessage) return;
+
   setIsFetchingOlder(true);
   const container = chatContainerRef.current;
   const previousScrollHeight = container ? container.scrollHeight : 0;
@@ -390,37 +395,49 @@ const fetchOlderMessages = async () => {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await response.json();
-
+    
     if (response.ok && data.success) {
       if (data.messages.length < 30) {
-        setHasMore(false); // Bottomed out oldest server records
+        setHasMore(false);
       }
-
       if (data.messages.length > 0) {
+        isAdjustingScrollRef.current = true;
+        
         setMessages(prev => {
           const currentIds = new Set(prev.map(m => m._id));
           const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
           return [...uniqueHistorical, ...prev];
         });
-        requestAnimationFrame(() => {
+        if (chatContainerRef.current) {
+          const freshHeight = chatContainerRef.current.scrollHeight;
+          chatContainerRef.current.scrollTop = previousScrollTop + (freshHeight - previousScrollHeight);
+        }
+        setTimeout(() => {
           if (chatContainerRef.current) {
-            const newScrollHeight = chatContainerRef.current.scrollHeight;
-            const heightDifference = newScrollHeight - previousScrollHeight;
-            chatContainerRef.current.scrollTop = previousScrollTop + heightDifference;
+            const finalHeight = chatContainerRef.current.scrollHeight;
+            const delta = finalHeight - previousScrollHeight;
+            chatContainerRef.current.scrollTop = previousScrollTop + delta;
           }
-        });
+          isAdjustingScrollRef.current = false;
+        }, 45);
+      } else {
+        isAdjustingScrollRef.current = false;
       }
+    } else {
+      isAdjustingScrollRef.current = false;
     }
   } catch (err) {
     console.error("Failed to load older historical slices:", err);
+    isAdjustingScrollRef.current = false;
   } finally {
     setIsFetchingOlder(false);
   }
 };
-
 const handleChatScroll = (e) => {
-  // Trigger fetch slightly before hitting the absolute ceiling (<= 15px) for a smoother load threshold
-  if (e.currentTarget.scrollTop <= 15) {
+  const container = e.currentTarget;
+  const currentScrollTop = container.scrollTop;
+  if (isAdjustingScrollRef.current) return;
+    if (currentScrollTop <= 35 && currentScrollTop > 0) {
     fetchOlderMessages();
   }
 };
