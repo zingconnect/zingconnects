@@ -1228,66 +1228,6 @@ const handleFileChange = (e) => {
   e.target.value = ""; 
 };
 
-const handleFinalSend = async () => {
-  // Guard clause using the unified state names from your UI preview template
-  if (!previewFile || isUploading) return;
-  setIsUploading(true);
-
-  const token = localStorage.getItem('userToken');
-  // Dynamic fallback targeting your active agent profile state
-  const targetReceiverId = agent?._id || selectedUser?._id;
-
-  if (!targetReceiverId) {
-    console.error("❌ ZingConnect: Cannot send media. No target receiver agent ID found.");
-    setIsUploading(false);
-    return;
-  }
-
-  try {
-    const formData = new FormData();
-    // Appends the raw file object caught by your input fields
-    formData.append('file', previewFile);
-    
-    console.log("📦 Routing asset pipe through secure upload engine...");
-    
-    // Fixed: Absolute environment pathing + Auth headers included
-    const uploadRes = await axios.post(
-      `${import.meta.env.VITE_API_URL}/api/upload`, 
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${token}`
-        }
-      }
-    );
-    const { fileUrl, fileType } = uploadRes.data;
-    const payload = {
-      receiverId: targetReceiverId,
-      text: caption.trim(), 
-      fileUrl: fileUrl,
-      fileType: fileType, 
-      senderModel: 'User' 
-    };
-    if (socket) {
-      socket.emit('sendMessage', payload);
-      console.log("⚡ Media packet emitted to WebSocket gateway.");
-    }
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl); 
-    }
-    setPreviewUrl(null);
-    setPreviewFile(null); 
-    setCaption("");
-    
-  } catch (error) {
-    console.error("❌ ZingConnect media transmission failure:", error);
-    alert("Failed to upload asset pipeline. Please try again.");
-  } finally {
-    setIsUploading(false);
-  }
-};
-
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
     if (!formData.phone || formData.phone.length < 10) {
