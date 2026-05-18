@@ -387,7 +387,6 @@ useEffect(() => {
 }, [agent?._id, agent?.id, isInitialLoadComplete]);
 
 const fetchOlderMessages = async () => {
-  // ⚡ DEFENSIVE GUARD: Safely check if the ref exists before reading '.current'
   if (isFetchingOlder || !hasMore || !agent?._id || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
   
   const token = localStorage.getItem('userToken');
@@ -435,18 +434,20 @@ const fetchOlderMessages = async () => {
               const finalDelta = finalHeight - previousScrollHeight;
               chatContainerRef.current.scrollTop = previousScrollTop + finalDelta;
             }
-            if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
+            if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') {
+              isAdjustingScrollRef.current = false;
+            }
           }, 35);
         });
       } else {
-        if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
+        if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
       }
     } else {
-      if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
+      if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
     }
   } catch (err) {
     console.error("Failed to load older historical slices:", err);
-    if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
+    if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
   } finally {
     setIsFetchingOlder(false);
   }
@@ -454,16 +455,18 @@ const fetchOlderMessages = async () => {
 
 const handleChatScroll = (e) => {
   const container = e.currentTarget;
+  if (!container) return;
   const currentScrollTop = container.scrollTop;
-  if (isAdjustingScrollRef.current) return;
-    if (currentScrollTop <= 35 && currentScrollTop > 0) {
+    if (isAdjustingScrollRef && isAdjustingScrollRef.current) return;  
+  if (currentScrollTop <= 35 && currentScrollTop > 0) {
     fetchOlderMessages();
   }
 };
 
-  const agentStatus = getStatusInfo(agent);
 
-  const handlePhotoClick = () => fileInputRef.current.click();
+const agentStatus = getStatusInfo(agent);
+
+const handlePhotoClick = () => fileInputRef.current.click();
 
 const handleFileChange = (e) => {
   const file = e.target.files[0];
