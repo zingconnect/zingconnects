@@ -387,7 +387,8 @@ useEffect(() => {
 }, [agent?._id, agent?.id, isInitialLoadComplete]);
 
 const fetchOlderMessages = async () => {
-  if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
+  // ⚡ DEFENSIVE GUARD: Safely check if the ref exists before reading '.current'
+  if (isFetchingOlder || !hasMore || !agent?._id || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
   
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent._id || agent.id;
@@ -396,7 +397,7 @@ const fetchOlderMessages = async () => {
   if (!oldestMessage) return;
 
   setIsFetchingOlder(true);
-  const container = chatContainerRef.current;
+  const container = chatContainerRef ? chatContainerRef.current : null;
   const previousScrollHeight = container ? container.scrollHeight : 0;
   const previousScrollTop = container ? container.scrollTop : 0;
 
@@ -411,7 +412,7 @@ const fetchOlderMessages = async () => {
         setHasMore(false);
       }
       if (data.messages.length > 0) {
-        isAdjustingScrollRef.current = true;
+        if (isAdjustingScrollRef) isAdjustingScrollRef.current = true;
         
         setMessages(prev => {
           const currentIds = new Set(prev.map(m => m._id));
@@ -419,10 +420,9 @@ const fetchOlderMessages = async () => {
           return [...uniqueHistorical, ...prev];
         });
 
-        // 🚀 CRITICAL MOBILE ENGINE LOCK:
-        // Adjust the scroll offset inside the engine's animation frame to eliminate layout jumps.
+        // 🚀 MOBILE ENGINE LOCK:
         requestAnimationFrame(() => {
-          if (chatContainerRef.current) {
+          if (chatContainerRef && chatContainerRef.current) {
             const freshHeight = chatContainerRef.current.scrollHeight;
             const delta = freshHeight - previousScrollHeight;
             chatContainerRef.current.scrollTop = previousScrollTop + delta;
@@ -430,23 +430,23 @@ const fetchOlderMessages = async () => {
           
           // Secondary fallback for slower rendering devices (e.g., older iOS/WebKit engines)
           setTimeout(() => {
-            if (chatContainerRef.current) {
+            if (chatContainerRef && chatContainerRef.current) {
               const finalHeight = chatContainerRef.current.scrollHeight;
               const finalDelta = finalHeight - previousScrollHeight;
               chatContainerRef.current.scrollTop = previousScrollTop + finalDelta;
             }
-            isAdjustingScrollRef.current = false;
+            if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
           }, 35);
         });
       } else {
-        isAdjustingScrollRef.current = false;
+        if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
       }
     } else {
-      isAdjustingScrollRef.current = false;
+      if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
     }
   } catch (err) {
     console.error("Failed to load older historical slices:", err);
-    isAdjustingScrollRef.current = false;
+    if (isAdjustingScrollRef) isAdjustingScrollRef.current = false;
   } finally {
     setIsFetchingOlder(false);
   }
