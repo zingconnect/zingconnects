@@ -1259,27 +1259,33 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 </footer>
       </div>
 
-    {/* --- 3. SECURITY ONBOARDING --- */}
-  {!hasInteracted && (
-    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+  {/* --- 3. SECURITY ONBOARDING --- */}
+{!hasInteracted && (
+  <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+    {/* Changed container wrapper from a button to a semantic layout div */}
+    <div className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100">
+      <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+        <BsShieldLockFill className="text-blue-600" size={28} />
+      </div>
+      <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
+      <p className="text-gray-500 text-sm font-semibold leading-relaxed">
+        Tap to authenticate your session and enable secure message alerts.
+      </p>
       <button 
-        onClick={unlockAudio} 
-        className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100 active:scale-95 transition-transform"
-      >
-        <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
-          <BsShieldLockFill className="text-blue-600" size={28} />
-        </div>
-        <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
-        <p className="text-gray-500 text-sm font-semibold leading-relaxed">
-          Tap to authenticate your session and enable secure message alerts.
-        </p>
-        <div className="bg-blue-600 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg">
-          SYNC & ENTER
-        </div>
+        onClick={() => {
+          if (typeof unlockAudio === 'function') {
+            unlockAudio();
+          }
+          if (typeof setHasInteracted === 'function') {
+            setHasInteracted(true);
+          }
+        }} 
+        className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg transition-transform cursor-pointer block">
+        SYNC & ENTER
       </button>
     </div>
-  )}
-
+  </div>
+)}
     {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
 {fullscreenImage && (
   <div 
