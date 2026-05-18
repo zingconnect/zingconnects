@@ -551,7 +551,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     return () => { if (timer) clearInterval(timer); };
   }, [callStatus]);
 
-  // Text Message Listener Engine Synchronization Layer
   useEffect(() => {
     if (!socket) return;
     const handleNewMessage = (msg) => {
@@ -563,14 +562,16 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         return [...prev, msg];
       });
       setTimeout(() => {
-        if (messagesEndRef && messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        if (messagesEndRef && typeof messagesEndRef.current !== 'undefined' && messagesEndRef.current !== null) {
+          try {
+            messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+          } catch (scrollError) {
+            console.warn("📡 ZingConnect Sync Jitter: Handled scrolling offset drop gracefully.");
+          }
         }
       }, 100);
     };
-
     const handleMessageDeleted = (id) => setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
-
     socket.on("new-message", handleNewMessage);
     socket.on("message-deleted", handleMessageDeleted);
     return () => { 
