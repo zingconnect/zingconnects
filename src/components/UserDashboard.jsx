@@ -1027,7 +1027,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   ref={chatContainerRef}
   onScroll={handleChatScroll}
   className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
-  style={{ scrollAnchor: 'none', overscrollBehaviorY: 'contain', WebkitOverflowScrolling: 'touch' }}
+  style={{
+    scrollAnchor: 'none',             
+    overscrollBehaviorY: 'contain',   
+    WebkitOverflowScrolling: 'touch'  
+  }}
 >
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
@@ -1055,7 +1059,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       return (
         <CallStatusMessage 
           key={msgKey}
-          status={m.status}
+          status={m.status} 
           time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         />
       );
@@ -1064,7 +1068,12 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
 
     return (
-      <MessageBubble key={msgKey} m={m} isMe={isMe} onReply={setReplyingTo}>
+      <MessageBubble 
+        key={msgKey} 
+        m={m} 
+        isMe={isMe} 
+        onReply={setReplyingTo}
+      >
         {(m.fileType === 'image' || m.fileType === 'video') && (
           <div className="relative mb-2 mt-1 group">
             {m.fileType === 'image' ? (
@@ -1155,7 +1164,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
-
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
 {previewUrl && !showOnboarding && (
     <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
