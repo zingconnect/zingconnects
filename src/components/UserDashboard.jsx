@@ -378,33 +378,37 @@ const fetchOlderMessages = async () => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent._id || agent.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-  const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
+    const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
   if (!oldestMessage) return;
-
   setIsFetchingOlder(true);
-    const container = chatContainerRef.current;
+  const container = chatContainerRef.current;
   const previousScrollHeight = container ? container.scrollHeight : 0;
+  const previousScrollTop = container ? container.scrollTop : 0;
 
   try {
     const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await response.json();
+
     if (response.ok && data.success) {
       if (data.messages.length < 30) {
-        setHasMore(false); 
+        setHasMore(false); // Bottomed out oldest server records
       }
+
       if (data.messages.length > 0) {
         setMessages(prev => {
           const currentIds = new Set(prev.map(m => m._id));
           const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
           return [...uniqueHistorical, ...prev];
         });
-        setTimeout(() => {
+        requestAnimationFrame(() => {
           if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight - previousScrollHeight;
+            const newScrollHeight = chatContainerRef.current.scrollHeight;
+            const heightDifference = newScrollHeight - previousScrollHeight;
+            chatContainerRef.current.scrollTop = previousScrollTop + heightDifference;
           }
-        }, 0);
+        });
       }
     }
   } catch (err) {
@@ -415,7 +419,8 @@ const fetchOlderMessages = async () => {
 };
 
 const handleChatScroll = (e) => {
-  if (e.currentTarget.scrollTop <= 5) {
+  // Trigger fetch slightly before hitting the absolute ceiling (<= 15px) for a smoother load threshold
+  if (e.currentTarget.scrollTop <= 15) {
     fetchOlderMessages();
   }
 };
