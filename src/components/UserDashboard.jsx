@@ -1163,8 +1163,6 @@ ref={chatContainerRef}
                   <BsPlusLg className="rotate-45" size={10} />
                 </button>
               )}
-
-              {/* 3. SUCCESS DELIVERED STATES */}
               {(!m.status || m.status === 'sent' || m.status === 'seen') && (
                 <div className="flex items-center">
                   {m.status === 'seen' ? (
@@ -1180,8 +1178,6 @@ ref={chatContainerRef}
       </div>
     );
   })}
-
-  {/* Auto-scroll viewport Anchor */}
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
