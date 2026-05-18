@@ -135,7 +135,7 @@ const [agent, setAgent] = useState(null);
     isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
     lastNotifiedId, notificationSound, ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
     handleEndCall, terminateLocalSession, unlockAudio 
-  } = useUserZingCall(socket, userData, agent, messagesEndRef);
+    } = useUserZingCall(socket, userData, agent, messagesEndRef, chatContainerRef); 
 
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
