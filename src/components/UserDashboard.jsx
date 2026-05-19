@@ -151,7 +151,7 @@ const {
     return { isOnline: false, label: "Offline" };
   };
 
-  const getStatusIcon = (status) => {
+const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
         return <BsCheckAll className="text-blue-500" size={18} />;
@@ -168,107 +168,123 @@ const {
     }
   }, [callStatus, callStatusRef]);
 
-useEffect(() => {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' })
-      .then(reg => {
-        console.log('Service Worker Registered:', reg.scope);
-        reg.onupdatefound = () => {
-          const installingWorker = reg.installing;
-          installingWorker.onstatechange = () => {
-            if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('New content is available; please refresh.');
-            }
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .then(reg => {
+          console.log('Service Worker Registered:', reg.scope);
+          reg.onupdatefound = () => {
+            const installingWorker = reg.installing;
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('New content is available; please refresh.');
+              }
+            };
           };
-        };
-      })
-      .catch(err => console.error('SW Registration failed:', err));
-  }
-}, []);
-
-useEffect(() => {
-  return () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-  };
-}, [previewUrl]);
-
-useEffect(() => {
-  if (!socket) return;
-  
-  socket.on("new-message", (msg) => {
-    setMessages(prev => {
-      const isDuplicate = prev.some(m => m._id === msg._id || m.tempId === msg._id);
-      if (isDuplicate) return prev;
-      if (msg.senderModel === 'Agent' && notificationSound.current) {
-        notificationSound.current.play().catch(() => {});
-      }
-      return [...prev, msg];
-    });
-    const container = chatContainerRef.current;
-    if (container) {
-      if (isAdjustingScrollRef.current) return;
-            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-      if (isNearBottom) {
-        setTimeout(() => {
-          if (!isAdjustingScrollRef.current) {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-          }
-        }, 50);
-      }
+        })
+        .catch(err => console.error('SW Registration failed:', err));
     }
-  });
-  socket.on("message-deleted", (deletedId) => {
-    setMessages(prev => prev.filter(m => (m._id || m.id) !== deletedId));
-  });
-  return () => {
-    socket.off("new-message");
-    socket.off("message-deleted");
-  };
-}, [socket]);
+  }, []);
 
-useEffect(() => {
-  const setupNotifications = async () => {
-    try {
-      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-      if (!publicKey) return;
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
+  useEffect(() => {
+    if (!socket) return;
 
-      const registration = await navigator.serviceWorker.ready;
-      
-      // Get existing or create new
-      let subscription = await registration.pushManager.getSubscription();
-      
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
-        });
-      }
-      const token = localStorage.getItem('userToken'); 
-      if (!token) return;
-      const response = await fetch('/api/save-subscription', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ subscription }) 
+    const handleNewMessage = (msg) => {
+      setMessages(prev => {
+        if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
+        return [...prev, msg];
       });
+    };
 
-      if (response.ok) {
-        console.log("Database synced with Push Subscription");
-      }
-    } catch (err) {
-      console.error("User Push setup failed:", err);
+    const handleMessageDeleted = (id) => {
+      setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
+    };
+
+    socket.on("new-message", handleNewMessage);
+    socket.on("message-deleted", handleMessageDeleted);
+
+    return () => {
+      socket.off("new-message", handleNewMessage);
+      socket.off("message-deleted", handleMessageDeleted);
+    };
+  }, [socket]); 
+
+  useEffect(() => {
+    if (!messages || messages.length === 0) {
+      totalMessagesCountRef.current = 0;
+      return;
     }
-  };
+    if (messages.length > totalMessagesCountRef.current) {
+      const latestMsg = messages[messages.length - 1];
+            if (latestMsg && latestMsg.senderModel === "Agent") {
+        if (notificationSound && notificationSound.current) {
+          notificationSound.current.play().catch((e) => {
+            console.log("Audio framework awaiting gesture interaction:", e.message);
+          });
+        }
+      }
+      const container = chatContainerRef.current;
+      if (container && !isAdjustingScrollRef.current) {
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160;
+        if (isNearBottom) {
+          setTimeout(() => {
+            if (messagesEndRef && messagesEndRef.current) {
+              try {
+                messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+              } catch (err) {
+                console.warn("Suppressed layout scroll jitter.");
+              }
+            }
+          }, 60);
+        }
+      }
+    }
+    totalMessagesCountRef.current = messages.length;
+  }, [messages]);
 
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    setupNotifications();
-  }
-}, []);
+  useEffect(() => {
+    const setupNotifications = async () => {
+      try {
+        const publicKey = import.meta.env.VITE_PUBLIC_KEY;
+        if (!publicKey) return;
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') return;
+        const registration = await navigator.serviceWorker.ready;
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey)
+          });
+        }
+        const token = localStorage.getItem('userToken'); 
+        if (!token) return;
+        const response = await fetch('/api/save-subscription', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ subscription }) 
+        });
+
+        if (response.ok) {
+          console.log("Database synced with Push Subscription");
+        }
+      } catch (err) {
+        console.error("User Push setup failed:", err);
+      }
+    };
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      setupNotifications();
+    }
+  }, []);
 
  useEffect(() => {
   if (!socket) return;
