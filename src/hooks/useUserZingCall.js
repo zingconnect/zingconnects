@@ -312,8 +312,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   
     const assets = [
       { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
-      { ref: callingAudio, src: '/sounds/calling.wav' },
-      { ref: notificationSound, src: '/sounds/notification.mp3' }
+      { ref: callingAudio, src: '/sounds/calling.wav' }
     ];
   
     assets.forEach(({ ref, src }) => {
