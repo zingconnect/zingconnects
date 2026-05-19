@@ -90,6 +90,7 @@ export const UserDashboard = () => {
   const activeCallRef = useRef(null);
   const chatContainerRef = useRef(null);
   const isAdjustingScrollRef = useRef(false);
+  const lastNotifiedId = useRef(null);
 
 const [hasMore, setHasMore] = useState(true);
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
@@ -133,12 +134,13 @@ const {
   callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
   callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
   isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
-  lastNotifiedId, ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
+  ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
   handleEndCall, terminateLocalSession, unlockAudio 
-} = useUserZingCall(socket, userData, agent); 
+} = useUserZingCall(socket, userData, agent);
 
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const totalMessagesCountRef = useRef(messages.length);
+  
 
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
