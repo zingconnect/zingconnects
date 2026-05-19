@@ -406,10 +406,7 @@ useEffect(() => {
           lastMsg._id !== lastNotifiedId.current
         ) {
           lastNotifiedId.current = lastMsg._id;
-          if (notificationSound.current) {
-            notificationSound.current.currentTime = 0;
-            notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
-          }
+         
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
               body: lastMsg.text || "Sent a file",
