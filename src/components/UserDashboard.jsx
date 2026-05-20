@@ -1,5 +1,5 @@
 import { 
-  LiveKitRoom, AudioConference, useTracks,RoomAudioRenderer, StartAudio, useLocalParticipant
+  LiveKitRoom, AudioConference, AudioSession, useTracks,RoomAudioRenderer, StartAudio, useLocalParticipant
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
@@ -48,7 +48,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
-import Peer from 'simple-peer';
+import SimplePeer from 'simple-peer';
 import { useDrag } from "@use-gesture/react";
 import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
