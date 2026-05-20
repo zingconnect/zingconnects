@@ -573,6 +573,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   return {
     callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, isIncomingCall, peerConnected, liveKitToken,
     isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn, callTime, messages, setMessages, hasInteracted, unlockAudio,
-    handleStartCall, handleAcceptCall, handleEndCall, handleRejectCall, formatTime, showFullScreenCall, setShowFullScreenCall
+    handleStartCall, handleAcceptCall, handleEndCall, handleRejectCall, formatTime, showFullScreenCall, setShowFullScreenCall, ringtoneAudio
   };
 }

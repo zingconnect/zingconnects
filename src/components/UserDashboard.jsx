@@ -2,13 +2,11 @@ import { LiveKitRoom, AudioConference, useTracks, RoomAudioRenderer, StartAudio,
 import { Track } from 'livekit-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
 import { Buffer } from 'buffer'; // Keep this at the top
-
 if (typeof window !== 'undefined') {
   window.global = window;
     if (!window.Buffer) {
     window.Buffer = Buffer; 
   }
-  
   if (!("AudioSession" in window)) {
     let _underlyingHardwareAudioSession = undefined;
     Object.defineProperty(window, 'AudioSession', {
@@ -29,7 +27,6 @@ if (typeof window !== 'undefined') {
       }
     });
   }
-
   if (!window.process) {
     window.process = {
       env: { DEBUG: undefined },
@@ -41,7 +38,6 @@ if (typeof window !== 'undefined') {
     };
   }
 }
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -51,11 +47,8 @@ import { useDrag } from "@use-gesture/react";
 import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import { 
-  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill,
-  BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
-  BsPlayFill, BsXLg, BsX, BsReplyFill
-} from 'react-icons/bs';
-
+  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill, BsArrowRight, BsCameraFill, BsMicFill,
+   BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload, BsPlayFill, BsXLg, BsX, BsReplyFill } from 'react-icons/bs';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -70,7 +63,6 @@ function urlBase64ToUint8Array(base64String) {
 
 function AudioStateController({ isMuted, isMasked }) {
   const { localParticipant } = useLocalParticipant();
-
   useEffect(() => {
     if (localParticipant) {
       const micEnabled = !isMuted;
@@ -80,13 +72,10 @@ function AudioStateController({ isMuted, isMasked }) {
       localParticipant.setMetadata(isMasked ? "voice-mode:masked" : "voice-mode:natural");
     }
   }, [localParticipant, isMuted, isMasked]);
-
   return null;
 }
-
 const socket = io(import.meta.env.VITE_API_URL);
 const PhoneInput = ReactPhoneInput.default || ReactPhoneInput;
-
 const CallStatusMessage = ({ status, time }) => {
   const isMissed = status === 'missed' || status === 'declined';
   const isRinging = status === 'ringing';
@@ -134,11 +123,10 @@ export const UserDashboard = () => {
   const chatContainerRef = useRef(null);
   const isAdjustingScrollRef = useRef(false);
   const lastNotifiedId = useRef(null);
-
+  const ringtoneAudio = useRef(null);
 const [hasMore, setHasMore] = useState(true);
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
 const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
-
 const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -147,7 +135,6 @@ const [agent, setAgent] = useState(null);
   const [newMessage, setNewMessage] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
   const [hasInteracted, setHasInteracted] = useState(false);  
-
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingFile, setOnboardingFile] = useState(null);
@@ -157,21 +144,10 @@ const [agent, setAgent] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
-  
   const API_BASE_URL = import.meta.env.VITE_API_URL;
   const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
-
-
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    dob: '',
-    gender: '',
-    city: '',
-    state: ''
-  });
-
+    firstName: '', lastName: '', phone: '', dob: '', gender: '', city: '', state: '' });
 const { 
   callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
   callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
@@ -179,11 +155,8 @@ const {
   ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
   handleEndCall, terminateLocalSession, unlockAudio 
 } = useUserZingCall(socket, userData, agent);
-
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const totalMessagesCountRef = useRef(messages.length);
-  
-
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
     if (agent.status === 'online') return { isOnline: true, label: "Online" };
@@ -194,7 +167,6 @@ const {
     }
     return { isOnline: false, label: "Offline" };
   };
-
 const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
@@ -238,21 +210,17 @@ const getStatusIcon = (status) => {
 
   useEffect(() => {
     if (!socket) return;
-
     const handleNewMessage = (msg) => {
       setMessages(prev => {
         if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
         return [...prev, msg];
       });
     };
-
     const handleMessageDeleted = (id) => {
       setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
     };
-
     socket.on("new-message", handleNewMessage);
     socket.on("message-deleted", handleMessageDeleted);
-
     return () => {
       socket.off("new-message", handleNewMessage);
       socket.off("message-deleted", handleMessageDeleted);
@@ -332,31 +300,22 @@ const getStatusIcon = (status) => {
 
  useEffect(() => {
   if (!socket) return;
-
-  // 1. Clean Socket Message Receiver (Data Core Only)
-  const handleNewMessage = (msg) => {
+ const handleNewMessage = (msg) => {
     setMessages(prev => {
-      // Fast duplicate checking
       if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
       return [...prev, msg];
     });
   };
-
-  // 2. Clean Deletion Handler
   const handleMessageDeleted = (id) => {
     setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
   };
-
-  // Bind Listeners
   socket.on("new-message", handleNewMessage);
   socket.on("message-deleted", handleMessageDeleted);
-
-  // Unbind Listeners on Unmount
   return () => { 
     socket.off("new-message", handleNewMessage); 
     socket.off("message-deleted", handleMessageDeleted); 
   };
-}, [socket]); // 👈 CRITICAL: Completely removed messagesEndRef dependency here!
+}, [socket]); 
 
  useEffect(() => {
   if (!messages || messages.length === 0) {
@@ -392,11 +351,9 @@ const getStatusIcon = (status) => {
   totalMessagesCountRef.current = messages.length;
 }, [messages]);
 
-// 1. CLEAN TRACKING HOOK FOR INITIAL SESSIONS ONLY
 useEffect(() => {
   const token = localStorage.getItem('userToken');
   if (!token) return navigate('/');
-
   const fetchUserSession = async () => {
     try {
       const response = await fetch('/api/users/my-session', {
@@ -428,18 +385,14 @@ useEffect(() => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-  
   if (!token || !targetAgentId) return;
-
   let isFirstLoad = !isInitialLoadComplete;
-
   const fetchMessages = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
-
       if (response.ok && data.success) {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
@@ -461,7 +414,6 @@ useEffect(() => {
               tag: 'zing-msg'
             });
           }
-
           fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
@@ -505,7 +457,6 @@ useEffect(() => {
       if (isFirstLoad) setLoading(false);
     }
   };
-
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);
@@ -513,18 +464,15 @@ useEffect(() => {
 
 const fetchOlderMessages = async () => {
   if (isFetchingOlder || !hasMore || !agent?._id || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
-  
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent._id || agent.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
   const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
   if (!oldestMessage) return;
-
   setIsFetchingOlder(true);
   const container = chatContainerRef ? chatContainerRef.current : null;
   const previousScrollHeight = container ? container.scrollHeight : 0;
   const previousScrollTop = container ? container.scrollTop : 0;
-
   try {
     const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -543,17 +491,13 @@ const fetchOlderMessages = async () => {
           const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
           return [...uniqueHistorical, ...prev];
         });
-
-        // 🚀 MOBILE ENGINE LOCK:
         requestAnimationFrame(() => {
           if (chatContainerRef && chatContainerRef.current) {
             const freshHeight = chatContainerRef.current.scrollHeight;
             const delta = freshHeight - previousScrollHeight;
             chatContainerRef.current.scrollTop = previousScrollTop + delta;
           }
-          
-          // Secondary fallback for slower rendering devices (e.g., older iOS/WebKit engines)
-          setTimeout(() => {
+                    setTimeout(() => {
             if (chatContainerRef && chatContainerRef.current) {
               const finalHeight = chatContainerRef.current.scrollHeight;
               const finalDelta = finalHeight - previousScrollHeight;
@@ -587,10 +531,7 @@ const handleChatScroll = (e) => {
     fetchOlderMessages();
   }
 };
-
-
 const agentStatus = getStatusInfo(agent);
-
 const handlePhotoClick = () => fileInputRef.current.click();
 
 const handleFileChange = (e) => {
@@ -599,9 +540,7 @@ const handleFileChange = (e) => {
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
   }
-
   const url = URL.createObjectURL(file);
-  
   if (showOnboarding) {
     setPreviewUrl(url); 
     setFormData(prev => ({ ...prev, profileImage: file }));
@@ -619,24 +558,18 @@ const handleProfileSubmit = async (e) => {
     alert("Please enter a valid phone number with country code.");
     return;
   }
-
   setIsUploading(true); 
   const token = localStorage.getItem('userToken');
   const data = new FormData();
-  
-  // 1. Handle File logic
-  const fileToUpload = onboardingFile || previewFile;
+    const fileToUpload = onboardingFile || previewFile;
   if (fileToUpload) {
     data.append('photo', fileToUpload);
   }
-
-  // 2. Automatically appends firstName, lastName, phone, dob, gender, city, state
   Object.keys(formData).forEach(key => {
     if (formData[key] !== undefined && formData[key] !== null) {
       data.append(key, formData[key]);
     }
   });
-
   try {
     const res = await fetch('/api/users/update-user-onboarding', {
       method: 'PUT',
@@ -645,20 +578,14 @@ const handleProfileSubmit = async (e) => {
       },
       body: data
     });
-
     const result = await res.json();
-
     if (res.ok) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
-
       if (setUserData) setUserData(result.user);
-      
-      // 3. Success Reset
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);
       setPreviewUrl(null);
-      
       console.log("Profile updated successfully. Phone saved:", result.user.phone);
     } else {
       alert(result.message || "Initialization failed. Please check the form.");
@@ -674,10 +601,8 @@ const handleProfileSubmit = async (e) => {
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
   if (!file || !agent?._id) return;
-
   const isVideo = file.type.startsWith('video/');
   const isImage = file.type.startsWith('image/');
-  
   if (!isVideo && !isImage) {
     alert("Please upload only images or videos.");
     return;
@@ -708,8 +633,6 @@ const handleFinalSend = async () => {
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
   const savedFile = previewFile; // Keep a reference for resending
   const savedCaption = caption;
-
-  // Optimistic UI for Media
   const pendingMedia = {
     _id: tempId,
     tempId: tempId,
@@ -723,11 +646,9 @@ const handleFinalSend = async () => {
     isTemp: true,
     originalFile: savedFile // Store file in object for resending
   };
-
   setMessages(prev => [...prev, pendingMedia]);
   setPreviewUrl(null); // Close the preview overlay
   setPreviewFile(null);
-
   setIsUploading(true);
   const token = localStorage.getItem('userToken'); 
 
@@ -798,9 +719,7 @@ const handleDownload = async (url, type) => {
 const startStatusPolling = (roomName) => {
   const token = localStorage.getItem('userToken');
   const startTime = Date.now(); // Mark when polling started
-
   if (pollingRef.current) clearInterval(pollingRef.current);
-
   const pollInterval = setInterval(async () => {
     if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
 
@@ -912,7 +831,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   const controls = useAnimation();
   const bind = useDrag(({ active, movement: [x], last }) => {
     const xMovement = Math.min(Math.max(0, x), 100); 
-
     if (active) {
       controls.set({ x: xMovement });
     }
@@ -947,7 +865,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   );
 };
-
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">
@@ -1677,10 +1594,10 @@ ref={chatContainerRef}
       } catch (e) {
         console.warn("⚠️ ZingConnect: Manual audio wake-up failed:", e);
       }
-      if (ringtoneAudio.current) {
+     if (ringtoneAudio && ringtoneAudio.current) {
         ringtoneAudio.current.pause();
         ringtoneAudio.current.currentTime = 0;
-      }
+    }
       peerConnectedRef.current = true;
       setPeerConnected(true);
       setCallStatus('connected');
