@@ -5,16 +5,43 @@ import { Track } from 'livekit-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
 import { Buffer } from 'buffer';
 if (typeof window !== 'undefined') {
-  window.Buffer = Buffer;
   window.global = window;
-  window.process = {
-    env: { DEBUG: undefined },
-    version: '',
-    nextTick: (fn) => setTimeout(fn, 0),
-    listeners: () => [],
-    on: () => [],
-    removeListener: () => [],
-  };
+  
+  if (!window.Buffer) {
+    window.Buffer = require('buffer').Buffer; 
+  }
+  if (!("AudioSession" in window)) {
+    let _underlyingHardwareAudioSession = undefined;
+
+    Object.defineProperty(window, 'AudioSession', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (_underlyingHardwareAudioSession) return _underlyingHardwareAudioSession;
+                return {
+          configureAudio: async () => { return { success: true }; },
+          startAudioSession: async () => {},
+          stopAudioSession: async () => {},
+          setAppleAudioConfiguration: async () => {}
+        };
+      },
+      set(nativeSessionInstance) {
+        console.log("🍏 Native Hardware AudioSession cleanly captured by WebRTC bridge.");
+        _underlyingHardwareAudioSession = nativeSessionInstance;
+      }
+    });
+  }
+
+  if (!window.process) {
+    window.process = {
+      env: { DEBUG: undefined },
+      version: '',
+      nextTick: (fn) => setTimeout(fn, 0),
+      listeners: () => [],
+      on: () => [],
+      removeListener: () => [],
+    };
+  }
 }
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
