@@ -1,6 +1,4 @@
-import { 
-  LiveKitRoom, AudioConference, AudioSession, useTracks,RoomAudioRenderer, StartAudio, useLocalParticipant
-} from '@livekit/components-react';
+import { LiveKitRoom, AudioConference, useTracks, RoomAudioRenderer, StartAudio, useLocalParticipant } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
 import { Buffer } from 'buffer'; // Keep this at the top
@@ -69,6 +67,23 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
+
+function AudioStateController({ isMuted, isMasked }) {
+  const { localParticipant } = useLocalParticipant();
+
+  useEffect(() => {
+    if (localParticipant) {
+      const micEnabled = !isMuted;
+      if (localParticipant.isMicrophoneEnabled !== micEnabled) {
+        localParticipant.setMicrophoneEnabled(micEnabled);
+      }
+      localParticipant.setMetadata(isMasked ? "voice-mode:masked" : "voice-mode:natural");
+    }
+  }, [localParticipant, isMuted, isMasked]);
+
+  return null;
+}
+
 const socket = io(import.meta.env.VITE_API_URL);
 const PhoneInput = ReactPhoneInput.default || ReactPhoneInput;
 
@@ -123,7 +138,6 @@ export const UserDashboard = () => {
 const [hasMore, setHasMore] = useState(true);
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
 const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
-
 
 const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
@@ -1677,12 +1691,9 @@ ref={chatContainerRef}
         console.log("📡 ZingConnect: LiveKit connection lost. Cleaning up session.");
         handleEndCall();
       }
-    }}
-  >
-    <AudioSession 
-      isMuted={isMuted} 
-      isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} 
-    />
+    }}>
+    <StartAudio label="Click to join call" />
+        <AudioStateController isMuted={isMuted} isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} />
   </LiveKitRoom>
 )}
 
