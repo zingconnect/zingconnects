@@ -3,22 +3,22 @@ import {
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
-import { Buffer } from 'buffer';
+import { Buffer } from 'buffer'; // Keep this at the top
+
 if (typeof window !== 'undefined') {
   window.global = window;
-  
-  if (!window.Buffer) {
-    window.Buffer = require('buffer').Buffer; 
+    if (!window.Buffer) {
+    window.Buffer = Buffer; 
   }
+  
   if (!("AudioSession" in window)) {
     let _underlyingHardwareAudioSession = undefined;
-
     Object.defineProperty(window, 'AudioSession', {
       configurable: true,
       enumerable: true,
       get() {
         if (_underlyingHardwareAudioSession) return _underlyingHardwareAudioSession;
-                return {
+        return {
           configureAudio: async () => { return { success: true }; },
           startAudioSession: async () => {},
           stopAudioSession: async () => {},
@@ -43,6 +43,7 @@ if (typeof window !== 'undefined') {
     };
   }
 }
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
@@ -1055,7 +1056,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     inputClass="phone-input-field"
     buttonClass="phone-dropdown-button"
     placeholder="Enter phone number"
-    // Use search to find specific country codes easily
     enableSearch={true} 
   />
 </div>
