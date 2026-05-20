@@ -16,6 +16,14 @@ export const UserCallProvider = ({ children }) => {
   const [agent, setAgent] = useState(null);
   const messagesEndRef = useRef(null); // Centralized window scrolling anchor
 
+  // Track broken image URLs in state instead of directly mutating the DOM node inside render loops
+  const [avatarError, setAvatarError] = useState(false);
+
+  // Reset the image error indicator whenever the active agent target switches
+  useEffect(() => {
+    setAvatarError(false);
+  }, [agent?.id, agent?._id]);
+
   // 1. Unified Session Engine Fetch Core
   useEffect(() => {
     const token = localStorage.getItem('userToken');
@@ -44,6 +52,9 @@ export const UserCallProvider = ({ children }) => {
   // 2. Consume core calling engine states using current synchronized references
   const callEngine = useUserZingCall(socket, userData, agent, messagesEndRef);
 
+  // Determine a safe string resource target for avatars ahead of execution
+  const finalAvatarUrl = avatarError || !agent?.photoUrl ? '/default-avatar.png' : agent.photoUrl;
+
   return (
     <UserCallContext.Provider value={{ ...callEngine, socket, userData, agent, setUserData, setAgent, messagesEndRef }}>
       {children}
@@ -54,10 +65,10 @@ export const UserCallProvider = ({ children }) => {
           <div className="text-center space-y-5 max-w-sm px-6 w-full">
             <div className="relative">
               <img 
-                src={agent?.photoUrl || '/default-avatar.png'} 
+                src={finalAvatarUrl} 
                 alt="Agent Avatar" 
                 className="w-28 h-28 rounded-full mx-auto object-cover border-4 border-blue-500 shadow-2xl"
-                onError={(e) => { e.target.src = "/default-avatar.png"; }}
+                onError={() => setAvatarError(true)}
               />
               <span className="absolute bottom-1 right-[38%] block h-4 w-4 rounded-full bg-green-400 ring-2 ring-[#0b141a] animate-ping" />
             </div>
@@ -107,10 +118,10 @@ export const UserCallProvider = ({ children }) => {
           <div className="flex justify-center my-auto">
             <div className="w-36 h-36 rounded-full bg-slate-800 flex items-center justify-center border border-white/10 shadow-2xl relative">
               <img 
-                src={agent?.photoUrl || '/default-avatar.png'} 
+                src={finalAvatarUrl} 
                 className="w-full h-full rounded-full object-cover" 
                 alt="Agent Active Session Avatar" 
-                onError={(e) => { e.target.src = "/default-avatar.png"; }}
+                onError={() => setAvatarError(true)}
               />
             </div>
           </div>

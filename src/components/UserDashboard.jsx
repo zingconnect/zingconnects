@@ -993,7 +993,9 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
                   <div className="p-1">
                     <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Date of Birth</p>
                     <p className="text-xs font-bold text-gray-700">
-                       {agent?.dob ? new Date(agent.dob).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                    {agent?.dob ? (() => {  const datePart = agent.dob.split('T')[0]; const [year, month, day] = datePart.split('-');
+                      const localDate = new Date(year, month - 1, day); return localDate.toLocaleDateString(undefined, { 
+                    month: 'short', day: 'numeric', year: 'numeric' }); })() : 'N/A'}
                     </p>
                   </div>
                 </div>
@@ -1220,8 +1222,9 @@ ref={chatContainerRef}
               <div className="relative">
                 {/* Fixed src inside video element tag ensures smooth re-indexing when scrolling prepends nodes */}
                 <video 
-                  key={`video-${msgKey}`}
-                  src={m.fileUrl}
+                 key={`video-${msgKey}`}
+                 src={m.fileUrl}
+                   preload="metadata"
                   className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
                   onClick={() => setFullscreenVideo(m.fileUrl)}
                 />
