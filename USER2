@@ -1,34 +1,54 @@
-import { 
-  LiveKitRoom, AudioConference, useTracks,RoomAudioRenderer, StartAudio, useLocalParticipant
-} from '@livekit/components-react';
+import { LiveKitRoom, AudioConference, useTracks, RoomAudioRenderer, StartAudio, useLocalParticipant } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { Buffer } from 'buffer';
+import { useUserZingCall } from '../hooks/useUserZingCall';
+import { Buffer } from 'buffer'; // Keep this at the top
 if (typeof window !== 'undefined') {
-  window.Buffer = Buffer;
   window.global = window;
-  window.process = {
-    env: { DEBUG: undefined },
-    version: '',
-    nextTick: (fn) => setTimeout(fn, 0),
-    listeners: () => [],
-    on: () => [],
-    removeListener: () => [],
-  };
+    if (!window.Buffer) {
+    window.Buffer = Buffer; 
+  }
+  if (!("AudioSession" in window)) {
+    let _underlyingHardwareAudioSession = undefined;
+    Object.defineProperty(window, 'AudioSession', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (_underlyingHardwareAudioSession) return _underlyingHardwareAudioSession;
+        return {
+          configureAudio: async () => { return { success: true }; },
+          startAudioSession: async () => {},
+          stopAudioSession: async () => {},
+          setAppleAudioConfiguration: async () => {}
+        };
+      },
+      set(nativeSessionInstance) {
+        console.log("🍏 Native Hardware AudioSession cleanly captured by WebRTC bridge.");
+        _underlyingHardwareAudioSession = nativeSessionInstance;
+      }
+    });
+  }
+  if (!window.process) {
+    window.process = {
+      env: { DEBUG: undefined },
+      version: '',
+      nextTick: (fn) => setTimeout(fn, 0),
+      listeners: () => [],
+      on: () => [],
+      removeListener: () => [],
+    };
+  }
 }
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
-import Peer from 'simple-peer';
+import SimplePeer from 'simple-peer';
 import { useDrag } from "@use-gesture/react";
 import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import { 
-  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill,
-  BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
-  BsPlayFill, BsXLg, BsX 
-} from 'react-icons/bs';
-
+  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill, BsArrowRight, BsCameraFill, BsMicFill,
+   BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload, BsPlayFill, BsXLg, BsX, BsReplyFill } from 'react-icons/bs';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -40,9 +60,22 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
+
+function AudioStateController({ isMuted, isMasked }) {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    if (localParticipant) {
+      const micEnabled = !isMuted;
+      if (localParticipant.isMicrophoneEnabled !== micEnabled) {
+        localParticipant.setMicrophoneEnabled(micEnabled);
+      }
+      localParticipant.setMetadata(isMasked ? "voice-mode:masked" : "voice-mode:natural");
+    }
+  }, [localParticipant, isMuted, isMasked]);
+  return null;
+}
 const socket = io(import.meta.env.VITE_API_URL);
 const PhoneInput = ReactPhoneInput.default || ReactPhoneInput;
-
 const CallStatusMessage = ({ status, time }) => {
   const isMissed = status === 'missed' || status === 'declined';
   const isRinging = status === 'ringing';
@@ -85,47 +118,23 @@ export const UserDashboard = () => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
-const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
-const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
-const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
-  const serverUrl = import.meta.env.VITE_LIVEKIT_URL
-
-  
-  
-  const connectionRef = useRef(null);
-  const pollingRef = useRef(null);
-  const connectionTimeoutRef = useRef(null);
   const userStreamRef = useRef(null); 
   const activeCallRef = useRef(null);
-  const remoteStreamRef = useRef(null); 
+  const chatContainerRef = useRef(null);
+  const isAdjustingScrollRef = useRef(false);
   const lastNotifiedId = useRef(null);
-  const callStatusRef = useRef('idle');
-  const isTransitioningRef = useRef(false);
-  const peerConnectedRef = useRef(false);
-  const audioCtxRef = useRef(null);
-const nextStartTimeRef = useRef(0);
-  const [agent, setAgent] = useState(null);
+  const ringtoneAudio = useRef(null);
+const [hasMore, setHasMore] = useState(true);
+const [isFetchingOlder, setIsFetchingOlder] = useState(false);
+const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
-  const [hasInteracted, setHasInteracted] = useState(false);
-  const [liveKitToken, setLiveKitToken] = useState(null);
-  
-
-  const [callStatus, setCallStatus] = useState('idle'); 
-  const [activeCall, setActiveCall] = useState(null); 
-  const [activeCaller, setActiveCaller] = useState(null); 
-  const [localStream, setLocalStream] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-  const [callTime, setCallTime] = useState(0);
-  const [peerConnected, setPeerConnected] = useState(false);
-  const [isEnding, setIsEnding] = useState(false);
-  
-
+  const [hasInteracted, setHasInteracted] = useState(false);  
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingFile, setOnboardingFile] = useState(null);
@@ -135,26 +144,19 @@ const nextStartTimeRef = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
-  const [showFullScreenCall, setShowFullScreenCall] = useState(false);
-  const [isIncomingCall, setIsIncomingCall] = useState(false);
-  
-  const API_BASE_URL = import.meta.env.VITE_API_URL
-
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
+  const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    dob: '',
-    gender: '',
-    city: '',
-    state: ''
-  });
-
-    useEffect(() => {
-    callStatusRef.current = callStatus;
-  }, [callStatus]);
-
-
+    firstName: '', lastName: '', phone: '', dob: '', gender: '', city: '', state: '' });
+const { 
+  callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
+  callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
+  isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
+  ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
+  handleEndCall, terminateLocalSession, unlockAudio 
+} = useUserZingCall(socket, userData, agent);
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
+  const totalMessagesCountRef = useRef(messages.length);
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
     if (agent.status === 'online') return { isOnline: true, label: "Online" };
@@ -165,8 +167,7 @@ const nextStartTimeRef = useRef(0);
     }
     return { isOnline: false, label: "Offline" };
   };
-
-  const getStatusIcon = (status) => {
+const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
         return <BsCheckAll className="text-blue-500" size={18} />;
@@ -177,965 +178,224 @@ const nextStartTimeRef = useRef(0);
     }
   };
   
-const unlockAudio = useCallback(() => {
-  if (hasInteracted) return;
-  console.log("🔓 Unlocking secure audio channels...");
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (AudioContext) {
-    const tempCtx = new AudioContext();
-    if (tempCtx.state === 'suspended') tempCtx.resume();
-  }
-  const silentPlayer = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
-  silentPlayer.play()
-    .then(() => {
-      silentPlayer.pause();
-      setHasInteracted(true); 
-      console.log("✅ Audio hardware primed.");
-    })
-    .catch(err => console.warn("⚠️ Audio priming deferred:", err));
-  const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio) {
-    remoteAudio.play().then(() => remoteAudio.pause()).catch(() => {});
-  }
-}, [hasInteracted]);
-
-const LocalUserMuteController = ({ isMuted, isMasked }) => {
-  const { localParticipant } = useLocalParticipant();
   useEffect(() => {
-    if (!localParticipant) return;
-    const syncMic = async () => {
-      const shouldPublish = !isMasked && !isMuted;
+    if (callStatusRef) {
+      callStatusRef.current = callStatus;
+    }
+  }, [callStatus, callStatusRef]);
+
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .then(reg => {
+          console.log('Service Worker Registered:', reg.scope);
+          reg.onupdatefound = () => {
+            const installingWorker = reg.installing;
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('New content is available; please refresh.');
+              }
+            };
+          };
+        })
+        .catch(err => console.error('SW Registration failed:', err));
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleNewMessage = (msg) => {
+      setMessages(prev => {
+        if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
+        return [...prev, msg];
+      });
+    };
+    const handleMessageDeleted = (id) => {
+      setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
+    };
+    socket.on("new-message", handleNewMessage);
+    socket.on("message-deleted", handleMessageDeleted);
+    return () => {
+      socket.off("new-message", handleNewMessage);
+      socket.off("message-deleted", handleMessageDeleted);
+    };
+  }, [socket]); 
+
+  useEffect(() => {
+    if (!messages || messages.length === 0) {
+      totalMessagesCountRef.current = 0;
+      return;
+    }
+    if (messages.length > totalMessagesCountRef.current) {
+      const latestMsg = messages[messages.length - 1];
+            if (latestMsg && latestMsg.senderModel === "Agent") {
+        if (notificationSound && notificationSound.current) {
+          notificationSound.current.play().catch((e) => {
+            console.log("Audio framework awaiting gesture interaction:", e.message);
+          });
+        }
+      }
+      const container = chatContainerRef.current;
+      if (container && !isAdjustingScrollRef.current) {
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160;
+        if (isNearBottom) {
+          setTimeout(() => {
+            if (messagesEndRef && messagesEndRef.current) {
+              try {
+                messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+              } catch (err) {
+                console.warn("Suppressed layout scroll jitter.");
+              }
+            }
+          }, 60);
+        }
+      }
+    }
+    totalMessagesCountRef.current = messages.length;
+  }, [messages]);
+
+  useEffect(() => {
+    const setupNotifications = async () => {
       try {
-        await localParticipant.setMicrophoneEnabled(shouldPublish);
-        console.log(`🎤 ZingConnect Mic Sync: ${shouldPublish ? 'PUBLISHING' : 'MUTED/MASKED'}`);
+        const publicKey = import.meta.env.VITE_PUBLIC_KEY;
+        if (!publicKey) return;
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') return;
+        const registration = await navigator.serviceWorker.ready;
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey)
+          });
+        }
+        const token = localStorage.getItem('userToken'); 
+        if (!token) return;
+        const response = await fetch('/api/save-subscription', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ subscription }) 
+        });
+
+        if (response.ok) {
+          console.log("Database synced with Push Subscription");
+        }
       } catch (err) {
-        console.error("❌ LiveKit Mic Sync Error:", err);
+        console.error("User Push setup failed:", err);
       }
     };
-
-    syncMic();
-  }, [isMuted, isMasked, localParticipant]);
-
-  return null;
-};
-
-const AudioSession = ({ isMuted, isMasked }) => {
-  return (
-    <>
-      <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
-      <RoomAudioRenderer />
-    </>
-  );
-};
-useEffect(() => {
-  if (!hasInteracted) {
-    window.addEventListener('click', unlockAudio);
-    window.addEventListener('touchstart', unlockAudio);
-  }
-  return () => {
-    window.removeEventListener('click', unlockAudio);
-    window.removeEventListener('touchstart', unlockAudio);
-  };
-}, [hasInteracted, unlockAudio]);
-
-useEffect(() => {
-  let remoteAudio = document.getElementById('remoteAudio');
-  if (!remoteAudio) {
-    remoteAudio = document.createElement('audio');
-    remoteAudio.id = 'remoteAudio';
-    remoteAudio.setAttribute('playsinline', 'true');
-    remoteAudio.style.display = 'none';
-    document.body.appendChild(remoteAudio);
-  }
-
-  // 2. Prime UI Assets
-  const assets = [
-    { ref: ringtoneAudio, src: '/sounds/ringtone.mp3' },
-    { ref: callingAudio, src: '/sounds/calling.wav' },
-    { ref: notificationSound, src: '/sounds/notification.mp3' }
-  ];
-
-  assets.forEach(({ ref, src }) => {
-    const el = ref.current;
-    if (el) {
-      el.muted = true;
-      el.src = src;
-      el.load();
-      el.play().then(() => {
-        el.pause();
-        el.muted = false;
-        el.currentTime = 0;
-      }).catch(e => console.log("Asset priming deferred"));
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      setupNotifications();
     }
-  });
+  }, []);
 
-  // 3. Socket Room Join
-  if (socket && agent?._id) {
-    socket.emit("join-private-room", agent._id);
-  }
-}, [agent?._id]); // Runs when agent data loads
-
-const terminateLocalSession = useCallback(() => {
-  console.log("🧹 Executing Full Local Cleanup...");
-    setIsEnding(true);
-  
-  [ringtoneAudio, callingAudio].forEach(ref => {
-    if (ref?.current) {
-      ref.current.pause();
-      ref.current.currentTime = 0;
-    }
-  });
-
-  setLiveKitToken(null);
-  setCallStatus('idle');
-  setIsIncomingCall(false);
-  setActiveCall(null);
-  setCallTime(0);
-  setShowFullScreenCall(false);
-  setPeerConnected(false);
-
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
-    setLocalStream(null);
-  }
-  setTimeout(() => {
-    setIsEnding(false);
-  }, 3000);
-}, [localStream, ringtoneAudio, callingAudio]);
-
-useEffect(() => {
-  activeCallRef.current = activeCall;
-}, [activeCall]);
-
-useEffect(() => {
-  socket.on("voice-state-updated", (data) => {
-    if (data.mode === 'natural') {
-      const remoteAudio = document.getElementById('remoteAudio');
-      if (remoteAudio) {
-        remoteAudio.muted = false; // Force unmute the WebRTC stream
-        remoteAudio.volume = isSpeakerOn ? 1.0 : 0.7;
-        console.log("🔊 Switch to Natural: WebRTC Unmuted");
-      }
-    }
-  });
-  return () => socket.off("voice-state-updated");
-}, [socket, isSpeakerOn]);
-
-useEffect(() => {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' })
-      .then(reg => {
-        console.log('Service Worker Registered:', reg.scope);
-        reg.onupdatefound = () => {
-          const installingWorker = reg.installing;
-          installingWorker.onstatechange = () => {
-            if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('New content is available; please refresh.');
-            }
-          };
-        };
-      })
-      .catch(err => console.error('SW Registration failed:', err));
-  }
-}, []);
-
-useEffect(() => {
+ useEffect(() => {
   if (!socket) return;
-
-  if (!audioCtxRef.current) {
-    audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  
-  const audioCtx = audioCtxRef.current;
-
-  const handleAiAudioChunk = async (base64Audio) => {
-    const isNaturalMode = activeCall?.voiceId === 'natural' || !activeCall?.voiceId;
-    if (callStatus !== 'connected' || isNaturalMode) return;
-
-    try {
-      if (audioCtx.state === 'suspended') await audioCtx.resume();
-
-      const binaryString = window.atob(base64Audio);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      
-      const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-      const gainNode = audioCtx.createGain();
-      gainNode.gain.value = isSpeakerOn ? 1.0 : 0.7;
-      gainNode.connect(audioCtx.destination);
-      
-      const source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(gainNode);
-
-      const currentTime = audioCtx.currentTime;
-      if (nextStartTimeRef.current < currentTime) {
-        nextStartTimeRef.current = currentTime;
-      }
-      
-      source.start(nextStartTimeRef.current);
-      nextStartTimeRef.current += audioBuffer.duration;
-    } catch (err) {
-      console.error("AI Audio Stream Error:", err);
-    }
-  };
-
-  socket.on("ai-audio-chunk", handleAiAudioChunk);
-  return () => socket.off("ai-audio-chunk", handleAiAudioChunk);
-}, [socket, callStatus, isSpeakerOn, activeCall?.voiceId]);
-
-
-useEffect(() => {
-  if (!hasInteracted) {
-    document.addEventListener('click', unlockAudio);
-    document.addEventListener('touchstart', unlockAudio);
-  }
-  return () => {
-    document.removeEventListener('click', unlockAudio);
-    document.removeEventListener('touchstart', unlockAudio);
-  };
-}, [hasInteracted, agent?._id]); // Re-bind if agent loads later
-
-const handleEndCall = useCallback(async () => {
-  console.log("📴 Initiating Call End Sequence...");
-  
-  // 1. Clear Timeouts and Pollers
-  if (connectionTimeoutRef.current) {
-    clearTimeout(connectionTimeoutRef.current);
-    connectionTimeoutRef.current = null;
-  }
-  if (pollingRef.current) {
-    console.log("🛑 Stopping background status polling...");
-    clearInterval(pollingRef.current);
-    pollingRef.current = null;
-  }
-  const myId = userData?._id || userData?.id;
-  const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
-  const token = localStorage.getItem('userToken');
-  const targetId = activeCall?.fromId === myId 
-    ? activeCall?.toId 
-    : activeCall?.fromId;
-  try {
-    if (currentCallId && token) {
-      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      console.log("✅ Server notified: Call marked as inactive.");
-    }
-    if (socket && targetId) {
-      socket.emit("end-call", { 
-        to: targetId.toString().trim(), 
-        callId: currentCallId 
-      });
-      socket.off("ai-audio-chunk");
-    }
-  } catch (err) {
-    console.warn("⚠️ Error during end-call handshake:", err);
-  } finally {
-    terminateLocalSession();
-  }
-}, [socket, userData, activeCall, terminateLocalSession]);
-
-useEffect(() => {
-  if (!socket || !userData?._id) return;
-
-  const myId = userData._id.toString();
-  socket.emit("join-main-room", myId);
-
-  const handleIncomingCall = (data) => {
-    // 🔥 RESET GATES for the new call
-    peerConnectedRef.current = false;
-    setPeerConnected(false);
-
-    if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) {
-      console.log("☎️ Line busy or transitioning, rejecting incoming call from:", data.fromId);
-      socket.emit("user-busy", { to: data.fromId, callId: data.callId });
-      return; 
-    }
-
-    console.log("📥 Incoming Secure Call detected:", data.callId);
-
-    const ringTimeout = setTimeout(() => {
-      if (callStatusRef.current === 'ringing') {
-        console.log("⏰ Call timed out: No answer after 45s.");
-        handleEndCall();
-      }
-    }, 45000);
-
-    socket.emit("confirm-ringing", { to: data.fromId });
-
-    setActiveCall({ 
-      callId: data.callId || data._id,
-      roomName: data.callId || data.roomName,
-      fromId: data.fromId || data.callerData?.callerId || data.from?._id,
-      isInitiator: false,           
-      voiceId: data.voiceId, 
-      callerData: {
-        fromName: data.fromName || data.callerData?.fromName || "Secure Agent",
-        photoUrl: data.photoUrl || data.callerData?.photoUrl || "/default-agent.png",
-        callerId: data.fromId
-      }
-    });
-
-    setIsIncomingCall(true); 
-    setCallStatus('ringing');
-  };
-
-  const handleCallAccepted = (acceptData) => {
-    console.log("📡 Outbound Call Accepted by Agent:", acceptData);
-    if (acceptData.lkToken) {
-      // 🔥 Mark peer as ready so the LiveKitRoom bridge can activate immediately
-      peerConnectedRef.current = true;
-      setPeerConnected(true);
-      setLiveKitToken(acceptData.lkToken);
-      setCallStatus('connected');
-    }
-  };
-  const handleRemoteEnd = (data) => {
-    const currentCallId = (activeCallRef.current?.callId || activeCallRef.current?._id || "").toString();
-    const incomingCallId = (data?.callId || data?.roomName || "").toString();
-
-    if (incomingCallId && currentCallId && incomingCallId !== currentCallId) {
-      console.warn("⏭️ Ignoring end-signal: ID mismatch", { incoming: incomingCallId, current: currentCallId });
-      return;
-    }
-
-    console.log("📞 Remote peer disconnected. Shutting down locally.");
-    handleEndCall();
-  };
-
-  socket.on("incoming-call", handleIncomingCall);
-  socket.on("call-accepted", handleCallAccepted);
-  socket.on("end-call", handleRemoteEnd);
-  socket.on("call-ended", handleRemoteEnd);
-  socket.on("call-rejected", handleRemoteEnd);
-
-  return () => {
-    socket.off("incoming-call", handleIncomingCall);
-    socket.off("call-accepted", handleCallAccepted);
-    socket.off("end-call", handleRemoteEnd);
-    socket.off("call-ended", handleRemoteEnd);
-    socket.off("call-rejected", handleRemoteEnd);
-  };
-}, [socket, userData?._id, handleEndCall, isEnding]);
-
-useEffect(() => {
-  if (!socket) return;
-
-  const handleRemoteDisconnect = (data) => {
-    const currentCallId = activeCall?.callId || activeCall?._id;
-    const incomingSignalCallId = data?.callId;
-    if (incomingSignalCallId && currentCallId && String(incomingSignalCallId) !== String(currentCallId)) {
-      console.warn("⚠️ ZingConnect: Received end signal for a different session. Ignoring.");
-      return;
-    }
-    console.log("📴 ZingConnect: Remote peer disconnected. Cleaning up...");
-        if (aiMediaRecorderRef?.current) {
-      try {
-        if (aiMediaRecorderRef.current.state !== 'inactive') {
-          aiMediaRecorderRef.current.stop();
-        }
-        aiMediaRecorderRef.current.stream?.getTracks().forEach(t => {
-          t.stop();
-          console.log("🚫 Media track stopped.");
-        });
-      } catch (e) { 
-        console.warn("ZingConnect: Cleanup jitter", e); 
-      }
-      aiMediaRecorderRef.current = null;
-    }
-    [ringtoneAudio, callingAudio].forEach(ref => {
-      if (ref?.current) {
-        ref.current.pause();
-        ref.current.currentTime = 0;
-      }
-    });
-    setCallStatus('idle');
-    setLkToken(null);           // Disconnects LiveKit
-    setActiveCall(null);
-    setActiveCaller(null);
-    setPeerConnected(false);
-    setShowFullScreenCall(false);
-    setCallTime(0); 
-    if (typeof setIsVoiceConversionActive === 'function') {
-      setIsVoiceConversionActive(false);
-    }
-  };
-  socket.on("call-ended", handleRemoteDisconnect);
-  socket.on("end-call", handleRemoteDisconnect);
-  socket.on("call-rejected", handleRemoteDisconnect);
-  return () => {
-    socket.off("call-ended", handleRemoteDisconnect);
-    socket.off("end-call", handleRemoteDisconnect);
-    socket.off("call-rejected", handleRemoteDisconnect);
-  };
-}, [
-  socket, 
-  activeCall?.callId, 
-  activeCall?._id, 
-]);
-useEffect(() => {
-  let timer;
-  if (callStatus === 'connected') {
-    setCallTime(0);
-    const localStart = Date.now();
-    timer = setInterval(() => {
-      const now = Date.now();
-      const secondsPassed = Math.floor((now - localStart) / 1000);
-      setCallTime(Math.max(0, secondsPassed));
-    }, 1000);
-    console.log("⏱️ Call timer started.");
-  } else if (callStatus === 'idle') {
-    setCallTime(0);
-  }
-
-  return () => {
-    if (timer) clearInterval(timer);
-  };
-}, [callStatus]);
-
-useEffect(() => {
-  return () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-  };
-}, [previewUrl]);
-
-const formatTime = (seconds) => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-};
-useEffect(() => {
-  const token = localStorage.getItem('userToken');
-  const currentCallId = activeCall?.callId || activeCall?._id;
-    if (!token || !currentCallId || callStatus === 'idle' || callStatus === 'connected' || isEnding) return;
-  const syncSessionStart = Date.now();
-  const syncStatus = async () => {
-    if (isEnding || callStatus === 'connected') return;
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache' 
-        }
-      });      
-      if (res.status === 404) {
-        if (Date.now() - syncSessionStart > 15000) {
-          console.log("⚠️ Call record missing after long grace period.");
-          handleEndCall();
-        }
-        return;
-      }
-      const data = await res.json();
-      if (!data) return;
-      const terminalStates = ['ended', 'declined', 'missed', 'rejected'];
-      if (terminalStates.includes(data.status) || data.active === false) {
-        const timeElapsed = Date.now() - syncSessionStart;
-                if (timeElapsed < 30000 && callStatus === 'ringing') {
-          return;
-        }
-        console.log("🔴 DB Sync: Server confirmed call is truly over.");
-        handleEndCall();
-        return;
-      }
-      if (data.status === 'connected' && callStatus === 'ringing') {
-        console.log("📡 DB Sync: Agent connected.");
-        setCallStatus('connected');
-      }
-    } catch (e) {
-      console.warn("Sync Polling jitter:", e);
-    }
-  };
-  const interval = setInterval(syncStatus, 5000); 
-  return () => clearInterval(interval);
-}, [callStatus, activeCall?.callId, activeCall?._id, isEnding]); 
-
-useEffect(() => {
-  if (!socket) return;
-  const handleRemoteEnd = (data) => {
-    const currentCallId = (activeCall?.callId || activeCall?._id || "").toString();
-    const incomingCallId = (data?.callId || "").toString();
-    console.log("📡 Signal Received:", data);
-    if (incomingCallId && currentCallId && incomingCallId !== currentCallId) {
-      console.warn("Ignored signal: ID mismatch", { 
-        received: incomingCallId, 
-        current: currentCallId 
-      });
-      return;
-    }
-    console.log("☎️ Remote cleanup triggered (End/Reject). Resetting UI...");
-    handleEndCall(); 
-  };
-  socket.on("call-ended", handleRemoteEnd);
-  socket.on("end-call", handleRemoteEnd);
-  socket.on("call-rejected", handleRemoteEnd);
-
-  return () => {
-    socket.off("call-ended", handleRemoteEnd);
-    socket.off("end-call", handleRemoteEnd);
-    socket.off("call-rejected", handleRemoteEnd);
-  };
-  }, [socket, activeCall?.callId, activeCall?._id]);
-
-useEffect(() => {
-  const audio = document.getElementById('remoteAudio');
-  if (!audio) return;
-  const isUsingAI = activeCall?.voiceId && activeCall.voiceId !== "natural";
-
-  if (isUsingAI) {
-    audio.muted = true;
-    audio.volume = 0;
-  } else {
-    audio.muted = false;
-    audio.volume = isSpeakerOn ? 1.0 : 0.2;
-        if (audio.setSinkId && isSpeakerOn) {
-      audio.setSinkId('').catch(err => console.warn("Audio route error:", err));
-    }
-  }
-}, [isSpeakerOn, activeCall?.voiceId, callStatus]);
-
-useEffect(() => {
-  const token = localStorage.getItem('userToken');
-  if (!token) return;
-
-  const checkCalls = async () => {
-    
-    if (
-      callStatusRef.current !== 'idle' || 
-      isEnding || 
-      isTransitioningRef.current
-    ) {
-      return; 
-    }
-
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Cache-Control': 'no-cache' 
-        }
-      });
-      if (!response.ok) return;
-
-      const data = await response.json();
-
-      if (data && data.hasIncomingCall) {
-        if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
-
-        console.log("📡 Poller found incoming call, triggering UI...");
-                setActiveCall({
-          callId: data.callId,
-          fromId: data.callerData?.callerId || data.fromId,
-          roomName: data.roomName || data.callId,
-          callerData: data.callerData,
-          voiceId: data.voiceId // Ensure voice identity carries over
-        });
-        
-        setIsIncomingCall(true); 
-        setCallStatus('ringing');
-      }
-    } catch (err) {
-      console.warn("User Polling error:", err);
-    }
-  };
-  const interval = setInterval(checkCalls, 4000); 
-  return () => clearInterval(interval);
-}, [userData?._id, isEnding]);
-
-useEffect(() => {
-  // 1. Set looping once
-  ringtoneAudio.current.loop = true;
-  callingAudio.current.loop = true;
-  const handleAudioLogic = async () => {
-    try {
-      // Incoming Call Logic
-      if (callStatus === 'ringing' && isIncomingCall) {
-        callingAudio.current.pause();
-        callingAudio.current.currentTime = 0;
-                await ringtoneAudio.current.play();
-        console.log("🔊 Playing Ringtone");
-      } 
-      // Outgoing Call Logic
-      else if (callStatus === 'calling' || (callStatus === 'ringing' && !isIncomingCall)) {
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.currentTime = 0;
-        await callingAudio.current.play();
-        console.log("🔉 Playing Outgoing Call Sound");
-      } 
-      // Stop/Idle Logic
-      else {
-        ringtoneAudio.current.pause();
-        ringtoneAudio.current.currentTime = 0;
-        
-        callingAudio.current.pause();
-        callingAudio.current.currentTime = 0;
-      }
-    } catch (err) {
-      console.warn("Audio playback prevented. User must interact with the document first.", err);
-    }
-  };
-  handleAudioLogic();
-  return () => {
-    ringtoneAudio.current.pause();
-    callingAudio.current.pause();
-  };
-}, [callStatus, isIncomingCall]);
-
-
-useEffect(() => {
-  const remoteMedia = document.getElementById('remoteAudio'); 
-  
-  if (remoteMedia && callStatus === 'connected') {
-    remoteMedia.volume = isSpeakerOn ? 1.0 : 0.4; 
-    remoteMedia.muted = false;
-        if (remoteMedia.paused) {
-      remoteMedia.play().catch(e => console.log("Playback pending gesture"));
-    }
-  }
-}, [isSpeakerOn, callStatus]);
-const toggleMute = () => {
-  setIsMuted(prev => {
-    const newState = !prev;
-  const stream = localStream || userStreamRef.current;  
-    if (stream) {
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !newState; // Track enabled = not muted
-      });
-      console.log(`Mic ${newState ? 'disabled' : 'enabled'}`);
-    } else {
-      console.warn("No active stream found to mute");
-    }
-    return newState;
-  });
-};
-
-const handleAcceptCall = async () => {
-  // 1. Audio Pipeline Wake-up
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (AudioContext) {
-    const audioCtx = new AudioContext();
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume().catch(e => console.warn("Context unlock blocked:", e));
-    }
-  }
-
-  // 2. Kill Local Ringtone
-  if (ringtoneAudio.current) {
-    ringtoneAudio.current.pause();
-    ringtoneAudio.current.currentTime = 0;
-  }
-
-  const token = localStorage.getItem('userToken');
-  const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
-
-  if (!callId) {
-    console.error("❌ ZingConnect: No valid Call ID found for acceptance.");
-    return;
-  }
-  try {
-    setIsEnding(false); 
-    isTransitioningRef.current = true;
-        setCallStatus('connecting');
-    setShowFullScreenCall(true);
-
-    console.log(`📡 Sending acceptance to server engine for room/call: ${callId}...`);
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    const data = await response.json();    
-    if (data.success && data.lkToken) {
-      console.log("✅ Secure LiveKit token verified and cached locally.");
-            const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
-      
-      if (socket && agentId) {
-        socket.emit("answer-call", { 
-          to: agentId, 
-          callId: data.roomName || callId, 
-          myId: userData?._id?.toString() 
-        });
-      }
-      peerConnectedRef.current = true; 
-      setPeerConnected(true);
-            setLiveKitToken(data.lkToken); 
-            isTransitioningRef.current = false;
-      setIsIncomingCall(false); // Move incoming flag change here post-auth verification
-      
-    } else {
-      throw new Error(data.message || "LiveKit RTC token missing from server engine");
-    }
-
-  } catch (err) {
-    console.error("❌ ZingConnect acceptance runtime exception:", err);
-    setIsEnding(false); 
-    isTransitioningRef.current = false;
-    handleEndCall(); // Safely fall back to structural teardown logic
-  }
-};
-
-useEffect(() => {
-  if (!socket || !userData?._id) return;
-
-  const myId = userData._id.toString();
-  socket.emit("join-main-room", myId);
-
- const onIncoming = async (data) => {
-  if (callStatusRef.current !== 'idle' || isEnding) return;
-
-  const roomName = data.callId || data.roomName;
-    setActiveCall({
-    ...data,
-    roomName: roomName,
-    fromId: data.fromId || data.callerData?.callerId
-  });
-  setIsIncomingCall(true);
-  setCallStatus('ringing');
-  if (socket) {
-    socket.emit("confirm-ringing", { to: data.fromId || data.callerData?.callerId });
-  }
-  try {
-    const token = localStorage.getItem('userToken');
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const statusData = await res.json();
-    
-    if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
-      handleEndCall(); 
-    }
-  } catch (err) {
-    console.warn("Incoming check jitter ignored.");
-  }
-};
-
-const onRemoteEnd = (data) => {
-  const currentId = activeCallRef.current?.roomName || 
-                    activeCallRef.current?.callId || 
-                    activeCallRef.current?._id;
-  const incomingId = data?.callId || data?.roomName || data?._id;
-
-  console.log("📴 Signal Received:", { incomingId, currentId });
-  if (!currentId) {
-    if (callStatus !== 'idle') {
-       console.log("Cleaning up zombie UI session");
-       handleEndCall();
-    }
-    return;
-  }
-  if (incomingId && currentId && String(incomingId) !== String(currentId)) {
-    console.warn("⏭️ Ignoring end signal: Session mismatch", { incomingId, currentId });
-    return;
-  }
-
-  // 5. Final Execution
-  console.log("✅ Call termination confirmed via Socket.");
-  handleEndCall();
-};
-  socket.on("incoming-call", onIncoming);
-  socket.on("call-ended", onRemoteEnd);
-  socket.on("end-call", onRemoteEnd);
-  socket.on("call-rejected", onRemoteEnd);
-  socket.on("call-accepted", (data) => {
-     if (data.signal || data.answerSignal) {
-     }
-  });
-
-  return () => {
-    socket.off("incoming-call", onIncoming);
-    socket.off("call-ended", onRemoteEnd);
-    socket.off("end-call", onRemoteEnd);
-    socket.off("call-rejected", onRemoteEnd);
-    socket.off("call-accepted");
-  };
-}, [socket, userData?._id, handleEndCall]);
-
-
-async function handleRejectCall() {
-  console.log("🚫 User rejecting Agent call...");
-  const currentCall = activeCallRef.current || activeCall;
-  
-  if (!currentCall) {
-    console.warn("⚠️ Reject failed: No active call found in state/ref");
-    handleEndCall(); 
-    return;
-  }
-  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
-    const myId = userData?._id?.toString();
-  const initiatorId = currentCall.fromId?.toString();
-  const receiverId = currentCall.receiverId?.toString() || currentCall.toId?.toString();
-  const targetId = (initiatorId === myId) ? receiverId : initiatorId;
-
-  console.log("📡 Emitting reject-call to:", targetId, "for room:", callId);
-
-  if (socket && targetId && callId) {
-    socket.emit("reject-call", { 
-      to: targetId, 
-      fromId: myId, 
-      callId: String(callId).trim() 
-    });
-  } else {
-    console.error("❌ Missing Socket, Target, or CallID", { targetId, callId });
-  }
-  handleEndCall();
-}
-
-useEffect(() => {
-  if (!socket) return;
-  socket.on("new-message", (msg) => {
+ const handleNewMessage = (msg) => {
     setMessages(prev => {
-      const isDuplicate = prev.some(m => m._id === msg._id || m.tempId === msg._id);
-      if (isDuplicate) return prev;
-      if (msg.senderModel === 'Agent' && notificationSound.current) {
-        notificationSound.current.play().catch(() => {});
-      }
+      if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
       return [...prev, msg];
     });
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-  });
-
-  socket.on("message-deleted", (deletedId) => {
-    setMessages(prev => prev.filter(m => (m._id || m.id) !== deletedId));
-  });
-  return () => {
-    socket.off("new-message");
-    socket.off("message-deleted");
   };
-}, [socket]);
+  const handleMessageDeleted = (id) => {
+    setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
+  };
+  socket.on("new-message", handleNewMessage);
+  socket.on("message-deleted", handleMessageDeleted);
+  return () => { 
+    socket.off("new-message", handleNewMessage); 
+    socket.off("message-deleted", handleMessageDeleted); 
+  };
+}, [socket]); 
 
-useEffect(() => {
-  const setupNotifications = async () => {
-    try {
-      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-      if (!publicKey) return;
-
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
-
-      const registration = await navigator.serviceWorker.ready;
-      
-      // Get existing or create new
-      let subscription = await registration.pushManager.getSubscription();
-      
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
+ useEffect(() => {
+  if (!messages || messages.length === 0) {
+    totalMessagesCountRef.current = 0;
+    return;
+  }
+  if (messages.length > totalMessagesCountRef.current) {
+    const latestMsg = messages[messages.length - 1];
+    if (latestMsg && latestMsg.senderModel === "Agent") {
+      if (notificationSound && notificationSound.current) {
+        notificationSound.current.play().catch((e) => {
+          console.log("Audio framework awaiting gesture interaction:", e.message);
         });
       }
-      const token = localStorage.getItem('userToken'); 
-      if (!token) return;
-      const response = await fetch('/api/save-subscription', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ subscription }) 
-      });
+    }
+    const container = chatContainerRef.current;
+    if (container && !isAdjustingScrollRef.current) {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160;
+      
+      if (isNearBottom) {
+        setTimeout(() => {
+          if (messagesEndRef && messagesEndRef.current) {
+            try {
+              messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+            } catch (err) {
+              console.warn("Suppressed layout scroll jitter.");
+            }
+          }
+        }, 60);
+      }
+    }
+  }
+  totalMessagesCountRef.current = messages.length;
+}, [messages]);
 
+useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token) return navigate('/');
+  const fetchUserSession = async () => {
+    try {
+      const response = await fetch('/api/users/my-session', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      
       if (response.ok) {
-        console.log("Database synced with Push Subscription");
+        setAgent(data.agent); 
+        setUserData(data.user); 
+        
+        if (!data.user.isProfileComplete) {
+          setShowOnboarding(true);
+        }
       }
     } catch (err) {
-      console.error("User Push setup failed:", err);
+      console.error("Session fetch error:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    setupNotifications();
-  }
-}, []);
+  fetchUserSession();
+  const interval = setInterval(fetchUserSession, 30000); 
+  return () => clearInterval(interval);
+}, [navigate]);
 
 useEffect(() => {
-  const handleVoiceUpdate = (data) => {
-    const remoteAudio = document.getElementById('remoteAudio');
-    if (!remoteAudio) return;
-    if (data.mode === 'natural' || !data.voiceId) {
-      console.log("🔊 Switch to Natural: Unmuting WebRTC Stream");
-      remoteAudio.muted = false;
-      remoteAudio.volume = isSpeakerOn ? 1.0 : 0.7;
-      remoteAudio.play().catch(e => console.warn("Audio resume failed:", e));
-    } else {
-      console.log("🔇 Switch to AI: Muting WebRTC Stream");
-      remoteAudio.muted = true;
-      remoteAudio.volume = 0;
-    }
-  };
-
-  socket.on("voice-state-updated", handleVoiceUpdate);
-  return () => socket.off("voice-state-updated", handleVoiceUpdate);
-}, [socket, isSpeakerOn]);
-
-useEffect(() => {
-    // Timeout ensures the DOM has rendered the new message before scrolling
-    const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [messages]);
-  useEffect(() => {
-    const token = localStorage.getItem('userToken');
-    if (!token) return navigate('/');
-
-    const fetchUserSession = async () => {
-  try {
-    const response = await fetch('/api/users/my-session', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    
-    if (response.ok) {
-      setAgent(data.agent); 
-      setUserData(data.user); 
-      
-      if (!data.user.isProfileComplete) {
-        setShowOnboarding(true);
-      }
-    }
-  } catch (err) {
-    console.error("Session fetch error:", err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-    fetchUserSession();
-    const interval = setInterval(fetchUserSession, 30000); 
-    return () => clearInterval(interval);
-  }, [navigate]);
-
-  useEffect(() => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-  
   if (!token || !targetAgentId) return;
-
-  let isFirstLoad = true;
-
+  let isFirstLoad = !isInitialLoadComplete;
   const fetchMessages = async () => {
     try {
-      // Added your ?limit=50 param to optimize historical fetching payload sizes
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
-
       if (response.ok && data.success) {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
-
-        // 1. Silent Notification & Seen Logic
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
@@ -1154,39 +414,42 @@ useEffect(() => {
               tag: 'zing-msg'
             });
           }
-
           fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
-
-        // 2. State Sync: Merge incoming messages with local in-flight ones
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
+          const historicalLocal = prev.filter(m => m._id && !incomingMessages.some(incoming => incoming._id === m._id));
           const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
           const uniqueInFlight = inFlight.filter(m => 
             !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
           );
-          const newCombined = [...incomingMessages, ...uniqueInFlight];
-          
-          if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
-            return prev;
-          }
-          return newCombined;
+          return [...historicalLocal, ...incomingMessages, ...uniqueInFlight];
         });
-
-        // 3. Smart Viewport Anchoring
-        setTimeout(() => {
-          if (isFirstLoad) {
-            // Instant snap on mount so user doesn't see scroll animation lag
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-            isFirstLoad = false;
-          } else {
-            // Smooth adjustment for passive incoming messages while chatting
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (isFirstLoad) {
+          setTimeout(() => {
+            if (chatContainerRef.current) {
+              chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+            }
+            setIsInitialLoadComplete(true);
+          }, 120);
+        } else {
+          const container = chatContainerRef.current;
+          if (container) {
+            if (isAdjustingScrollRef.current) return;
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+            
+            if (isNearBottom) {
+              setTimeout(() => {
+                if (!isAdjustingScrollRef.current) {
+                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }
+              }, 50);
+            }
           }
-        }, 100);
+        }
       }
     } catch (err) {
       console.error("ZingConnect Sync Jitter:", err);
@@ -1194,19 +457,82 @@ useEffect(() => {
       if (isFirstLoad) setLoading(false);
     }
   };
-
-  // Immediate invocation on change/mount
   fetchMessages();
-  
-  // Set up background long-poll tracker
   const interval = setInterval(fetchMessages, 5000); 
-  
   return () => clearInterval(interval);
-}, [agent?._id, agent?.id]);
+}, [agent?._id, agent?.id, isInitialLoadComplete]);
 
-  const agentStatus = getStatusInfo(agent);
+const fetchOlderMessages = async () => {
+  if (isFetchingOlder || !hasMore || !agent?._id || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
+  const token = localStorage.getItem('userToken');
+  const targetAgentId = agent._id || agent.id;
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
+  if (!oldestMessage) return;
+  setIsFetchingOlder(true);
+  const container = chatContainerRef ? chatContainerRef.current : null;
+  const previousScrollHeight = container ? container.scrollHeight : 0;
+  const previousScrollTop = container ? container.scrollTop : 0;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await response.json();
+    
+    if (response.ok && data.success) {
+      if (data.messages.length < 30) {
+        setHasMore(false);
+      }
+      if (data.messages.length > 0) {
+        if (isAdjustingScrollRef) isAdjustingScrollRef.current = true;
+        
+        setMessages(prev => {
+          const currentIds = new Set(prev.map(m => m._id));
+          const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
+          return [...uniqueHistorical, ...prev];
+        });
+        requestAnimationFrame(() => {
+          if (chatContainerRef && chatContainerRef.current) {
+            const freshHeight = chatContainerRef.current.scrollHeight;
+            const delta = freshHeight - previousScrollHeight;
+            chatContainerRef.current.scrollTop = previousScrollTop + delta;
+          }
+                    setTimeout(() => {
+            if (chatContainerRef && chatContainerRef.current) {
+              const finalHeight = chatContainerRef.current.scrollHeight;
+              const finalDelta = finalHeight - previousScrollHeight;
+              chatContainerRef.current.scrollTop = previousScrollTop + finalDelta;
+            }
+            if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') {
+              isAdjustingScrollRef.current = false;
+            }
+          }, 35);
+        });
+      } else {
+        if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
+      }
+    } else {
+      if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
+    }
+  } catch (err) {
+    console.error("Failed to load older historical slices:", err);
+    if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
+  } finally {
+    setIsFetchingOlder(false);
+  }
+};
 
-  const handlePhotoClick = () => fileInputRef.current.click();
+const handleChatScroll = (e) => {
+  const container = e.currentTarget;
+  if (!container) return;
+  const currentScrollTop = container.scrollTop;
+    if (isAdjustingScrollRef && isAdjustingScrollRef.current) return;  
+  if (currentScrollTop <= 35 && currentScrollTop > 0) {
+    fetchOlderMessages();
+  }
+};
+const agentStatus = getStatusInfo(agent);
+const handlePhotoClick = () => fileInputRef.current.click();
 
 const handleFileChange = (e) => {
   const file = e.target.files[0];
@@ -1214,9 +540,7 @@ const handleFileChange = (e) => {
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
   }
-
   const url = URL.createObjectURL(file);
-  
   if (showOnboarding) {
     setPreviewUrl(url); 
     setFormData(prev => ({ ...prev, profileImage: file }));
@@ -1234,24 +558,18 @@ const handleProfileSubmit = async (e) => {
     alert("Please enter a valid phone number with country code.");
     return;
   }
-
   setIsUploading(true); 
   const token = localStorage.getItem('userToken');
   const data = new FormData();
-  
-  // 1. Handle File logic
-  const fileToUpload = onboardingFile || previewFile;
+    const fileToUpload = onboardingFile || previewFile;
   if (fileToUpload) {
     data.append('photo', fileToUpload);
   }
-
-  // 2. Automatically appends firstName, lastName, phone, dob, gender, city, state
   Object.keys(formData).forEach(key => {
     if (formData[key] !== undefined && formData[key] !== null) {
       data.append(key, formData[key]);
     }
   });
-
   try {
     const res = await fetch('/api/users/update-user-onboarding', {
       method: 'PUT',
@@ -1260,20 +578,14 @@ const handleProfileSubmit = async (e) => {
       },
       body: data
     });
-
     const result = await res.json();
-
     if (res.ok) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
-
       if (setUserData) setUserData(result.user);
-      
-      // 3. Success Reset
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);
       setPreviewUrl(null);
-      
       console.log("Profile updated successfully. Phone saved:", result.user.phone);
     } else {
       alert(result.message || "Initialization failed. Please check the form.");
@@ -1289,10 +601,8 @@ const handleProfileSubmit = async (e) => {
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
   if (!file || !agent?._id) return;
-
   const isVideo = file.type.startsWith('video/');
   const isImage = file.type.startsWith('image/');
-  
   if (!isVideo && !isImage) {
     alert("Please upload only images or videos.");
     return;
@@ -1323,8 +633,6 @@ const handleFinalSend = async () => {
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
   const savedFile = previewFile; // Keep a reference for resending
   const savedCaption = caption;
-
-  // Optimistic UI for Media
   const pendingMedia = {
     _id: tempId,
     tempId: tempId,
@@ -1338,11 +646,9 @@ const handleFinalSend = async () => {
     isTemp: true,
     originalFile: savedFile // Store file in object for resending
   };
-
   setMessages(prev => [...prev, pendingMedia]);
   setPreviewUrl(null); // Close the preview overlay
   setPreviewFile(null);
-
   setIsUploading(true);
   const token = localStorage.getItem('userToken'); 
 
@@ -1413,9 +719,7 @@ const handleDownload = async (url, type) => {
 const startStatusPolling = (roomName) => {
   const token = localStorage.getItem('userToken');
   const startTime = Date.now(); // Mark when polling started
-
   if (pollingRef.current) clearInterval(pollingRef.current);
-
   const pollInterval = setInterval(async () => {
     if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
 
@@ -1446,85 +750,6 @@ const startStatusPolling = (roomName) => {
   }, 4000);
 
   pollingRef.current = pollInterval;
-};
-const handleStartCall = async () => {
-  // 1. Validation and Setup
-  const currentUserId = userData?._id || userData?.id;
-  const currentAgentId = agent?._id || agent?.id;
-  const token = localStorage.getItem('userToken');
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-
-  if (!currentAgentId || !currentUserId) {
-    alert("Profile data still loading. Please try again.");
-    return;
-  }
-
-  // UI State: Move to calling immediately
-  setCallStatus('calling'); 
-  setShowFullScreenCall(true);
-
-  try {
-    // 2. Request a Secure LiveKit Room from Backend
-    const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({ 
-        receiverId: currentAgentId, 
-        receiverModel: 'Agent',
-        voiceId: "natural" 
-      })
-    });
-
-    const data = await res.json();
-
-    if (!data.success) {
-      throw new Error(data.message || "Agent unavailable");
-    }
-
-    // 3. Resolve Photo URL
-    const photoPath = userData?.photoUrl;
-    const fullPhotoUrl = photoPath?.startsWith('http') 
-      ? photoPath 
-      : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
-
-    // 4. Set Active Call Metadata IMMEDIATELY (Updates UI)
-    setActiveCall({ 
-      callId: data.roomName, 
-      roomName: data.roomName,
-      toId: currentAgentId.toString(),
-      fromId: currentUserId,
-      isInitiator: true,
-      callerData: {
-        fromName: `${userData?.firstName} ${userData?.lastName}`,
-        photoUrl: fullPhotoUrl,
-        callerId: currentUserId
-      }
-    });
-    socket.emit("call-agent", { 
-      agentToCall: currentAgentId.toString(),
-      fromId: currentUserId,
-      fromName: `${userData?.firstName} ${userData?.lastName}`,
-      photoUrl: fullPhotoUrl,
-      callId: data.roomName
-    });
-    setCallStatus('ringing'); 
-    setTimeout(() => {
-      if (data.lkToken) {
-        console.log("🚀 ZingConnect: Initializing Secure Media Handshake...");
-        setLiveKitToken(data.lkToken); 
-      }
-    }, 500);
-
-    // 7. Start the Safety Poller
-    startStatusPolling(data.roomName);
-
-  } catch (err) {
-    console.error("❌ ZingConnect: Call initialization failed:", err);
-    handleEndCall();
-  }
 };
 
  const handleSendMessage = async (e) => {
@@ -1606,7 +831,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   const controls = useAnimation();
   const bind = useDrag(({ active, movement: [x], last }) => {
     const xMovement = Math.min(Math.max(0, x), 100); 
-
     if (active) {
       controls.set({ x: xMovement });
     }
@@ -1641,7 +865,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   );
 };
-
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">
@@ -1702,7 +925,9 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
                   <div className="p-1">
                     <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Date of Birth</p>
                     <p className="text-xs font-bold text-gray-700">
-                       {agent?.dob ? new Date(agent.dob).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                    {agent?.dob ? (() => {  const datePart = agent.dob.split('T')[0]; const [year, month, day] = datePart.split('-');
+                      const localDate = new Date(year, month - 1, day); return localDate.toLocaleDateString(undefined, { 
+                    month: 'short', day: 'numeric', year: 'numeric' }); })() : 'N/A'}
                     </p>
                   </div>
                 </div>
@@ -1762,7 +987,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     inputClass="phone-input-field"
     buttonClass="phone-dropdown-button"
     placeholder="Enter phone number"
-    // Use search to find specific country codes easily
     enableSearch={true} 
   />
 </div>
@@ -1845,12 +1069,30 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
-<main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
+
+<main 
+ref={chatContainerRef}
+  onScroll={handleChatScroll}
+  className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
+  style={{
+    scrollAnchor: 'none',             
+    overscrollBehaviorY: 'contain',   
+    WebkitOverflowScrolling: 'touch'  
+  }}
+>
   {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
     style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
   />
+
+  {/* --- INFINITE SCROLL HISTORICAL LOADING INDICATOR --- */}
+  {isFetchingOlder && (
+    <div className="self-center z-20 my-2 px-3 py-1.5 bg-[#005c4b] text-white rounded-full text-[10px] font-bold tracking-wider flex items-center gap-2 shadow-md border border-emerald-500/20 animate-pulse">
+      <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      <span>LOADING OLDER MESSAGES...</span>
+    </div>
+  )}
 
   {/* 2. Encryption Notice */}
   <div className="self-center z-10 my-4 px-4 py-1.5 bg-[#fff9c2] rounded-lg shadow-sm border border-yellow-100 flex items-center gap-2 max-w-[90%]">
@@ -1909,12 +1151,14 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
               </>
             ) : (
               <div className="relative">
+                {/* Fixed src inside video element tag ensures smooth re-indexing when scrolling prepends nodes */}
                 <video 
+                 key={`video-${msgKey}`}
+                 src={m.fileUrl}
+                   preload="metadata"
                   className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
                   onClick={() => setFullscreenVideo(m.fileUrl)}
-                >
-                  <source src={m.fileUrl} type="video/mp4" />
-                </video>
+                />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
                     <BsPlayFill size={30} />
@@ -1963,8 +1207,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
                   <BsPlusLg className="rotate-45" size={10} />
                 </button>
               )}
-
-              {/* 3. SUCCESS DELIVERED STATES */}
               {(!m.status || m.status === 'sent' || m.status === 'seen') && (
                 <div className="flex items-center">
                   {m.status === 'seen' ? (
@@ -1980,8 +1222,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       </div>
     );
   })}
-
-  {/* Auto-scroll viewport Anchor */}
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
@@ -1992,12 +1232,8 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     <div className="p-4 flex justify-between items-center text-white">
       <button 
         onClick={() => { 
-          URL.revokeObjectURL(previewUrl);
-          setPreviewUrl(null); 
-          setPreviewFile(null); // Ensure this matches your state name
-        }} 
-        className="p-2 hover:bg-white/10 rounded-full transition-colors"
-      >
+          URL.revokeObjectURL(previewUrl); setPreviewUrl(null);  setPreviewFile(null);    }} 
+        className="p-2 hover:bg-white/10 rounded-full transition-colors">
         <BsChevronLeft size={24} />
       </button>
       <span className="font-bold uppercase tracking-widest text-[10px]">Preview Media</span>
@@ -2007,40 +1243,21 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     {/* Dynamic Media Preview Container */}
     <div className="flex-1 flex items-center justify-center p-4">
       {previewFile?.type?.startsWith('video/') ? (
-        <video 
-          key={previewUrl}
-          src={previewUrl} 
-          controls 
-          autoPlay 
-          muted
-          playsInline
-          className="max-h-full max-w-full rounded-lg shadow-2xl bg-black"
-        />
+        <video key={previewUrl} src={previewUrl} controls autoPlay muted playsInline
+          className="max-h-full max-w-full rounded-lg shadow-2xl bg-black" />
       ) : (
-        <img 
-          src={previewUrl} 
-          alt="Preview" 
-          className="max-h-full max-w-full object-contain rounded-lg shadow-2xl" 
-        />
+        <img   src={previewUrl} alt="Preview" 
+          className="max-h-full max-w-full object-contain rounded-lg shadow-2xl"  />
       )}
     </div>
 
     {/* Caption Input Area */}
     <div className="p-4 bg-black/40 backdrop-blur-md">
       <div className="max-w-4xl mx-auto flex items-end gap-3 bg-white/10 p-2 rounded-2xl border border-white/20">
-        <input
-          type="text"
-          placeholder="Add a caption..."
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm"
-          autoFocus
-        />
+        <input type="text" placeholder="Add a caption..." value={caption} onChange={(e) => setCaption(e.target.value)}
+          className="flex-1 bg-transparent text-white px-4 py-3 outline-none text-sm" autoFocus />
         <button 
-          onClick={handleFinalSend}
-          disabled={isUploading}
-          className="bg-blue-600 text-white p-4 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg"
-        >
+          onClick={handleFinalSend} disabled={isUploading} className="bg-blue-600 text-white p-4 rounded-xl hover:bg-blue-700 active:scale-95 transition-all shadow-lg">
           {isUploading ? (
             <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
           ) : (
@@ -2051,7 +1268,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   </div>
 )}
-
 <footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
     
     {/* --- 1. REPLY PREVIEW PANEL --- */}
@@ -2097,65 +1313,33 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 
   {/* --- MAIN INPUT CONTROLS --- */}
   <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
-    <input 
-      type="file" 
-      ref={fileInputRef} 
-      onChange={handleFileUpload} 
-      accept="image/*,video/*" 
-      className="hidden" 
-    />
-    <input 
-      type="file" 
-      ref={cameraInputRef} 
-      onChange={handleFileUpload} 
-      accept="image/*,video/*" 
-      capture="environment" 
-      className="hidden" 
-    />
+    <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
+    <input  type="file"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden"/>
 
     <div className="flex gap-1 md:gap-2 text-gray-500">
-      <button 
-        type="button"
-        onClick={() => fileInputRef.current.click()} 
-        disabled={isUploading}
-        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
-      >
+      <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
         <BsPaperclip size={22} />
       </button>
 
-      <button 
-        type="button"
-        onClick={() => cameraInputRef.current.click()} 
-        disabled={isUploading}
-        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
-      >
+      <button  type="button" onClick={() => cameraInputRef.current.click()}  disabled={isUploading}
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
         <BsCameraFill size={22} />
       </button>
     </div>
     
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
       <div className="flex-1 relative flex items-center">
-        <input 
-          value={newMessage} 
-          onChange={(e) => setNewMessage(e.target.value)} 
-          disabled={isUploading}
+        <input value={newMessage}  onChange={(e) => setNewMessage(e.target.value)} disabled={isUploading}
           placeholder={isUploading ? "Uploading file..." : (replyingTo ? "Write a reply..." : "Type your secure message")} 
           className={`w-full bg-white px-4 py-2.5 md:py-3 text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20 transition-all ${
-            replyingTo ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-full'
-          }`}
-        />
+            replyingTo ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-full'}`}/>
       </div>
-      
-      {/* ALWAYS SHOW SEND BUTTON, REMOVED MIC TOGGLE */}
-      <button 
-        type="submit" 
-        disabled={!newMessage.trim() && !isUploading}
+            <button type="submit"  disabled={!newMessage.trim() && !isUploading}
         className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${
           newMessage.trim() 
             ? "bg-blue-600 text-white" 
-            : "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"
-        }`}
-      >
+            : "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"}`}>
         <BsSendFill size={16} className="ml-0.5" />
       </button>
     </form>
@@ -2163,63 +1347,51 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 </footer>
       </div>
 
-    {/* --- 3. SECURITY ONBOARDING --- */}
-  {!hasInteracted && (
-    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+{!hasInteracted && (
+  <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+    <div className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100">
+      <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+        <BsShieldLockFill className="text-blue-600" size={28} />
+      </div>
+      <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
+      <p className="text-gray-500 text-sm font-semibold leading-relaxed">
+        Tap to authenticate your session and enable secure message alerts.
+      </p>
       <button 
-        onClick={unlockAudio} 
-        className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100 active:scale-95 transition-transform"
-      >
-        <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
-          <BsShieldLockFill className="text-blue-600" size={28} />
-        </div>
-        <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
-        <p className="text-gray-500 text-sm font-semibold leading-relaxed">
-          Tap to authenticate your session and enable secure message alerts.
-        </p>
-        <div className="bg-blue-600 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg">
-          SYNC & ENTER
-        </div>
+        onClick={() => {
+          if (typeof unlockAudio === 'function') {
+            unlockAudio();
+          }
+          if (typeof setHasInteracted === 'function') {
+            setHasInteracted(true);
+          }
+        }} 
+        className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg transition-transform cursor-pointer block">
+        SYNC & ENTER
       </button>
     </div>
-  )}
-
+  </div>
+)}
     {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
 {fullscreenImage && (
-  <div 
-    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
-    onClick={() => setFullscreenImage(null)}
-  >
+  <div className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
+    onClick={() => setFullscreenImage(null)} >
     {/* Top Navigation Bar */}
     <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
-      <button 
-        onClick={() => setFullscreenImage(null)}
-        className="text-white/70 hover:text-white transition-colors"
-      >
+      <button onClick={() => setFullscreenImage(null)} className="text-white/70 hover:text-white transition-colors">
         <BsChevronLeft size={30} />
       </button>
 
       {/* DOWNLOAD BUTTON */}
-      <button 
-        onClick={(e) => { 
-          e.stopPropagation(); // Stops the overlay from closing when downloading
-          handleDownload(fullscreenImage, 'image'); 
-        }}
-        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all"
-      >
+      <button onClick={(e) => { e.stopPropagation(); handleDownload(fullscreenImage, 'image'); }}
+        className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all">
         <BsDownload size={18} />
         <span>Save to Device</span>
       </button>
     </div>
 
     {/* The Image */}
-    <img 
-      src={fullscreenImage} 
-      className="max-w-[95%] max-h-[85%] object-contain shadow-2xl" 
-      alt="Full view" 
-      onClick={(e) => e.stopPropagation()} // Prevents closing if the user clicks the image itself
-    />
-    
+    <img src={fullscreenImage}  className="max-w-[95%] max-h-[85%] object-contain shadow-2xl" alt="Full view" onClick={(e) => e.stopPropagation()} />
     <p className="absolute bottom-10 text-white/40 text-[10px] uppercase tracking-[0.2em] font-medium">
       Secure Preview Mode
     </p>
@@ -2228,25 +1400,16 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 
 {/* --- FULLSCREEN VIDEO OVERLAY --- */}
 {fullscreenVideo && (
-  <div 
-    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
-    onClick={() => setFullscreenVideo(null)} // Click background to close
-  >
+  <div className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
+    onClick={() => setFullscreenVideo(null)}>
     {/* Top Navigation Bar */}
     <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
-      <button 
-        onClick={() => setFullscreenVideo(null)}
-        className="text-white/70 hover:text-white transition-colors"
-      >
+      <button onClick={() => setFullscreenVideo(null)} className="text-white/70 hover:text-white transition-colors">
         <BsChevronLeft size={30} />
       </button>
 
       {/* DOWNLOAD BUTTON */}
-      <button 
-        onClick={(e) => { 
-          e.stopPropagation(); // Prevents overlay from closing
-          handleDownload(fullscreenVideo, 'video'); 
-        }}
+      <button onClick={(e) => { e.stopPropagation(); handleDownload(fullscreenVideo, 'video'); }}
         className="bg-white text-black px-5 py-2.5 rounded-full flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider shadow-2xl active:scale-95 transition-all"
       >
         <BsDownload size={18} />
@@ -2431,10 +1594,10 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       } catch (e) {
         console.warn("⚠️ ZingConnect: Manual audio wake-up failed:", e);
       }
-      if (ringtoneAudio.current) {
+     if (ringtoneAudio && ringtoneAudio.current) {
         ringtoneAudio.current.pause();
         ringtoneAudio.current.currentTime = 0;
-      }
+    }
       peerConnectedRef.current = true;
       setPeerConnected(true);
       setCallStatus('connected');
@@ -2445,12 +1608,9 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         console.log("📡 ZingConnect: LiveKit connection lost. Cleaning up session.");
         handleEndCall();
       }
-    }}
-  >
-    <AudioSession 
-      isMuted={isMuted} 
-      isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} 
-    />
+    }}>
+    <StartAudio label="Click to join call" />
+        <AudioStateController isMuted={isMuted} isMasked={activeCall?.voiceId && activeCall.voiceId !== 'natural'} />
   </LiveKitRoom>
 )}
 
