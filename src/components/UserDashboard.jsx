@@ -152,7 +152,7 @@ const {
   callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
   callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
   isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
-  ringtoneAudio, callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
+   callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
   handleEndCall, terminateLocalSession, unlockAudio 
 } = useUserZingCall(socket, userData, agent);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
