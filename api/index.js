@@ -1186,7 +1186,50 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-// --- Route to get the "Price Tag" in Naira for the frontend ---
+
+app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), async (req, res) => {
+  try {
+    await connectToDatabase();
+        const userId = req.user.id;
+        const { firstName, lastName, phone, dob, gender, city, state } = req.body;
+    let updateFields = {
+      firstName, lastName, phone, dob, gender, city, state };
+    if (req.file) {
+      try {
+        const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+        updateFields.photoUrl = base64Image; 
+      } catch (uploadErr) {
+        console.error("Storage upload failed:", uploadErr);
+        return res.status(500).json({ success: false, message: "Failed to process image upload" });
+      }
+    }
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateFields },
+      { new: true, runValidators: true } // Returns the newly modified document
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    let signedPhotoUrl = updatedUser.photoUrl || null;
+    if (!signedPhotoUrl) {
+      signedPhotoUrl = `https://ui-avatars.com/api/?name=${updatedUser.firstName || 'User'}+${updatedUser.lastName || ''}&background=0D1117&color=fff&size=128`;
+    }
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+      user: {
+        ...updatedUser.toObject(),
+        photoUrl: signedPhotoUrl
+      }
+    });
+
+  } catch (err) {
+    console.error("Profile Update Error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+}); 
 app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
   const { planPrice } = req.params;
   const FIXED_RATE = Number(process.env.USD_TO_NGN_RATE);
