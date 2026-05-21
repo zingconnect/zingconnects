@@ -26,30 +26,37 @@ export const UserProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  useEffect(() => {
+ useEffect(() => {
     const fetchUserData = async () => {
       const token = localStorage.getItem('userToken');
+      if (!token) {
+        console.error("No token found. User might not be logged in.");
+        setLoading(false);
+        return;
+      }
       try {
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const result = await res.json();
-        if (result.success) {
+        
+        if (res.ok && result.success) {
           setUserData(result.user);
+        } else {
+          console.error("API Error:", result.message || "Failed to fetch user");
         }
       } catch (err) {
-        console.error("Failed to fetch profile:", err);
+        console.error("Network or parsing error:", err);
       } finally {
         setLoading(false);
       }
     };
-    
-    if (!userData) {
+        if (!userData || Object.keys(userData).length === 0) {
       fetchUserData();
     } else {
       setLoading(false);
     }
-  }, [userData, setUserData]);
+  }, [userData]);
   
   useEffect(() => {
     if (userData) {
