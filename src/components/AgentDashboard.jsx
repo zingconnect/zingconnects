@@ -13,6 +13,7 @@ import {
   BsTelephoneFill, BsTelephoneXFill, BsMicMuteFill, BsXLg, BsGearFill, BsPlusLg, BsPlus, BsSend, BsSendFill, BsPaperclip,
   BsCameraFill  
 } from 'react-icons/bs';
+import { useAgentCall } from '../context/AgentCallContext';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -36,18 +37,14 @@ export const AgentDashboard = () => {
   const localAudioRef = useRef(null);
   const scrollRef = useRef(null);
   const userStreamRef = useRef(null);
-  const peerConnectedRef = useRef(false);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
-  const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
-  const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing
   const lastNotifiedId = useRef(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const timerRef = useRef(null);
   const isTransitioningRef = useRef(false);
   const pollingIntervalRef = useRef(null);
-  const activeCallRef = useRef(null);
-  const activeCallerRef = useRef(null);
+
   const pollingRef = useRef(null); 
   const aiMediaRecorderRef = useRef(null);
 
@@ -70,19 +67,10 @@ export const AgentDashboard = () => {
   const [isDualLoginConflict, setIsDualLoginConflict] = useState(false);
   const [holdTimer, setHoldTimer] = useState(null);
   const [showUserModal, setShowUserModal] = useState(false);
-  const [showFullScreenCall, setShowFullScreenCall] = useState(false);
   const [localStream, setLocalStream] = useState(null);
-  const [lkToken, setLkToken] = useState(null);
   const [isEnding, setIsEnding] = useState(false);
 
-  const [activeCall, setActiveCall] = useState(null);
-  const [callStatus, setCallStatus] = useState('idle'); 
-  const [isIncomingCall, setIsIncomingCall] = useState(false);
-  const [activeCaller, setActiveCaller] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-  const [callTime, setCallTime] = useState(0);
-
+ 
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
@@ -1876,169 +1864,6 @@ return (
       </LiveKitRoom>
     )}
 
-    {/* B. IN-CHAT STATUS BAR */}
-    {/* Displays mini-status controls once actively connecting or connected. */}
-    {/* ✅ FIX: Stays hidden during 'calling' and 'ringing' states to avoid overlay mismatches */}
-    {!showFullScreenCall && !['calling', 'ringing'].includes(callStatus) && (
-      <div className="absolute top-0 left-0 w-full z-[150] animate-in slide-in-from-top duration-300">
-        <div className={`h-[55px] md:h-[65px] flex items-center justify-between px-6 shadow-lg backdrop-blur-md transition-all duration-300 ${
-          callStatus === 'connected' ? 'bg-green-500/95 text-white' : 'bg-blue-600/95 text-white'
-        }`}>
-          <div className="flex items-center gap-3">
-            <div className="flex gap-1">
-              <span className="w-1.5 h-1.5 bg-white rounded-full animate-bounce" />
-              <span className="w-1.5 h-1.5 bg-white rounded-full animate-bounce [animation-delay:0.2s]" />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black uppercase tracking-[0.15em] leading-none">
-                {callStatus === 'connected' ? 'Secure Link Established' : 'Establishing Secure Link...'}
-              </span>
-              {callStatus === 'connected' && (
-                <div className="flex items-center gap-1.5 mt-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${isVoiceConversionActive ? 'bg-green-400 animate-pulse' : 'bg-blue-300 opacity-60'}`} />
-                  <span className="text-[8px] font-black uppercase tracking-tighter opacity-90">
-                    {isVoiceConversionActive ? 'AI Masking Active' : 'Natural Voice Mode'}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <div className="flex flex-col items-end mr-2">
-              <span className="text-xs font-mono font-bold">
-                {callStatus === 'connected' ? formatTime(callTime) : 'SECURE...'}
-              </span>
-            </div>
-            <button
-              onClick={() => setShowFullScreenCall(true)}
-              className="text-[9px] font-black border border-white/40 px-3 py-1.5 rounded-lg hover:bg-white/20 transition-all active:scale-95 uppercase tracking-widest"
-            >
-              Expand
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-
-
-    {/* C. FULLSCREEN OVERLAY */}
-    {/* Forces itself into view instantly if callStatus is 'ringing' or if expanded manually */}
-    {(showFullScreenCall || callStatus === 'ringing') && (
-      <div className="fixed inset-0 z-[40000] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white animate-in fade-in zoom-in duration-300">
-        <div className="flex flex-col items-center space-y-10 relative w-full max-w-lg">
-          
-          {/* Prevent agents from minimizing the modal overlay while an active call is ringing */}
-          {callStatus !== 'ringing' && (
-            <button
-              onClick={() => setShowFullScreenCall(false)}
-              className="absolute -top-16 right-8 p-3 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 group active:scale-95 transition-all"
-            >
-              <BsChevronDown className="text-white/50 group-hover:text-white" size={20} />
-            </button>
-          )}
-          
-          {/* Caller Avatar */}
-          <div className="w-44 h-44 rounded-[3rem] border-4 border-blue-500/20 p-1 relative shadow-2xl">
-            <img
-              src={isIncomingCall ? activeCaller?.photoUrl : (selectedUser?.photoUrl || "/default-avatar.png")}
-              className="w-full h-full rounded-[2.8rem] object-cover"
-              alt="Caller"
-              onError={(e) => {
-                e.currentTarget.onerror = null;
-                const displayName = isIncomingCall ? activeCaller?.fromName : selectedUser?.firstName;
-                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName || "User")}&background=0D1117&color=fff`;
-              }}
-            />
-            {callStatus !== 'connected' && (
-              <div className="absolute inset-0 w-full h-full bg-blue-500 rounded-[2.8rem] animate-ping opacity-20"></div>
-            )}
-          </div>
-
-          <div className="text-center px-6">
-            <h2 className="text-3xl md:text-4xl font-black tracking-tighter mb-2">
-              {isIncomingCall ? (activeCaller?.fromName || "Incoming Call") : (selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : "Secure Line")}
-            </h2>
-            
-            {/* Status Section */}
-            <div className="flex flex-col items-center gap-4 mt-6">
-              <p className="text-blue-400 font-black uppercase tracking-[0.5em] text-[10px] animate-pulse">
-                {callStatus === 'ringing' 
-                  ? "Incoming Secure Call..." 
-                  : peerConnected 
-                    ? "Connection Encrypted" 
-                    : "Waiting for User to Accept..."}
-              </p>
-
-              {/* Consolidated Voice Mode Badge */}
-              {callStatus === 'connected' && (
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all duration-500 ${
-                  isVoiceConversionActive 
-                    ? 'bg-green-500/20 border-green-500/40 shadow-[0_0_20px_rgba(34,197,94,0.15)]' 
-                    : 'bg-white/5 border-white/10'
-                }`}>
-                  {isVoiceConversionActive ? (
-                    <>
-                      <div className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                      </div>
-                      <BsShieldLockFill size={12} className="text-green-500" />
-                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-green-400">
-                        AI Voice Masking Active
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <BsMicFill size={12} className="text-blue-400 opacity-80" />
-                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200/70">
-                        Standard Natural Mode
-                      </span>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {callStatus === 'connected' && (
-                <span className="text-white font-mono text-3xl font-light tracking-widest mt-2">{formatTime(callTime)}</span>
-              )}
-            </div>
-          </div>
-
-          {/* Control Buttons */}
-          <div className="flex items-center gap-8 md:gap-12 mt-12">
-            {isIncomingCall && callStatus === 'ringing' ? (
-              <>
-                <button onClick={handleEndCall} className="w-20 h-20 bg-red-500 rounded-2xl flex items-center justify-center shadow-2xl active:scale-90 transition-all z-[40001]">
-                  <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
-                </button>
-                <button onClick={handleAcceptCall} className="w-20 h-20 bg-green-500 rounded-2xl flex items-center justify-center shadow-2xl animate-bounce active:scale-90 transition-all z-[40001]">
-                  <BsTelephoneFill size={32} color="white" />
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => setIsMuted(!isMuted)}
-                  className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all active:scale-90 ${isMuted ? 'bg-red-500 shadow-red-500/20' : 'bg-white/10 hover:bg-white/20'}`}
-                >
-                  {isMuted ? <BsMicMuteFill size={24} color="white" /> : <BsMicFill size={24} color="white" />}
-                </button>
-                <button onClick={handleEndCall} className="w-20 h-20 bg-red-600 rounded-2xl flex items-center justify-center shadow-2xl active:scale-95 transition-all">
-                  <div className="rotate-[135deg]"><BsTelephoneFill size={32} color="white" /></div>
-                </button>
-                <button 
-                  onClick={() => setIsSpeakerOn(!isSpeakerOn)} 
-                  className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all active:scale-90 ${isSpeakerOn ? 'bg-white text-slate-900' : 'bg-white/10 hover:bg-white/20'}`}
-                >
-                  <BsVolumeUpFill size={26} />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    )}
   </>
 )}
     {/* --- CONNECTION STATUS OVERLAY --- */}

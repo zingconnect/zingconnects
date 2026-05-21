@@ -13,8 +13,19 @@ import { UserProfile } from './components/UserProfile';
 import { CallSetting } from './components/CallSetting'; 
 import ZingAdmin from './components/ZingAdmin'; 
 import ZingDashboard from './components/ZingDashboard'; 
+// Context Providers
 import { UserCallProvider } from './context/UserCallContext';
+import { AgentCallProvider } from './context/AgentCallContext'; // <-- ADDED GLOBAL AGENT PROVIDER
 
+// --- AGENT COORD LAYOUT COMPONENT ---
+const AgentLayoutWrapper = () => {
+  return (
+    <AgentCallProvider>
+      {/* Outlet acts as a slot that renders whichever child route is currently active */}
+      <Outlet />
+    </AgentCallProvider>
+  );
+};
 const PWAController = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
