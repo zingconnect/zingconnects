@@ -6,7 +6,6 @@ import {
 import { 
   BsTelephoneFill, BsMicFill, BsMicMuteFill, BsVolumeUpFill, BsShieldLockFill, BsChevronDown 
 } from 'react-icons/bs';
-import { useAgentZingCall } from "../hooks/useAgentZingCall";
 
 const AgentCallContext = createContext(null);
 
@@ -16,15 +15,17 @@ export const useAgentCall = () => {
   return context;
 };
 
+// Global Connection Signalling Socket Singleton
 const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentCallProvider = ({ children }) => {
+  // --- CORE SIGNALING STATE ENGINE ---
   const [callStatus, setCallStatus] = useState('idle'); // idle, dialing, ringing, connected, connecting
   const [isIncomingCall, setIsIncomingCall] = useState(false);
   const [activeCaller, setActiveCaller] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   
-  // --- GLOBAL UI LAYOUT LAYER CONTROLS ---
+  // --- GLOBAL UI LAYOUT CONTROL ---
   const [showFullScreenCall, setShowFullScreenCall] = useState(false);
   
   // --- AUDIO & MODIFIER CONFIGURATIONS ---
@@ -33,19 +34,19 @@ export const AgentCallProvider = ({ children }) => {
   const [isVoiceConversionActive, setIsVoiceConversionActive] = useState(false);
   const [selectedVoiceId, setSelectedVoiceId] = useState("");
   
-  // --- TELEMETRY & CONNECTIVITY STATES ---
+  // --- TELEMETRY & WEBRTC PIPELINE CONFIGS ---
   const [callTime, setCallTime] = useState(0);
   const [peerConnected, setPeerConnected] = useState(false);
   const [lkToken, setLkToken] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
 
-  // --- HARDWARE & RUNTIME TIMEOUT REFS ---
+  // --- HARDWARE & AUDIO PIPELINE REFS ---
   const timerRef = useRef(null);
   const pollingIntervalRef = useRef(null);
-  const ringtoneAudio = useRef(new Audio('/sounds/secure-ringtone.mp3'));
+  const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3'));
   const callingAudio = useRef(new Audio('/sounds/calling.wav'));
 
-  // --- COMPONENT INITIALIZATION SOUND SANITIZATION ---
+  // --- COMPONENT INITIALIZATION AUDIO CLEANUP ---
   useEffect(() => {
     ringtoneAudio.current.loop = true;
     callingAudio.current.loop = true;
@@ -60,7 +61,7 @@ export const AgentCallProvider = ({ children }) => {
     };
   }, []);
 
-  // --- AUTO-EXPAND SYSTEM VIEW ---
+  // --- AUTO-EXPAND VIEWPORTS ON EVENT TRIGGERS ---
   useEffect(() => {
     if (['ringing', 'dialing', 'connecting'].includes(callStatus)) {
       setShowFullScreenCall(true);
@@ -114,7 +115,9 @@ export const AgentCallProvider = ({ children }) => {
     if (targetUserData) setSelectedUser(targetUserData);
     
     try {
-      callingAudio.current.play().catch(e => console.warn("Audio playback deferred:", e));
+      if (callingAudio.current) {
+        callingAudio.current.play().catch(e => console.warn("Audio playback deferred:", e));
+      }
 
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/start`, {
         method: 'POST',
@@ -139,6 +142,11 @@ export const AgentCallProvider = ({ children }) => {
       };
 
       setActiveCall(callMetadata);
+      
+      // Update local context variables for AI Masking configuration visibility
+      if (selectedVoiceId && selectedVoiceId !== "natural") {
+        setIsVoiceConversionActive(true);
+      }
       
       socket.emit("call-user", { 
         userToCall: targetUserId.toString(),
@@ -235,7 +243,7 @@ export const AgentCallProvider = ({ children }) => {
       }
     });
     
-    // Clear State Values
+    // Reset Context States
     setCallStatus('idle');
     setLkToken(null);
     setActiveCall(null);
@@ -243,6 +251,7 @@ export const AgentCallProvider = ({ children }) => {
     setIsIncomingCall(false);
     setShowFullScreenCall(false);
     setPeerConnected(false);
+    setIsVoiceConversionActive(false);
     
     const token = localStorage.getItem('agentToken');
     if (currentCallId && token) {
@@ -257,7 +266,7 @@ export const AgentCallProvider = ({ children }) => {
     }
   }, [activeCall, activeCaller, isIncomingCall, selectedUser]);
 
-  // --- SIGNALLING WIRE LISTENER LINK ---
+  // --- SIGNALLING WIRE LISTENER INTEGRATION ---
   useEffect(() => {
     const onCallIncoming = (data) => {
       console.log('[Global Context] Intercepted incoming call signal:', data);
@@ -278,7 +287,9 @@ export const AgentCallProvider = ({ children }) => {
       setIsIncomingCall(true);
       setCallStatus('ringing');
       
-      ringtoneAudio.current.play().catch(err => console.log("Audio deferred:", err));
+      if (ringtoneAudio.current) {
+        ringtoneAudio.current.play().catch(err => console.log("Audio deferred:", err));
+      }
     };
 
     const onCallAccepted = (data) => {
@@ -299,7 +310,7 @@ export const AgentCallProvider = ({ children }) => {
     };
 
     socket.on('call_incoming', onCallIncoming);
-    socket.on('call-user-incoming', onCallIncoming); // handles multi-route maps
+    socket.on('call-user-incoming', onCallIncoming);
     socket.on('call-accepted', onCallAccepted);
     socket.on('answer-call', onCallAccepted);
     socket.on('end-call', onCallTerminated);
@@ -336,6 +347,8 @@ export const AgentCallProvider = ({ children }) => {
         setIsSpeakerOn,
         isVoiceConversionActive,
         setIsVoiceConversionActive,
+        selectedVoiceId,
+        setSelectedVoiceId,
         callTime,
         peerConnected,
         handleStartCall,
@@ -346,7 +359,7 @@ export const AgentCallProvider = ({ children }) => {
     >
       {children}
 
-      {/* FLOATING HEADER SUBCOMPONENT COMPOSER */}
+      {/* FLOATING HEADER COMPONENT */}
       {!showFullScreenCall && !['idle', 'dialing', 'ringing', 'connecting'].includes(callStatus) && (
         <div className="fixed top-0 left-0 w-full z-[99999] animate-in slide-in-from-top duration-300">
           <div className="h-[55px] md:h-[65px] flex items-center justify-between px-6 shadow-lg backdrop-blur-md transition-all bg-green-500/95 text-white">
@@ -375,11 +388,10 @@ export const AgentCallProvider = ({ children }) => {
         </div>
       )}
 
-      {/* FULLSCREEN CALL OVERLAY CONTROLLER WITH LIVEKIT CORE ROOM WRAPPER */}
+      {/* FULLSCREEN OVERLAY MODAL */}
       {(showFullScreenCall || ['ringing', 'dialing', 'connecting'].includes(callStatus)) && (
         <div className="fixed inset-0 z-[99998] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white animate-in fade-in zoom-in duration-300">
           
-          {/* Inject Dynamic Audio Stream Receiver once LiveKit Token is Issued */}
           {lkToken && (
             <LiveKitRoom
               video={false}
@@ -495,7 +507,7 @@ export const AgentCallProvider = ({ children }) => {
   );
 };
 
-// --- RUNTIME INTERNAL MIC TUNNEL TRACKER ---
+// --- RUNTIME MICROPHONE TRACKER COMPONENT ---
 const LocalMicController = ({ isMuted }) => {
   const { localParticipant } = useLocalParticipant();
   const room = useRoomContext();
