@@ -631,7 +631,7 @@ const handleFinalSend = async () => {
 
   const tempId = Date.now().toString();
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-  const savedFile = previewFile; // Keep a reference for resending
+  const savedFile = previewFile;
   const savedCaption = caption;
   const pendingMedia = {
     _id: tempId,
@@ -639,15 +639,15 @@ const handleFinalSend = async () => {
     senderId: userData._id,
     senderModel: 'User',
     text: savedCaption,
-    fileUrl: previewUrl, // Use the local blob URL for preview
+    fileUrl: previewUrl, 
     fileType: detectedType,
     status: 'sending',
     createdAt: new Date().toISOString(),
     isTemp: true,
-    originalFile: savedFile // Store file in object for resending
+    originalFile: savedFile 
   };
   setMessages(prev => [...prev, pendingMedia]);
-  setPreviewUrl(null); // Close the preview overlay
+  setPreviewUrl(null); 
   setPreviewFile(null);
   setIsUploading(true);
   const token = localStorage.getItem('userToken'); 
