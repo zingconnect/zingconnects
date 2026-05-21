@@ -29,20 +29,21 @@ export const UserCallProvider = ({ children }) => {
     const token = localStorage.getItem('userToken');
     if (!token) return;
 
-    const fetchUserSession = async () => {
-      try {
-        const response = await fetch('/api/users/my-session', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (response.ok) {
-          setAgent(data.agent);
-          setUserData(data.user);
-        }
-      } catch (err) {
-        console.error("Global Context Session fetch error:", err);
-      }
-    };
+   const fetchUserSession = async () => {
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/users/my-session`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    const data = await response.json();
+    if (response.ok) {
+      setAgent(data.agent);
+      setUserData(data.user); // This will now cleanly update globally
+    }
+  } catch (err) {
+    console.error("Global Context Session fetch error:", err);
+  }
+};
 
     fetchUserSession();
     const interval = setInterval(fetchUserSession, 30000);

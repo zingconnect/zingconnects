@@ -26,37 +26,38 @@ export const UserProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
- useEffect(() => {
-    const fetchUserData = async () => {
-      const token = localStorage.getItem('userToken');
-      if (!token) {
-        console.error("No token found. User might not be logged in.");
-        setLoading(false);
-        return;
+useEffect(() => {
+  const fetchUserData = async () => {
+    const token = localStorage.getItem('userToken');
+    if (!token) {
+      console.error("No token found. User might not be logged in.");
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const result = await res.json();
+      
+      if (res.ok && result.success) {
+        setUserData(result.user);
+      } else {
+        console.error("API Error:", result.message || "Failed to fetch user");
       }
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const result = await res.json();
-        
-        if (res.ok && result.success) {
-          setUserData(result.user);
-        } else {
-          console.error("API Error:", result.message || "Failed to fetch user");
-        }
-      } catch (err) {
-        console.error("Network or parsing error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-        if (!userData || Object.keys(userData).length === 0) {
-      fetchUserData();
-    } else {
+    } catch (err) {
+      console.error("Network or parsing error:", err);
+    } finally {
       setLoading(false);
     }
-  }, [userData]);
+  };
+
+  if (!userData || !userData._id) {
+    fetchUserData();
+  } else {
+    setLoading(false);
+  }
+}, [userData, setUserData]); // Added setUserData to dependencies to fulfill standard hooks rules safely
   
   useEffect(() => {
     if (userData) {
