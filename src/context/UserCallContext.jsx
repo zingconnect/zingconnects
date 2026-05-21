@@ -16,7 +16,8 @@ export const UserCallProvider = ({ children }) => {
   const [agent, setAgent] = useState(null);
   const messagesEndRef = useRef(null); // Centralized window scrolling anchor
 
-  // Track broken image URLs in state instead of directly mutating the DOM node inside render loops
+  const ringtoneRef = useRef(null);
+
   const [avatarError, setAvatarError] = useState(false);
 
   // Reset the image error indicator whenever the active agent target switches
@@ -29,29 +30,59 @@ export const UserCallProvider = ({ children }) => {
     const token = localStorage.getItem('userToken');
     if (!token) return;
 
-   const fetchUserSession = async () => {
-  try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/users/my-session`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    const data = await response.json();
-    if (response.ok) {
-      setAgent(data.agent);
-      setUserData(data.user); // This will now cleanly update globally
-    }
-  } catch (err) {
-    console.error("Global Context Session fetch error:", err);
-  }
-};
+    const fetchUserSession = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/users/my-session`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        const data = await response.json();
+        if (response.ok) {
+          setAgent(data.agent);
+          setUserData(data.user); // This will now cleanly update globally
+        }
+      } catch (err) {
+        console.error("Global Context Session fetch error:", err);
+      }
+    };
 
     fetchUserSession();
     const interval = setInterval(fetchUserSession, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  // 2. Consume core calling engine states using current synchronized references
   const callEngine = useUserZingCall(socket, userData, agent, messagesEndRef);
+
+  useEffect(() => {
+    const isIncoming = callEngine.callStatus !== 'idle' && callEngine.isIncomingCall;
+
+    if (isIncoming) {
+      // Lazy-initialize the audio instance only on the first ring event match
+      if (!ringtoneRef.current) {
+        // UPDATE THIS PATH RIGHT HERE:
+        ringtoneRef.current = new Audio('/sounds/calling.wav'); 
+        ringtoneRef.current.loop = true;
+      }
+
+      // Safeguard against browser-side autoplay security policy blocks
+      ringtoneRef.current.play().catch(err => {
+        console.warn("Ringtone playback temporarily restricted until user interacts with layout:", err);
+      });
+    } else {
+      // Instantly kill and reset the audio timeline if the call state leaves the incoming loop
+      if (ringtoneRef.current) {
+        ringtoneRef.current.pause();
+        ringtoneRef.current.currentTime = 0;
+      }
+    }
+
+    // Context tree cleanup detachment sweep
+    return () => {
+      if (ringtoneRef.current) {
+        ringtoneRef.current.pause();
+      }
+    };
+  }, [callEngine.callStatus, callEngine.isIncomingCall]);
 
   // Determine a safe string resource target for avatars ahead of execution
   const finalAvatarUrl = avatarError || !agent?.photoUrl ? '/default-avatar.png' : agent.photoUrl;
@@ -60,7 +91,7 @@ export const UserCallProvider = ({ children }) => {
     <UserCallContext.Provider value={{ ...callEngine, socket, userData, agent, setUserData, setAgent, messagesEndRef }}>
       {children}
       
-      {/* 3. GLOBAL CALL HUD: Overlays over any route rendered underneath */}
+      {/* 4. GLOBAL CALL HUD: Overlays over any route rendered underneath */}
       {callEngine.callStatus !== 'idle' && callEngine.isIncomingCall && (
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
           <div className="text-center space-y-5 max-w-sm px-6 w-full">
@@ -104,7 +135,7 @@ export const UserCallProvider = ({ children }) => {
         </div>
       )}
 
-      {/* 4. ACTIVE LINE CALL SCREEN HUD */}
+      {/* 5. ACTIVE LINE CALL SCREEN HUD */}
       {callEngine.callStatus !== 'idle' && callEngine.showFullScreenCall && !callEngine.isIncomingCall && (
         <div className="fixed inset-0 z-[9998] bg-[#0b141a] text-white flex flex-col justify-between py-16 px-6 animate-in fade-in duration-300">
           <div className="text-center space-y-2 mt-8">
