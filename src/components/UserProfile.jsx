@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BsChevronLeft, BsCameraFill, BsShieldCheck, BsPencilSquare, BsCheckLg } from 'react-icons/bs';
-import { useGlobalCall } from '../context/UserCallContext'; // 🚀 IMPORT THE ENGINE
+import { useGlobalCall } from '../context/UserCallContext'; 
 
 export const UserProfile = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   
-  // Consume data instantly from our global context pipeline
   const { userData, setUserData } = useGlobalCall(); 
   
   const [loading, setLoading] = useState(!userData);
@@ -15,18 +14,45 @@ export const UserProfile = () => {
   const [isUpdating, setIsUpdating] = useState(false);
 
   const [formData, setFormData] = useState({
-    firstName: userData?.firstName || '',
-    lastName: userData?.lastName || '',
-    phone: userData?.phone || '',
-    dob: userData?.dob || '',
-    gender: userData?.gender || '',
-    city: userData?.city || '',
-    state: userData?.state || ''
+    firstName: '',
+    lastName: '',
+    phone: '',
+    dob: '',
+    gender: '',
+    city: '',
+    state: ''
   });
+  
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // Sync state if global polling fetches new user records in the background
+  // 1. Fetch data from backend and sync to context
+  useEffect(() => {
+    const fetchUserData = async () => {
+      const token = localStorage.getItem('userToken');
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const result = await res.json();
+        if (result.success) {
+          setUserData(result.user); // Syncs to Context
+        }
+      } catch (err) {
+        console.error("Failed to fetch profile:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    if (!userData) {
+      fetchUserData();
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  // 2. Sync context data to local form state
   useEffect(() => {
     if (userData) {
       setFormData({
@@ -38,21 +64,12 @@ export const UserProfile = () => {
         city: userData.city || '',
         state: userData.state || ''
       });
-      setLoading(false);
     }
   }, [userData]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setSelectedFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
-    }
   };
 
   const handleUpdate = async () => {
@@ -72,12 +89,9 @@ export const UserProfile = () => {
 
       if (res.ok) {
         const result = await res.json();
-        setUserData(result.user); // Sync back to global context
+        setUserData(result.user); // Update context
         setIsEditing(false);
-        setSelectedFile(null);
         alert("Profile updated successfully!");
-      } else {
-        alert("Failed to update profile.");
       }
     } catch (err) {
       console.error("Update error:", err);
@@ -86,7 +100,7 @@ export const UserProfile = () => {
     }
   };
 
-  if (loading) return <div className="flex h-screen items-center justify-center bg-white">Loading...</div>;
+if (!userData) return <div className="flex h-screen items-center justify-center">Loading...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
