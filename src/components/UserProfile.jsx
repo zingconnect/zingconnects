@@ -7,6 +7,7 @@ export const UserProfile = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   
+  // Consume data from global context
   const { userData, setUserData } = useGlobalCall(); 
   
   const [loading, setLoading] = useState(!userData);
@@ -26,7 +27,7 @@ export const UserProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // 1. Fetch data from backend and sync to context
+  // 1. Fetch data from backend and sync to context if not present
   useEffect(() => {
     const fetchUserData = async () => {
       const token = localStorage.getItem('userToken');
@@ -36,7 +37,7 @@ export const UserProfile = () => {
         });
         const result = await res.json();
         if (result.success) {
-          setUserData(result.user); // Syncs to Context
+          setUserData(result.user);
         }
       } catch (err) {
         console.error("Failed to fetch profile:", err);
@@ -50,7 +51,7 @@ export const UserProfile = () => {
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [userData, setUserData]);
 
   // 2. Sync context data to local form state
   useEffect(() => {
@@ -72,6 +73,14 @@ export const UserProfile = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
   const handleUpdate = async () => {
     setIsUpdating(true);
     const token = localStorage.getItem('userToken');
@@ -91,7 +100,10 @@ export const UserProfile = () => {
         const result = await res.json();
         setUserData(result.user); // Update context
         setIsEditing(false);
+        setSelectedFile(null);
         alert("Profile updated successfully!");
+      } else {
+        alert("Failed to update profile.");
       }
     } catch (err) {
       console.error("Update error:", err);
@@ -100,7 +112,7 @@ export const UserProfile = () => {
     }
   };
 
-if (!userData) return <div className="flex h-screen items-center justify-center">Loading...</div>;
+  if (loading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
