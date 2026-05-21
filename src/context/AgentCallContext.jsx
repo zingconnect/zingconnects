@@ -6,8 +6,7 @@ import {
 import { 
   BsTelephoneFill, BsMicFill, BsMicMuteFill, BsVolumeUpFill, BsShieldLockFill, BsChevronDown 
 } from 'react-icons/bs';
-import { useUserZingCall } from '../hooks/useAgentZingCall';
-
+import { useAgentZingCall } from "../hooks/useAgentZingCall";
 
 const AgentCallContext = createContext(null);
 
@@ -17,11 +16,9 @@ export const useAgentCall = () => {
   return context;
 };
 
-// Singleton socket connection
 const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentCallProvider = ({ children }) => {
-  // --- CORE SYSTEM STATES ---
   const [callStatus, setCallStatus] = useState('idle'); // idle, dialing, ringing, connected, connecting
   const [isIncomingCall, setIsIncomingCall] = useState(false);
   const [activeCaller, setActiveCaller] = useState(null);
