@@ -53,20 +53,21 @@ export const UserProfile = () => {
     }
   }, [userData, setUserData]);
 
-  // 2. Sync context data to local form state
   useEffect(() => {
-    if (userData) {
-      setFormData({
-        firstName: userData.firstName || '',
-        lastName: userData.lastName || '',
-        phone: userData.phone || '',
-        dob: userData.dob || '',
-        gender: userData.gender || '',
-        city: userData.city || '',
-        state: userData.state || ''
-      });
-    }
-  }, [userData]);
+  console.log("Current userData in Profile:", userData); // <--- ADD THIS LINE
+  
+  if (userData) {
+    setFormData({
+      firstName: userData.firstName || userData.first_name || '', 
+      lastName: userData.lastName || userData.last_name || '',
+      phone: userData.phone || '',
+      dob: userData.dob || '',
+      gender: userData.gender || '',
+      city: userData.city || '',
+      state: userData.state || ''
+    });
+  }
+}, [userData]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
