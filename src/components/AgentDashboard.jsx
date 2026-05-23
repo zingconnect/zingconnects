@@ -19,36 +19,14 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
-
-// Singleton socket instance prevents re-initialization on component changes
 const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   
-  const {
-    callStatus,
-    setCallStatus,
-    isIncomingCall,
-    activeCaller,
-    activeCall,
-    selectedUser,
-    setSelectedUser,
-    isMuted,
-    setIsMuted,
-    isSpeakerOn,
-    setIsSpeakerOn,
-    isVoiceConversionActive,
-    setIsVoiceConversionActive,
-    selectedVoiceId,
-    setSelectedVoiceId,
-    callTime,
-    peerConnected,
-    handleStartCall,   // Handled globally by AgentCallContext
-    handleAcceptCall,  // Handled globally by AgentCallContext
-    handleEndCall,     // Handled globally by AgentCallContext
-    formatTime,
-  } = useAgentCall();
+  const { callStatus, setCallStatus, isIncomingCall, activeCaller, activeCall, selectedUser, setSelectedUser, isMuted, setIsMuted,
+    isSpeakerOn, setIsSpeakerOn, isVoiceConversionActive, setIsVoiceConversionActive, selectedVoiceId, setSelectedVoiceId, callTime,
+    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime,  } = useAgentCall();
 
   // --- REFS ---
   const messagesEndRef = useRef(null);
@@ -80,6 +58,8 @@ export const AgentDashboard = () => {
   const [showUserModal, setShowUserModal] = useState(false);
   const [localStream, setLocalStream] = useState(null);
   const [isEnding, setIsEnding] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [isFetchingOlder, setIsFetchingOlder] = useState(false);
 
   // --- SUBSCRIPTION tier STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -256,15 +236,12 @@ export const AgentDashboard = () => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
-
-  // --- DASHBOARD CORE SYSTEM SOCKET ROOMS ---
   useEffect(() => {
     if (!socket || !agentData?._id) return;
     const myRoomId = agentData._id.toString();
     socket.emit("join-main-room", myRoomId);
   }, [agentData?._id, socket]);
 
-  // --- OUTBOUND/INBOUND STATUS SYNC ENGINES ---
   useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
     const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
@@ -459,7 +436,6 @@ export const AgentDashboard = () => {
     };
   }, [navigate]);
 
-  // --- BILLING: FLUTTERWAVE NGN GATEWAY ROUTER ---
   const handlePayment = async () => {
     if (!agentData || !agentData.email) {
       alert("Profile data is still loading. Please wait a moment or refresh.");
@@ -474,10 +450,8 @@ export const AgentDashboard = () => {
       setPaymentProcessing(false);
       return;
     }
-
     try {
       const finalNairaAmount = Number(activePlan.price.replace(/,/g, ''));
-
       window.FlutterwaveCheckout({
         public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
         tx_ref: `ZING-${Date.now()}`,
@@ -610,7 +584,6 @@ export const AgentDashboard = () => {
     }
   };
 
-  // --- CLOUD ARCHITECTURE: S3 DIRECT SINGLE-URL UPLOADS ---
   const handleFinalSend = async () => {
     if (!previewFile || isUploading || !selectedUser) return;
     setIsUploading(true);
@@ -666,49 +639,93 @@ export const AgentDashboard = () => {
     window.location.href = currentSlug ? `/${currentSlug}` : '/';
   };
 
-  // --- DYNAMIC USER ROUTING & REAL-TIME SOCKET ROOM PIPELINES ---
-  const handleSelectUser = async (user) => {
-    if (window.innerWidth < 1024) setShowSidebar(false);
-    
-    setMessages([]); 
-    setIsInitialLoad(true); 
-    setSelectedUser(user);
-    setLimit(30);
-    if (socket) socket.emit('join-chat', user._id); 
+const handleScroll = async () => {
+  const container = scrollRef.current;
+  if (!container || isFetchingOlder || !hasMore || !selectedUser || messages.length === 0) return;
+  const absScrollTop = Math.abs(container.scrollTop);
+  const scrollThreshold = container.scrollHeight - container.clientHeight - 100;
 
+  if (absScrollTop >= scrollThreshold) {
+    setIsFetchingOlder(true);
+        const previousScrollHeight = container.scrollHeight;
     try {
       const token = localStorage.getItem('agentToken');
-      if (!token) return;
-
-      const response = await fetch(`/api/messages/${user._id}?limit=30`, {
+      const oldestMessageId = messages[0]._id || messages[0].id;
+      
+      if (!oldestMessageId) {
+        setIsFetchingOlder(false);
+        return;
+      }
+      const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&beforeId=${oldestMessageId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-
       if (response.ok) {
-        setConnectionStatus('connected');
         const data = await response.json();
         
         if (data.success && Array.isArray(data.messages)) {
-          setMessages(data.messages);
+          setHasMore(data.hasMore);
+
+          if (data.messages.length > 0) {
+            setMessages(prev => [...data.messages, ...prev]);
+            setTimeout(() => {
+              if (container) {
+                const heightDifference = container.scrollHeight - previousScrollHeight;
+                container.scrollTop -= heightDifference;
+              }
+            }, 0);
+          }
         }
-        fetch(`/api/messages/mark-read/${user._id}`, {
-          method: 'PATCH',
-          headers: { 'Authorization': `Bearer ${token}` }
-        }).catch(err => console.error("Mark read background error:", err));
-        
-      } else {
-        setConnectionStatus('connecting');
       }
     } catch (err) {
-      setConnectionStatus('connecting');
-      console.error("Failed to load chat history:", err);
+      console.error("ZingConnect Cursor Pagination Failure:", err);
+    } finally {
+      setIsFetchingOlder(false);
     }
-  };
+  }
+};
+const handleSelectUser = async (user) => {
+  if (window.innerWidth < 1024) setShowSidebar(false);
+    setMessages([]); 
+  setIsInitialLoad(true); 
+  setSelectedUser(user);
+  setLimit(30);
+  setHasMore(true); 
+  setIsFetchingOlder(false);
+
+  if (socket) socket.emit('join-chat', user._id); 
+
+  try {
+    const token = localStorage.getItem('agentToken');
+    if (!token) return;
+    const response = await fetch(`/api/messages/${user._id}?limit=30`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (response.ok) {
+      setConnectionStatus('connected');
+      const data = await response.json();
+      
+      if (data.success && Array.isArray(data.messages)) {
+        setMessages(data.messages);
+         setHasMore(data.hasMore);
+      }
+            fetch(`/api/messages/mark-read/${user._id}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(err => console.error("Mark read background error:", err));
+      
+    } else {
+      setConnectionStatus('connecting');
+    }
+  } catch (err) {
+    setConnectionStatus('connecting');
+    console.error("Failed to load chat history:", err);
+  }
+};
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const userIdFromUrl = params.get('userId');
-    
     if (userIdFromUrl && users.length > 0) {
       const userToSelect = users.find(u => u._id === userIdFromUrl);
       if (userToSelect) {
@@ -722,27 +739,21 @@ export const AgentDashboard = () => {
     setIsInitialLoad(true);
   }, [selectedUser?._id]);
 
-  // --- INTEGRATED INTERCEPTORS FOR INCOMING MESSAGE DISPATCHING ---
   useEffect(() => {
     if (!socket) return;
     if ("Notification" in window && Notification.permission === "default") {
       Notification.permission === 'default' && Notification.requestPermission();
     }
-
     const handleIncomingMessage = (data) => {
       console.log("📥 Real-time Socket Message Detected:", data);
-
       if (data._id && data._id === lastNotifiedId.current) return;
       lastNotifiedId.current = data._id;
-
       const isChattingWithSender = selectedUser && (data.senderId === selectedUser._id || data.senderId === selectedUser.id);
-      
       if (isChattingWithSender) {
         setMessages((prev) => {
           if (prev.some(m => m._id === data._id)) return prev;
           return [...prev, data];
         });
-
         const token = localStorage.getItem('agentToken');
         fetch(`/api/messages/mark-read/${selectedUser._id}`, {
           method: 'PATCH',
@@ -756,7 +767,6 @@ export const AgentDashboard = () => {
             console.warn("🔊 Notification audio context restricted:", err.message)
           );
         }
-        
         if ('vibrate' in navigator) {
           navigator.vibrate([200, 100, 200]); 
         }
@@ -1089,281 +1099,278 @@ export const AgentDashboard = () => {
       </aside>
 
 {/* --- MAIN CHAT INTERFACE --- */}
-      <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
-        {selectedUser ? (
-          <>
-            <header className="h-[75px] bg-card-bg px-4 flex justify-between items-center z-30 shadow-sm border-b border-gray-100 relative">
-              <div className="flex items-center gap-3 min-w-0">
-                <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
-                  <BsChevronLeft size={16} />
-                </button>
-                
-                <div onClick={() => setShowUserModal(true)} className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-slate-100 cursor-pointer hover:ring-2 hover:ring-blue-500/30 transition-all shrink-0">
-                  <img
-                    src={selectedUser.photoUrl}
-                    className="w-full h-full object-cover"
-                    alt="Profile"
-                    onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
-                  />
-                </div>
+<main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
+  {selectedUser ? (
+    <>
+      <header className="h-[75px] bg-card-bg px-4 flex justify-between items-center z-30 shadow-sm border-b border-gray-100 relative">
+        <div className="flex items-center gap-3 min-w-0">
+          <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+            <BsChevronLeft size={16} />
+          </button>
+          
+          <div onClick={() => setShowUserModal(true)} className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-slate-100 cursor-pointer hover:ring-2 hover:ring-blue-500/30 transition-all shrink-0">
+            <img
+              src={selectedUser.photoUrl}
+              className="w-full h-full object-cover"
+              alt="Profile"
+              onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
+            />
+          </div>
 
-                <div className="cursor-pointer min-w-0" onClick={() => setShowUserModal(true)}>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-bold text-text-main truncate leading-tight">
-                      {selectedUser.firstName} {selectedUser.lastName}
-                    </h2>
-                    <span className={`flex items-center gap-1 text-[9px] font-black uppercase shrink-0 ${
-                      selectedUser.status === 'online' || selectedUser.isOnline ? 'text-green-500' : 'text-gray-400'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        selectedUser.status === 'online' || selectedUser.isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
-                      }`} />
-                      {selectedUser.status === 'online' || selectedUser.isOnline ? 'Online' : 'Offline'}
+          <div className="cursor-pointer min-w-0" onClick={() => setShowUserModal(true)}>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-text-main truncate leading-tight">
+                {selectedUser.firstName} {selectedUser.lastName}
+              </h2>
+              <span className={`flex items-center gap-1 text-[9px] font-black uppercase shrink-0 ${
+                selectedUser.status === 'online' || selectedUser.isOnline ? 'text-green-500' : 'text-gray-400'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  selectedUser.status === 'online' || selectedUser.isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
+                }`} />
+                {selectedUser.status === 'online' || selectedUser.isOnline ? 'Online' : 'Offline'}
+              </span>
+            </div>
+            
+            {selectedUser.status === 'online' || selectedUser.isOnline ? (
+              <p className="text-[11px] font-medium text-gray-500 truncate leading-tight mt-0.5">
+                {selectedUser.email}
+              </p>
+            ) : (
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5">
+                Last seen: {selectedUser.lastSeen ? new Date(selectedUser.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 text-gray-400 shrink-0">
+          <button onClick={() => handleStartCall(selectedUser._id)} className="text-gray-500 hover:text-green-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Start Secure Call">
+            <BsTelephoneFill size={16} /> 
+          </button>
+          <button onClick={() => navigate('/agent/call-settings')} className="text-gray-500 hover:text-blue-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Call Settings"> 
+            <BsGearFill size={18} />
+          </button>
+        </div>
+      </header>
+
+    
+      <div 
+        ref={scrollRef} 
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col-reverse bg-page-bg dark:bg-slate-950/50"
+      >
+        {/* Scroll Anchor element sits perfectly at bottom of log sequence */}
+        <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
+        
+        {/* Render normal stream flow */}
+        {messages.slice().reverse().map((m) => {
+          const isMe = m.senderId === agentData?._id;
+          const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
+
+          {/* CALL LOG MESSAGE CONDITIONAL RENDERING */}
+          if (m.fileType === 'call_log' && m.callMetadata) {
+            const isMissed = m.callMetadata.status === 'missed';
+            return (
+              <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-1 animate-in fade-in duration-300`}>
+                <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-sm border max-w-[80%] ${
+                  isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none'
+                } dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
+                  <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                    {isMissed ? <BsTelephoneXFill size={14} /> : <BsTelephoneOutboundFill size={14} />}
+                  </div>
+                  <div className="flex flex-col">
+                    <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
+                      {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
+                    </p>
+                    <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
+                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
-                  
-                  {selectedUser.status === 'online' || selectedUser.isOnline ? (
-                    <p className="text-[11px] font-medium text-gray-500 truncate leading-tight mt-0.5">
-                      {selectedUser.email}
-                    </p>
-                  ) : (
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5">
-                      Last seen: {selectedUser.lastSeen ? new Date(selectedUser.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
-                    </p>
-                  )}
                 </div>
               </div>
+            );
+          }
 
-              <div className="flex items-center gap-4 text-gray-400 shrink-0">
-                <button onClick={() => handleStartCall(selectedUser._id)} className="text-gray-500 hover:text-green-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Start Secure Call">
-                  <BsTelephoneFill size={16} /> 
-                </button>
-                <button onClick={() => navigate('/agent/call-settings')} className="text-gray-500 hover:text-blue-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Call Settings"> 
-                  <BsGearFill size={18} />
-                </button>
-              </div>
-            </header>
-
-            {/* --- MESSAGES AREA --- */}
-            {/* Added flex-col-reverse layout strategy for robust upward pagination loading */}
-            <div 
-              ref={scrollRef} 
-              className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col-reverse bg-page-bg dark:bg-slate-950/50"
+          {/* TEXT OR ATTACHMENT MESSAGE STANDARD RENDERING */}
+          return (
+            <div
+              key={msgKey}
+              onMouseDown={() => isMe && startHold(m._id)}
+              onMouseUp={stopHold}
+              className={`max-w-[85%] md:max-w-[65%] px-3.5 py-2 rounded-xl shadow-sm relative flex flex-col ${
+                isMe 
+                  ? 'bg-green-600 text-white self-end rounded-tr-none' 
+                  : 'bg-card-bg text-text-main border border-gray-100 dark:border-slate-800 self-start rounded-tl-none'
+              } mb-1`}
             >
-              {/* Scroll Anchor element must sit at the top of the container layout block under flex-col-reverse */}
-              <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
-              
-              {/* Array mapped chronologically through safe reverse cloning */}
-              {messages.slice().reverse().map((m) => {
-                const isMe = m.senderId === agentData?._id;
-                const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
-
-                {/* CALL LOG MESSAGE CONDITIONAL RENDERING */}
-                if (m.fileType === 'call_log' && m.callMetadata) {
-                  const isMissed = m.callMetadata.status === 'missed';
-                  return (
-                    <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-1 animate-in fade-in duration-300`}>
-                      <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-sm border max-w-[80%] ${
-                        isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none'
-                      } dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
-                        <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-                          {isMissed ? <BsTelephoneXFill size={14} /> : <BsTelephoneOutboundFill size={14} />}
-                        </div>
-                        <div className="flex flex-col">
-                          <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
-                            {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
-                          </p>
-                          <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
-                            {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
+              {(m.fileType === 'image' || m.fileType === 'video') && (
+                <div className="relative mb-2 mt-0.5 group rounded-lg overflow-hidden border border-black/5">
+                  {m.fileType === 'image' ? (
+                    <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95 max-h-72 transition-opacity" alt="attachment" />
+                  ) : (
+                    <div className="relative max-h-72 overflow-hidden bg-black flex items-center">
+                      <video className="w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
+                        <source src={m.fileUrl} type="video/mp4" />
+                      </video>
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" />
                       </div>
                     </div>
-                  );
-                }
-
-                {/* TEXT OR ATTACHMENT MESSAGE STANDARD RENDERING */}
-                return (
-                  <div
-                    key={msgKey}
-                    onMouseDown={() => isMe && startHold(m._id)}
-                    onMouseUp={stopHold}
-                    className={`max-w-[85%] md:max-w-[65%] px-3.5 py-2 rounded-xl shadow-sm relative flex flex-col ${
-                      isMe 
-                        ? 'bg-green-600 text-white self-end rounded-tr-none' 
-                        : 'bg-card-bg text-text-main border border-gray-100 dark:border-slate-800 self-start rounded-tl-none'
-                    } mb-1`}
-                  >
-                    {(m.fileType === 'image' || m.fileType === 'video') && (
-                      <div className="relative mb-2 mt-0.5 group rounded-lg overflow-hidden border border-black/5">
-                        {m.fileType === 'image' ? (
-                          <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95 max-h-72 transition-opacity" alt="attachment" />
-                        ) : (
-                          <div className="relative max-h-72 overflow-hidden bg-black flex items-center">
-                            <video className="w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
-                              <source src={m.fileUrl} type="video/mp4" />
-                            </video>
-                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                              <BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" />
-                            </div>
-                          </div>
-                        )}
-                        <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={12} /></button>
-                      </div>
+                  )}
+                  <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={12} /></button>
+                </div>
+              )}
+              
+              {m.text && <p className="text-[13px] md:text-[14px] leading-relaxed break-words whitespace-pre-wrap">{m.text}</p>}
+              
+              <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-1">
+                <span className={`text-[8px] font-bold uppercase ${isMe ? 'text-white/80' : 'text-gray-400'}`}>
+                  {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                {isMe && (
+                  <div className="flex items-center ml-1">
+                    {m.status === 'sending' ? (
+                      <div className="w-2.5 h-2.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : m.status === 'failed' ? (
+                      <BsPlusLg className="rotate-45 text-red-300 cursor-pointer" size={10} onClick={() => handleResend(m)} />
+                    ) : (
+                      <BsCheckAll className={m.status === 'seen' ? 'text-blue-300' : 'text-white/60'} size={14} />
                     )}
-                    
-                    {m.text && <p className="text-[13px] md:text-[14px] leading-relaxed break-words whitespace-pre-wrap">{m.text}</p>}
-                    
-                    <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-1">
-                      <span className={`text-[8px] font-bold uppercase ${isMe ? 'text-white/80' : 'text-gray-400'}`}>
-                        {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      {isMe && (
-                        <div className="flex items-center ml-1">
-                          {m.status === 'sending' ? (
-                            <div className="w-2.5 h-2.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          ) : m.status === 'failed' ? (
-                            <BsPlusLg className="rotate-45 text-red-300 cursor-pointer" size={10} onClick={() => handleResend(m)} />
-                          ) : (
-                            <BsCheckAll className={m.status === 'seen' ? 'text-blue-300' : 'text-white/60'} size={14} />
-                          )}
-                        </div>
-                      )}
-                    </div>
                   </div>
-                );
-              })}
+                )}
+              </div>
+            </div>
+          );
+        })}
 
-              {/* Pagination elements are moved into logical alignment position inside reverse order block */}
-              {messages.length >= limit && (
-                <div className="w-full flex justify-center py-4">
-                  <button 
-                    onClick={() => setLimit(prev => prev + 30)} 
-                    className="text-[10px] font-black uppercase text-gray-500 bg-white shadow-sm px-4 py-2 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors z-20 relative"
-                  >
-                    ↑ Load Older Messages
-                  </button>
-                </div>
-              )}
+        {/* 🔄 AUTOMATIC INFINITE FETCH LOADING ELEMENT (Renders at the top due to flex-col-reverse) */}
+        {isFetchingOlder && (
+          <div className="w-full flex justify-center py-2 animate-pulse">
+            <span className="text-[9px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100">
+              Synchronizing past transmissions...
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* --- FOOTER INPUT PANEL --- */}
+      <footer className="min-h-[56px] bg-card-bg px-3 py-2 flex items-center justify-between gap-2 z-10 border-t border-gray-100">
+        <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
+        <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
+        
+        <div className="flex items-center shrink-0 gap-1">
+          <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsPaperclip size={18} /></button>
+          <button onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsCameraFill size={18} /></button>
+        </div>
+
+        <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+          <input 
+            value={newMessage} 
+            onChange={(e) => setNewMessage(e.target.value)} 
+            placeholder="Type secure instruction transmission..." 
+            className="w-full bg-input-bg text-text-main px-4 py-2 rounded-full text-sm outline-none border border-transparent focus:border-gray-200 transition-all shadow-inner placeholder-gray-400" 
+          />
+          <button 
+            type="submit" 
+            disabled={!newMessage.trim() || isUploading} 
+            className={`p-2.5 rounded-full shadow-sm transition-all shrink-0 ${newMessage.trim() && !isUploading ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+          >
+            <BsSend size={14} />
+          </button>
+        </form>
+      </footer>
+    </>
+  ) : (
+    <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50">
+      <div className="p-5 bg-white rounded-3xl shadow-sm border border-gray-100 mb-4 opacity-75">
+        <BsShieldLockFill size={32} className="text-blue-600 animate-pulse" />
+      </div>
+      <h1 className="text-xl font-black uppercase tracking-widest text-slate-800">ZingConnect Terminal</h1>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mt-1">Select an isolated node to monitor peer-to-peer data pipes</p>
+    </div>
+  )}
+
+  {/* --- USER DETAILS MODAL --- */}
+  {showUserModal && selectedUser && (
+    <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
+      <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
+        <div className="px-6 pb-8 flex flex-col items-center">
+          <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-white border-4 border-white shadow-md">
+            <img 
+              src={selectedUser.photoUrl} 
+              className="w-full h-full object-cover" 
+              alt="Profile" 
+              onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
+            />
+          </div>
+          <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
+          <p className="text-[10px] font-bold text-blue-600 uppercase mb-6 tracking-widest">Verified Client Node</p>
+          
+          <div className="w-full space-y-2.5 text-left">
+            <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
+              <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Email Address</p>
+              <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
             </div>
 
-            {/* --- FOOTER INPUT PANEL --- */}
-            <footer className="min-h-[56px] bg-card-bg px-3 py-2 flex items-center justify-between gap-2 z-10 border-t border-gray-100">
-              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
-              <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
-              
-              <div className="flex items-center shrink-0 gap-1">
-                <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsPaperclip size={18} /></button>
-                <button onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsCameraFill size={18} /></button>
-              </div>
+            <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
+              <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Phone Number</p>
+              <p className="text-[11px] font-bold text-slate-700">
+                {selectedUser.phoneNumber || selectedUser.phone || 'No Phone Registered'}
+              </p>
+            </div>
 
-              <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
-                <input 
-                  value={newMessage} 
-                  onChange={(e) => setNewMessage(e.target.value)} 
-                  placeholder="Type secure instruction transmission..." 
-                  className="w-full bg-input-bg text-text-main px-4 py-2 rounded-full text-sm outline-none border border-transparent focus:border-gray-200 transition-all shadow-inner placeholder-gray-400" 
-                />
-                <button 
-                  type="submit" 
-                  disabled={!newMessage.trim() || isUploading} 
-                  className={`p-2.5 rounded-full shadow-sm transition-all shrink-0 ${newMessage.trim() && !isUploading ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-                >
-                  <BsSend size={14} />
-                </button>
-              </form>
-            </footer>
-          </>
+            <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
+              <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Location Details</p>
+              <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
+                {selectedUser.address && <span>{selectedUser.address}<br /></span>}
+                <span className="text-blue-600">
+                  {selectedUser.city || ''}
+                  {selectedUser.city && selectedUser.state ? ', ' : ''}
+                  {selectedUser.state || ''}
+                </span>
+                {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
+              </p>
+            </div>
+          </div>
+          
+          <button 
+            onClick={() => setShowUserModal(false)}
+            className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
+          >
+            Close Profile
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* --- MEDIA PREVIEW OVERLAY --- */}
+  {previewUrl && (
+    <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col animate-in fade-in duration-300">
+      <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white border-b border-white/5">
+        <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-2 hover:bg-white/10 rounded-full transition-colors"><BsXLg size={20} /></button>
+        <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">Media Payload Preview</span>
+        <div className="w-10" />
+      </div>
+      <div className="flex-1 flex items-center justify-center p-4 bg-slate-950">
+        {previewFile?.type.startsWith('video') ? (
+          <video src={previewUrl} controls className="max-w-full max-h-[65vh] rounded-2xl shadow-2xl" />
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50">
-            <div className="p-5 bg-white rounded-3xl shadow-sm border border-gray-100 mb-4 opacity-75">
-              <BsShieldLockFill size={32} className="text-blue-600 animate-pulse" />
-            </div>
-            <h1 className="text-xl font-black uppercase tracking-widest text-slate-800">ZingConnect Terminal</h1>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mt-1">Select an isolated node to monitor peer-to-peer data pipes</p>
-          </div>
+          <img src={previewUrl} className="max-w-full max-h-[65vh] rounded-2xl object-contain shadow-2xl" alt="Preview" />
         )}
-
-        {/* --- USER DETAILS MODAL --- */}
-        {showUserModal && selectedUser && (
-          <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
-            <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
-              <div className="px-6 pb-8 flex flex-col items-center">
-                <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-white border-4 border-white shadow-md">
-                  <img 
-                    src={selectedUser.photoUrl} 
-                    className="w-full h-full object-cover" 
-                    alt="Profile" 
-                    onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
-                  />
-                </div>
-                <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
-                <p className="text-[10px] font-bold text-blue-600 uppercase mb-6 tracking-widest">Verified Client Node</p>
-                
-                <div className="w-full space-y-2.5 text-left">
-                  <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
-                    <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Email Address</p>
-                    <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
-                  </div>
-
-                  <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
-                    <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Phone Number</p>
-                    <p className="text-[11px] font-bold text-slate-700">
-                      {selectedUser.phoneNumber || selectedUser.phone || 'No Phone Registered'}
-                    </p>
-                  </div>
-
-                  <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
-                    <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Location Details</p>
-                    <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
-                      {selectedUser.address && <span>{selectedUser.address}<br /></span>}
-                      <span className="text-blue-600">
-                        {selectedUser.city || ''}
-                        {selectedUser.city && selectedUser.state ? ', ' : ''}
-                        {selectedUser.state || ''}
-                      </span>
-                      {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
-                    </p>
-                  </div>
-                </div>
-                
-                <button 
-                  onClick={() => setShowUserModal(false)}
-                  className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
-                >
-                  Close Profile
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* --- MEDIA PREVIEW OVERLAY --- */}
-        {previewUrl && (
-          <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col animate-in fade-in duration-300">
-            <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white border-b border-white/5">
-              <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-2 hover:bg-white/10 rounded-full transition-colors"><BsXLg size={20} /></button>
-              <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">Media Payload Preview</span>
-              <div className="w-10" />
-            </div>
-            <div className="flex-1 flex items-center justify-center p-4 bg-slate-950">
-              {previewFile?.type.startsWith('video') ? (
-                <video src={previewUrl} controls className="max-w-full max-h-[65vh] rounded-2xl shadow-2xl" />
-              ) : (
-                <img src={previewUrl} className="max-w-full max-h-[65vh] rounded-2xl object-contain shadow-2xl" alt="Preview" />
-              )}
-            </div>
-            <div className="p-6 bg-slate-900 border-t border-white/5">
-              <div className="max-w-4xl mx-auto flex items-center gap-4">
-                <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add transaction caption text description..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-white/20 transition-all" />
-                <button onClick={handleFinalSend} className="w-14 h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center shrink-0 shadow-lg"><BsSend size={20} className="text-white" /></button>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
+      </div>
+      <div className="p-6 bg-slate-900 border-t border-white/5">
+        <div className="max-w-4xl mx-auto flex items-center gap-4">
+          <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add transaction caption text description..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-white/20 transition-all" />
+          <button onClick={handleFinalSend} className="w-14 h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center shrink-0 shadow-lg"><BsSend size={20} className="text-white" /></button>
+        </div>
+      </div>
+    </div>
+  )}
+</main>
     </div>
   );
 };
