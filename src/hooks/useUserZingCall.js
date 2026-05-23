@@ -5,13 +5,13 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   const navigate = useNavigate();
 
   // Core Call States
-  const [callStatus, setCallStatus] = useState('idle');
+  const [callStatus, setCallStatus] = useState('idle'); // idle, calling, ringing, connecting, connected
   const [activeCall, setActiveCall] = useState(null);
   const [activeCaller, setActiveCaller] = useState(null);
   const [isIncomingCall, setIsIncomingCall] = useState(false);
   const [peerConnected, setPeerConnected] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
-  const [liveKitToken, setLiveKitToken] = useState(null);
+  const [lkToken, setLkToken] = useState(null); // Aligned to Context expectations
   
   // Audio Engine Controls
   const [isMuted, setIsMuted] = useState(false);
@@ -40,6 +40,13 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   useEffect(() => { if (callStatusRef) callStatusRef.current = callStatus; }, [callStatus]);
   useEffect(() => { if (activeCallRef) activeCallRef.current = activeCall; }, [activeCall]);
   useEffect(() => { if (peerConnectedRef) peerConnectedRef.current = peerConnected; }, [peerConnected]);
+
+  // Expand Full Screen HUD automatically when call states activate
+  useEffect(() => {
+    if (['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) {
+      setShowFullScreenCall(true);
+    }
+  }, [callStatus]);
 
   // Secure Audio Subsystem Awake Handle
   const unlockAudio = useCallback(() => {
@@ -101,7 +108,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     }
     if (nextStartTimeRef) nextStartTimeRef.current = 0;
 
-    setLiveKitToken(null);
+    setLkToken(null);
     setCallStatus('idle');
     setIsIncomingCall(false);
     setActiveCall(null);
@@ -219,18 +226,19 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         }
       });
 
-      socket.emit("call-agent", { 
-        agentToCall: currentAgentId.toString(),
+      // Signals target workspace agent node terminal
+      socket.emit("call-user", { 
+        userToCall: currentAgentId.toString(),
+        roomName: data.roomName,
         fromId: currentUserId,
         fromName: `${userData?.firstName} ${userData?.lastName}`,
-        photoUrl: fullPhotoUrl,
-        callId: data.roomName
+        photoUrl: fullPhotoUrl
       });
 
       setCallStatus('ringing'); 
 
       setTimeout(() => {
-        if (data.lkToken) setLiveKitToken(data.lkToken); 
+        if (data.lkToken) setLkToken(data.lkToken); 
       }, 500);
   
       startStatusPolling(data.roomName);
@@ -279,7 +287,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
           socket.emit("answer-call", { to: agentId, callId: data.roomName || callId, myId: userData?._id?.toString() });
         }
         setPeerConnected(true);
-        setLiveKitToken(data.lkToken);
+        setLkToken(data.lkToken);
         if (isTransitioningRef) isTransitioningRef.current = false;
         setIsIncomingCall(false);
         setCallStatus('connected');
@@ -357,7 +365,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       console.log("📥 Incoming Secure Call detected:", data.callId);
       const roomName = data.callId || data.roomName;
 
-      // Clean up past reference timeouts before binding a new tracking window
       if (connectionTimeoutRef && connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
       }
@@ -409,26 +416,30 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       if (d.lkToken) {
         if (peerConnectedRef) peerConnectedRef.current = true;
         setPeerConnected(true);
-        setLiveKitToken(d.lkToken);
+        setLkToken(d.lkToken);
         setCallStatus('connected');
       }
     };
   
     socket.on("incoming-call", onIncoming);
+    socket.on("call-user-incoming", onIncoming); // Safe parity listener
     socket.on("call-ended", onRemoteEnd);
     socket.on("end-call", onRemoteEnd);
     socket.on("call-rejected", onRemoteEnd);
     socket.on("answer-call", onAnswerReceived);
+    socket.on("call-accepted", onAnswerReceived); // Safe parity listener
   
     return () => {
       if (connectionTimeoutRef && connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
       }
       socket.off("incoming-call", onIncoming);
+      socket.off("call-user-incoming", onIncoming);
       socket.off("call-ended", onRemoteEnd);
       socket.off("end-call", onRemoteEnd);
       socket.off("call-rejected", onRemoteEnd);
       socket.off("answer-call", onAnswerReceived);
+      socket.off("call-accepted", onAnswerReceived);
     };
   }, [socket, userData?._id, handleEndCall, isEnding]);
 
@@ -549,8 +560,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     return () => { if (timer) clearInterval(timer); };
   }, [callStatus]);
 
-
-
   useEffect(() => {
     if (ringtoneAudio && ringtoneAudio.current) ringtoneAudio.current.loop = true; 
     if (callingAudio && callingAudio.current) callingAudio.current.loop = true;
@@ -571,7 +580,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   }, [callStatus, isIncomingCall]);
 
   return {
-    callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, isIncomingCall, peerConnected, liveKitToken,
+    callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, isIncomingCall, peerConnected, lkToken,
     isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn, callTime, messages, setMessages, hasInteracted, unlockAudio,
     handleStartCall, handleAcceptCall, handleEndCall, handleRejectCall, formatTime, showFullScreenCall, setShowFullScreenCall, ringtoneAudio
   };

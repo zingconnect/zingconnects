@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
+// Bring in LiveKit parts to prevent the "silent connection" track failure
+import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useRoomContext } from '@livekit/components-react';
 
 const UserCallContext = createContext(null);
 
-// Persistent, single-instance socket connection initialized outside component tree rendering bounds
 const socket = io(import.meta.env.VITE_API_URL, {
   autoConnect: true,
   reconnectionAttempts: 5,
@@ -14,18 +15,15 @@ const socket = io(import.meta.env.VITE_API_URL, {
 export const UserCallProvider = ({ children }) => {
   const [userData, setUserData] = useState(null);
   const [agent, setAgent] = useState(null);
-  const messagesEndRef = useRef(null); // Centralized window scrolling anchor
-
+  const messagesEndRef = useRef(null);
   const ringtoneRef = useRef(null);
-
   const [avatarError, setAvatarError] = useState(false);
 
-  // Reset the image error indicator whenever the active agent target switches
   useEffect(() => {
     setAvatarError(false);
   }, [agent?.id, agent?._id]);
 
-  // 1. Unified Session Engine Fetch Core
+  // Session Engine Poller Engine
   useEffect(() => {
     const token = localStorage.getItem('userToken');
     if (!token) return;
@@ -39,7 +37,7 @@ export const UserCallProvider = ({ children }) => {
         const data = await response.json();
         if (response.ok) {
           setAgent(data.agent);
-          setUserData(data.user); // This will now cleanly update globally
+          setUserData(data.user);
         }
       } catch (err) {
         console.error("Global Context Session fetch error:", err);
@@ -53,46 +51,60 @@ export const UserCallProvider = ({ children }) => {
 
   const callEngine = useUserZingCall(socket, userData, agent, messagesEndRef);
 
+  // Sound Engine Lifecycle Rules
   useEffect(() => {
-    const isIncoming = callEngine.callStatus !== 'idle' && callEngine.isIncomingCall;
+    const isIncoming = callEngine.callStatus === 'ringing' || (callEngine.callStatus !== 'idle' && callEngine.isIncomingCall);
 
-    if (isIncoming) {
-      // Lazy-initialize the audio instance only on the first ring event match
+    if (isIncoming && callEngine.callStatus !== 'connected') {
       if (!ringtoneRef.current) {
-        // UPDATE THIS PATH RIGHT HERE:
         ringtoneRef.current = new Audio('/sounds/calling.wav'); 
         ringtoneRef.current.loop = true;
       }
-
-      // Safeguard against browser-side autoplay security policy blocks
       ringtoneRef.current.play().catch(err => {
-        console.warn("Ringtone playback temporarily restricted until user interacts with layout:", err);
+        console.warn("Ringtone playback deferred:", err);
       });
     } else {
-      // Instantly kill and reset the audio timeline if the call state leaves the incoming loop
       if (ringtoneRef.current) {
         ringtoneRef.current.pause();
         ringtoneRef.current.currentTime = 0;
       }
     }
 
-    // Context tree cleanup detachment sweep
     return () => {
-      if (ringtoneRef.current) {
-        ringtoneRef.current.pause();
-      }
+      if (ringtoneRef.current) ringtoneRef.current.pause();
     };
   }, [callEngine.callStatus, callEngine.isIncomingCall]);
 
-  // Determine a safe string resource target for avatars ahead of execution
   const finalAvatarUrl = avatarError || !agent?.photoUrl ? '/default-avatar.png' : agent.photoUrl;
 
   return (
     <UserCallContext.Provider value={{ ...callEngine, socket, userData, agent, setUserData, setAgent, messagesEndRef }}>
       {children}
       
-      {/* 4. GLOBAL CALL HUD: Overlays over any route rendered underneath */}
-      {callEngine.callStatus !== 'idle' && callEngine.isIncomingCall && (
+      {/* LIVEKIT PIPELINE BRIDGING ENGINE */}
+      {callEngine.lkToken && (
+        <LiveKitRoom
+          video={false}
+          audio={true}
+          token={callEngine.lkToken}
+          serverUrl={import.meta.env.VITE_LIVEKIT_URL || "wss://zingconnect-livekit-url"}
+          connect={true}
+          onConnected={() => {
+            console.log("⚡ [User Context] LiveKit Room Bridged Successfully.");
+            if (ringtoneRef.current) {
+              ringtoneRef.current.pause();
+              ringtoneRef.current.currentTime = 0;
+            }
+          }}
+          onDisconnected={() => callEngine.handleEndCall()}
+        >
+          <RoomAudioRenderer />
+          <LocalMicController isMuted={callEngine.isMuted} />
+        </LiveKitRoom>
+      )}
+
+      {/* 4. GLOBAL INCOMING CALL HUD OVERLAY */}
+      {callEngine.callStatus === 'ringing' && callEngine.isIncomingCall && (
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
           <div className="text-center space-y-5 max-w-sm px-6 w-full">
             <div className="relative">
@@ -115,7 +127,6 @@ export const UserCallProvider = ({ children }) => {
             </div>
 
             <div className="flex items-center justify-center gap-10 pt-6">
-              {/* Reject Trigger Button */}
               <button 
                 onClick={callEngine.handleRejectCall}
                 className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center shadow-xl hover:bg-red-700 transition-transform active:scale-90 cursor-pointer"
@@ -123,7 +134,6 @@ export const UserCallProvider = ({ children }) => {
                 <span className="transform rotate-[135deg] text-xl text-white">📞</span>
               </button>
 
-              {/* Accept Trigger Button */}
               <button 
                 onClick={callEngine.handleAcceptCall}
                 className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center shadow-xl hover:bg-green-600 transition-transform active:scale-90 animate-bounce cursor-pointer"
@@ -136,7 +146,7 @@ export const UserCallProvider = ({ children }) => {
       )}
 
       {/* 5. ACTIVE LINE CALL SCREEN HUD */}
-      {callEngine.callStatus !== 'idle' && callEngine.showFullScreenCall && !callEngine.isIncomingCall && (
+      {callEngine.callStatus !== 'idle' && callEngine.callStatus !== 'ringing' && callEngine.showFullScreenCall && (
         <div className="fixed inset-0 z-[9998] bg-[#0b141a] text-white flex flex-col justify-between py-16 px-6 animate-in fade-in duration-300">
           <div className="text-center space-y-2 mt-8">
             <h2 className="text-2xl font-black tracking-tight">
@@ -178,6 +188,21 @@ export const UserCallProvider = ({ children }) => {
       )}
     </UserCallContext.Provider>
   );
+};
+
+// RUNTIME MICROPHONE TRACKER COMPONENT (Matches Agent Side Pipeline Logic)
+const LocalMicController = ({ isMuted }) => {
+  const { localParticipant } = useLocalParticipant();
+  const room = useRoomContext();
+
+  useEffect(() => {
+    if (!localParticipant || !room || room.state !== 'connected') return;
+    
+    localParticipant.setMicrophoneEnabled(!isMuted)
+      .catch(err => console.error("[User Mic Sync] Failure:", err));
+  }, [isMuted, localParticipant, room]);
+
+  return null;
 };
 
 export const useGlobalCall = () => {

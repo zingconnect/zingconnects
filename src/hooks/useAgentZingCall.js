@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 export const useAgentZingCall = (socket, agentId) => {
   // --- CORE SYSTEM STATES ---
-  const [callStatus, setCallStatus] = useState('idle'); // idle, dialing, ringing, connected
+  const [callStatus, setCallStatus] = useState('idle'); // idle, calling, ringing, connecting, connected
   const [isIncomingCall, setIsIncomingCall] = useState(false);
   const [activeCaller, setActiveCaller] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [lkToken, setLkToken] = useState(null); // Critical fix for LiveKit room integration
 
   // --- AUDIO & MODIFIER STATES ---
   const [isMuted, setIsMuted] = useState(false);
@@ -19,6 +20,12 @@ export const useAgentZingCall = (socket, agentId) => {
   // --- REFS FOR HARDWARE TIMERS & AUDIO ASSETS ---
   const timerRef = useRef(null);
   const ringtoneRef = useRef(null);
+  const callStatusRef = useRef('idle');
+
+  // Keep state and ref bound in sync for async socket closure contexts
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
 
   // --- INITIALIZE RINGTONE MEDIA ELEMENT ---
   useEffect(() => {
@@ -62,98 +69,170 @@ export const useAgentZingCall = (socket, agentId) => {
   }, [callStatus]);
 
   // --- INTERACTION LIFECYCLE HANDLERS ---
-  const handleStartCall = useCallback((targetUserId, targetUserData = null) => {
-    if (!socket) return;
-    console.log(`[useAgentZingCall] Outbound link initiating to target user: ${targetUserId}`);
+  const handleStartCall = useCallback(async (targetUserId, targetUserData = null) => {
+    if (!socket || !agentId) return;
+    console.log(`[useAgentZingCall] Outbound link initiating to user target: ${targetUserId}`);
     
-    setCallStatus('dialing');
+    setCallStatus('calling');
     setIsIncomingCall(false);
-    
-    // Fallback profile object composition if full object isn't passed down
     setSelectedUser(targetUserData || { _id: targetUserId, firstName: "Secure", lastName: "Line" });
     playRingtone();
 
-    socket.emit('call_initiate', {
-      to: targetUserId,
-      from: agentId,
-      timestamp: new Date()
-    });
-  }, [socket, agentId, playRingtone]);
+    const token = localStorage.getItem('agentToken'); // Swap to matching client layout token if needed
 
-  const handleAcceptCall = useCallback(() => {
+    try {
+      // Synchronize backend tracking record instantiation 
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/start`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          receiverId: targetUserId,
+          receiverModel: 'User',
+          voiceId: "natural"
+        })
+      });
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || "User unreachable");
+
+      if (data.lkToken) setLkToken(data.lkToken);
+
+      // Matches User hook: socket.on("incoming-call") / "call-user-incoming"
+      socket.emit('call-user', {
+        userToCall: targetUserId.toString(),
+        roomName: data.roomName,
+        fromId: agentId,
+        fromName: "Secure Agent",
+        callId: data.roomName
+      });
+
+      setCallStatus('ringing');
+    } catch (err) {
+      console.error("❌ Agent Call Initialization Error:", err);
+      setCallStatus('idle');
+      stopRingtone();
+    }
+  }, [socket, agentId, playRingtone, stopRingtone]);
+
+  const handleAcceptCall = useCallback(async () => {
     if (!socket || !activeCaller) return;
-    console.log('[useAgentZingCall] Accepting incoming call request pipeline.');
+    console.log('[useAgentZingCall] Running inbound call acceptance endpoint...');
     
     stopRingtone();
-    setCallStatus('connected');
-    setPeerConnected(true);
+    setCallStatus('connecting');
+    const token = localStorage.getItem('agentToken');
+    const callId = activeCaller.callId;
 
-    socket.emit('call_accept', {
-      to: activeCaller.fromId,
-      from: agentId
-    });
-  }, [socket, agentId, activeCaller, stopRingtone]);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+
+      if (data.success && data.lkToken) {
+        setLkToken(data.lkToken);
+        setPeerConnected(true);
+        setCallStatus('connected');
+
+        // Emits back to User hook listener: socket.on("answer-call")
+        socket.emit('answer-call', {
+          to: activeCaller.fromId,
+          callId: callId,
+          lkToken: data.lkToken
+        });
+      } else {
+        throw new Error("Invalid Handshake validation data");
+      }
+    } catch (err) {
+      console.error("Failed to cleanly accept call channel:", err);
+      handleEndCall();
+    }
+  }, [socket, activeCaller, stopRingtone]);
 
   const handleEndCall = useCallback(() => {
     if (!socket) return;
     const targetId = isIncomingCall ? activeCaller?.fromId : selectedUser?._id;
-    console.log(`[useAgentZingCall] Terminating call channel for target: ${targetId}`);
+    const currentCallId = activeCaller?.callId || selectedUser?.roomName;
+    console.log(`[useAgentZingCall] Terminating call channel for target payload ID: ${targetId}`);
 
     stopRingtone();
     setCallStatus('idle');
     setPeerConnected(false);
     setIsIncomingCall(false);
     setActiveCaller(null);
+    setLkToken(null);
     setIsVoiceConversionActive(false);
 
     if (targetId) {
-      socket.emit('call_terminate', { to: targetId, from: agentId });
+      // Double emitted signatures match both hook variants seamlessly
+      socket.emit('end-call', { to: targetId, callId: currentCallId });
+      socket.emit('call-ended', { to: targetId, callId: currentCallId });
     }
-  }, [socket, agentId, isIncomingCall, activeCaller, selectedUser, stopRingtone]);
+  }, [socket, isIncomingCall, activeCaller, selectedUser, stopRingtone]);
 
   // --- REAL-TIME SIGNALLING SUBSCRIPTION HANDLER ---
   useEffect(() => {
     if (!socket) return;
 
+    // Handles user calling agent payload mapping strings
     const onCallIncoming = (data) => {
-      console.log('[useAgentZingCall] Intercepted call_incoming socket payload:', data);
+      console.log('[useAgentZingCall] Received user incoming-call hook payload data:', data);
       
-      // MODIFIED: Constructing complete active caller schemas cleanly
       setActiveCaller({
-        fromId: data.from,
-        fromName: data.fromName || `${data.firstName || 'Secure'} ${data.lastName || 'Client'}`.trim(),
-        photoUrl: data.photoUrl || ''
+        fromId: data.fromId || data.from,
+        fromName: data.fromName || `${data.firstName || 'ZingConnect'} ${data.lastName || 'Client'}`.trim(),
+        photoUrl: data.photoUrl || '',
+        callId: data.callId || data.roomName
       });
       
       setIsIncomingCall(true);
-      setCallStatus('ringing'); // This toggle kicks off your global UI modal expansion immediately
+      setCallStatus('ringing'); 
       playRingtone();
     };
 
     const onCallAccepted = (data) => {
-      console.log('[useAgentZingCall] Handshake verification returned success.');
+      console.log('[useAgentZingCall] Remote end answer handshaking detected.');
       stopRingtone();
-      setCallStatus('connected');
+      if (data.lkToken) setLkToken(data.lkToken);
       setPeerConnected(true);
+      setCallStatus('connected');
     };
 
     const onCallTerminated = () => {
-      console.log('[useAgentZingCall] Terminate trigger intercepted via network socket.');
+      console.log('[useAgentZingCall] Remote peer drop hook event intercepted.');
       stopRingtone();
       setCallStatus('idle');
       setPeerConnected(false);
       setIsIncomingCall(false);
       setActiveCaller(null);
+      setLkToken(null);
       setIsVoiceConversionActive(false);
     };
 
-    socket.on('call_incoming', onCallIncoming);
-    socket.on('call_accepted', onCallAccepted);
+    // Parity safety listeners mapping across both schemas to remove channel deadlocks
+    socket.on('incoming-call', onCallIncoming);
+    socket.on('call-agent', onCallIncoming); 
+    
+    socket.on('answer-call', onCallAccepted);
+    socket.on('call-accepted', onCallAccepted);
+    
+    socket.on('end-call', onCallTerminated);
+    socket.on('call-ended', onCallTerminated);
+    socket.on('call-rejected', onCallTerminated);
     socket.on('call_terminated', onCallTerminated);
 
     return () => {
-      socket.off('call_incoming', onCallIncoming);
-      socket.off('call_accepted', onCallAccepted);
+      socket.off('incoming-call', onCallIncoming);
+      socket.off('call-agent', onCallIncoming);
+      socket.off('answer-call', onCallAccepted);
+      socket.off('call-accepted', onCallAccepted);
+      socket.off('end-call', onCallTerminated);
+      socket.off('call-ended', onCallTerminated);
+      socket.off('call-rejected', onCallTerminated);
       socket.off('call_terminated', onCallTerminated);
     };
   }, [socket, playRingtone, stopRingtone]);
@@ -171,6 +250,7 @@ export const useAgentZingCall = (socket, agentId) => {
     activeCaller,
     selectedUser,
     setSelectedUser,
+    lkToken, // Exposed cleanly to match AgentContext layouts
     isMuted,
     setIsMuted,
     isSpeakerOn,
