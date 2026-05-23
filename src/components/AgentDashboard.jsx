@@ -287,24 +287,23 @@ export const AgentDashboard = () => {
     return () => clearInterval(interval);
   }, [callStatus, activeCall, handleEndCall, isIncomingCall, setCallStatus]);
 
-  // --- AUTO SCROLL CHAT LOGIC ---
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const threshold = 200; 
-    const isNearBottom = 
-      container.scrollHeight - container.scrollTop <= container.clientHeight + threshold;
-    if (isNearBottom || isUploading) {
-      const timeoutId = setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ 
-          behavior: isUploading ? "auto" : "smooth", 
-          block: "end" 
-        });
-      }, 100);
+ // --- CORRECTED AUTO SCROLL CHAT LOGIC (COL-REVERSE COMPATIBLE) ---
+useEffect(() => {
+  const container = scrollRef.current;
+  if (!container || messages.length === 0) return;
+  const lastMessage = messages[messages.length - 1];
+  const isMySentMessage = lastMessage?.senderId === agentData?._id;
+  if (isUploading || isMySentMessage || Math.abs(container.scrollTop) < 150) {
+    const timeoutId = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ 
+        behavior: isUploading ? "auto" : "smooth", 
+        block: "end" 
+      });
+    }, 50);
 
-      return () => clearTimeout(timeoutId);
-    }
-  }, [messages, isUploading]);
+    return () => clearTimeout(timeoutId);
+  }
+}, [messages, isUploading, agentData?._id]);
 
   // --- MEMORY DISPOSAL EFFECT ---
   useEffect(() => {
@@ -1155,104 +1154,102 @@ const handleSelectUser = async (user) => {
       </header>
 
     
-      <div 
-        ref={scrollRef} 
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col-reverse bg-page-bg dark:bg-slate-950/50"
-      >
-        {/* Scroll Anchor element sits perfectly at bottom of log sequence */}
-        <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
-        
-        {/* Render normal stream flow */}
-        {messages.slice().reverse().map((m) => {
-          const isMe = m.senderId === agentData?._id;
-          const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
+<div 
+  ref={scrollRef} 
+  onScroll={handleScroll}
+  className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col-reverse bg-page-bg dark:bg-slate-950/50"
+>
+  {/* Scroll Anchor element sits perfectly at bottom of log sequence in flex-col-reverse */}
+  <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
+  
+  {/* Render normal stream flow */}
+  {messages.slice().reverse().map((m) => {
+    const isMe = m.senderId === agentData?._id;
+    const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
 
-          {/* CALL LOG MESSAGE CONDITIONAL RENDERING */}
-          if (m.fileType === 'call_log' && m.callMetadata) {
-            const isMissed = m.callMetadata.status === 'missed';
-            return (
-              <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-1 animate-in fade-in duration-300`}>
-                <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-sm border max-w-[80%] ${
-                  isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none'
-                } dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
-                  <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-                    {isMissed ? <BsTelephoneXFill size={14} /> : <BsTelephoneOutboundFill size={14} />}
-                  </div>
-                  <div className="flex flex-col">
-                    <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
-                      {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
-                    </p>
-                    <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
-                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          {/* TEXT OR ATTACHMENT MESSAGE STANDARD RENDERING */}
-          return (
-            <div
-              key={msgKey}
-              onMouseDown={() => isMe && startHold(m._id)}
-              onMouseUp={stopHold}
-              className={`max-w-[85%] md:max-w-[65%] px-3.5 py-2 rounded-xl shadow-sm relative flex flex-col ${
-                isMe 
-                  ? 'bg-green-600 text-white self-end rounded-tr-none' 
-                  : 'bg-card-bg text-text-main border border-gray-100 dark:border-slate-800 self-start rounded-tl-none'
-              } mb-1`}
-            >
-              {(m.fileType === 'image' || m.fileType === 'video') && (
-                <div className="relative mb-2 mt-0.5 group rounded-lg overflow-hidden border border-black/5">
-                  {m.fileType === 'image' ? (
-                    <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95 max-h-72 transition-opacity" alt="attachment" />
-                  ) : (
-                    <div className="relative max-h-72 overflow-hidden bg-black flex items-center">
-                      <video className="w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
-                        <source src={m.fileUrl} type="video/mp4" />
-                      </video>
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" />
-                      </div>
-                    </div>
-                  )}
-                  <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={12} /></button>
-                </div>
-              )}
-              
-              {m.text && <p className="text-[13px] md:text-[14px] leading-relaxed break-words whitespace-pre-wrap">{m.text}</p>}
-              
-              <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-1">
-                <span className={`text-[8px] font-bold uppercase ${isMe ? 'text-white/80' : 'text-gray-400'}`}>
-                  {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                {isMe && (
-                  <div className="flex items-center ml-1">
-                    {m.status === 'sending' ? (
-                      <div className="w-2.5 h-2.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : m.status === 'failed' ? (
-                      <BsPlusLg className="rotate-45 text-red-300 cursor-pointer" size={10} onClick={() => handleResend(m)} />
-                    ) : (
-                      <BsCheckAll className={m.status === 'seen' ? 'text-blue-300' : 'text-white/60'} size={14} />
-                    )}
-                  </div>
-                )}
-              </div>
+    {/* CALL LOG MESSAGE CONDITIONAL RENDERING */}
+    if (m.fileType === 'call_log' && m.callMetadata) {
+      const isMissed = m.callMetadata.status === 'missed';
+      return (
+        <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-1 animate-in fade-in duration-300`}>
+          <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-sm border max-w-[80%] ${
+            isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none'
+          } dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
+            <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+              {isMissed ? <BsTelephoneXFill size={14} /> : <BsTelephoneOutboundFill size={14} />}
             </div>
-          );
-        })}
+            <div className="flex flex-col">
+              <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
+                {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
+              </p>
+              <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
+                {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
-        {/* 🔄 AUTOMATIC INFINITE FETCH LOADING ELEMENT (Renders at the top due to flex-col-reverse) */}
-        {isFetchingOlder && (
-          <div className="w-full flex justify-center py-2 animate-pulse">
-            <span className="text-[9px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100">
-              Synchronizing past transmissions...
-            </span>
+    {/* TEXT OR ATTACHMENT MESSAGE STANDARD RENDERING */}
+    return (
+      <div
+        key={msgKey}
+        onMouseDown={() => isMe && startHold(m._id)}
+        onMouseUp={stopHold}
+        className={`max-w-[85%] md:max-w-[65%] px-3.5 py-2 rounded-xl shadow-sm relative flex flex-col ${
+          isMe 
+            ? 'bg-green-600 text-white self-end rounded-tr-none' 
+            : 'bg-card-bg text-text-main border border-gray-100 dark:border-slate-800 self-start rounded-tl-none'
+        } mb-1`}
+      >
+        {(m.fileType === 'image' || m.fileType === 'video') && (
+          <div className="relative mb-2 mt-0.5 group rounded-lg overflow-hidden border border-black/5">
+            {m.fileType === 'image' ? (
+              <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95 max-h-72 transition-opacity" alt="attachment" />
+            ) : (
+              <div className="relative max-h-72 overflow-hidden bg-black flex items-center">
+                <video className="w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
+                  <source src={m.fileUrl} type="video/mp4" />
+                </video>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" />
+                </div>
+              </div>
+            )}
+            <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={12} /></button>
           </div>
         )}
+        
+        {m.text && <p className="text-[13px] md:text-[14px] leading-relaxed break-words whitespace-pre-wrap">{m.text}</p>}
+        
+        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-1">
+          <span className={`text-[8px] font-bold uppercase ${isMe ? 'text-white/80' : 'text-gray-400'}`}>
+            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {isMe && (
+            <div className="flex items-center ml-1">
+              {m.status === 'sending' ? (
+                <div className="w-2.5 h-2.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : m.status === 'failed' ? (
+                <BsPlusLg className="rotate-45 text-red-300 cursor-pointer" size={10} onClick={() => handleResend(m)} />
+              ) : (
+                <BsCheckAll className={m.status === 'seen' ? 'text-blue-300' : 'text-white/60'} size={14} />
+              )}
+            </div>
+          )}
+        </div>
       </div>
+    );
+  })}
+  {isFetchingOlder && (
+    <div className="w-full flex justify-center py-4 animate-pulse">
+      <span className="text-[9px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 dark:bg-blue-950/40 px-3 py-1.5 rounded-full border border-blue-100 dark:border-blue-900/50">
+        Synchronizing past transmissions...
+      </span>
+    </div>
+  )}
+</div>
 
       {/* --- FOOTER INPUT PANEL --- */}
       <footer className="min-h-[56px] bg-card-bg px-3 py-2 flex items-center justify-between gap-2 z-10 border-t border-gray-100">
