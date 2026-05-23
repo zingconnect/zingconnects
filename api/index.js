@@ -46,7 +46,8 @@ import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
 
 const app = express();
-
+const terminatingCallsCache = new Set();
+app.set('terminatingCallsCache', terminatingCallsCache);
 
 const corsOptions = {
   origin: "https://zingconnect.vercel.app",
@@ -72,7 +73,6 @@ app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);
 app.use('/api/admin', adminRoutes);
-app.set('terminatingCallsCache', terminatingCallsCache);
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
 webpush.setVapidDetails(
@@ -82,7 +82,6 @@ webpush.setVapidDetails(
 );
 
 const upload = multer({ storage: multer.memoryStorage() });
-const terminatingCallsCache = new Set();
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
