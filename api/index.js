@@ -72,6 +72,7 @@ app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.set('terminatingCallsCache', terminatingCallsCache);
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
 webpush.setVapidDetails(
@@ -81,7 +82,7 @@ webpush.setVapidDetails(
 );
 
 const upload = multer({ storage: multer.memoryStorage() });
-
+const terminatingCallsCache = new Set();
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
@@ -1931,7 +1932,6 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Server failed to delete message" });
   }
 });
-
 // ==========================================
 // 📞 1. INITIATE SECURE DIAL OUT
 // ==========================================
@@ -1946,13 +1946,11 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     const callerId = String(req.user.id || req.user._id).trim();
     const targetId = String(receiverId).trim();
     
-    // Create a pristine tracking identifier for the session context
     const roomName = `room_${Date.now()}_${callerId.slice(-4)}`;
     
     await connectToDatabase();
     const CallModel = mongoose.models.Call || mongoose.model('Call');
     
-    // ✅ FIX: Status initialized to 'calling'. No token generated yet to prevent premature expiration.
     const newCall = await CallModel.create({
       roomName,
       caller: callerId,
@@ -1965,7 +1963,6 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 
     console.log("✅ DB: Call record created strictly before response");
 
-    // Push state changes instantly down the socket wire to alert the device
     const io = req.app.get('socketio');
     if (io) {
       io.to(targetId).emit("incoming-call", {
@@ -1990,7 +1987,6 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     }
   }
 });
-
 // ==========================================
 // 🔍 2. INCOMING BACKGROUND POLLING ENGINE
 // ==========================================
@@ -2001,6 +1997,9 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
     const ActiveCallModel = mongoose.models.Call || mongoose.model('Call');
 
+    // Pull the cache reference from the Express app container
+    const terminatingCallsCache = req.app.get('terminatingCallsCache');
+
     let incoming = await ActiveCallModel.findOne({ 
       receiver: rawId,
       status: { $in: ['calling', 'ringing'] },
@@ -2010,7 +2009,10 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
     .sort({ createdAt: -1 })
     .populate('caller', 'firstName lastName photoUrl'); 
 
-    if (!incoming) return res.json({ hasIncomingCall: false });
+    // Guard with cache fallback strings
+    if (!incoming || (terminatingCallsCache && (terminatingCallsCache.has(incoming._id.toString()) || terminatingCallsCache.has(incoming.roomName)))) {
+      return res.json({ hasIncomingCall: false });
+    }
     
     let finalPhotoUrl = null;
     if (incoming.caller?.photoUrl) {
@@ -2024,7 +2026,7 @@ app.get('/api/calls/check-incoming', authenticateToken, async (req, res) => {
       hasIncomingCall: true,
       callId: incoming._id,
       status: incoming.status, 
-      roomName: incoming.roomName, // Ensure standard room structural mapping passes here
+      roomName: incoming.roomName, 
       voiceId: incoming.voiceId,
       callerData: {
         fromName: incoming.caller ? `${incoming.caller.firstName} ${incoming.caller.lastName}`.trim() : "Secure Caller",
@@ -2065,7 +2067,6 @@ app.post('/api/calls/accept/:callId', authenticateToken, async (req, res) => {
       return res.status(404).json({ success: false, message: "Call not found." });
     }
 
-    // ✅ FIX: Minting the secure token here guarantees fresh execution variables
     const roomName = call.roomName; 
     const token = await createLiveKitToken(roomName, myId);
     
@@ -2087,32 +2088,46 @@ app.post('/api/calls/accept/:callId', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 // ==========================================
 // 📴 4. UNIFIED CALL TERMINATION LOGS
 // ==========================================
 app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
+  const paramCallId = req.params.callId || req.body.callId;
+  
+  // Pull the cache from the Express app instance
+  const terminatingCallsCache = req.app.get('terminatingCallsCache');
+  
+  // Instantly block the tracking parameters from background pollers
+  if (paramCallId && terminatingCallsCache) {
+    terminatingCallsCache.add(paramCallId.toString());
+  }
+
   try {
     await connectToDatabase();
     const myId = (req.user.id || req.user._id || req.user.userId).toString();
-    const callId = req.params.callId || req.body.callId; 
-
-    const isObjectId = mongoose.Types.ObjectId.isValid(callId);
+    const isObjectId = mongoose.Types.ObjectId.isValid(paramCallId);
     const ActiveCallModel = mongoose.models.Call || mongoose.model('Call');
 
     let query = {
       $and: [
-        { $or: [{ roomName: callId }, { _id: isObjectId ? callId : null }] },
+        { $or: [{ roomName: paramCallId }, { _id: isObjectId ? paramCallId : null }] },
         { $or: [{ caller: myId }, { receiver: myId }] },
         { active: true } 
       ]
     };
 
-    if (!callId) {
+    if (!paramCallId) {
       query = { 
         $or: [{ caller: myId }, { receiver: myId }], 
         active: true 
       };
+    }
+
+    // Capture the target context names dynamically and drop them into the shield cache
+    const callToTerminate = await ActiveCallModel.findOne(query);
+    if (callToTerminate && terminatingCallsCache) {
+      terminatingCallsCache.add(callToTerminate._id.toString());
+      terminatingCallsCache.add(callToTerminate.roomName.toString());
     }
 
     const call = await ActiveCallModel.findOneAndUpdate(
@@ -2120,7 +2135,7 @@ app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
       { 
         status: 'ended', 
         endTime: new Date(), 
-        active: false // Clear the flag instantly to stop polling artifacts
+        active: false 
       },
       { new: true, sort: { createdAt: -1 } }
     );
@@ -2130,8 +2145,8 @@ app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
         ? Math.floor((new Date() - new Date(call.startTime)) / 1000) 
         : 0;
 
-      // Single-source tracking writes history entry to DB explicitly here
-      const callLogEntry = new Message({
+      const MessageModel = mongoose.models.Message || mongoose.model('Message');
+      const callLogEntry = new MessageModel({
         senderId: call.caller,
         senderModel: call.callerModel,
         receiverId: call.receiver,
@@ -2167,9 +2182,15 @@ app.post('/api/calls/end/:callId', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("🔥 End Route Error:", err.message);
     res.status(500).json({ success: false, message: err.message });
+  } finally {
+    // Clean up cache tracking entries automatically after 5 seconds
+    setTimeout(() => {
+      if (paramCallId && terminatingCallsCache) {
+        terminatingCallsCache.delete(paramCallId.toString());
+      }
+    }, 5000);
   }
 });
-
 // ==========================================
 // 📊 5. FETCH STATUS TRACKING METRICS
 // ==========================================
@@ -2198,7 +2219,7 @@ app.get('/api/calls/status/:callId', authenticateToken, async (req, res) => {
       status: call.status, 
       active: call.active,
       startTime: call.startTime 
-    });
+     });
 
   } catch (err) {
     console.error("❌ Status Route Crash:", err.message);
@@ -2209,7 +2230,6 @@ app.get('/api/calls/status/:callId', authenticateToken, async (req, res) => {
     });
   }
 });
-
 // ==========================================
 // 🕒 6. PORTAL CALL HISTORY ANALYTICS
 // ==========================================

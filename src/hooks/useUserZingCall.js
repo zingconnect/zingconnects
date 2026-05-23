@@ -11,7 +11,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   const [isIncomingCall, setIsIncomingCall] = useState(false);
   const [peerConnected, setPeerConnected] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
-  const [lkToken, setLkToken] = useState(null); // Aligned to Context expectations
+  const [lkToken, setLkToken] = useState(null); 
   
   // Audio Engine Controls
   const [isMuted, setIsMuted] = useState(false);
@@ -79,7 +79,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     return () => {
       window.removeEventListener('click', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
-    };
+    }
   }, [hasInteracted, unlockAudio]);
 
   const terminateLocalSession = useCallback(() => {
@@ -116,7 +116,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     setCallTime(0);
     setPeerConnected(false);
     setShowFullScreenCall(false);
-    setTimeout(() => setIsEnding(false), 2000);
+    
+    // Safety guard to bridge the latency gap while the server processes mutations
+    setTimeout(() => setIsEnding(false), 5000);
   }, []);
 
   // Structural Hangup Method
@@ -124,6 +126,8 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     console.log("📴 Initiating Call End Sequence...");
     const myId = userData?._id || userData?.id;
     const currentCall = activeCallRef ? activeCallRef.current : null;
+    
+    // ✅ FIX: Prioritize direct DB document identification tokens over human-readable room strings
     const currentCallId = currentCall?.callId || currentCall?._id || currentCall?.roomName;
     const token = localStorage.getItem('userToken');
     const targetId = currentCall?.fromId === myId ? currentCall?.toId : currentCall?.fromId;
@@ -214,7 +218,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
   
       setActiveCall({ 
-        callId: data.roomName, 
+        callId: data.callId, // ✅ FIX: Map data.callId explicitly here instead of roomName
         roomName: data.roomName,
         toId: currentAgentId.toString(),
         fromId: currentUserId,
@@ -226,13 +230,13 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         }
       });
 
-      // Signals target workspace agent node terminal
       socket.emit("call-user", { 
         userToCall: currentAgentId.toString(),
         roomName: data.roomName,
         fromId: currentUserId,
         fromName: `${userData?.firstName} ${userData?.lastName}`,
-        photoUrl: fullPhotoUrl
+        photoUrl: fullPhotoUrl,
+        callId: data.callId // ✅ Explicit sync parameter update
       });
 
       setCallStatus('ringing'); 
@@ -275,7 +279,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       if (isTransitioningRef) isTransitioningRef.current = true;
       setCallStatus('connecting');
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
       });
@@ -363,7 +367,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       }
   
       console.log("📥 Incoming Secure Call detected:", data.callId);
-      const roomName = data.callId || data.roomName;
+      const roomName = data.roomName || data.callId;
 
       if (connectionTimeoutRef && connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
@@ -422,12 +426,12 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     };
   
     socket.on("incoming-call", onIncoming);
-    socket.on("call-user-incoming", onIncoming); // Safe parity listener
+    socket.on("call-user-incoming", onIncoming); 
     socket.on("call-ended", onRemoteEnd);
     socket.on("end-call", onRemoteEnd);
     socket.on("call-rejected", onRemoteEnd);
     socket.on("answer-call", onAnswerReceived);
-    socket.on("call-accepted", onAnswerReceived); // Safe parity listener
+    socket.on("call-accepted", onAnswerReceived); 
   
     return () => {
       if (connectionTimeoutRef && connectionTimeoutRef.current) {
@@ -461,22 +465,30 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   // Fallback Poller for API Incoming Checks
   useEffect(() => {
     const token = localStorage.getItem('userToken');
-    const currentTransition = isTransitioningRef ? isTransitioningRef.current : false;
     if (!token) return;
-    if (callStatus !== 'idle' || isEnding || currentTransition) return;
 
     const checkCalls = async () => {
+      const freshStatus = callStatusRef ? callStatusRef.current : 'idle';
+      const freshTransition = isTransitioningRef ? isTransitioningRef.current : false;
+      
+      // ✅ FIX: Enhanced safety exit check blocks incoming loop logic execution instantly
+      if (freshStatus !== 'idle' || freshTransition || isEnding) return;
+
       try {
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Cache-Control': 'no-cache' }
+          headers: { 
+            'Authorization': `Bearer ${token}`, 
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          }
         });
         if (!response.ok) return;
         const data = await response.json();
 
-        if (data && data.hasIncomingCall) {
-          const freshStatus = callStatusRef ? callStatusRef.current : 'idle';
-          const freshTransition = isTransitioningRef ? isTransitioningRef.current : false;
-          if (freshStatus !== 'idle' || isEnding || freshTransition) return;
+        if (data && data.hasIncomingCall && data.status !== 'ended' && data.status !== 'rejected') {
+          
+          // ✅ FIX: Double-verify against reference snapshots immediately prior to mutating state context trees
+          if (callStatusRef.current !== 'idle' || isEnding) return;
 
           setActiveCall({
             callId: data.callId,
@@ -495,13 +507,14 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
           setCallStatus('ringing');
         }
       } catch (err) {
-        console.warn("User Polling error:", err);
+        console.warn("User Polling structural bypass applied:", err);
       }
     };
 
-    const interval = setInterval(checkCalls, 4000); 
+    checkCalls();
+    const interval = setInterval(checkCalls, 4000); // Accelerated signature sync window
     return () => clearInterval(interval);
-  }, [isEnding, callStatus]);
+  }, [isEnding]); // Safely stripped callStatus dependency to prevent race loops on fast status changes
 
   // Real-time Audio Streaming (AI Voice Conversion Engine Matrix)
   useEffect(() => {

@@ -78,7 +78,7 @@ export const useAgentZingCall = (socket, agentId) => {
     setSelectedUser(targetUserData || { _id: targetUserId, firstName: "Secure", lastName: "Line" });
     playRingtone();
 
-    const token = localStorage.getItem('agentToken'); // Swap to matching client layout token if needed
+    const token = localStorage.getItem('agentToken'); 
 
     try {
       // Synchronize backend tracking record instantiation 
@@ -100,14 +100,17 @@ export const useAgentZingCall = (socket, agentId) => {
 
       if (data.lkToken) setLkToken(data.lkToken);
 
-      // Matches User hook: socket.on("incoming-call") / "call-user-incoming"
+      // ✅ FIX: Pass the real data.callId (the MongoDB document ID) down the socket line!
       socket.emit('call-user', {
         userToCall: targetUserId.toString(),
         roomName: data.roomName,
         fromId: agentId,
         fromName: "Secure Agent",
-        callId: data.roomName
+        callId: data.callId // Used to be data.roomName; changed to database document ID
       });
+
+      // Update local storage tracking mapping if the layout depends on it
+      setSelectedUser(prev => prev ? { ...prev, roomName: data.roomName, callId: data.callId } : null);
 
       setCallStatus('ringing');
     } catch (err) {
@@ -116,6 +119,32 @@ export const useAgentZingCall = (socket, agentId) => {
       stopRingtone();
     }
   }, [socket, agentId, playRingtone, stopRingtone]);
+
+  const handleEndCall = useCallback(() => {
+    if (!socket) return;
+    if (callStatusRef.current === 'idle') return;
+
+    const targetId = isIncomingCall ? activeCaller?.fromId : selectedUser?._id;
+    // ✅ Safely grab the database ID or the room name context fallback
+    const currentCallId = activeCaller?.callId || selectedUser?.callId || selectedUser?.roomName;
+    
+    console.log(`[useAgentZingCall] Terminating call channel for target payload ID: ${targetId}`);
+
+    stopRingtone();
+    setCallStatus('idle');
+    setPeerConnected(false);
+    setIsIncomingCall(false);
+    setActiveCaller(null);
+    setSelectedUser(null); // ✅ Reset selected target state on clear down
+    setLkToken(null);
+    setIsVoiceConversionActive(false);
+
+    if (targetId) {
+      socket.emit('end-call', { to: targetId, callId: currentCallId });
+      socket.emit('call-ended', { to: targetId, callId: currentCallId });
+    }
+  }, [socket, isIncomingCall, activeCaller, selectedUser, stopRingtone]);
+
 
   const handleAcceptCall = useCallback(async () => {
     if (!socket || !activeCaller) return;
