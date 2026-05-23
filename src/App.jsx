@@ -1,5 +1,6 @@
 import React, { useLayoutEffect } from 'react'; 
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+// ADDED: Imported 'Outlet' so the layout can render child components
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 
 // Component Imports
 import { PricingPage } from './components/PricingPage';
@@ -13,19 +14,21 @@ import { UserProfile } from './components/UserProfile';
 import { CallSetting } from './components/CallSetting'; 
 import ZingAdmin from './components/ZingAdmin'; 
 import ZingDashboard from './components/ZingDashboard'; 
+
 // Context Providers
 import { UserCallProvider } from './context/UserCallContext';
-import { AgentCallProvider } from './context/AgentCallContext'; // <-- ADDED GLOBAL AGENT PROVIDER
+import { AgentCallProvider } from './context/AgentCallContext';
 
 // --- AGENT COORD LAYOUT COMPONENT ---
 const AgentLayoutWrapper = () => {
   return (
     <AgentCallProvider>
-      {/* Outlet acts as a slot that renders whichever child route is currently active */}
+      {/* Renders your child components inside the context lifecycle */}
       <Outlet />
     </AgentCallProvider>
   );
 };
+
 const PWAController = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -89,7 +92,6 @@ const ThemeInitializer = () => {
 function App() {
   return (
     <Router>
-      {/* Provider wrapped around routes to make context globally available */}
       <UserCallProvider>
         <PWAController>
           <ThemeInitializer />
@@ -100,10 +102,12 @@ function App() {
             <Route path="/registration" element={<Registration />} />
             <Route path="/verify-otp" element={<VerifyOTP />} />
 
-            {/* --- 2. PROTECTED AGENT ROUTES --- */}
-            <Route path="/agent/dashboard" element={<AgentDashboard />} />
-            <Route path="/agent/profile" element={<AgentProfile />} />
-            <Route path="/agent/call-settings" element={<CallSetting />} />
+            {/* --- 2. UPDATED: PROTECTED AGENT ROUTES WITH PROVIDER LAYOUT --- */}
+            <Route element={<AgentLayoutWrapper />}>
+              <Route path="/agent/dashboard" element={<AgentDashboard />} />
+              <Route path="/agent/profile" element={<AgentProfile />} />
+              <Route path="/agent/call-settings" element={<CallSetting />} />
+            </Route>
 
             {/* --- 3. PROTECTED USER ROUTES --- */}
             <Route path="/user/dashboard" element={<UserDashboard />} />
