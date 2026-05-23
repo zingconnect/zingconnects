@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { 
   BsSearch, BsThreeDotsVertical, BsCheckAll, BsCheck, BsPersonCircle, BsChevronLeft, BsShieldLockFill, 
-  BsCreditCard2BackFill, BsChevronDown, BsShieldFillExclamation, BsCheckCircleFill, BsVolumeUpFill, 
-  BsDownload, BsTelephoneOutboundFill, BsPlayFill, BsMicFill, BsTelephoneFill, BsTelephoneXFill, 
-  BsMicMuteFill, BsXLg, BsGearFill, BsPlusLg, BsPlus, BsSend, BsSendFill, BsPaperclip, BsCameraFill  
+  BsShieldFillExclamation, BsCheckCircleFill, BsDownload, BsTelephoneOutboundFill, BsPlayFill, 
+  BsTelephoneFill, BsTelephoneXFill, BsXLg, BsGearFill, BsPlusLg, BsSend, BsPaperclip, BsCameraFill  
 } from 'react-icons/bs';
 import { useAgentCall } from '../context/AgentCallContext';
 
@@ -19,14 +18,17 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
+
 const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   
-  const { callStatus, setCallStatus, isIncomingCall, activeCaller, activeCall, selectedUser, setSelectedUser, isMuted, setIsMuted,
+  const { 
+    callStatus, setCallStatus, isIncomingCall, activeCaller, activeCall, selectedUser, setSelectedUser, isMuted, setIsMuted,
     isSpeakerOn, setIsSpeakerOn, isVoiceConversionActive, setIsVoiceConversionActive, selectedVoiceId, setSelectedVoiceId, callTime,
-    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime,  } = useAgentCall();
+    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime, lkToken, setPeerConnected
+  } = useAgentCall();
 
   // --- REFS ---
   const messagesEndRef = useRef(null);
@@ -39,6 +41,7 @@ export const AgentDashboard = () => {
   const cameraInputRef = useRef(null);
   const isTransitioningRef = useRef(false);
   const aiMediaRecorderRef = useRef(null);
+  const lastNotifiedId = useRef(null);
 
   // --- LOCAL COMPONENT STATES ---
   const [agentData, setAgentData] = useState(null);
@@ -69,7 +72,7 @@ export const AgentDashboard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [previewFile, setPreviewFile] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null);   
-  const [caption, setCaption] = useState("");                  
+  const [caption, setCaption] = useState("");     
 
   const plans = [
     {
@@ -287,13 +290,13 @@ export const AgentDashboard = () => {
     return () => clearInterval(interval);
   }, [callStatus, activeCall, handleEndCall, isIncomingCall, setCallStatus]);
 
- // --- CORRECTED AUTO SCROLL CHAT LOGIC (COL-REVERSE COMPATIBLE) ---
 useEffect(() => {
   const container = scrollRef.current;
   if (!container || messages.length === 0) return;
   const lastMessage = messages[messages.length - 1];
   const isMySentMessage = lastMessage?.senderId === agentData?._id;
-  if (isUploading || isMySentMessage || Math.abs(container.scrollTop) < 150) {
+  const isNearBottom = container.scrollHeight - container.clientHeight - container.scrollTop < 200;
+  if (isUploading || isMySentMessage || isNearBottom) {
     const timeoutId = setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ 
         behavior: isUploading ? "auto" : "smooth", 
@@ -641,16 +644,14 @@ useEffect(() => {
 const handleScroll = async () => {
   const container = scrollRef.current;
   if (!container || isFetchingOlder || !hasMore || !selectedUser || messages.length === 0) return;
-  const absScrollTop = Math.abs(container.scrollTop);
-  const scrollThreshold = container.scrollHeight - container.clientHeight - 100;
-
-  if (absScrollTop >= scrollThreshold) {
+  if (container.scrollTop <= 80) {
     setIsFetchingOlder(true);
         const previousScrollHeight = container.scrollHeight;
+    const previousScrollTop = container.scrollTop;
     try {
       const token = localStorage.getItem('agentToken');
       const oldestMessageId = messages[0]._id || messages[0].id;
-      
+  
       if (!oldestMessageId) {
         setIsFetchingOlder(false);
         return;
@@ -660,18 +661,17 @@ const handleScroll = async () => {
       });
       if (response.ok) {
         const data = await response.json();
-        
         if (data.success && Array.isArray(data.messages)) {
           setHasMore(data.hasMore);
-
           if (data.messages.length > 0) {
             setMessages(prev => [...data.messages, ...prev]);
-            setTimeout(() => {
-              if (container) {
-                const heightDifference = container.scrollHeight - previousScrollHeight;
-                container.scrollTop -= heightDifference;
+            requestAnimationFrame(() => {
+              if (scrollRef.current) {
+                const newHeight = scrollRef.current.scrollHeight;
+                const heightDifference = newHeight - previousScrollHeight;
+                scrollRef.current.scrollTop = previousScrollTop + heightDifference;
               }
-            }, 0);
+            });
           }
         }
       }
@@ -684,7 +684,8 @@ const handleScroll = async () => {
 };
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
-    setMessages([]); 
+  
+  setMessages([]); 
   setIsInitialLoad(true); 
   setSelectedUser(user);
   setLimit(30);
@@ -696,6 +697,7 @@ const handleSelectUser = async (user) => {
   try {
     const token = localStorage.getItem('agentToken');
     if (!token) return;
+
     const response = await fetch(`/api/messages/${user._id}?limit=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -706,9 +708,15 @@ const handleSelectUser = async (user) => {
       
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
-         setHasMore(data.hasMore);
+        setHasMore(data.hasMore);
+                setTimeout(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }
+        }, 60);
       }
-            fetch(`/api/messages/mark-read/${user._id}`, {
+
+      fetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read background error:", err));
@@ -872,39 +880,38 @@ const handleSelectUser = async (user) => {
   );
 
   return (
-  <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
-    <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
+    <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
+      <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
 
-    {/* --- BACKGROUND LIVEKIT WEBRTC WRAPPER CONTEXT --- */}
-    {callStatus !== 'idle' && lkToken && (
-      <LiveKitRoom
-        video={false}
-        audio={true} 
-        token={lkToken}
-        serverUrl={import.meta.env.VITE_LIVEKIT_URL}
-        connect={true} 
-        options={{
-          publishDefaults: {
-            audioPreset: { maxBitrate: 48000 },
-            dtx: true, 
-          },
-          adaptiveStream: true,
-        }}
-        onDisconnected={handleEndCall}
-      >
-        <AudioSession 
-          isMuted={isMuted} 
-          isMasked={selectedVoiceId && selectedVoiceId !== 'natural'}
-          isIncomingCall={isIncomingCall}
-          setCallStatus={setCallStatus}
-          setPeerConnected={setPeerConnected}
-          ringtoneAudio={null}
-          callingAudio={null}
-        />
-      </LiveKitRoom>
-    )}
+      {/* --- BACKGROUND LIVEKIT WEBRTC WRAPPER CONTEXT --- */}
+      {callStatus !== 'idle' && lkToken && (
+        <LiveKitRoom
+          video={false}
+          audio={true} 
+          token={lkToken}
+          serverUrl={import.meta.env.VITE_LIVEKIT_URL}
+          connect={true} 
+          options={{
+            publishDefaults: {
+              audioPreset: { maxBitrate: 48000 },
+              dtx: true, 
+            },
+            adaptiveStream: true,
+          }}
+          onDisconnected={handleEndCall}
+        >
+          <AudioSession 
+            isMuted={isMuted} 
+            isMasked={selectedVoiceId && selectedVoiceId !== 'natural'}
+            isIncomingCall={isIncomingCall}
+            setCallStatus={setCallStatus}
+            setPeerConnected={setPeerConnected}
+            ringtoneAudio={null}
+            callingAudio={null}
+          />
+        </LiveKitRoom>
+      )}
 
-      
       {/* --- CONNECTION STATUS OVERLAY --- */}
       {(connectionStatus === 'offline' || connectionStatus === 'connecting') && (
         <div className={`fixed top-0 left-0 w-full z-[50000] py-1.5 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-300 ${connectionStatus === 'offline' ? 'bg-[#ea0038]' : 'bg-[#0052FF]'}`}>
@@ -1027,7 +1034,6 @@ const handleSelectUser = async (user) => {
                 {paymentProcessing ? "Processing..." : `Activate ${selectedPlan} Access`}
               </button>
             </div>
-
           </div>
         </div>
       )}
@@ -1097,277 +1103,277 @@ const handleSelectUser = async (user) => {
         </div>
       </aside>
 
-{/* --- MAIN CHAT INTERFACE --- */}
-<main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
-  {selectedUser ? (
-    <>
-      <header className="h-[75px] bg-card-bg px-4 flex justify-between items-center z-30 shadow-sm border-b border-gray-100 relative">
-        <div className="flex items-center gap-3 min-w-0">
-          <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
-            <BsChevronLeft size={16} />
-          </button>
-          
-          <div onClick={() => setShowUserModal(true)} className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-slate-100 cursor-pointer hover:ring-2 hover:ring-blue-500/30 transition-all shrink-0">
-            <img
-              src={selectedUser.photoUrl}
-              className="w-full h-full object-cover"
-              alt="Profile"
-              onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
-            />
-          </div>
+      {/* --- MAIN CHAT INTERFACE --- */}
+      <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
+        {selectedUser ? (
+          <>
+            <header className="h-[75px] bg-card-bg px-4 flex justify-between items-center z-30 shadow-sm border-b border-gray-100 relative">
+              <div className="flex items-center gap-3 min-w-0">
+                <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+                  <BsChevronLeft size={16} />
+                </button>
+                
+                <div onClick={() => setShowUserModal(true)} className="w-11 h-11 rounded-full overflow-hidden border border-gray-200 bg-slate-100 cursor-pointer hover:ring-2 hover:ring-blue-500/30 transition-all shrink-0">
+                  <img
+                    src={selectedUser.photoUrl}
+                    className="w-full h-full object-cover"
+                    alt="Profile"
+                    onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
+                  />
+                </div>
 
-          <div className="cursor-pointer min-w-0" onClick={() => setShowUserModal(true)}>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-text-main truncate leading-tight">
-                {selectedUser.firstName} {selectedUser.lastName}
-              </h2>
-              <span className={`flex items-center gap-1 text-[9px] font-black uppercase shrink-0 ${
-                selectedUser.status === 'online' || selectedUser.isOnline ? 'text-green-500' : 'text-gray-400'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  selectedUser.status === 'online' || selectedUser.isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
-                }`} />
-                {selectedUser.status === 'online' || selectedUser.isOnline ? 'Online' : 'Offline'}
-              </span>
-            </div>
-            
-            {selectedUser.status === 'online' || selectedUser.isOnline ? (
-              <p className="text-[11px] font-medium text-gray-500 truncate leading-tight mt-0.5">
-                {selectedUser.email}
-              </p>
-            ) : (
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5">
-                Last seen: {selectedUser.lastSeen ? new Date(selectedUser.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 text-gray-400 shrink-0">
-          <button onClick={() => handleStartCall(selectedUser._id)} className="text-gray-500 hover:text-green-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Start Secure Call">
-            <BsTelephoneFill size={16} /> 
-          </button>
-          <button onClick={() => navigate('/agent/call-settings')} className="text-gray-500 hover:text-blue-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Call Settings"> 
-            <BsGearFill size={18} />
-          </button>
-        </div>
-      </header>
-
-    
-<div 
-  ref={scrollRef} 
-  onScroll={handleScroll}
-  className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col-reverse bg-page-bg dark:bg-slate-950/50"
->
-  {/* Scroll Anchor element sits perfectly at bottom of log sequence in flex-col-reverse */}
-  <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
-  
-  {/* Render normal stream flow */}
-  {messages.slice().reverse().map((m) => {
-    const isMe = m.senderId === agentData?._id;
-    const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
-
-    {/* CALL LOG MESSAGE CONDITIONAL RENDERING */}
-    if (m.fileType === 'call_log' && m.callMetadata) {
-      const isMissed = m.callMetadata.status === 'missed';
-      return (
-        <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-1 animate-in fade-in duration-300`}>
-          <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-sm border max-w-[80%] ${
-            isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none'
-          } dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
-            <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-              {isMissed ? <BsTelephoneXFill size={14} /> : <BsTelephoneOutboundFill size={14} />}
-            </div>
-            <div className="flex flex-col">
-              <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
-                {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
-              </p>
-              <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
-                {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    {/* TEXT OR ATTACHMENT MESSAGE STANDARD RENDERING */}
-    return (
-      <div
-        key={msgKey}
-        onMouseDown={() => isMe && startHold(m._id)}
-        onMouseUp={stopHold}
-        className={`max-w-[85%] md:max-w-[65%] px-3.5 py-2 rounded-xl shadow-sm relative flex flex-col ${
-          isMe 
-            ? 'bg-green-600 text-white self-end rounded-tr-none' 
-            : 'bg-card-bg text-text-main border border-gray-100 dark:border-slate-800 self-start rounded-tl-none'
-        } mb-1`}
-      >
-        {(m.fileType === 'image' || m.fileType === 'video') && (
-          <div className="relative mb-2 mt-0.5 group rounded-lg overflow-hidden border border-black/5">
-            {m.fileType === 'image' ? (
-              <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95 max-h-72 transition-opacity" alt="attachment" />
-            ) : (
-              <div className="relative max-h-72 overflow-hidden bg-black flex items-center">
-                <video className="w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
-                  <source src={m.fileUrl} type="video/mp4" />
-                </video>
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" />
+                <div className="cursor-pointer min-w-0" onClick={() => setShowUserModal(true)}>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-text-main truncate leading-tight">
+                      {selectedUser.firstName} {selectedUser.lastName}
+                    </h2>
+                    <span className={`flex items-center gap-1 text-[9px] font-black uppercase shrink-0 ${
+                      selectedUser.status === 'online' || selectedUser.isOnline ? 'text-green-500' : 'text-gray-400'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        selectedUser.status === 'online' || selectedUser.isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
+                      }`} />
+                      {selectedUser.status === 'online' || selectedUser.isOnline ? 'Online' : 'Offline'}
+                    </span>
+                  </div>
+                  
+                  {selectedUser.status === 'online' || selectedUser.isOnline ? (
+                    <p className="text-[11px] font-medium text-gray-500 truncate leading-tight mt-0.5">
+                      {selectedUser.email}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5">
+                      Last seen: {selectedUser.lastSeen ? new Date(selectedUser.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
+                    </p>
+                  )}
                 </div>
               </div>
-            )}
-            <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={12} /></button>
-          </div>
-        )}
-        
-        {m.text && <p className="text-[13px] md:text-[14px] leading-relaxed break-words whitespace-pre-wrap">{m.text}</p>}
-        
-        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-1">
-          <span className={`text-[8px] font-bold uppercase ${isMe ? 'text-white/80' : 'text-gray-400'}`}>
-            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-          {isMe && (
-            <div className="flex items-center ml-1">
-              {m.status === 'sending' ? (
-                <div className="w-2.5 h-2.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : m.status === 'failed' ? (
-                <BsPlusLg className="rotate-45 text-red-300 cursor-pointer" size={10} onClick={() => handleResend(m)} />
-              ) : (
-                <BsCheckAll className={m.status === 'seen' ? 'text-blue-300' : 'text-white/60'} size={14} />
+
+              <div className="flex items-center gap-4 text-gray-400 shrink-0">
+                <button onClick={() => handleStartCall(selectedUser._id)} className="text-gray-500 hover:text-green-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Start Secure Call">
+                  <BsTelephoneFill size={16} /> 
+                </button>
+                <button onClick={() => navigate('/agent/call-settings')} className="text-gray-500 hover:text-blue-600 transition-colors active:scale-90 p-2 rounded-full hover:bg-gray-50" title="Call Settings"> 
+                  <BsGearFill size={18} />
+                </button>
+              </div>
+            </header>
+
+            <div 
+              ref={scrollRef} 
+              onScroll={handleScroll}
+              className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col-reverse bg-page-bg dark:bg-slate-950/50"
+            >
+              {/* Scroll Anchor element sits perfectly at bottom of log sequence in flex-col-reverse */}
+              <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
+              
+              {/* Render normal stream flow */}
+              {messages.slice().reverse().map((m) => {
+                const isMe = m.senderId === agentData?._id;
+                const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
+
+                {/* CALL LOG MESSAGE CONDITIONAL RENDERING */}
+                if (m.fileType === 'call_log' && m.callMetadata) {
+                  const isMissed = m.callMetadata.status === 'missed';
+                  return (
+                    <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-1 animate-in fade-in duration-300`}>
+                      <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-sm border max-w-[80%] ${
+                        isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none'
+                      } dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
+                        <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                          {isMissed ? <BsTelephoneXFill size={14} /> : <BsTelephoneOutboundFill size={14} />}
+                        </div>
+                        <div className="flex flex-col">
+                          <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
+                            {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
+                          </p>
+                          <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
+                            {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                {/* TEXT OR ATTACHMENT MESSAGE STANDARD RENDERING */}
+                return (
+                  <div
+                    key={msgKey}
+                    onMouseDown={() => isMe && startHold(m._id)}
+                    onMouseUp={stopHold}
+                    className={`max-w-[85%] md:max-w-[65%] px-3.5 py-2 rounded-xl shadow-sm relative flex flex-col ${
+                      isMe 
+                        ? 'bg-green-600 text-white self-end rounded-tr-none' 
+                        : 'bg-card-bg text-text-main border border-gray-100 dark:border-slate-800 self-start rounded-tl-none'
+                    } mb-1`}
+                  >
+                    {(m.fileType === 'image' || m.fileType === 'video') && (
+                      <div className="relative mb-2 mt-0.5 group rounded-lg overflow-hidden border border-black/5">
+                        {m.fileType === 'image' ? (
+                          <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95 max-h-72 transition-opacity" alt="attachment" />
+                        ) : (
+                          <div className="relative max-h-72 overflow-hidden bg-black flex items-center">
+                            <video className="w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
+                              <source src={m.fileUrl} type="video/mp4" />
+                            </video>
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                              <BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" />
+                            </div>
+                          </div>
+                        )}
+                        <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={12} /></button>
+                      </div>
+                    )}
+                    
+                    {m.text && <p className="text-[13px] md:text-[14px] leading-relaxed break-words whitespace-pre-wrap">{m.text}</p>}
+                    
+                    <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-1">
+                      <span className={`text-[8px] font-bold uppercase ${isMe ? 'text-white/80' : 'text-gray-400'}`}>
+                        {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {isMe && (
+                        <div className="flex items-center ml-1">
+                          {m.status === 'sending' ? (
+                            <div className="w-2.5 h-2.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : m.status === 'failed' ? (
+                            <BsPlusLg className="rotate-45 text-red-300 cursor-pointer" size={10} onClick={() => handleResend(m)} />
+                          ) : (
+                            <BsCheckAll className={m.status === 'seen' ? 'text-blue-300' : 'text-white/60'} size={14} />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {isFetchingOlder && (
+                <div className="w-full flex justify-center py-4 animate-pulse">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 dark:bg-blue-950/40 px-3 py-1.5 rounded-full border border-blue-100 dark:border-blue-900/50">
+                    Synchronizing past transmissions...
+                  </span>
+                </div>
               )}
             </div>
-          )}
-        </div>
-      </div>
-    );
-  })}
-  {isFetchingOlder && (
-    <div className="w-full flex justify-center py-4 animate-pulse">
-      <span className="text-[9px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 dark:bg-blue-950/40 px-3 py-1.5 rounded-full border border-blue-100 dark:border-blue-900/50">
-        Synchronizing past transmissions...
-      </span>
-    </div>
-  )}
-</div>
 
-      {/* --- FOOTER INPUT PANEL --- */}
-      <footer className="min-h-[56px] bg-card-bg px-3 py-2 flex items-center justify-between gap-2 z-10 border-t border-gray-100">
-        <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
-        <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
-        
-        <div className="flex items-center shrink-0 gap-1">
-          <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsPaperclip size={18} /></button>
-          <button onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsCameraFill size={18} /></button>
-        </div>
+            {/* --- FOOTER INPUT PANEL --- */}
+            <footer className="min-h-[56px] bg-card-bg px-3 py-2 flex items-center justify-between gap-2 z-10 border-t border-gray-100">
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
+              <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
+              
+              <div className="flex items-center shrink-0 gap-1">
+                <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsPaperclip size={18} /></button>
+                <button onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsCameraFill size={18} /></button>
+              </div>
 
-        <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
-          <input 
-            value={newMessage} 
-            onChange={(e) => setNewMessage(e.target.value)} 
-            placeholder="Type secure instruction transmission..." 
-            className="w-full bg-input-bg text-text-main px-4 py-2 rounded-full text-sm outline-none border border-transparent focus:border-gray-200 transition-all shadow-inner placeholder-gray-400" 
-          />
-          <button 
-            type="submit" 
-            disabled={!newMessage.trim() || isUploading} 
-            className={`p-2.5 rounded-full shadow-sm transition-all shrink-0 ${newMessage.trim() && !isUploading ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-          >
-            <BsSend size={14} />
-          </button>
-        </form>
-      </footer>
-    </>
-  ) : (
-    <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50">
-      <div className="p-5 bg-white rounded-3xl shadow-sm border border-gray-100 mb-4 opacity-75">
-        <BsShieldLockFill size={32} className="text-blue-600 animate-pulse" />
-      </div>
-      <h1 className="text-xl font-black uppercase tracking-widest text-slate-800">ZingConnect Terminal</h1>
-      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mt-1">Select an isolated node to monitor peer-to-peer data pipes</p>
-    </div>
-  )}
-
-  {/* --- USER DETAILS MODAL --- */}
-  {showUserModal && selectedUser && (
-    <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
-      <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-        <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
-        <div className="px-6 pb-8 flex flex-col items-center">
-          <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-white border-4 border-white shadow-md">
-            <img 
-              src={selectedUser.photoUrl} 
-              className="w-full h-full object-cover" 
-              alt="Profile" 
-              onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
-            />
-          </div>
-          <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
-          <p className="text-[10px] font-bold text-blue-600 uppercase mb-6 tracking-widest">Verified Client Node</p>
-          
-          <div className="w-full space-y-2.5 text-left">
-            <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
-              <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Email Address</p>
-              <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
-              <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Phone Number</p>
-              <p className="text-[11px] font-bold text-slate-700">
-                {selectedUser.phoneNumber || selectedUser.phone || 'No Phone Registered'}
-              </p>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
-              <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Location Details</p>
-              <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
-                {selectedUser.address && <span>{selectedUser.address}<br /></span>}
-                <span className="text-blue-600">
-                  {selectedUser.city || ''}
-                  {selectedUser.city && selectedUser.state ? ', ' : ''}
-                  {selectedUser.state || ''}
-                </span>
-                {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
-              </p>
-            </div>
-          </div>
-          
-          <button 
-            onClick={() => setShowUserModal(false)}
-            className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
-          >
-            Close Profile
-          </button>
-        </div>
-      </div>
-    </div>
-  )}
-
-  {/* --- MEDIA PREVIEW OVERLAY --- */}
-  {previewUrl && (
-    <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col animate-in fade-in duration-300">
-      <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white border-b border-white/5">
-        <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-2 hover:bg-white/10 rounded-full transition-colors"><BsXLg size={20} /></button>
-        <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">Media Payload Preview</span>
-        <div className="w-10" />
-      </div>
-      <div className="flex-1 flex items-center justify-center p-4 bg-slate-950">
-        {previewFile?.type.startsWith('video') ? (
-          <video src={previewUrl} controls className="max-w-full max-h-[65vh] rounded-2xl shadow-2xl" />
+              <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+                <input 
+                  value={newMessage} 
+                  onChange={(e) => setNewMessage(e.target.value)} 
+                  placeholder="Type secure instruction transmission..." 
+                  className="w-full bg-input-bg text-text-main px-4 py-2 rounded-full text-sm outline-none border border-transparent focus:border-gray-200 transition-all shadow-inner placeholder-gray-400" 
+                />
+                <button 
+                  type="submit" 
+                  disabled={!newMessage.trim() || isUploading} 
+                  className={`p-2.5 rounded-full shadow-sm transition-all shrink-0 ${newMessage.trim() && !isUploading ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                >
+                  <BsSend size={14} />
+                </button>
+              </form>
+            </footer>
+          </>
         ) : (
-          <img src={previewUrl} className="max-w-full max-h-[65vh] rounded-2xl object-contain shadow-2xl" alt="Preview" />
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50">
+            <div className="p-5 bg-white rounded-3xl shadow-sm border border-gray-100 mb-4 opacity-75">
+              <BsShieldLockFill size={32} className="text-blue-600 animate-pulse" />
+            </div>
+            <h1 className="text-xl font-black uppercase tracking-widest text-slate-800">ZingConnect Terminal</h1>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mt-1">Select an isolated node to monitor peer-to-peer data pipes</p>
+          </div>
         )}
-      </div>
-      <div className="p-6 bg-slate-900 border-t border-white/5">
-        <div className="max-w-4xl mx-auto flex items-center gap-4">
-          <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add transaction caption text description..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-white/20 transition-all" />
-          <button onClick={handleFinalSend} className="w-14 h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center shrink-0 shadow-lg"><BsSend size={20} className="text-white" /></button>
-        </div>
-      </div>
-    </div>
-  )}
-</main>
+
+        {/* --- USER DETAILS MODAL --- */}
+        {showUserModal && selectedUser && (
+          <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
+            <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
+              <div className="px-6 pb-8 flex flex-col items-center">
+                <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-white border-4 border-white shadow-md">
+                  <img 
+                    src={selectedUser.photoUrl} 
+                    className="w-full h-full object-cover" 
+                    alt="Profile" 
+                    onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
+                  />
+                </div>
+                <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
+                <p className="text-[10px] font-bold text-blue-600 uppercase mb-6 tracking-widest">Verified Client Node</p>
+                
+                <div className="w-full space-y-2.5 text-left">
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
+                    <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Email Address</p>
+                    <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
+                    <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Phone Number</p>
+                    <p className="text-[11px] font-bold text-slate-700">
+                      {selectedUser.phoneNumber || selectedUser.phone || 'No Phone Registered'}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-gray-100">
+                    <p className="text-[8px] font-black uppercase text-slate-400 mb-0.5">Location Details</p>
+                    <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
+                      {selectedUser.address && <span>{selectedUser.address}<br /></span>}
+                      <span className="text-blue-600">
+                        {selectedUser.city || ''}
+                        {selectedUser.city && selectedUser.state ? ', ' : ''}
+                        {selectedUser.state || ''}
+                      </span>
+                      {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
+                    </p>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setShowUserModal(false)}
+                  className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
+                >
+                  Close Profile
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- MEDIA PREVIEW OVERLAY --- */}
+        {previewUrl && (
+          <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col animate-in fade-in duration-300">
+            <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white border-b border-white/5">
+              <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-2 hover:bg-white/10 rounded-full transition-colors"><BsXLg size={20} /></button>
+              <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">Media Payload Preview</span>
+              <div className="w-10" />
+            </div>
+            <div className="flex-1 flex items-center justify-center p-4 bg-slate-950">
+              {previewFile?.type.startsWith('video') ? (
+                <video src={previewUrl} controls className="max-w-full max-h-[65vh] rounded-2xl shadow-2xl" />
+              ) : (
+                <img src={previewUrl} className="max-w-full max-h-[65vh] rounded-2xl object-contain shadow-2xl" alt="Preview" />
+              )}
+            </div>
+            <div className="p-6 bg-slate-900 border-t border-white/5">
+              <div className="max-w-4xl mx-auto flex items-center gap-4">
+                <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add transaction caption text description..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-white/20 transition-all" />
+                <button onClick={handleFinalSend} className="w-14 h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center shrink-0 shadow-lg"><BsSend size={20} className="text-white" /></button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   );
 };
