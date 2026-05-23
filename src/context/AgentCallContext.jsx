@@ -352,6 +352,7 @@ export const AgentCallProvider = ({ children }) => {
         callTime,
         peerConnected,
         handleStartCall,
+        activeCall,
         handleAcceptCall,
         handleEndCall,
         formatTime,

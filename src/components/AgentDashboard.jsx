@@ -26,12 +26,12 @@ const socket = io(import.meta.env.VITE_API_URL);
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   
-  // --- INHERIT GLOBAL WEBRTC & SIGNALING LAYERS FROM GLOBAL CONTEXT ---
   const {
     callStatus,
     setCallStatus,
     isIncomingCall,
     activeCaller,
+    activeCall,
     selectedUser,
     setSelectedUser,
     isMuted,
