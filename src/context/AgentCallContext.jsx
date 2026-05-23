@@ -129,7 +129,7 @@ export const AgentCallProvider = ({ children }) => {
           receiverId: targetUserId,
           receiverModel: 'User',
           voiceId: selectedVoiceId || "natural" 
-        })
+        } || {})
       });
 
       const data = await res.json();
@@ -143,7 +143,6 @@ export const AgentCallProvider = ({ children }) => {
 
       setActiveCall(callMetadata);
       
-      // Update local context variables for AI Masking configuration visibility
       if (selectedVoiceId && selectedVoiceId !== "natural") {
         setIsVoiceConversionActive(true);
       }
@@ -221,9 +220,11 @@ export const AgentCallProvider = ({ children }) => {
   };
 
   // --- SAFE TEARDOWN ENGINE ---
+  // ✅ IMPROVED: Converted to async to securely complete database termination before breaking layout tracking states
   const handleEndCall = useCallback(async () => {
     console.log("📴 Tearing down core call channel pipelines...");
     
+    // 1. INSTANTLY kill interval loops to prevent background polls during deletion routine
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
@@ -232,10 +233,12 @@ export const AgentCallProvider = ({ children }) => {
     const currentCallId = activeCall?.roomName || activeCall?.callId || activeCaller?.callId;
     const targetId = isIncomingCall ? activeCaller?.fromId : activeCall?.toId || selectedUser?._id;
 
+    // 2. Shut off global signals over the socket layer first
     if (targetId) {
       socket.emit("end-call", { to: String(targetId).trim(), callId: currentCallId });
     }
 
+    // 3. Stop ringing sound assets instantly
     [ringtoneAudio, callingAudio].forEach(audioRef => {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -243,7 +246,25 @@ export const AgentCallProvider = ({ children }) => {
       }
     });
     
-    // Reset Context States
+    // 4. ✅ BLOCKING DB CALL: Sync the ending status to MongoDB before wiping application state variables
+    const token = localStorage.getItem('agentToken');
+    if (currentCallId && token) {
+      try {
+        await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
+          method: 'POST',
+          headers: { 
+            'Authorization': `Bearer ${token}`, 
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({ callId: currentCallId }) 
+        });
+        console.log("✅ DB Sync completed successfully inside teardown engine pipeline.");
+      } catch (e) {
+        console.error("Database sync completion flag error:", e);
+      }
+    }
+
+    // 5. Clean local states safely after database transaction commits
     setCallStatus('idle');
     setLkToken(null);
     setActiveCall(null);
@@ -253,17 +274,6 @@ export const AgentCallProvider = ({ children }) => {
     setPeerConnected(false);
     setIsVoiceConversionActive(false);
     
-    const token = localStorage.getItem('agentToken');
-    if (currentCallId && token) {
-      fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ callId: currentCallId }) 
-      }).catch(e => console.error("Database sync completion flag error:", e));
-    }
   }, [activeCall, activeCaller, isIncomingCall, selectedUser]);
 
   // --- SIGNALLING WIRE LISTENER INTEGRATION ---
@@ -508,7 +518,6 @@ export const AgentCallProvider = ({ children }) => {
   );
 };
 
-// --- RUNTIME MICROPHONE TRACKER COMPONENT ---
 const LocalMicController = ({ isMuted }) => {
   const { localParticipant } = useLocalParticipant();
   const room = useRoomContext();
