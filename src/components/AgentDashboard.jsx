@@ -1088,7 +1088,7 @@ export const AgentDashboard = () => {
         </div>
       </aside>
 
-      {/* --- MAIN CHAT INTERFACE --- */}
+{/* --- MAIN CHAT INTERFACE --- */}
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
         {selectedUser ? (
           <>
@@ -1145,14 +1145,16 @@ export const AgentDashboard = () => {
             </header>
 
             {/* --- MESSAGES AREA --- */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50">
-              {messages.length >= limit && (
-                <div className="flex justify-center py-4">
-                  <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase text-gray-500 bg-white shadow-sm px-4 py-2 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors">↑ Load Older Messages</button>
-                </div>
-              )}
+            {/* Added flex-col-reverse layout strategy for robust upward pagination loading */}
+            <div 
+              ref={scrollRef} 
+              className="flex-1 overflow-y-auto p-4 md:px-12 lg:px-20 space-y-3 z-10 flex flex-col-reverse bg-page-bg dark:bg-slate-950/50"
+            >
+              {/* Scroll Anchor element must sit at the top of the container layout block under flex-col-reverse */}
+              <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
               
-              {messages.map((m) => {
+              {/* Array mapped chronologically through safe reverse cloning */}
+              {messages.slice().reverse().map((m) => {
                 const isMe = m.senderId === agentData?._id;
                 const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
 
@@ -1231,7 +1233,18 @@ export const AgentDashboard = () => {
                   </div>
                 );
               })}
-              <div ref={messagesEndRef} className="h-2 shrink-0 w-full" />
+
+              {/* Pagination elements are moved into logical alignment position inside reverse order block */}
+              {messages.length >= limit && (
+                <div className="w-full flex justify-center py-4">
+                  <button 
+                    onClick={() => setLimit(prev => prev + 30)} 
+                    className="text-[10px] font-black uppercase text-gray-500 bg-white shadow-sm px-4 py-2 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors z-20 relative"
+                  >
+                    ↑ Load Older Messages
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* --- FOOTER INPUT PANEL --- */}
