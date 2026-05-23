@@ -107,7 +107,6 @@ export const acceptCall = async (req, res) => {
       return res.status(404).json({ success: false, message: "Call record not found" });
     }
 
-    // ✅ FIX: Minting the secure LiveKit audio token happens right here on demand.
     const roomName = updatedCall.roomName;
     const token = await createLiveKitToken(roomName, myId);
 
@@ -142,16 +141,27 @@ export const checkIncomingCall = async (req, res) => {
     const userId = (req.user._id || req.user.id).toString();
     const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
 
+    // Fetch memory cache from express application context
+    const terminatingCallsCache = req.app.get('terminatingCallsCache');
+
     const incoming = await Call.findOne({ 
       receiver: userId, 
-      status: { $in: ['ringing', 'calling'] },
+      status: { $in: ['ringing', 'calling', 'connected'] }, // Keep track safely
       active: true,
       createdAt: { $gte: sixtySecondsAgo } 
     })
     .sort({ createdAt: -1 })
     .populate('caller', 'firstName lastName photoUrl');
 
+    // If absolutely no documents matched
     if (!incoming) return res.json({ hasIncomingCall: false });
+    
+    // ✅ THE SHIELD: If this call ID was marked as dead in memory, ignore MongoDB and return false
+    if (terminatingCallsCache && terminatingCallsCache.has(incoming._id.toString())) {
+      console.log(`🛡️ Intercepted race condition: Call ${incoming._id} is terminating. Blocking poller.`);
+      return res.json({ hasIncomingCall: false });
+    }
+
     let finalPhotoUrl = incoming.caller?.photoUrl || "/default-avatar.png";
     
     res.json({
@@ -180,9 +190,16 @@ export const getCallStatus = async (req, res) => {
     await connectToDatabase();
     const { callId } = req.params;
 
+    const terminatingCallsCache = req.app.get('terminatingCallsCache');
+    const isObjectId = mongoose.Types.ObjectId.isValid(callId);
+
+    // ✅ Quick catch: if the checked ID is currently cached as dead, resolve 'ended' instantly
+    if (isObjectId && terminatingCallsCache && terminatingCallsCache.has(callId.toString())) {
+      return res.status(200).json({ success: true, status: 'ended', active: false });
+    }
+
     console.log(`🔍 Querying status for Room: ${callId}`);
 
-    const isObjectId = mongoose.Types.ObjectId.isValid(callId);
     const call = await Call.findOne({
       $or: [
         { roomName: callId },
@@ -192,7 +209,7 @@ export const getCallStatus = async (req, res) => {
     .select('status active startTime voiceId')
     .lean();
 
-    if (!call) {
+    if (!call || (terminatingCallsCache && terminatingCallsCache.has(call._id.toString()))) {
       return res.status(200).json({ 
         success: true, 
         status: 'ended', 
@@ -233,6 +250,15 @@ export const endCall = async (req, res) => {
 
     const isObjectId = mongoose.Types.ObjectId.isValid(callId);
 
+    // ✅ INSTANT MEMORY BLOCK: Stop fallback interval handlers before hitting DB
+    const terminatingCallsCache = req.app.get('terminatingCallsCache');
+    if (terminatingCallsCache) {
+      if (isObjectId) {
+        terminatingCallsCache.add(callId.toString());
+      }
+      // If client sent roomName string instead, cache it dynamically on database discovery below
+    }
+
     const query = {
       $and: [
         { $or: [{ roomName: callId }, { _id: isObjectId ? callId : null }] },
@@ -251,6 +277,11 @@ export const endCall = async (req, res) => {
     );
 
     if (!call) return res.json({ success: true, message: "Call record not found or already handled" });
+
+    // Fallback sync for caching if query used roomName string
+    if (terminatingCallsCache) {
+      terminatingCallsCache.add(call._id.toString());
+    }
 
     const durationSeconds = call.startTime 
       ? Math.floor((new Date() - new Date(call.startTime)) / 1000) 
@@ -299,6 +330,12 @@ export const endCall = async (req, res) => {
 export const logMissedCall = async (callId, req = null) => {
   try {
     await connectToDatabase();
+
+    // Cache it if utility handles timeout execution drops
+    const terminatingCallsCache = req?.app?.get('terminatingCallsCache');
+    if (terminatingCallsCache && callId) {
+      terminatingCallsCache.add(callId.toString());
+    }
 
     const call = await Call.findByIdAndUpdate(
       callId, 
