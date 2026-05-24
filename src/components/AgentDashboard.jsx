@@ -1350,7 +1350,7 @@ const handleSelectUser = async (user) => {
           </div>
         )}
 
-        {/* --- MEDIA PREVIEW OVERLAY --- */}
+      {/* --- MEDIA PREVIEW OVERLAY --- */}
         {previewUrl && (
           <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col animate-in fade-in duration-300">
             <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white border-b border-white/5">

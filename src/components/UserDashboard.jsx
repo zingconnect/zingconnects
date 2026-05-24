@@ -1,10 +1,12 @@
 import { LiveKitRoom, AudioConference, useTracks, RoomAudioRenderer, StartAudio, useLocalParticipant } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { useUserZingCall } from '../hooks/useUserZingCall';
+import { useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { UserCallContext } from '../context/UserCallContext'; 
 import { Buffer } from 'buffer'; // Keep this at the top
+
 if (typeof window !== 'undefined') {
   window.global = window;
-    if (!window.Buffer) {
+  if (!window.Buffer) {
     window.Buffer = Buffer; 
   }
   if (!("AudioSession" in window)) {
@@ -38,7 +40,8 @@ if (typeof window !== 'undefined') {
     };
   }
 }
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
@@ -47,8 +50,9 @@ import { useDrag } from "@use-gesture/react";
 import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import { 
-  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill, BsArrowRight, BsCameraFill, BsMicFill,
-   BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload, BsPlayFill, BsXLg, BsX, BsReplyFill } from 'react-icons/bs';
+  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll, BsChevronLeft, BsShieldLockFill, BsGearFill, BsArrowRight, BsCameraFill, BsMicFill,
+  BsVolumeUpFill, BsMicMuteFill, BsPaperclip, BsDownload, BsPlayFill, BsXLg, BsX, BsReplyFill 
+} from 'react-icons/bs';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -74,8 +78,10 @@ function AudioStateController({ isMuted, isMasked }) {
   }, [localParticipant, isMuted, isMasked]);
   return null;
 }
+
 const socket = io(import.meta.env.VITE_API_URL);
 const PhoneInput = ReactPhoneInput.default || ReactPhoneInput;
+
 const CallStatusMessage = ({ status, time }) => {
   const isMissed = status === 'missed' || status === 'declined';
   const isRinging = status === 'ringing';
@@ -124,10 +130,11 @@ export const UserDashboard = () => {
   const isAdjustingScrollRef = useRef(false);
   const lastNotifiedId = useRef(null);
   const ringtoneAudio = useRef(null);
-const [hasMore, setHasMore] = useState(true);
-const [isFetchingOlder, setIsFetchingOlder] = useState(false);
-const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
-const [agent, setAgent] = useState(null);
+
+  const [hasMore, setHasMore] = useState(true);
+  const [isFetchingOlder, setIsFetchingOlder] = useState(false);
+  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
@@ -147,16 +154,22 @@ const [agent, setAgent] = useState(null);
   const API_BASE_URL = import.meta.env.VITE_API_URL;
   const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
   const [formData, setFormData] = useState({
-    firstName: '', lastName: '', phone: '', dob: '', gender: '', city: '', state: '' });
-const { 
-  callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
-  callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
-  isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
-   callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
-  handleEndCall, terminateLocalSession, unlockAudio 
-} = useUserZingCall(socket, userData, agent);
+    firstName: '', lastName: '', phone: '', dob: '', gender: '', city: '', state: '' 
+  });
+
+  // Consuming signaling states and event loops straight out of UserCallContext
+  const { 
+    callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
+    callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
+    isIncomingCall, setIsIncomingCall, callStatusRef, audioCtxRef, nextStartTimeRef, connectionTimeoutRef, pollingRef, isTransitioningRef, peerConnectedRef,
+    callingAudio, aiMediaRecorderRef, formatTime, handleStartCall, handleAcceptCall, handleRejectCall,
+    handleEndCall, terminateLocalSession, unlockAudio 
+  } = useContext(UserCallContext);
+
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
+  const ringtoneAudioRef = useRef(new Audio('/sounds/ringtone.mp3')); 
   const totalMessagesCountRef = useRef(messages.length);
+
   const getStatusInfo = (agent) => {
     if (!agent) return { isOnline: false, label: "Connecting..." };
     if (agent.status === 'online') return { isOnline: true, label: "Online" };
@@ -207,6 +220,24 @@ const getStatusIcon = (status) => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+  const ringtone = ringtoneAudioRef.current;
+  if (!ringtone) return;
+  ringtone.loop = true;
+  if (callStatus === 'ringing' && isIncomingCall) {
+    ringtone.play().catch((err) => {
+      console.warn("🔔 Ringtone playback prevented by browser auto-play policies. Waiting for interaction:", err);
+    });
+  } else {
+    ringtone.pause();
+    ringtone.currentTime = 0;
+  }
+  return () => {
+    ringtone.pause();
+    ringtone.currentTime = 0;
+  };
+}, [callStatus, isIncomingCall]);
 
   useEffect(() => {
     if (!socket) return;
