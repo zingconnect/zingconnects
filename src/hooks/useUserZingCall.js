@@ -31,6 +31,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   const peerConnectedRef = useRef(false);
   const connectionTimeoutRef = useRef(null);
   const aiMediaRecorderRef = useRef(null);
+  
+  // ✅ FIX: Lock variable tracking ref to fully insulate API poller racing loops
+  const isEndingRef = useRef(false);
 
   // Sound Assets
   const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3'));
@@ -84,6 +87,8 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
 
   const terminateLocalSession = useCallback(() => {
     setIsEnding(true);
+    isEndingRef.current = true; // ✅ Instantly lock references to bypass background async racing bugs
+
     if (pollingRef && pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
     if (connectionTimeoutRef && connectionTimeoutRef.current) { clearTimeout(connectionTimeoutRef.current); connectionTimeoutRef.current = null; }
     
@@ -117,8 +122,11 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     setPeerConnected(false);
     setShowFullScreenCall(false);
     
-    // Safety guard to bridge the latency gap while the server processes mutations
-    setTimeout(() => setIsEnding(false), 5000);
+    // Safety guard extended slightly to allow database update pipelines to wrap up safely
+    setTimeout(() => {
+      setIsEnding(false);
+      isEndingRef.current = false;
+    }, 6000);
   }, []);
 
   // Structural Hangup Method
@@ -127,7 +135,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     const myId = userData?._id || userData?.id;
     const currentCall = activeCallRef ? activeCallRef.current : null;
     
-    // ✅ FIX: Prioritize direct DB document identification tokens over human-readable room strings
     const currentCallId = currentCall?.callId || currentCall?._id || currentCall?.roomName;
     const token = localStorage.getItem('userToken');
     const targetId = currentCall?.fromId === myId ? currentCall?.toId : currentCall?.fromId;
@@ -159,7 +166,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
 
     pollingRef.current = setInterval(async () => {
       const currentStatus = callStatusRef ? callStatusRef.current : 'idle';
-      if (currentStatus === 'idle' || isEnding) return;
+      if (currentStatus === 'idle' || isEndingRef.current) return;
       try {
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -179,7 +186,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         console.warn("Status sync jitter:", err.message);
       }
     }, 4000);
-  }, [isEnding, handleEndCall]);
+  }, [handleEndCall]);
 
   // Structural Outbound Call Method
   const handleStartCall = async () => {
@@ -218,7 +225,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
   
       setActiveCall({ 
-        callId: data.callId, // ✅ FIX: Map data.callId explicitly here instead of roomName
+        callId: data.callId, 
         roomName: data.roomName,
         toId: currentAgentId.toString(),
         fromId: currentUserId,
@@ -236,7 +243,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         fromId: currentUserId,
         fromName: `${userData?.firstName} ${userData?.lastName}`,
         photoUrl: fullPhotoUrl,
-        callId: data.callId // ✅ Explicit sync parameter update
+        callId: data.callId 
       });
 
       setCallStatus('ringing'); 
@@ -360,7 +367,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       const currentStatus = callStatusRef ? callStatusRef.current : 'idle';
       const currentTransition = isTransitioningRef ? isTransitioningRef.current : false;
 
-      if (currentStatus !== 'idle' || isEnding || currentTransition) {
+      if (currentStatus !== 'idle' || isEndingRef.current || currentTransition) {
         console.log("☎️ Line busy or transitioning, rejecting incoming call from:", data.fromId);
         socket.emit("user-busy", { to: data.fromId, callId: data.callId });
         return;
@@ -445,7 +452,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       socket.off("answer-call", onAnswerReceived);
       socket.off("call-accepted", onAnswerReceived);
     };
-  }, [socket, userData?._id, handleEndCall, isEnding]);
+  }, [socket, userData?._id, handleEndCall]);
 
   // Real-time Audio Hardware Routing Controller
   useEffect(() => {
@@ -471,8 +478,8 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       const freshStatus = callStatusRef ? callStatusRef.current : 'idle';
       const freshTransition = isTransitioningRef ? isTransitioningRef.current : false;
       
-      // ✅ FIX: Enhanced safety exit check blocks incoming loop logic execution instantly
-      if (freshStatus !== 'idle' || freshTransition || isEnding) return;
+      // ✅ FIX: Use the rigid isEndingRef reference check to completely slam down loop re-rendering doors
+      if (freshStatus !== 'idle' || freshTransition || isEndingRef.current) return;
 
       try {
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
@@ -487,8 +494,8 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
 
         if (data && data.hasIncomingCall && data.status !== 'ended' && data.status !== 'rejected') {
           
-          // ✅ FIX: Double-verify against reference snapshots immediately prior to mutating state context trees
-          if (callStatusRef.current !== 'idle' || isEnding) return;
+          // ✅ FIX: Double check locks a final time right before parsing states
+          if (callStatusRef.current !== 'idle' || isEndingRef.current) return;
 
           setActiveCall({
             callId: data.callId,
@@ -512,9 +519,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     };
 
     checkCalls();
-    const interval = setInterval(checkCalls, 4000); // Accelerated signature sync window
+    const interval = setInterval(checkCalls, 4000); 
     return () => clearInterval(interval);
-  }, [isEnding]); // Safely stripped callStatus dependency to prevent race loops on fast status changes
+  }, []); // Clean layout reference architecture
 
   // Real-time Audio Streaming (AI Voice Conversion Engine Matrix)
   useEffect(() => {
