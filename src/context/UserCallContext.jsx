@@ -1,10 +1,10 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
-// Bring in LiveKit parts to prevent the "silent connection" track failure
 import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useRoomContext } from '@livekit/components-react';
 
-const UserCallContext = createContext(null);
+// 🔌 FIXED: Added 'export' so UserDashboard can import { UserCallContext } directly!
+export const UserCallContext = createContext(null);
 
 const socket = io(import.meta.env.VITE_API_URL, {
   autoConnect: true,
@@ -70,10 +70,7 @@ export const UserCallProvider = ({ children }) => {
       }
     }
 
-    return () => {
-      if (ringtoneRef.current) ringtoneRef.current.pause();
-    };
-  }, [callEngine.callStatus, callEngine.isIncomingCall]);
+  } , [callEngine.callStatus, callEngine.isIncomingCall]);
 
   const finalAvatarUrl = avatarError || !agent?.photoUrl ? '/default-avatar.png' : agent.photoUrl;
 
@@ -190,7 +187,6 @@ export const UserCallProvider = ({ children }) => {
   );
 };
 
-// RUNTIME MICROPHONE TRACKER COMPONENT (Matches Agent Side Pipeline Logic)
 const LocalMicController = ({ isMuted }) => {
   const { localParticipant } = useLocalParticipant();
   const room = useRoomContext();
