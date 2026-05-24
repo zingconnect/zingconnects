@@ -129,7 +129,6 @@ export const UserDashboard = () => {
   const chatContainerRef = useRef(null);
   const isAdjustingScrollRef = useRef(false);
   const lastNotifiedId = useRef(null);
-  const ringtoneAudio = useRef(null);
 
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
@@ -180,7 +179,8 @@ export const UserDashboard = () => {
     }
     return { isOnline: false, label: "Offline" };
   };
-const getStatusIcon = (status) => {
+
+  const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
         return <BsCheckAll className="text-blue-500" size={18} />;
@@ -221,42 +221,37 @@ const getStatusIcon = (status) => {
     };
   }, [previewUrl]);
 
+  // --- CENTRALIZED SOUND CONTROLLER (FIXES SIMULTANEOUS PLAYBACK) ---
   useEffect(() => {
-  const ringtone = ringtoneAudioRef.current;
-  if (!ringtone) return;
-  ringtone.loop = true;
-  if (callStatus === 'ringing' && isIncomingCall) {
-    ringtone.play().catch((err) => {
-      console.warn("🔔 Ringtone playback prevented by browser auto-play policies. Waiting for interaction:", err);
-    });
-  } else {
-    ringtone.pause();
-    ringtone.currentTime = 0;
-  }
-  return () => {
-    ringtone.pause();
-    ringtone.currentTime = 0;
-  };
-}, [callStatus, isIncomingCall]);
+    const localRingtone = ringtoneAudioRef.current;
+    const contextCallingTrack = callingAudio?.current; // Access track from provider context safely
 
-  useEffect(() => {
-    if (!socket) return;
-    const handleNewMessage = (msg) => {
-      setMessages(prev => {
-        if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
-        return [...prev, msg];
+    if (!localRingtone) return;
+    localRingtone.loop = true;
+
+    if (callStatus === 'ringing' && isIncomingCall) {
+      // 1. Force halt any outbound context ringing immediately
+      if (contextCallingTrack) {
+        contextCallingTrack.pause();
+        contextCallingTrack.currentTime = 0;
+      }
+      // 2. Play the true incoming ringtone safely
+      localRingtone.play().catch((err) => {
+        console.warn("🔔 Ringtone playback deferred by browser policy:", err.message);
       });
-    };
-    const handleMessageDeleted = (id) => {
-      setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
-    };
-    socket.on("new-message", handleNewMessage);
-    socket.on("message-deleted", handleMessageDeleted);
+    } else {
+      // Hard clear the asset when call changes status
+      localRingtone.pause();
+      localRingtone.currentTime = 0;
+    }
+
     return () => {
-      socket.off("new-message", handleNewMessage);
-      socket.off("message-deleted", handleMessageDeleted);
+      localRingtone.pause();
+      localRingtone.currentTime = 0;
     };
-  }, [socket]); 
+  }, [callStatus, isIncomingCall, callingAudio]);
+
+  // Cleaned up duplicate message socket handlers that were here previously
 
   useEffect(() => {
     if (!messages || messages.length === 0) {
@@ -265,7 +260,7 @@ const getStatusIcon = (status) => {
     }
     if (messages.length > totalMessagesCountRef.current) {
       const latestMsg = messages[messages.length - 1];
-            if (latestMsg && latestMsg.senderModel === "Agent") {
+      if (latestMsg && latestMsg.senderModel === "Agent") {
         if (notificationSound && notificationSound.current) {
           notificationSound.current.play().catch((e) => {
             console.log("Audio framework awaiting gesture interaction:", e.message);
@@ -329,523 +324,469 @@ const getStatusIcon = (status) => {
     }
   }, []);
 
- useEffect(() => {
-  if (!socket) return;
- const handleNewMessage = (msg) => {
-    setMessages(prev => {
-      if (prev.some(m => m._id === msg._id || m.tempId === msg._id)) return prev;
-      return [...prev, msg];
-    });
-  };
-  const handleMessageDeleted = (id) => {
-    setMessages(prev => prev.filter(m => (m._id || m.id) !== id));
-  };
-  socket.on("new-message", handleNewMessage);
-  socket.on("message-deleted", handleMessageDeleted);
-  return () => { 
-    socket.off("new-message", handleNewMessage); 
-    socket.off("message-deleted", handleMessageDeleted); 
-  };
-}, [socket]); 
-
- useEffect(() => {
-  if (!messages || messages.length === 0) {
-    totalMessagesCountRef.current = 0;
-    return;
-  }
-  if (messages.length > totalMessagesCountRef.current) {
-    const latestMsg = messages[messages.length - 1];
-    if (latestMsg && latestMsg.senderModel === "Agent") {
-      if (notificationSound && notificationSound.current) {
-        notificationSound.current.play().catch((e) => {
-          console.log("Audio framework awaiting gesture interaction:", e.message);
+  useEffect(() => {
+    const token = localStorage.getItem('userToken');
+    if (!token) return navigate('/');
+    const fetchUserSession = async () => {
+      try {
+        const response = await fetch('/api/users/my-session', {
+          headers: { 'Authorization': `Bearer ${token}` }
         });
+        const data = await response.json();
+        
+        if (response.ok) {
+          setAgent(data.agent); 
+          setUserData(data.user); 
+          
+          if (!data.user.isProfileComplete) {
+            setShowOnboarding(true);
+          }
+        }
+      } catch (err) {
+        console.error("Session fetch error:", err);
+      } finally {
+        setLoading(false);
       }
-    }
-    const container = chatContainerRef.current;
-    if (container && !isAdjustingScrollRef.current) {
-      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160;
-      
-      if (isNearBottom) {
-        setTimeout(() => {
-          if (messagesEndRef && messagesEndRef.current) {
-            try {
-              messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-            } catch (err) {
-              console.warn("Suppressed layout scroll jitter.");
+    };
+
+    fetchUserSession();
+    const interval = setInterval(fetchUserSession, 30000); 
+    return () => clearInterval(interval);
+  }, [navigate]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('userToken');
+    const targetAgentId = agent?._id || agent?.id;
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+    if (!token || !targetAgentId) return;
+    let isFirstLoad = !isInitialLoadComplete;
+    const fetchMessages = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          const incomingMessages = data.messages;
+          const lastMsg = incomingMessages[incomingMessages.length - 1];
+          if (
+            lastMsg && 
+            lastMsg.senderModel === 'Agent' && 
+            lastMsg.status !== 'seen' && 
+            lastMsg._id !== lastNotifiedId.current
+          ) {
+            lastNotifiedId.current = lastMsg._id;
+            if (notificationSound.current) {
+              notificationSound.current.currentTime = 0;
+              notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
+            }
+            if (Notification.permission === "granted") {
+              new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
+                body: lastMsg.text || "Sent a file",
+                icon: '/logo-s.png',
+                tag: 'zing-msg'
+              });
+            }
+            fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
+              method: 'PATCH',
+              headers: { 'Authorization': `Bearer ${token}` }
+            }).catch(err => console.error("Mark read failed:", err));
+          }
+          setMessages(prev => {
+            const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
+            const historicalLocal = prev.filter(m => m._id && !incomingMessages.some(incoming => incoming._id === m._id));
+            const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
+            const uniqueInFlight = inFlight.filter(m => 
+              !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
+            );
+            return [...historicalLocal, ...incomingMessages, ...uniqueInFlight];
+          });
+          if (isFirstLoad) {
+            setTimeout(() => {
+              if (chatContainerRef.current) {
+                chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+              }
+              setIsInitialLoadComplete(true);
+            }, 120);
+          } else {
+            const container = chatContainerRef.current;
+            if (container) {
+              if (isAdjustingScrollRef.current) return;
+              const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+              
+              if (isNearBottom) {
+                setTimeout(() => {
+                  if (!isAdjustingScrollRef.current) {
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }, 50);
+              }
             }
           }
-        }, 60);
+        }
+      } catch (err) {
+        console.error("ZingConnect Sync Jitter:", err);
+      } finally {
+        if (isFirstLoad) setLoading(false);
       }
-    }
-  }
-  totalMessagesCountRef.current = messages.length;
-}, [messages]);
+    };
+    fetchMessages();
+    const interval = setInterval(fetchMessages, 5000); 
+    return () => clearInterval(interval);
+  }, [agent?._id, agent?.id, isInitialLoadComplete]);
 
-useEffect(() => {
-  const token = localStorage.getItem('userToken');
-  if (!token) return navigate('/');
-  const fetchUserSession = async () => {
+  const fetchOlderMessages = async () => {
+    if (isFetchingOlder || !hasMore || !agent?._id || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
+    const token = localStorage.getItem('userToken');
+    const targetAgentId = agent._id || agent.id;
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+    const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
+    if (!oldestMessage) return;
+    setIsFetchingOlder(true);
+    const container = chatContainerRef ? chatContainerRef.current : null;
+    const previousScrollHeight = container ? container.scrollHeight : 0;
+    const previousScrollTop = container ? container.scrollTop : 0;
     try {
-      const response = await fetch('/api/users/my-session', {
+      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
       
-      if (response.ok) {
-        setAgent(data.agent); 
-        setUserData(data.user); 
-        
-        if (!data.user.isProfileComplete) {
-          setShowOnboarding(true);
-        }
-      }
-    } catch (err) {
-      console.error("Session fetch error:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  fetchUserSession();
-  const interval = setInterval(fetchUserSession, 30000); 
-  return () => clearInterval(interval);
-}, [navigate]);
-
-useEffect(() => {
-  const token = localStorage.getItem('userToken');
-  const targetAgentId = agent?._id || agent?.id;
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-  if (!token || !targetAgentId) return;
-  let isFirstLoad = !isInitialLoadComplete;
-  const fetchMessages = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();
       if (response.ok && data.success) {
-        const incomingMessages = data.messages;
-        const lastMsg = incomingMessages[incomingMessages.length - 1];
-        if (
-          lastMsg && 
-          lastMsg.senderModel === 'Agent' && 
-          lastMsg.status !== 'seen' && 
-          lastMsg._id !== lastNotifiedId.current
-        ) {
-          lastNotifiedId.current = lastMsg._id;
-          if (notificationSound.current) {
-            notificationSound.current.currentTime = 0;
-            notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
-          }
-          if (Notification.permission === "granted") {
-            new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
-              body: lastMsg.text || "Sent a file",
-              icon: '/logo-s.png',
-              tag: 'zing-msg'
-            });
-          }
-          fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
-            method: 'PATCH',
-            headers: { 'Authorization': `Bearer ${token}` }
-          }).catch(err => console.error("Mark read failed:", err));
+        if (data.messages.length < 30) {
+          setHasMore(false);
         }
-        setMessages(prev => {
-          const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
-          const historicalLocal = prev.filter(m => m._id && !incomingMessages.some(incoming => incoming._id === m._id));
-          const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
-          const uniqueInFlight = inFlight.filter(m => 
-            !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
-          );
-          return [...historicalLocal, ...incomingMessages, ...uniqueInFlight];
-        });
-        if (isFirstLoad) {
-          setTimeout(() => {
-            if (chatContainerRef.current) {
-              chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-            }
-            setIsInitialLoadComplete(true);
-          }, 120);
-        } else {
-          const container = chatContainerRef.current;
-          if (container) {
-            if (isAdjustingScrollRef.current) return;
-            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-            
-            if (isNearBottom) {
-              setTimeout(() => {
-                if (!isAdjustingScrollRef.current) {
-                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-                }
-              }, 50);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.error("ZingConnect Sync Jitter:", err);
-    } finally {
-      if (isFirstLoad) setLoading(false);
-    }
-  };
-  fetchMessages();
-  const interval = setInterval(fetchMessages, 5000); 
-  return () => clearInterval(interval);
-}, [agent?._id, agent?.id, isInitialLoadComplete]);
-
-const fetchOlderMessages = async () => {
-  if (isFetchingOlder || !hasMore || !agent?._id || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
-  const token = localStorage.getItem('userToken');
-  const targetAgentId = agent._id || agent.id;
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-  const oldestMessage = messages.find(m => m._id && !m.isTemp && m.status !== 'sending');
-  if (!oldestMessage) return;
-  setIsFetchingOlder(true);
-  const container = chatContainerRef ? chatContainerRef.current : null;
-  const previousScrollHeight = container ? container.scrollHeight : 0;
-  const previousScrollTop = container ? container.scrollTop : 0;
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    
-    if (response.ok && data.success) {
-      if (data.messages.length < 30) {
-        setHasMore(false);
-      }
-      if (data.messages.length > 0) {
-        if (isAdjustingScrollRef) isAdjustingScrollRef.current = true;
-        
-        setMessages(prev => {
-          const currentIds = new Set(prev.map(m => m._id));
-          const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
-          return [...uniqueHistorical, ...prev];
-        });
-        requestAnimationFrame(() => {
-          if (chatContainerRef && chatContainerRef.current) {
-            const freshHeight = chatContainerRef.current.scrollHeight;
-            const delta = freshHeight - previousScrollHeight;
-            chatContainerRef.current.scrollTop = previousScrollTop + delta;
-          }
-                    setTimeout(() => {
+        if (data.messages.length > 0) {
+          if (isAdjustingScrollRef) isAdjustingScrollRef.current = true;
+          
+          setMessages(prev => {
+            const currentIds = new Set(prev.map(m => m._id));
+            const uniqueHistorical = data.messages.filter(m => !currentIds.has(m._id));
+            return [...uniqueHistorical, ...prev];
+          });
+          requestAnimationFrame(() => {
             if (chatContainerRef && chatContainerRef.current) {
-              const finalHeight = chatContainerRef.current.scrollHeight;
-              const finalDelta = finalHeight - previousScrollHeight;
-              chatContainerRef.current.scrollTop = previousScrollTop + finalDelta;
+              const freshHeight = chatContainerRef.current.scrollHeight;
+              const delta = freshHeight - previousScrollHeight;
+              chatContainerRef.current.scrollTop = previousScrollTop + delta;
             }
-            if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') {
-              isAdjustingScrollRef.current = false;
-            }
-          }, 35);
-        });
+            setTimeout(() => {
+              if (chatContainerRef && chatContainerRef.current) {
+                const finalHeight = chatContainerRef.current.scrollHeight;
+                const finalDelta = finalHeight - previousScrollHeight;
+                chatContainerRef.current.scrollTop = previousScrollTop + finalDelta;
+              }
+              if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') {
+                isAdjustingScrollRef.current = false;
+              }
+            }, 35);
+          });
+        } else {
+          if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
+        }
       } else {
         if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
       }
-    } else {
+    } catch (err) {
+      console.error("Failed to load older historical slices:", err);
       if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
+    } finally {
+      setIsFetchingOlder(false);
     }
-  } catch (err) {
-    console.error("Failed to load older historical slices:", err);
-    if (isAdjustingScrollRef && typeof isAdjustingScrollRef.current !== 'undefined') isAdjustingScrollRef.current = false;
-  } finally {
-    setIsFetchingOlder(false);
-  }
-};
-
-const handleChatScroll = (e) => {
-  const container = e.currentTarget;
-  if (!container) return;
-  const currentScrollTop = container.scrollTop;
-    if (isAdjustingScrollRef && isAdjustingScrollRef.current) return;  
-  if (currentScrollTop <= 35 && currentScrollTop > 0) {
-    fetchOlderMessages();
-  }
-};
-const agentStatus = getStatusInfo(agent);
-const handlePhotoClick = () => fileInputRef.current.click();
-
-const handleFileChange = (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-  }
-  const url = URL.createObjectURL(file);
-  if (showOnboarding) {
-    setPreviewUrl(url); 
-    setFormData(prev => ({ ...prev, profileImage: file }));
-  } else {
-    setPreviewFile(file); // Stores the actual File object for S3 upload
-    setPreviewUrl(url);   // Triggers the Fullscreen WhatsApp-style preview
-    setCaption("");       // Reset caption so previous message text doesn't persist
-  }
-  e.target.value = ""; 
-};
-
-const handleProfileSubmit = async (e) => {
-  e.preventDefault();
-    if (!formData.phone || formData.phone.length < 10) {
-    alert("Please enter a valid phone number with country code.");
-    return;
-  }
-  setIsUploading(true); 
-  const token = localStorage.getItem('userToken');
-  const data = new FormData();
-    const fileToUpload = onboardingFile || previewFile;
-  if (fileToUpload) {
-    data.append('photo', fileToUpload);
-  }
-  Object.keys(formData).forEach(key => {
-    if (formData[key] !== undefined && formData[key] !== null) {
-      data.append(key, formData[key]);
-    }
-  });
-  try {
-    const res = await fetch('/api/users/update-user-onboarding', {
-      method: 'PUT',
-      headers: { 
-        'Authorization': `Bearer ${token}` 
-      },
-      body: data
-    });
-    const result = await res.json();
-    if (res.ok) {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      if (setUserData) setUserData(result.user);
-      setShowOnboarding(false);
-      setOnboardingFile(null);
-      setPreviewFile(null);
-      setPreviewUrl(null);
-      console.log("Profile updated successfully. Phone saved:", result.user.phone);
-    } else {
-      alert(result.message || "Initialization failed. Please check the form.");
-    }
-  } catch (err) {
-    console.error("Profile initialization failed:", err);
-    alert("Network error. Please check your connection.");
-  } finally {
-    setIsUploading(false);
-  }
-};
-
-const handleFileUpload = (e) => {
-  const file = e.target.files[0];
-  if (!file || !agent?._id) return;
-  const isVideo = file.type.startsWith('video/');
-  const isImage = file.type.startsWith('image/');
-  if (!isVideo && !isImage) {
-    alert("Please upload only images or videos.");
-    return;
-  }
-   const maxLimit = 100 * 1024 * 1024; 
-  if (file.size > maxLimit) {
-    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
-    e.target.value = null; 
-    return;
-  }
-
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-  }
-
-  // Set State for the WhatsApp-style preview overlay
-  const localUrl = URL.createObjectURL(file);
-  setPreviewFile(file);
-  setPreviewUrl(localUrl);
-  setCaption(""); 
-  if (e.target) e.target.value = null; 
-};
-
-const handleFinalSend = async () => {
-  if (!previewFile || isUploading || !agent?._id) return;
-
-  const tempId = Date.now().toString();
-  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-  const savedFile = previewFile;
-  const savedCaption = caption;
-  const pendingMedia = {
-    _id: tempId,
-    tempId: tempId,
-    senderId: userData._id,
-    senderModel: 'User',
-    text: savedCaption,
-    fileUrl: previewUrl, 
-    fileType: detectedType,
-    status: 'sending',
-    createdAt: new Date().toISOString(),
-    isTemp: true,
-    originalFile: savedFile 
   };
-  setMessages(prev => [...prev, pendingMedia]);
-  setPreviewUrl(null); 
-  setPreviewFile(null);
-  setIsUploading(true);
-  const token = localStorage.getItem('userToken'); 
 
-  try {
-    const urlResponse = await fetch('/api/messages/get-upload-url', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
-    });
-
-    const urlData = await urlResponse.json();
-    if (!urlData.success) throw new Error("Upload permission failed");
-
-    await fetch(urlData.uploadUrl, {
-      method: 'PUT',
-      body: savedFile,
-      headers: { 'Content-Type': savedFile.type }
-    });
-
-    const confirmResponse = await fetch('/api/messages/confirm-upload', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({
-        receiverId: agent._id,
-        text: savedCaption.trim(),
-        fileUrl: urlData.key, 
-        fileType: detectedType
-      })
-    });
-
-    const data = await confirmResponse.json();
-    if (data.success) {
-      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
-      setReplyingTo(null);
-    } else {
-      throw new Error();
+  const handleChatScroll = (e) => {
+    const container = e.currentTarget;
+    if (!container) return;
+    const currentScrollTop = container.scrollTop;
+    if (isAdjustingScrollRef && isAdjustingScrollRef.current) return;  
+    if (currentScrollTop <= 35 && currentScrollTop > 0) {
+      fetchOlderMessages();
     }
-  } catch (err) {
-    setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
-  } finally {
-    setIsUploading(false);
-  }
-};
+  };
 
-const handleDownload = async (url, type) => {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const blobUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = `zing-${type}-${Date.now()}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(blobUrl);
-  } catch (err) {
-    console.error("Download failed:", err);
-  }
-};
+  const agentStatus = getStatusInfo(agent);
+  const handlePhotoClick = () => fileInputRef.current.click();
 
-const startStatusPolling = (roomName) => {
-  const token = localStorage.getItem('userToken');
-  const startTime = Date.now(); // Mark when polling started
-  if (pollingRef.current) clearInterval(pollingRef.current);
-  const pollInterval = setInterval(async () => {
-    if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    const url = URL.createObjectURL(file);
+    if (showOnboarding) {
+      setPreviewUrl(url); 
+      setFormData(prev => ({ ...prev, profileImage: file }));
+    } else {
+      setPreviewFile(file);
+      setPreviewUrl(url);   
+      setCaption("");       
+    }
+    e.target.value = ""; 
+  };
 
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (res.status === 404) {
-        if (Date.now() - startTime > 8000) {
-          console.warn("🏳️ Polling: Call record missing.");
-          handleEndCall();
-        }
-        return;
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.phone || formData.phone.length < 10) {
+      alert("Please enter a valid phone number with country code.");
+      return;
+    }
+    setIsUploading(true); 
+    const token = localStorage.getItem('userToken');
+    const data = new FormData();
+    const fileToUpload = onboardingFile || previewFile;
+    if (fileToUpload) {
+      data.append('photo', fileToUpload);
+    }
+    Object.keys(formData).forEach(key => {
+      if (formData[key] !== undefined && formData[key] !== null) {
+        data.append(key, formData[key]);
       }
-      const data = await res.json();
-      const terminalStates = ['ended', 'rejected', 'missed', 'declined'];
-
-      if (terminalStates.includes(data.status) || data.active === false) {
-        if (Date.now() - startTime > 5000) {
-          console.log("🏳️ Polling: Remote side terminated call.");
-          handleEndCall();
-        }
+    });
+    try {
+      const res = await fetch('/api/users/update-user-onboarding', {
+        method: 'PUT',
+        headers: { 
+          'Authorization': `Bearer ${token}` 
+        },
+        body: data
+      });
+      const result = await res.json();
+      if (res.ok) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        if (setUserData) setUserData(result.user);
+        setShowOnboarding(false);
+        setOnboardingFile(null);
+        setPreviewFile(null);
+        setPreviewUrl(null);
+        console.log("Profile updated successfully. Phone saved:", result.user.phone);
+      } else {
+        alert(result.message || "Initialization failed. Please check the form.");
       }
     } catch (err) {
-      console.warn("Status sync jitter:", err.message);
+      console.error("Profile initialization failed:", err);
+      alert("Network error. Please check your connection.");
+    } finally {
+      setIsUploading(false);
     }
-  }, 4000);
-
-  pollingRef.current = pollInterval;
-};
-
- const handleSendMessage = async (e) => {
-  e.preventDefault();
-  if (!newMessage.trim() || !agent?._id) return;
-  
-  const textToSend = newMessage;
-  const tempId = Date.now().toString(); 
-  setNewMessage(''); 
-
-  const pendingMessage = {
-    _id: tempId,
-    tempId: tempId,
-    senderId: userData._id,
-    senderModel: 'User', // Ensure this matches your CSS logic
-    text: textToSend,
-    status: 'sending',
-    createdAt: new Date().toISOString(),
-    isTemp: true
   };
-  setMessages(prev => [...prev, pendingMessage]);
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file || !agent?._id) return;
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) {
+      alert("Please upload only images or videos.");
+      return;
+    }
+    const maxLimit = 100 * 1024 * 1024; 
+    if (file.size > maxLimit) {
+      alert(`This file is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
+      e.target.value = null; 
+      return;
+    }
+
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+
+    const localUrl = URL.createObjectURL(file);
+    setPreviewFile(file);
+    setPreviewUrl(localUrl);
+    setCaption(""); 
+    if (e.target) e.target.value = null; 
+  };
+
+  const handleFinalSend = async () => {
+    if (!previewFile || isUploading || !agent?._id) return;
+
+    const tempId = Date.now().toString();
+    const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+    const savedFile = previewFile;
+    const savedCaption = caption;
+    const pendingMedia = {
+      _id: tempId,
+      tempId: tempId,
+      senderId: userData._id,
+      senderModel: 'User',
+      text: savedCaption,
+      fileUrl: previewUrl, 
+      fileType: detectedType,
+      status: 'sending',
+      createdAt: new Date().toISOString(),
+      isTemp: true,
+      originalFile: savedFile 
+    };
+    setMessages(prev => [...prev, pendingMedia]);
+    setPreviewUrl(null); 
+    setPreviewFile(null);
+    setIsUploading(true);
+    const token = localStorage.getItem('userToken'); 
+
+    try {
+      const urlResponse = await fetch('/api/messages/get-upload-url', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
+      });
+
+      const urlData = await urlResponse.json();
+      if (!urlData.success) throw new Error("Upload permission failed");
+
+      await fetch(urlData.uploadUrl, {
+        method: 'PUT',
+        body: savedFile,
+        headers: { 'Content-Type': savedFile.type }
+      });
+
+      const confirmResponse = await fetch('/api/messages/confirm-upload', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          receiverId: agent._id,
+          text: savedCaption.trim(),
+          fileUrl: urlData.key, 
+          fileType: detectedType
+        })
+      });
+
+      const data = await confirmResponse.json();
+      if (data.success) {
+        setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+        setReplyingTo(null);
+      } else {
+        throw new Error();
+      }
+    } catch (err) {
+      setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDownload = async (url, type) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `zing-${type}-${Date.now()}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Download failed:", err);
+    }
+  };
+
+  const startStatusPolling = (roomName) => {
+    const token = localStorage.getItem('userToken');
+    const startTime = Date.now();
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    const pollInterval = setInterval(async () => {
+      if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
+
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.status === 404) {
+          if (Date.now() - startTime > 8000) {
+            console.warn("🏳️ Polling: Call record missing.");
+            handleEndCall();
+          }
+          return;
+        }
+        const data = await res.json();
+        const terminalStates = ['ended', 'rejected', 'missed', 'declined'];
+
+        if (terminalStates.includes(data.status) || data.active === false) {
+          if (Date.now() - startTime > 5000) {
+            console.log("🏳️ Polling: Remote side terminated call.");
+            handleEndCall();
+          }
+        }
+      } catch (err) {
+        console.warn("Status sync jitter:", err.message);
+      }
+    }, 4000);
+
+    pollingRef.current = pollInterval;
+  };
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !agent?._id) return;
+    
+    const textToSend = newMessage;
+    const tempId = Date.now().toString(); 
+    setNewMessage(''); 
+
+    const pendingMessage = {
+      _id: tempId,
+      tempId: tempId,
+      senderId: userData._id,
+      senderModel: 'User',
+      text: textToSend,
+      status: 'sending',
+      createdAt: new Date().toISOString(),
+      isTemp: true
+    };
+    setMessages(prev => [...prev, pendingMessage]);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
 
-  try {
-    const token = localStorage.getItem('userToken');
-    const response = await fetch('/api/messages/send', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        receiverId: agent._id,
-        text: textToSend,
-        fileType: 'text',
-        replyToId: replyingTo?._id 
-      })
-    });
+    try {
+      const token = localStorage.getItem('userToken');
+      const response = await fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          receiverId: agent._id,
+          text: textToSend,
+          fileType: 'text',
+          replyToId: replyingTo?._id 
+        })
+      });
 
-    const data = await response.json();
-    if (data.success) {
-      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
-      socket.emit("sendMessage", data.message); 
-      
-      setReplyingTo(null);
-    } else {
-      throw new Error();
+      const data = await response.json();
+      if (data.success) {
+        setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+        socket.emit("sendMessage", data.message); 
+        setReplyingTo(null);
+      } else {
+        throw new Error();
+      }
+    } catch (err) {
+      setMessages(prev => prev.map(m => 
+        m._id === tempId ? { ...m, status: 'failed' } : m
+      ));
     }
-  } catch (err) {
-    setMessages(prev => prev.map(m => 
-      m._id === tempId ? { ...m, status: 'failed' } : m
-    ));
-  }
-};
+  };
 
-const handleResend = (msg) => {
-  setMessages(prev => prev.filter(m => m._id !== msg._id));
-  if (msg.fileType === 'image' || msg.fileType === 'video') {
-    setPreviewFile(msg.originalFile);
-    setPreviewUrl(msg.fileUrl);
-    setCaption(msg.text);
-  } else {
-    setNewMessage(msg.text);
-  }
-};
+  const handleResend = (msg) => {
+    setMessages(prev => prev.filter(m => m._id !== msg._id));
+    if (msg.fileType === 'image' || msg.fileType === 'video') {
+      setPreviewFile(msg.originalFile);
+      setPreviewUrl(msg.fileUrl);
+      setCaption(msg.text);
+    } else {
+      setNewMessage(msg.text);
+    }
+  };
 
 function AudioTracks({ active }) {
   const tracks = useTracks(
