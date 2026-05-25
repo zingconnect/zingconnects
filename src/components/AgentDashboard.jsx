@@ -276,46 +276,51 @@ const triggerNotification = (message) => {
     };
   }, [socket, callStatus, isSpeakerOn]);
 
-
+// 2. Optimized Effect
 useEffect(() => {
   if (!socket) return;
-  if ("Notification" in window && Notification.permission === "default") {
-    Notification.requestPermission();
-  }
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
 
-    // 1. Core Safeguard: Drop duplicates by tracking message ID explicitly
+    // Safeguard
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
-    const isChattingWithSender = selectedUser && (data.senderId === selectedUser._id || data.senderId === selectedUser.id);
+    // Use the REF to get the latest chat target
+    const currentSelectedUser = selectedUserRef.current;
+    const isChattingWithSender = currentSelectedUser && 
+      (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
     
+    // Update State
     if (isChattingWithSender) {
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
 
-      // Mark as read immediately on backend
+      // Mark as read
       const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${selectedUser._id}`, {
+      fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
     }
+
+    // Audio & Notifications
     if (data.senderModel === 'User') {
+      // Audio
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
         notificationSound.current.play().catch((err) => 
-          console.warn("🔊 Notification audio context autoplay restricted:", err.message)
+          console.warn("🔊 Audio autoplay restricted:", err.message)
         );
       }
       
-      if ('vibrate' in navigator) {
-        navigator.vibrate([200, 100, 200]); // Double pulse haptic alert
-      }
+      // Haptics
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+
+      // Popups
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
       if (Notification.permission === "granted" && shouldShowPopup) {
         const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
@@ -324,10 +329,7 @@ useEffect(() => {
           tag: 'zing-msg',
           renotify: true
         });
-        popup.onclick = () => { 
-          window.focus(); 
-          popup.close(); 
-        };
+        popup.onclick = () => { window.focus(); popup.close(); };
       }
     }
   };
@@ -336,7 +338,12 @@ useEffect(() => {
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket, selectedUser]); 
+}, [socket]);
+
+const selectedUserRef = useRef(selectedUser);
+useEffect(() => {
+  selectedUserRef.current = selectedUser;
+}, [selectedUser]);
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
