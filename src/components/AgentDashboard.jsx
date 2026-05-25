@@ -960,57 +960,55 @@ const handleSelectUser = async (user) => {
               </div>
             </div>
 
-            {/* Right Pricing Plan Selection */}
-            <div className="p-12 md:w-2/3 bg-gray-50 flex flex-col overflow-y-auto">
-              <h3 className="text-xl font-bold text-gray-800 mb-6">Choose Your Access Tier</h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-                {plans.map((plan) => (
-                  <div
-                    key={plan.tier}
-                    onClick={() => setSelectedPlan(plan.tier)}
-                    className={`cursor-pointer p-5 rounded-2xl border-2 transition-all relative flex flex-col justify-between h-36 ${
-                      selectedPlan === plan.tier 
-                        ? 'border-blue-600 bg-white shadow-xl scale-[1.03]' 
-                        : 'border-gray-200 bg-white opacity-80 hover:opacity-100'
-                    }`}
-                  >
-                    {plan.popular && (
-                      <span className="absolute -top-2.5 left-4 bg-orange-500 text-white text-[8px] font-black tracking-widest px-2 py-0.5 rounded-full uppercase">
-                        Popular
-                      </span>
-                    )}
-
-                    <div>
-                      <span className={`text-[9px] font-black uppercase tracking-widest block ${selectedPlan === plan.tier ? 'text-blue-600' : 'text-gray-400'}`}>
-                        {plan.tier}
-                      </span>
-                      <span className="text-xs font-bold text-gray-500 block mt-0.5">
-                        {plan.term} Access
-                      </span>
-                    </div>
-
-                    <div>
-                      <div className="text-2xl font-black text-gray-900 leading-none">
-                        Ref{plan.price}
-                      </div>
-                      <span className="text-[10px] text-gray-400 font-medium mt-1 block">
-                        {plan.tier === 'BASIC' && 'billed monthly'}
-                        {plan.tier === 'GROWTH' && 'billed every 6 months'}
-                        {plan.tier === 'PROFESSIONAL' && 'billed annually'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button 
-                disabled={paymentProcessing} 
-                onClick={handlePayment} 
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-4 rounded-xl uppercase tracking-widest text-[11px] transition-colors shadow-md"
-              >
-                {paymentProcessing ? "Processing..." : `Activate ${selectedPlan} Access`}
-              </button>
-            </div>
+          {/* Right Pricing Plan Selection */}
+<div className="p-12 md:w-2/3 bg-gray-50 flex flex-col overflow-y-auto">
+  <h3 className="text-xl font-bold text-gray-800 mb-6">Choose Your Access Tier</h3>
+  
+  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+    {plans.map((plan) => (
+      <div
+        key={plan.tier}
+        onClick={() => setSelectedPlan(plan.tier)}
+        className={`cursor-pointer p-5 rounded-2xl border-2 transition-all relative flex flex-col justify-between h-36 ${
+          selectedPlan === plan.tier 
+            ? 'border-blue-600 bg-white shadow-xl scale-[1.03]' 
+            : 'border-gray-200 bg-white opacity-80 hover:opacity-100'
+        }`}
+      >
+        {plan.popular && (
+          <span className="absolute -top-2.5 left-4 bg-orange-500 text-white text-[8px] font-black tracking-widest px-2 py-0.5 rounded-full uppercase">
+            Popular
+          </span>
+        )}
+        <div>
+          <span className={`text-[9px] font-black uppercase tracking-widest block ${selectedPlan === plan.tier ? 'text-blue-600' : 'text-gray-400'}`}>
+            {plan.tier}
+          </span>
+          <span className="text-xs font-bold text-gray-500 block mt-0.5">
+            {plan.term} Access
+          </span>
+        </div>
+        <div>
+          <div className="text-2xl font-black text-gray-900 leading-none">
+            ₦{plan.price}
+          </div>
+          <span className="text-[10px] text-gray-400 font-medium mt-1 block">
+            {plan.tier === 'BASIC' && 'billed monthly'}
+            {plan.tier === 'GROWTH' && 'billed every 6 months'}
+            {plan.tier === 'PROFESSIONAL' && 'billed annually'}
+          </span>
+        </div>
+      </div>
+    ))}
+  </div>
+  <button 
+    disabled={paymentProcessing} 
+    onClick={handlePayment} 
+    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-4 rounded-xl uppercase tracking-widest text-[11px] transition-colors shadow-md"
+  >
+    {paymentProcessing ? "Processing..." : `Activate ${selectedPlan} Access`}
+  </button>
+</div>
           </div>
         </div>
       )}
