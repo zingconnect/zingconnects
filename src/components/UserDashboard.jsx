@@ -832,21 +832,27 @@ function AudioTracks({ active }) {
 
 const MessageBubble = ({ m, isMe, onReply, children }) => {
   const controls = useAnimation();
-  const bind = useDrag(({ active, movement: [x], last }) => {
-    const xMovement = Math.min(Math.max(0, x), 100); 
 
+  const bind = useDrag(({ active, movement: [x], last, cancel }) => {
+    const xMovement = Math.min(Math.max(0, x), 80); 
     if (active) {
       controls.set({ x: xMovement });
     }
 
     if (last) {
-      if (xMovement > 60) {
+      if (xMovement > 55) {
         onReply(m);
-        if (window.navigator.vibrate) window.navigator.vibrate(10);
+        if (window.navigator && window.navigator.vibrate) {
+          window.navigator.vibrate(10);
+        }
       }
-      controls.start({ x: 0, transition: { type: "spring", stiffness: 300, damping: 30 } });
+      controls.start({ x: 0, transition: { type: "spring", stiffness: 350, damping: 25 } });
     }
-  }, { axis: 'x' });
+  }, { 
+    axis: 'x',
+    filterTaps: true,
+    pointer: { touch: true }
+  });
 
   return (
     <div className="relative group">
@@ -869,7 +875,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   );
 };
-
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">
