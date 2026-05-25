@@ -15,7 +15,7 @@ export const useAgentCall = () => {
   return context;
 };
 
-// Global Connection Signalling Socket Singleton
+// Global Connection Signaling Socket Singleton
 const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentCallProvider = ({ children }) => {
@@ -41,10 +41,17 @@ export const AgentCallProvider = ({ children }) => {
   const [activeCall, setActiveCall] = useState(null);
 
   // --- HARDWARE & AUDIO PIPELINE REFS ---
+  const callStatusRef = useRef('idle');
+  const activeCallRef = useRef(null);
+  const isEndingRef = useRef(false);
   const timerRef = useRef(null);
   const pollingIntervalRef = useRef(null);
   const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3'));
   const callingAudio = useRef(new Audio('/sounds/calling.wav'));
+
+  // Sync state mutations directly to background reference maps
+  useEffect(() => { callStatusRef.current = callStatus; }, [callStatus]);
+  useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
 
   // --- COMPONENT INITIALIZATION AUDIO CLEANUP ---
   useEffect(() => {
@@ -52,10 +59,13 @@ export const AgentCallProvider = ({ children }) => {
     callingAudio.current.loop = true;
 
     return () => {
+      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+      
       [ringtoneAudio, callingAudio].forEach(audioRef => {
-        if (audioRef.current) {
+        if (audioRef && audioRef.current) {
           audioRef.current.pause();
-          audioRef.current = null;
+          audioRef.current.currentTime = 0;
         }
       });
     };
@@ -75,18 +85,19 @@ export const AgentCallProvider = ({ children }) => {
         setCallTime((prev) => prev + 1);
       }, 1000);
     } else {
-      clearInterval(timerRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
       setCallTime(0);
     }
-    return () => clearInterval(timerRef.current);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [callStatus]);
 
   // --- REMOTELY MANAGED STATUS POLLING ENGINE ---
-  const startStatusPolling = (roomName) => {
+  const startStatusPolling = useCallback((roomName) => {
     const startTime = Date.now();
     if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
 
     pollingIntervalRef.current = setInterval(async () => {
+      if (isEndingRef.current || callStatusRef.current === 'idle') return;
       try {
         const token = localStorage.getItem('agentToken');
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
@@ -103,7 +114,71 @@ export const AgentCallProvider = ({ children }) => {
         console.error("[CallContext] Poller Error:", err);
       }
     }, 4000);
-  };
+  }, []);
+
+  // --- SAFE TEARDOWN ENGINE ---
+  const handleEndCall = useCallback(async () => {
+    // If we're already ending, skip to avoid double-processing event streams
+    if (isEndingRef.current) return;
+    
+    console.log("📴 Tearing down core call channel pipelines...");
+    isEndingRef.current = true;
+
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
+    const currentCall = activeCallRef.current;
+    const currentCallId = currentCall?.roomName || currentCall?.callId;
+    const targetId = currentCall?.toId || currentCall?.fromId;
+
+    // Dispatch socket notification flags
+    if (socket && targetId) {
+      socket.emit("end-call", { to: String(targetId).trim(), callId: currentCallId });
+    }
+
+    // Terminate local sound structures immediately
+    [ringtoneAudio, callingAudio].forEach(audioRef => {
+      if (audioRef && audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    });
+
+    // Reset baseline layout variables instantly before making remote network hits
+    setCallStatus('idle');
+    setIsIncomingCall(false);
+    setActiveCall(null);
+    setActiveCaller(null);
+    setLkToken(null);
+    setShowFullScreenCall(false);
+    setPeerConnected(false);
+    setIsVoiceConversionActive(false);
+    
+    // Dispatch DB teardown logs
+    const token = localStorage.getItem('agentToken');
+    if (currentCallId && token) {
+      try {
+        await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
+          method: 'POST',
+          headers: { 
+            'Authorization': `Bearer ${token}`, 
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({ callId: currentCallId }) 
+        });
+        console.log("✅ DB Sync completed successfully inside teardown engine pipeline.");
+      } catch (e) {
+        console.warn("Database sync completion flag error:", e);
+      }
+    }
+
+    // Keep the guard active briefly to discard remaining delayed bounce packets
+    setTimeout(() => {
+      isEndingRef.current = false;
+    }, 1500);
+  }, []);
 
   // --- OUTBOUND CALL TRIGGER ---
   const handleStartCall = async (targetUserId, targetUserData = null) => {
@@ -129,7 +204,7 @@ export const AgentCallProvider = ({ children }) => {
           receiverId: targetUserId,
           receiverModel: 'User',
           voiceId: selectedVoiceId || "natural" 
-        } || {})
+        })
       });
 
       const data = await res.json();
@@ -149,7 +224,8 @@ export const AgentCallProvider = ({ children }) => {
       
       socket.emit("call-user", { 
         userToCall: targetUserId.toString(),
-        roomName: data.roomName
+        roomName: data.roomName,
+        callId: data.callId
       });
       
       setLkToken(data.lkToken);
@@ -157,7 +233,6 @@ export const AgentCallProvider = ({ children }) => {
 
     } catch (err) {
       console.error("❌ Outbound Connection Init Failed:", err);
-      alert(`Could not start call: ${err.message}`);
       handleEndCall();
     }
   };
@@ -170,8 +245,9 @@ export const AgentCallProvider = ({ children }) => {
     }
     
     const token = localStorage.getItem('agentToken');
-    const callId = activeCall?.callId || activeCaller?.callId;
-    const remoteUserId = activeCaller?.fromId || activeCall?.fromId;
+    const currentCall = activeCallRef.current;
+    const callId = currentCall?.callId || currentCall?.roomName;
+    const remoteUserId = currentCall?.fromId || currentCall?.toId;
 
     if (!callId) {
       console.error("❌ Cannot accept call: Missing Call Session Identity parameters.");
@@ -203,10 +279,11 @@ export const AgentCallProvider = ({ children }) => {
         }));
 
         if (remoteUserId) {
-          socket.emit("accept-call", {
+          socket.emit("answer-call", {
             to: remoteUserId.toString(),
             roomName: data.roomName,
-            callId: callId
+            callId: callId,
+            lkToken: data.lkToken
           });
         }
         setLkToken(data.lkToken);
@@ -219,97 +296,59 @@ export const AgentCallProvider = ({ children }) => {
     }
   };
 
-  // --- SAFE TEARDOWN ENGINE ---
-  // ✅ IMPROVED: Converted to async to securely complete database termination before breaking layout tracking states
-  const handleEndCall = useCallback(async () => {
-    console.log("📴 Tearing down core call channel pipelines...");
-    
-    // 1. INSTANTLY kill interval loops to prevent background polls during deletion routine
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
+  // Handle ringing patterns across hook dependencies
+  useEffect(() => {
+    const rAudio = ringtoneAudio.current;
+    const cAudio = callingAudio.current;
+
+    if (callStatus === 'ringing' && isIncomingCall) {
+      if (cAudio) cAudio.pause();
+      if (rAudio) rAudio.play().catch(() => {});
+    } else if (callStatus === 'dialing' || (callStatus === 'ringing' && !isIncomingCall)) {
+      if (rAudio) rAudio.pause();
+      if (cAudio) cAudio.play().catch(() => {});
+    } else {
+      if (rAudio) rAudio.pause();
+      if (cAudio) cAudio.pause();
     }
-
-    const currentCallId = activeCall?.roomName || activeCall?.callId || activeCaller?.callId;
-    const targetId = isIncomingCall ? activeCaller?.fromId : activeCall?.toId || selectedUser?._id;
-
-    // 2. Shut off global signals over the socket layer first
-    if (targetId) {
-      socket.emit("end-call", { to: String(targetId).trim(), callId: currentCallId });
-    }
-
-    // 3. Stop ringing sound assets instantly
-    [ringtoneAudio, callingAudio].forEach(audioRef => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
-    });
-    
-    // 4. ✅ BLOCKING DB CALL: Sync the ending status to MongoDB before wiping application state variables
-    const token = localStorage.getItem('agentToken');
-    if (currentCallId && token) {
-      try {
-        await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
-          method: 'POST',
-          headers: { 
-            'Authorization': `Bearer ${token}`, 
-            'Content-Type': 'application/json' 
-          },
-          body: JSON.stringify({ callId: currentCallId }) 
-        });
-        console.log("✅ DB Sync completed successfully inside teardown engine pipeline.");
-      } catch (e) {
-        console.error("Database sync completion flag error:", e);
-      }
-    }
-
-    // 5. Clean local states safely after database transaction commits
-    setCallStatus('idle');
-    setLkToken(null);
-    setActiveCall(null);
-    setActiveCaller(null);
-    setIsIncomingCall(false);
-    setShowFullScreenCall(false);
-    setPeerConnected(false);
-    setIsVoiceConversionActive(false);
-    
-  }, [activeCall, activeCaller, isIncomingCall, selectedUser]);
+  }, [callStatus, isIncomingCall]);
 
   // --- SIGNALLING WIRE LISTENER INTEGRATION ---
   useEffect(() => {
     const onCallIncoming = (data) => {
+      // STRICT GUARD: Reject if we aren't idle, or if we are finishing an old call teardown
+      if (callStatusRef.current !== 'idle' || isEndingRef.current) {
+        console.log("[Global Context] Blocked incoming signal loop. Status:", callStatusRef.current, "Ending:", isEndingRef.current);
+        socket.emit("user-busy", { to: data.fromId, callId: data.callId });
+        return;
+      }
+      
       console.log('[Global Context] Intercepted incoming call signal:', data);
       
+      const sessionRoom = data.roomName || data.callId;
       setActiveCaller({
         fromId: data.fromId || data.from,
         fromName: data.fromName || "Secure Client",
         photoUrl: data.photoUrl || "",
-        callId: data.roomName || data.callId
+        callId: sessionRoom
       });
       
       setActiveCall({
-        callId: data.roomName || data.callId,
-        roomName: data.roomName || data.callId,
+        callId: sessionRoom,
+        roomName: sessionRoom,
         fromId: data.fromId || data.from
       });
 
       setIsIncomingCall(true);
       setCallStatus('ringing');
-      
-      if (ringtoneAudio.current) {
-        ringtoneAudio.current.play().catch(err => console.log("Audio deferred:", err));
-      }
     };
 
     const onCallAccepted = (data) => {
+      if (isEndingRef.current) return;
       console.log("[Global Context] Outbound call picked up by customer.");
-      if (callingAudio.current) {
-        callingAudio.current.pause();
-        callingAudio.current.currentTime = 0;
-      }
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
       
+      if (data?.lkToken) setLkToken(data.lkToken);
       setCallStatus('connected');
       setPeerConnected(true);
     };
@@ -325,6 +364,7 @@ export const AgentCallProvider = ({ children }) => {
     socket.on('answer-call', onCallAccepted);
     socket.on('end-call', onCallTerminated);
     socket.on('call-ended', onCallTerminated);
+    socket.on('call-rejected', onCallTerminated);
 
     return () => {
       socket.off('call_incoming', onCallIncoming);
@@ -333,8 +373,9 @@ export const AgentCallProvider = ({ children }) => {
       socket.off('answer-call', onCallAccepted);
       socket.off('end-call', onCallTerminated);
       socket.off('call-ended', onCallTerminated);
+      socket.off('call-rejected', onCallTerminated);
     };
-  }, [handleEndCall]);
+  }, [handleEndCall]); // Depend on handleEndCall so listeners execute using updated handler instance
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -414,10 +455,6 @@ export const AgentCallProvider = ({ children }) => {
                 console.log("⚡ [Context] LiveKit Room Bridged Successfully.");
                 setCallStatus('connected');
                 setPeerConnected(true);
-                if (callingAudio.current) {
-                  callingAudio.current.pause();
-                  callingAudio.current.currentTime = 0;
-                }
               }}
               onDisconnected={() => handleEndCall()}
             >
