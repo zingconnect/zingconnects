@@ -879,8 +879,8 @@ const handleSelectUser = async (user) => {
     }
   };
 
-  if (loading) return (
-    <div className="h-screen flex items-center justify-center bg-page-bg text-[10px] font-bold uppercase tracking-widest text-text-secondary">
+ if (loading) return (
+     <div className="h-screen flex items-center justify-center bg-page-bg text-[10px] font-bold uppercase tracking-widest text-text-secondary">
       Initializing ZingConnect...
     </div>
   );
