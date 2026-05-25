@@ -130,6 +130,8 @@ export const UserDashboard = () => {
   const isAdjustingScrollRef = useRef(false);
   const lastNotifiedId = useRef(null);
   const onboardingFileInputRef = useRef(null);
+  const previousScrollHeightRef = useRef(null);
+  const previousScrollTopRef = useRef(null);
 
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
