@@ -871,26 +871,17 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
             : 'bg-white text-slate-900 rounded-tl-none'
         }`}>
         {children}
-       <div className={`flex items-center justify-end gap-1 mt-1 ${isMe ? 'opacity-70' : 'opacity-50'}`}>
+      <div className={`flex items-center justify-end gap-1 mt-1 opacity-70`}>
   <span className="text-[9px] font-bold uppercase">
-    {m.createdAt 
-      ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-      : "00:00"}
+    {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "00:00"}
   </span>
 
-  {isMe && (
+ {isMe && (
     <div className="flex items-center ml-1">
-      {(m.status === 'sending') && (
-        <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-      )}
-      {m.status === 'failed' && (
-        <span className="text-[8px] text-red-600 font-bold uppercase">Failed</span>
-      )}
-      {(!m.status || m.status === 'sent' || m.status === 'delivered' || m.status === 'seen') && (
-        <BsCheckAll 
-          className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} 
-          size={14} 
-        />
+      {m.status === 'sending' && <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />}
+      {m.status === 'failed' && <span className="text-[8px] text-red-600 font-bold uppercase">Failed</span>}
+      {(m.status === 'sent' || m.status === 'delivered' || m.status === 'seen') && (
+        <BsCheckAll className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} size={14} />
       )}
     </div>
   )}
@@ -1173,119 +1164,87 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       Messages are end-to-end encrypted. No one outside of this chat can read them.
     </p>
   </div>
+{messages.map((m, index) => {
+  const msgKey = m._id || m.tempId || `msg-node-${m.createdAt}-${index}`;
 
-  {messages.map((m, index) => {
-    const msgKey = m._id || m.tempId || `msg-node-${m.createdAt}-${index}`;
-
-    if (m.fileType === 'voice_call') {
-      return (
-        <CallStatusMessage 
-          key={msgKey}
-          status={m.status} 
-          time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        />
-      );
-    }
-
-    const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
-
+  if (m.fileType === 'voice_call') {
     return (
-      <MessageBubble
+      <CallStatusMessage 
         key={msgKey}
-        m={m}
-        isMe={isMe}
-        onReply={(messageInstance) => setReplyingTo(messageInstance)}
-      >
-        {(m.fileType === 'image' || m.fileType === 'video') && (
-          <div className="relative mb-2 mt-1 group w-full">
-            {m.fileType === 'image' ? (
-              <>
-                <img 
-                  src={m.fileUrl} 
-                  alt="attachment" 
-                  onClick={() => setFullscreenImage(m.fileUrl)} 
-                  className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
-                  onError={(e) => {
-                    const target = e.currentTarget;
-                    target.onerror = null; 
-                    target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
-                  }}
-                />
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
-                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                >
-                  <BsDownload size={14} />
-                </button>
-              </>
-            ) : (
-              <div className="relative">
-                <video 
-                  key={`video-${msgKey}`}
-                  src={m.fileUrl}
-                  preload="metadata"
-                  className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
-                  onClick={() => setFullscreenVideo(m.fileUrl)}
-                />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
-                    <BsPlayFill size={30} />
-                  </div>
+        status={m.status} 
+        time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      />
+    );
+  }
+
+  const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
+
+  return (
+    <MessageBubble
+      key={msgKey}
+      m={m}
+      isMe={isMe}
+      onReply={(messageInstance) => setReplyingTo(messageInstance)}
+    >
+      {/* 1. Media Content */}
+      {(m.fileType === 'image' || m.fileType === 'video') && (
+        <div className="relative mb-2 mt-1 group w-full">
+          {m.fileType === 'image' ? (
+            <>
+              <img 
+                src={m.fileUrl} 
+                alt="attachment" 
+                onClick={() => setFullscreenImage(m.fileUrl)} 
+                className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  target.onerror = null; 
+                  target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+                }}
+              />
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
+                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+              >
+                <BsDownload size={14} />
+              </button>
+            </>
+          ) : (
+            <div className="relative">
+              <video 
+                key={`video-${msgKey}`}
+                src={m.fileUrl}
+                preload="metadata"
+                className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
+                onClick={() => setFullscreenVideo(m.fileUrl)}
+              />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
+                  <BsPlayFill size={30} />
                 </div>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
-                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
-                >
-                  <BsDownload size={14} />
-                </button>
               </div>
-            )}
-          </div>
-        )}
-
-        {m.text && (
-          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words whitespace-pre-wrap text-slate-900 ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
-            {m.text}
-          </p>
-        )}
-
-        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
-          <span className="text-[9px] text-gray-400 font-bold uppercase">
-            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-
-          {isMe && (
-            <div className="flex items-center ml-1">
-              
-              {m.status === 'sending' && (
-                <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-              )}
-
-              {m.status === 'failed' && (
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleResend(m); }}
-                  className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
-                >
-                  <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
-                  <BsPlusLg className="rotate-45" size={10} />
-                </button>
-              )}
-
-              {(!m.status || m.status === 'sent' || m.status === 'seen') && (
-                <div className="flex items-center">
-                  {m.status === 'seen' ? (
-                    <BsCheckAll className="text-blue-500" size={16} title="Read" />
-                  ) : (
-                    <BsCheckAll className="text-gray-400" size={16} title="Sent" />
-                  )}
-                </div>
-              )}
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
+                className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
+              >
+                <BsDownload size={14} />
+              </button>
             </div>
           )}
         </div>
-      </MessageBubble>
-    );
-  })}
+      )}
+
+      {/* 2. Text Content */}
+      {m.text && (
+        <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words whitespace-pre-wrap text-slate-900 ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+          {m.text}
+        </p>
+      )}
+      
+      {/* Footer metadata is now handled internally by MessageBubble */}
+    </MessageBubble>
+  );
+})}
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
