@@ -57,6 +57,7 @@ export const AgentDashboard = () => {
   const [isEnding, setIsEnding] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastMessageId, setLastMessageId] = useState(null);
+  const [latestMessages, setLatestMessages] = useState({});
   // --- SUBSCRIPTION STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
@@ -297,6 +298,12 @@ const handleIncomingMessage = (data) => {
   const currentSelectedUser = selectedUserRef.current;
   const isChattingWithSender = currentSelectedUser && 
     (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
+
+    setLatestMessages(prev => ({
+    ...prev,
+    [data.senderId]: data.text || "Sent a file" // Store the message snippet
+  }));
+  
   if (!isChattingWithSender) {
     setUnreadCounts(prev => ({
       ...prev,
@@ -764,10 +771,8 @@ const handleScroll = async (e) => {
 };
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
+    setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
   
-  // CLEAR THE BADGE IMMEDIATELY
-  setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
- 
   setMessages([]); 
   setIsInitialLoad(true); 
   setSelectedUser(user);
@@ -792,6 +797,8 @@ const handleSelectUser = async (user) => {
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
         setHasMore(data.hasMore);
+        
+        // Ensure scroll to bottom after messages load
         setTimeout(() => {
           if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -813,6 +820,7 @@ const handleSelectUser = async (user) => {
     console.error("Failed to load chat history:", err);
   }
 };
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const userIdFromUrl = params.get('userId');
@@ -1095,51 +1103,61 @@ const handleSelectUser = async (user) => {
         </div>
 
 <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-  {users.length > 0 ? users.map((user) => (
-    <div
-      key={user._id}
-      onClick={() => handleSelectUser(user)}
-      className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
-    >
-      <div className="relative shrink-0">
-        <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
-          <img
-            src={user.photoUrl}
-            alt={user.firstName}
-            className="w-full h-full object-cover"
-            onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
-          />
-        </div>
-        <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
-      </div>
-      <div className="ml-3 flex-1 min-w-0">
-        <div className="flex justify-between items-center mb-0.5">
-          <h3 className="text-[13px] font-bold text-gray-800 truncate">
-            {user.firstName} {user.lastName}
-          </h3>
-          {unreadCounts[user._id] > 0 && (
-            <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
-              {unreadCounts[user._id]}
-            </div>
-          )}
-        </div>
-        <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
-        {(user.city || user.state) && (
-          <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
-            <span className="opacity-70">📍</span>
-            {user.city ? user.city : ''}{user.city && user.state ? ', ' : ''}{user.state ? user.state : ''}
-          </p>
-        )}
-      </div>
-    </div>
-  )) : (
-            <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
-              <p className="text-xs font-black uppercase tracking-widest text-gray-400">No Secure Links Established</p>
-              <p className="text-[11px] text-gray-400 mt-1 max-w-[200px]">Waiting for downstream connections to hook into routing tables.</p>
-            </div>
-          )}
-        </div>
+  {users.length > 0 ? users.map((user) => {
+    const isUnread = unreadCounts[user._id] > 0;
+    const lastMessage = latestMessages[user._id]; // Accessing the latest snippet
 
+    return (
+      <div
+        key={user._id}
+        onClick={() => handleSelectUser(user)}
+        className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
+      >
+        <div className="relative shrink-0">
+          <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
+            <img
+              src={user.photoUrl}
+              alt={user.firstName}
+              className="w-full h-full object-cover"
+              onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
+            />
+          </div>
+          <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+        </div>
+        
+        <div className="ml-3 flex-1 min-w-0">
+          <div className="flex justify-between items-center mb-0.5">
+            <h3 className={`text-[13px] font-bold truncate ${isUnread ? 'text-blue-600' : 'text-gray-800'}`}>
+              {user.firstName} {user.lastName}
+            </h3>
+            {isUnread && (
+              <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
+                {unreadCounts[user._id]}
+              </div>
+            )}
+          </div>
+          
+          {/* UPDATED: Displays Last Message Snippet if available, otherwise Email */}
+          <p className={`text-[11px] truncate ${isUnread ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>
+            {lastMessage || user.email}
+          </p>
+          
+          {(user.city || user.state) && !isUnread && (
+            <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
+              <span className="opacity-70">📍</span>
+              {user.city}{user.city && user.state ? ', ' : ''}{user.state}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }) : (
+    <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
+      <p className="text-xs font-black uppercase tracking-widest text-gray-400">No Secure Links Established</p>
+      <p className="text-[11px] text-gray-400 mt-1 max-w-[200px]">Waiting for downstream connections to hook into routing tables.</p>
+    </div>
+  )}
+</div>
         <div className="p-4 border-t border-gray-100 bg-gray-50/50">
           <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-200 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-[0.98] shadow-sm">
             <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
