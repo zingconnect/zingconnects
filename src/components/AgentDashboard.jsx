@@ -159,11 +159,9 @@ export const AgentDashboard = () => {
         }).catch(err => console.warn(`Priming skipped for ${src}`, err.message));
       }
     });
-    
     if (socket && agentData?._id) {
       socket.emit("join-private-room", agentData._id);
     }
-
     document.removeEventListener('click', unlockAudio);
     document.removeEventListener('touchstart', unlockAudio);
   };
@@ -175,10 +173,19 @@ export const AgentDashboard = () => {
     }
   }, [localStream]);
 
-  // --- USER ONLINE/OFFLINE STATUS MONITOR ---
+useEffect(() => {
+  if (callStatus === 'idle') {
+    console.log("[AgentDashboard] Core status returned to idle. Cleaning local dashboard layout loops.");
+    setIsEnding(false);
+        if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      setLocalStream(null);
+    }
+  }
+}, [callStatus, localStream]);
+
   useEffect(() => {
     if (!socket) return;
-    
     const handleStatusUpdate = ({ userId, isOnline, lastSeen }) => {
       setUsers(prevUsers => prevUsers.map(u => 
         u._id === userId ? { ...u, isOnline, lastSeen } : u
@@ -196,12 +203,10 @@ export const AgentDashboard = () => {
     };
   }, [socket, setSelectedUser]);
 
-  // --- AI AUDIO STREAMING ENGINE ---
   useEffect(() => {
     if (!socket) return;
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     let nextStartTime = 0; 
-    
     const handleAiAudioChunk = async (base64Audio) => {
       if (callStatus !== 'connected' && callStatus !== 'connecting') return;
       try {
@@ -245,50 +250,52 @@ export const AgentDashboard = () => {
     socket.emit("join-main-room", myRoomId);
   }, [agentData?._id, socket]);
 
-  useEffect(() => {
-    const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-    const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
+ // --- AUTOMATED BACKGROUND SYSTEM SYNC ENGINE ---
+useEffect(() => {
+  const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+  
+  // FIX: Resolve the ID correctly from your active core context shapes
+  const currentCallId = activeCaller?.callId || selectedUser?.callId || selectedUser?.roomName;
 
-    if (!token || !currentCallId || typeof currentCallId !== 'string' || callStatus === 'idle') {
-      return;
-    }
-
-    const syncStatus = async () => {
-      if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
-          headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json' 
-          }
-        });
-        const contentType = res.headers.get("content-type");
-        if (!res.ok || !contentType?.includes("application/json")) {
-          if (res.status === 404) handleEndCall();
-          return;
+  if (!token || !currentCallId || callStatus === 'idle') {
+    return;
+  }
+  const syncStatus = async () => {
+    if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json' 
         }
-        const data = await res.json();
-        if (data?.status === 'ringing' && callStatus === 'calling') {
-          setCallStatus('ringing');
-        }
-        if (data?.status === 'connected' && callStatus !== 'connected') {
-          if (isIncomingCall) {
-            setCallStatus('connected');
-          } else {
-            console.log("📡 DB is connected, but Agent is dialing out. Awaiting explicit user socket acceptance...");
-          }
-        }
-
-        if (data && ['ended', 'declined', 'missed', 'rejected'].includes(data.status)) {
-          handleEndCall();
-        }
-      } catch (e) {
-        console.warn("ZingConnect Sync Jitter:", e.message);
+      });
+      const contentType = res.headers.get("content-type");
+      if (!res.ok || !contentType?.includes("application/json")) {
+        if (res.status === 404) handleEndCall();
+        return;
       }
-    };
-    const interval = setInterval(syncStatus, 3000);
-    return () => clearInterval(interval);
-  }, [callStatus, activeCall, handleEndCall, isIncomingCall, setCallStatus]);
+      const data = await res.json();
+      if (data?.status === 'ringing' && callStatus === 'calling') {
+        setCallStatus('ringing');
+      }
+      if (data?.status === 'connected' && callStatus !== 'connected') {
+        if (isIncomingCall) {
+          setCallStatus('connected');
+        } else {
+          console.log("📡 DB is connected, but Agent is dialing out. Awaiting explicit user socket acceptance...");
+        }
+      }
+      if (data && ['ended', 'declined', 'missed', 'rejected'].includes(data.status)) {
+        console.log("[AgentDashboard] Sync engine caught dead database channel. Scrubbing UI.");
+        handleEndCall();
+      }
+    } catch (e) {
+      console.warn("ZingConnect Sync Jitter:", e.message);
+    }
+  };
+  const interval = setInterval(syncStatus, 3000);
+  return () => clearInterval(interval);
+}, [callStatus, activeCaller, selectedUser, handleEndCall, isIncomingCall, setCallStatus]);
 
 useEffect(() => {
   const container = scrollRef.current;
