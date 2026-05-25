@@ -211,6 +211,7 @@ export const useAgentZingCall = (socket, agentId) => {
       socket.off('call-accepted', onCallAccepted);
       socket.off('end-call', handleEndCall);
       socket.off('call-ended', handleEndCall);
+      clearTimeout(isEndingRef.current);
     };
   }, [socket, handleEndCall]);
 

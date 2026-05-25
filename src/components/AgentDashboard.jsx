@@ -92,7 +92,6 @@ export const AgentDashboard = () => {
       features: ['All Growth', 'Voice Changer', 'Analytics'],
     },
   ];
-
 const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
@@ -103,8 +102,6 @@ const getStatusIcon = (status) => {
         return <BsCheck className="text-gray-400" size={16} />;
     }
   };
-
-  // --- LONG PRESS CONTROLS ---
   const startHold = (id) => {
     const timer = setTimeout(() => {
       if (window.confirm("Delete this message?")) {
@@ -113,24 +110,20 @@ const getStatusIcon = (status) => {
     }, 700); 
     setHoldTimer(timer);
   };
-
   const stopHold = () => {
     if (holdTimer) {
       clearTimeout(holdTimer);
       setHoldTimer(null);
     }
   };
-
 const unlockAudio = () => {
     setAudioUnlocked(true);
     console.log("Initializing secure audio channels for Agent Dashboard...");
-    
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (AudioContext) {
       const tempCtx = new AudioContext();
       if (tempCtx.state === 'suspended') tempCtx.resume();
     }
-
     const cacheBuster = `?t=${Date.now()}`;
     if (notificationSound.current) {
       notificationSound.current.muted = true;
@@ -150,6 +143,21 @@ const unlockAudio = () => {
     document.removeEventListener('click', unlockAudio);
     document.removeEventListener('touchstart', unlockAudio);
   };
+
+  useEffect(() => {
+  const agentToken = localStorage.getItem('agentToken');
+  if (agentToken) {
+    console.log("[AgentDashboard] Session identified as Agent. Skipping User-Session polling.");
+    return; 
+  }
+  const interval = setInterval(() => {
+    fetch('/api/users/my-session', { 
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('userToken')}` } 
+    }).catch(console.error);
+  }, 5000);
+  
+  return () => clearInterval(interval);
+}, []);
 
   useEffect(() => {
     if (localAudioRef.current && localStream) {

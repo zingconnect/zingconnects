@@ -92,39 +92,39 @@ const ThemeInitializer = () => {
 function App() {
   return (
     <Router>
-      <UserCallProvider>
-        <PWAController>
-          <ThemeInitializer />
-          <Routes>
-            {/* --- 1. PUBLIC & AUTH ROUTES --- */}
-            <Route path="/" element={<PricingPage />} />
-            <Route path="/pricing" element={<PricingPage />} />
-            <Route path="/registration" element={<Registration />} />
-            <Route path="/verify-otp" element={<VerifyOTP />} />
+      <PWAController>
+        <ThemeInitializer />
+        <Routes>
+          {/* --- 1. PUBLIC & AUTH ROUTES --- */}
+          <Route path="/" element={<PricingPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/registration" element={<Registration />} />
+          <Route path="/verify-otp" element={<VerifyOTP />} />
 
-            {/* --- 2. PROTECTED AGENT ROUTES WITH PROVIDER LAYOUT --- */}
-            <Route element={<AgentLayoutWrapper />}>
-              <Route path="/agent/dashboard" element={<AgentDashboard />} />
-              <Route path="/agent/profile" element={<AgentProfile />} />
-              <Route path="/agent/call-settings" element={<CallSetting />} />
-            </Route>
+          {/* --- 2. PROTECTED AGENT ROUTES --- */}
+          <Route element={<AgentLayoutWrapper />}>
+            <Route path="/agent/dashboard" element={<AgentDashboard />} />
+            <Route path="/agent/profile" element={<AgentProfile />} />
+            <Route path="/agent/call-settings" element={<CallSetting />} />
+          </Route>
 
-            {/* --- 3. PROTECTED USER ROUTES --- */}
+          {/* --- 3. PROTECTED USER ROUTES (Wrapped in UserCallProvider) --- */}
+          <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
             <Route path="/user/dashboard" element={<UserDashboard />} />
             <Route path="/user/profile" element={<UserProfile />} />
+          </Route>
 
-            {/* --- 4. ADMINISTRATOR ROUTES --- */}
-            <Route path="/admin/terminal" element={<ZingAdmin />} /> 
-            <Route path="/admin/dashboard" element={<ZingDashboard />} />
-            
-            {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
-            <Route path="/:slug" element={<AgentSlug />} />
-            
-            {/* --- 6. GLOBAL FALLBACK --- */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </PWAController>
-      </UserCallProvider>
+          {/* --- 4. ADMINISTRATOR ROUTES --- */}
+          <Route path="/admin/terminal" element={<ZingAdmin />} /> 
+          <Route path="/admin/dashboard" element={<ZingDashboard />} />
+          
+          {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
+          <Route path="/:slug" element={<AgentSlug />} />
+          
+          {/* --- 6. GLOBAL FALLBACK --- */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </PWAController>
     </Router>
   );
 }
