@@ -170,6 +170,17 @@ useEffect(() => {
 }, [callStatus, localStream]);
 
 useEffect(() => {
+  if (!audioUnlocked) {
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('touchstart', unlockAudio);
+  }
+  return () => {
+    document.removeEventListener('click', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
+  };
+}, [audioUnlocked]);
+
+useEffect(() => {
     if (!socket) return;
     const handleStatusUpdate = ({ userId, isOnline, lastSeen }) => {
       setUsers(prevUsers => prevUsers.map(u => 
@@ -732,48 +743,39 @@ const handleSelectUser = async (user) => {
     if ("Notification" in window && Notification.permission === "default") {
       Notification.permission === 'default' && Notification.requestPermission();
     }
-    const handleIncomingMessage = (data) => {
-      console.log("📥 Real-time Socket Message Detected:", data);
-      if (data._id && data._id === lastNotifiedId.current) return;
-      lastNotifiedId.current = data._id;
-      const isChattingWithSender = selectedUser && (data.senderId === selectedUser._id || data.senderId === selectedUser.id);
-      if (isChattingWithSender) {
-        setMessages((prev) => {
-          if (prev.some(m => m._id === data._id)) return prev;
-          return [...prev, data];
-        });
-        const token = localStorage.getItem('agentToken');
-        fetch(`/api/messages/mark-read/${selectedUser._id}`, {
-          method: 'PATCH',
-          headers: { 'Authorization': `Bearer ${token}` }
-        }).catch(err => console.error("Mark read error:", err));
-      }
-      if (data.senderModel === 'User') {
-        if (notificationSound.current) {
-          notificationSound.current.currentTime = 0;
-          notificationSound.current.play().catch((err) => 
-            console.warn("🔊 Notification audio context restricted:", err.message)
-          );
-        }
-        if ('vibrate' in navigator) {
-          navigator.vibrate([200, 100, 200]); 
-        }
-        const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-        if (Notification.permission === "granted" && shouldShowPopup) {
-          const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
-            body: data.text || "Sent a file",
-            icon: data.senderPhoto || '/favicon.ico',
-            tag: 'zing-msg',
-            renotify: true
-          });
-          popup.onclick = () => { 
-            window.focus(); 
-            popup.close(); 
-          };
-        }
-      }
-    };
+   const handleIncomingMessage = (data) => {
+  console.log("📥 Socket Message:", data);
+  
+  // 1. Robust ID matching
+  const senderId = data.senderId?.toString();
+  const currentUserId = selectedUser?._id?.toString();
+  const isChattingWithSender = selectedUser && (senderId === currentUserId);
 
+  if (isChattingWithSender) {
+    setMessages((prev) => {
+      if (prev.some(m => m._id === data._id)) return prev;
+      return [...prev, data];
+    });
+        const token = localStorage.getItem('agentToken');
+    fetch(`/api/messages/mark-read/${senderId}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).catch(console.error);
+  }
+  if (data.senderModel === 'User') {
+    // Force sound
+    if (notificationSound.current) {
+      notificationSound.current.currentTime = 0;
+      notificationSound.current.play().catch(e => console.warn("Audio blocked:", e));
+    }
+        if (Notification.permission === "granted" && document.visibilityState !== 'visible') {
+      new Notification(`Message from ${data.senderName || 'Client'}`, {
+        body: data.text || "Sent a file",
+        icon: '/favicon.ico'
+      });
+    }
+  }
+};
     socket.on('new-message', handleIncomingMessage);
     return () => {
       socket.off('new-message', handleIncomingMessage);
@@ -860,8 +862,21 @@ const handleSelectUser = async (user) => {
     </div>
   );
 
+
   return (
     <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
+     {!audioUnlocked && (
+        <div 
+          onClick={unlockAudio} 
+          className="fixed inset-0 z-[100000] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center cursor-pointer"
+        >
+          <div className="bg-white p-8 rounded-3xl shadow-2xl text-center max-w-xs animate-in zoom-in duration-300">
+            <div className="mb-4 text-blue-600 animate-pulse text-2xl">🔊</div>
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-800 mb-2">Audio Systems Locked</h3>
+            <p className="text-[11px] text-slate-500">Click anywhere to initialize secure audio transmission protocols.</p>
+          </div>
+        </div>
+      )}
       <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
 
       {/* --- BACKGROUND LIVEKIT WEBRTC WRAPPER CONTEXT --- */}
