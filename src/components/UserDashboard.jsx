@@ -129,6 +129,7 @@ export const UserDashboard = () => {
   const chatContainerRef = useRef(null);
   const isAdjustingScrollRef = useRef(false);
   const lastNotifiedId = useRef(null);
+  const onboardingFileInputRef = useRef(null);
 
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
@@ -251,7 +252,6 @@ export const UserDashboard = () => {
     };
   }, [callStatus, isIncomingCall, callingAudio]);
 
-  // Cleaned up duplicate message socket handlers that were here previously
 
   useEffect(() => {
     if (!messages || messages.length === 0) {
@@ -285,6 +285,21 @@ export const UserDashboard = () => {
     }
     totalMessagesCountRef.current = messages.length;
   }, [messages]);
+
+  useEffect(() => {
+  if (!chatContainerRef.current) return;
+  if (previousScrollHeightRef.current && isFetchingOlder === false) {
+    isAdjustingScrollRef.current = true; // Lock listener flags
+    const container = chatContainerRef.current;
+    const heightDifference = container.scrollHeight - previousScrollHeightRef.current;
+    container.scrollTop = previousScrollTopRef.current + heightDifference;
+    previousScrollHeightRef.current = null;
+    previousScrollTopRef.current = null;
+        setTimeout(() => {
+      isAdjustingScrollRef.current = false;
+    }, 100);
+  }
+}, [messages, isFetchingOlder]);
 
   useEffect(() => {
     const setupNotifications = async () => {
@@ -495,36 +510,36 @@ export const UserDashboard = () => {
     }
   };
 
-  const handleChatScroll = (e) => {
-    const container = e.currentTarget;
-    if (!container) return;
-    const currentScrollTop = container.scrollTop;
-    if (isAdjustingScrollRef && isAdjustingScrollRef.current) return;  
-    if (currentScrollTop <= 35 && currentScrollTop > 0) {
-      fetchOlderMessages();
-    }
-  };
+ const handleChatScroll = (e) => {
+  const container = e.currentTarget;
+  if (!container || isFetchingOlder || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
+  if (container.scrollTop <= 50 && hasMoreOlderMessages) {
+    previousScrollHeightRef.current = container.scrollHeight;
+    previousScrollTopRef.current = container.scrollTop;
+    fetchOlderMessages();
+  }
+};
 
   const agentStatus = getStatusInfo(agent);
   const handlePhotoClick = () => fileInputRef.current.click();
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
-    const url = URL.createObjectURL(file);
-    if (showOnboarding) {
-      setPreviewUrl(url); 
-      setFormData(prev => ({ ...prev, profileImage: file }));
-    } else {
-      setPreviewFile(file);
-      setPreviewUrl(url);   
-      setCaption("");       
-    }
-    e.target.value = ""; 
-  };
+const handleFileChange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+  }
+  const url = URL.createObjectURL(file);
+  if (showOnboarding) {
+    setPreviewUrl(url); 
+    setFormData(prev => ({ ...prev, profileImage: file }));
+  } else {
+    setPreviewFile(file);
+    setPreviewUrl(url);   
+    setCaption("");       
+  }
+  e.target.value = ""; 
+};
 
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
@@ -801,39 +816,48 @@ function AudioTracks({ active }) {
 
 const MessageBubble = ({ m, isMe, onReply, children }) => {
   const controls = useAnimation();
-  const bind = useDrag(({ active, movement: [x], last }) => {
-    const xMovement = Math.min(Math.max(0, x), 100); 
+
+  const bind = useDrag(({ active, movement: [x], last, cancel }) => {
+    const xMovement = Math.min(Math.max(0, x), 80); 
     if (active) {
       controls.set({ x: xMovement });
     }
 
     if (last) {
-      if (xMovement > 60) {
+      if (xMovement > 55) {
         onReply(m);
-        if (window.navigator.vibrate) window.navigator.vibrate(10);
+        if (window.navigator && window.navigator.vibrate) {
+          window.navigator.vibrate(10);
+        }
       }
-      controls.start({ x: 0, transition: { type: "spring", stiffness: 300, damping: 30 } });
+      controls.start({ x: 0, transition: { type: "spring", stiffness: 350, damping: 25 } });
     }
-  }, { axis: 'x' });
+  }, { 
+    axis: 'x',
+    filterTaps: true, // Prevents unintended drag triggers during simple clicks
+    pointer: { touch: true } // Maximizes hardware compatibility across Android and iOS touch surfaces
+  });
 
   return (
-    <div className="relative group">
-      {/* The Hidden Reply Icon */}
-      <div className="absolute left-[-40px] inset-y-0 flex items-center opacity-0 group-active:opacity-100 transition-opacity">
-        <div className="bg-gray-200 p-2 rounded-full">
-          <BsReplyFill className="text-gray-600" size={18} />
+    <div className={`w-full flex flex-col ${isMe ? 'items-end' : 'items-start'} relative overflow-hidden px-1 mb-1.5`}>
+      <div className="absolute left-3 inset-y-0 flex items-center pointer-events-none z-0">
+        <div className="bg-slate-200/80 p-2 rounded-full transition-all duration-150 transform scale-90 group-active:scale-100">
+          <BsReplyFill className="text-slate-600" size={16} />
         </div>
       </div>
-
       <motion.div 
         {...bind()} 
         animate={controls}
-        className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
-          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-        } mb-1`}
+        className={`max-w-[85%] md:max-w-[70%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 select-none touch-none cursor-grab active:cursor-grabbing animate-in fade-in slide-in-from-bottom-1 ${
+          isMe 
+            ? 'bg-[#dcf8c6] text-slate-900 rounded-tr-none' 
+            : 'bg-white text-slate-900 rounded-tl-none'
+        }`}
+        style={{ x: 0 }} // Hard-bind initialization style frame
       >
         {children}
       </motion.div>
+
     </div>
   );
 };
@@ -914,35 +938,64 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         </main>
       </aside>
 
-
-    {/* --- ONBOARDING OVERLAY --- */}
 {showOnboarding && (
   <div className="absolute inset-0 z-[100] bg-white flex flex-col items-center justify-center p-4 md:p-8 animate-in fade-in zoom-in duration-300">
     <div className="w-full max-w-sm md:max-w-md space-y-4 md:space-y-6">
+      
       <div className="text-center space-y-1">
         <h2 className="text-lg md:text-2xl font-black text-blue-900 uppercase leading-none">Initialize Profile</h2>
         <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-[0.15em]">Secure verification required</p>
       </div>
 
       <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
-        {/* Profile Photo Section remains same */}
+        
+        {/* Profile Photo Section - Using Isolated Onboarding File Ref */}
         <div className="flex flex-col items-center mb-4">
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
-          <div onClick={handlePhotoClick} className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden">
-            {previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <BsCameraFill size={20} />}
-            {!previewUrl && <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>}
+          <input 
+            type="file" 
+            ref={onboardingFileInputRef} // 👈 CHANGED: Independent pointer isolation
+            onChange={handleFileChange} 
+            accept="image/*" 
+            className="hidden" 
+          />
+          <div 
+            onClick={() => onboardingFileInputRef.current?.click()} // 👈 CHANGED: Triggers the correct input element
+            className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden shadow-inner"
+          >
+            {previewUrl ? (
+              <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+            ) : (
+              <BsCameraFill size={20} />
+            )}
+            {!previewUrl && (
+              <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider scale-90">
+                Add Photo
+              </span>
+            )}
           </div>
         </div>
 
-        {/* First & Last Name */}
+        {/* First & Last Name Fields */}
         <div className="grid grid-cols-2 gap-2 md:gap-4">
           <div className="space-y-1">
             <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">First Name</label>
-            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="First" onChange={e => setFormData({...formData, firstName: e.target.value})} />
+            <input 
+              required 
+              value={formData.firstName || ''}
+              className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none focus:bg-white focus:border-blue-400 transition-all" 
+              placeholder="First" 
+              onChange={e => setFormData({...formData, firstName: e.target.value})} 
+            />
           </div>
           <div className="space-y-1">
             <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Last Name</label>
-            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="Last" onChange={e => setFormData({...formData, lastName: e.target.value})} />
+            <input 
+              required 
+              value={formData.lastName || ''}
+              className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none focus:bg-white focus:border-blue-400 transition-all" 
+              placeholder="Last" 
+              onChange={e => setFormData({...formData, lastName: e.target.value})} 
+            />
           </div>
         </div>
 
@@ -1043,7 +1096,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         </header>
 
 <main 
-ref={chatContainerRef}
+  ref={chatContainerRef}
   onScroll={handleChatScroll}
   className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
   style={{
@@ -1052,13 +1105,11 @@ ref={chatContainerRef}
     WebkitOverflowScrolling: 'touch'  
   }}
 >
-  {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
     style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
   />
 
-  {/* --- INFINITE SCROLL HISTORICAL LOADING INDICATOR --- */}
   {isFetchingOlder && (
     <div className="self-center z-20 my-2 px-3 py-1.5 bg-[#005c4b] text-white rounded-full text-[10px] font-bold tracking-wider flex items-center gap-2 shadow-md border border-emerald-500/20 animate-pulse">
       <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1066,7 +1117,6 @@ ref={chatContainerRef}
     </div>
   )}
 
-  {/* 2. Encryption Notice */}
   <div className="self-center z-10 my-4 px-4 py-1.5 bg-[#fff9c2] rounded-lg shadow-sm border border-yellow-100 flex items-center gap-2 max-w-[90%]">
     <BsShieldLockFill size={10} className="text-gray-600" />
     <p className="text-[9px] md:text-[10px] text-gray-600 text-center font-medium leading-tight">
@@ -1074,34 +1124,30 @@ ref={chatContainerRef}
     </p>
   </div>
 
-  {/* 3. Message List */}
-  {messages.map((m) => {
-    const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
+  {messages.map((m, index) => {
+    const msgKey = m._id || m.tempId || `msg-node-${m.createdAt}-${index}`;
 
-    // Handle Secure LiveKit Room Call Events
     if (m.fileType === 'voice_call') {
       return (
         <CallStatusMessage 
           key={msgKey}
-          status={m.status} // 'ringing', 'missed', 'ended'
+          status={m.status} 
           time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         />
       );
     }
 
-    // Determine Message Ownership Correctly (Fixes the Optimistic Media Left-Side Skew)
     const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
 
     return (
-      <div 
-        key={msgKey} 
-        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
-          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-        } mb-3`}
+      <MessageBubble
+        key={msgKey}
+        m={m}
+        isMe={isMe}
+        onReply={(messageInstance) => setReplyingTo(messageInstance)}
       >
-        {/* Media Handling */}
         {(m.fileType === 'image' || m.fileType === 'video') && (
-          <div className="relative mb-2 mt-1 group">
+          <div className="relative mb-2 mt-1 group w-full">
             {m.fileType === 'image' ? (
               <>
                 <img 
@@ -1110,8 +1156,9 @@ ref={chatContainerRef}
                   onClick={() => setFullscreenImage(m.fileUrl)} 
                   className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
                   onError={(e) => {
-                    e.target.onerror = null;
-                    e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
+                    const target = e.currentTarget;
+                    target.onerror = null; 
+                    target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
                   }}
                 />
                 <button 
@@ -1123,11 +1170,10 @@ ref={chatContainerRef}
               </>
             ) : (
               <div className="relative">
-                {/* Fixed src inside video element tag ensures smooth re-indexing when scrolling prepends nodes */}
                 <video 
-                 key={`video-${msgKey}`}
-                 src={m.fileUrl}
-                   preload="metadata"
+                  key={`video-${msgKey}`}
+                  src={m.fileUrl}
+                  preload="metadata"
                   className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
                   onClick={() => setFullscreenVideo(m.fileUrl)}
                 />
@@ -1147,29 +1193,24 @@ ref={chatContainerRef}
           </div>
         )}
 
-        {/* Text Content (Caption / Standard Message) */}
         {m.text && (
-          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words whitespace-pre-wrap text-slate-900 ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
             {m.text}
           </p>
         )}
 
-        {/* Time / Status Bar */}
         <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
           <span className="text-[9px] text-gray-400 font-bold uppercase">
             {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
 
-          {/* Verification Delivery Checks (Only for Local User Submissions) */}
           {isMe && (
             <div className="flex items-center ml-1">
               
-              {/* 1. SENDING STATE (iDrive E2 Pipe Active) */}
               {m.status === 'sending' && (
                 <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
               )}
 
-              {/* 2. FAILED STATE */}
               {m.status === 'failed' && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); handleResend(m); }}
@@ -1179,6 +1220,7 @@ ref={chatContainerRef}
                   <BsPlusLg className="rotate-45" size={10} />
                 </button>
               )}
+
               {(!m.status || m.status === 'sent' || m.status === 'seen') && (
                 <div className="flex items-center">
                   {m.status === 'seen' ? (
@@ -1191,7 +1233,7 @@ ref={chatContainerRef}
             </div>
           )}
         </div>
-      </div>
+      </MessageBubble>
     );
   })}
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />

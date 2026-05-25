@@ -1,5 +1,5 @@
 import React, { useLayoutEffect } from 'react'; 
-// ADDED: Imported 'Outlet' so the layout can render child components
+// Imported 'Outlet' so the layout can render child components
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 
 // Component Imports
@@ -102,7 +102,7 @@ function App() {
             <Route path="/registration" element={<Registration />} />
             <Route path="/verify-otp" element={<VerifyOTP />} />
 
-            {/* --- 2. UPDATED: PROTECTED AGENT ROUTES WITH PROVIDER LAYOUT --- */}
+            {/* --- 2. PROTECTED AGENT ROUTES WITH PROVIDER LAYOUT --- */}
             <Route element={<AgentLayoutWrapper />}>
               <Route path="/agent/dashboard" element={<AgentDashboard />} />
               <Route path="/agent/profile" element={<AgentProfile />} />

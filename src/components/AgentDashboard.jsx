@@ -25,25 +25,19 @@ export const AgentDashboard = () => {
   const navigate = useNavigate();
   
   const { 
-    callStatus, setCallStatus, isIncomingCall, activeCaller, activeCall, selectedUser, setSelectedUser, isMuted, setIsMuted,
-    isSpeakerOn, setIsSpeakerOn, isVoiceConversionActive, setIsVoiceConversionActive, selectedVoiceId, setSelectedVoiceId, callTime,
-    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime, lkToken, setPeerConnected
-  } = useAgentCall();
+    callStatus, isIncomingCall,  activeCaller, selectedUser, setSelectedUser, isMuted, setIsMuted, isSpeakerOn, 
+    setIsSpeakerOn, isVoiceConversionActive, setIsVoiceConversionActive, selectedVoiceId, setSelectedVoiceId, callTime,
+    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime } = useAgentCall();
 
-  // --- REFS ---
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
-  const localAudioRef = useRef(null);
   const scrollRef = useRef(null);
-  const userStreamRef = useRef(null);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
-  const isTransitioningRef = useRef(false);
-  const aiMediaRecorderRef = useRef(null);
   const lastNotifiedId = useRef(null);
 
-  // --- LOCAL COMPONENT STATES ---
+  // --- LOCAL CHAT & PLATFORM STATES ---
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
   const [messages, setMessages] = useState([]);
@@ -59,12 +53,10 @@ export const AgentDashboard = () => {
   const [isDualLoginConflict, setIsDualLoginConflict] = useState(false);
   const [holdTimer, setHoldTimer] = useState(null);
   const [showUserModal, setShowUserModal] = useState(false);
-  const [localStream, setLocalStream] = useState(null);
-  const [isEnding, setIsEnding] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
 
-  // --- SUBSCRIPTION tier STRUCTURES ---
+  // --- SUBSCRIPTION STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
@@ -101,7 +93,7 @@ export const AgentDashboard = () => {
     },
   ];
 
-  const getStatusIcon = (status) => {
+const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
         return <BsCheckAll className="text-blue-400" size={18} />;
@@ -112,7 +104,7 @@ export const AgentDashboard = () => {
     }
   };
 
-  // --- LONG PRESS MESSAGE CONTROLS ---
+  // --- LONG PRESS CONTROLS ---
   const startHold = (id) => {
     const timer = setTimeout(() => {
       if (window.confirm("Delete this message?")) {
@@ -129,8 +121,7 @@ export const AgentDashboard = () => {
     }
   };
 
-  // --- LOCAL AUDIO UNLOCK MECHANISM ---
-  const unlockAudio = () => {
+const unlockAudio = () => {
     setAudioUnlocked(true);
     console.log("Initializing secure audio channels for Agent Dashboard...");
     
@@ -141,24 +132,18 @@ export const AgentDashboard = () => {
     }
 
     const cacheBuster = `?t=${Date.now()}`;
-    const audioRefs = [
-      { ref: notificationSound, src: `/sounds/notification.mp3${cacheBuster}` }
-    ];
-
-    audioRefs.forEach(({ ref, src }) => {
-      const el = ref.current;
-      if (el) {
-        el.muted = true;
-        el.crossOrigin = "anonymous"; 
-        el.src = src;
-        el.load(); 
-        el.play().then(() => {
-          el.pause();
-          el.muted = false; 
-          el.currentTime = 0;
-        }).catch(err => console.warn(`Priming skipped for ${src}`, err.message));
-      }
-    });
+    if (notificationSound.current) {
+      notificationSound.current.muted = true;
+      notificationSound.current.crossOrigin = "anonymous"; 
+      notificationSound.current.src = `/sounds/notification.mp3${cacheBuster}`;
+      notificationSound.current.load(); 
+      notificationSound.current.play().then(() => {
+        notificationSound.current.pause();
+        notificationSound.current.muted = false; 
+        notificationSound.current.currentTime = 0;
+      }).catch(err => console.warn("Priming skipped for notification audio:", err.message));
+    }
+    
     if (socket && agentData?._id) {
       socket.emit("join-private-room", agentData._id);
     }
@@ -184,7 +169,7 @@ useEffect(() => {
   }
 }, [callStatus, localStream]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!socket) return;
     const handleStatusUpdate = ({ userId, isOnline, lastSeen }) => {
       setUsers(prevUsers => prevUsers.map(u => 
@@ -250,52 +235,37 @@ useEffect(() => {
     socket.emit("join-main-room", myRoomId);
   }, [agentData?._id, socket]);
 
- // --- AUTOMATED BACKGROUND SYSTEM SYNC ENGINE ---
-useEffect(() => {
-  const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
-  
-  // FIX: Resolve the ID correctly from your active core context shapes
-  const currentCallId = activeCaller?.callId || selectedUser?.callId || selectedUser?.roomName;
+ useEffect(() => {
+    const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
+    const currentCallId = activeCaller?.callId || selectedUser?.callId || selectedUser?.roomName;
 
-  if (!token || !currentCallId || callStatus === 'idle') {
-    return;
-  }
-  const syncStatus = async () => {
-    if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json' 
+    if (!token || !currentCallId || callStatus === 'idle') return;
+
+    const syncStatus = async () => {
+      if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json' 
+          }
+        });
+        if (res.status === 404) {
+          handleEndCall();
+          return;
         }
-      });
-      const contentType = res.headers.get("content-type");
-      if (!res.ok || !contentType?.includes("application/json")) {
-        if (res.status === 404) handleEndCall();
-        return;
-      }
-      const data = await res.json();
-      if (data?.status === 'ringing' && callStatus === 'calling') {
-        setCallStatus('ringing');
-      }
-      if (data?.status === 'connected' && callStatus !== 'connected') {
-        if (isIncomingCall) {
-          setCallStatus('connected');
-        } else {
-          console.log("📡 DB is connected, but Agent is dialing out. Awaiting explicit user socket acceptance...");
+        const data = await res.json();
+        if (data && ['ended', 'declined', 'missed', 'rejected'].includes(data.status)) {
+          console.log("[AgentDashboard] Sync engine terminated dead database link.");
+          handleEndCall();
         }
+      } catch (e) {
+        console.warn("ZingConnect Sync Jitter:", e.message);
       }
-      if (data && ['ended', 'declined', 'missed', 'rejected'].includes(data.status)) {
-        console.log("[AgentDashboard] Sync engine caught dead database channel. Scrubbing UI.");
-        handleEndCall();
-      }
-    } catch (e) {
-      console.warn("ZingConnect Sync Jitter:", e.message);
-    }
-  };
-  const interval = setInterval(syncStatus, 3000);
-  return () => clearInterval(interval);
-}, [callStatus, activeCaller, selectedUser, handleEndCall, isIncomingCall, setCallStatus]);
+    };
+    const interval = setInterval(syncStatus, 3000);
+    return () => clearInterval(interval);
+  }, [callStatus, activeCaller, selectedUser, handleEndCall]);
 
 useEffect(() => {
   const container = scrollRef.current;

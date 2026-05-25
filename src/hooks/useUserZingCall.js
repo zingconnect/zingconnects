@@ -31,8 +31,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
   const peerConnectedRef = useRef(false);
   const connectionTimeoutRef = useRef(null);
   const aiMediaRecorderRef = useRef(null);
-  
-  // ✅ FIX: Lock variable tracking ref to fully insulate API poller racing loops
   const isEndingRef = useRef(false);
 
   // Sound Assets
@@ -87,7 +85,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
 
   const terminateLocalSession = useCallback(() => {
     setIsEnding(true);
-    isEndingRef.current = true; // ✅ Instantly lock references to bypass background async racing bugs
+    isEndingRef.current = true; 
 
     if (pollingRef && pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
     if (connectionTimeoutRef && connectionTimeoutRef.current) { clearTimeout(connectionTimeoutRef.current); connectionTimeoutRef.current = null; }
@@ -105,7 +103,12 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     }
 
     [ringtoneAudio, callingAudio].forEach(ref => { 
-      if (ref && ref.current) { ref.current.pause(); ref.current.currentTime = 0; } 
+      if (ref && ref.current) {
+        try {
+          ref.current.pause(); 
+          ref.current.currentTime = 0;
+        } catch (e) {}
+      } 
     });
     if (audioCtxRef && audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
       audioCtxRef.current.close().catch(() => {});
@@ -122,7 +125,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     setPeerConnected(false);
     setShowFullScreenCall(false);
     
-    // Safety guard extended slightly to allow database update pipelines to wrap up safely
     setTimeout(() => {
       setIsEnding(false);
       isEndingRef.current = false;
@@ -286,7 +288,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       if (isTransitioningRef) isTransitioningRef.current = true;
       setCallStatus('connecting');
 
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
       });
@@ -475,11 +477,7 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     if (!token) return;
 
     const checkCalls = async () => {
-      const freshStatus = callStatusRef ? callStatusRef.current : 'idle';
-      const freshTransition = isTransitioningRef ? isTransitioningRef.current : false;
-      
-      // ✅ FIX: Use the rigid isEndingRef reference check to completely slam down loop re-rendering doors
-      if (freshStatus !== 'idle' || freshTransition || isEndingRef.current) return;
+      if (callStatusRef.current !== 'idle' || isTransitioningRef.current || isEndingRef.current) return;
 
       try {
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
@@ -493,8 +491,6 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
         const data = await response.json();
 
         if (data && data.hasIncomingCall && data.status !== 'ended' && data.status !== 'rejected') {
-          
-          // ✅ FIX: Double check locks a final time right before parsing states
           if (callStatusRef.current !== 'idle' || isEndingRef.current) return;
 
           setActiveCall({
@@ -518,10 +514,9 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
       }
     };
 
-    checkCalls();
     const interval = setInterval(checkCalls, 4000); 
     return () => clearInterval(interval);
-  }, []); // Clean layout reference architecture
+  }, []); 
 
   // Real-time Audio Streaming (AI Voice Conversion Engine Matrix)
   useEffect(() => {
@@ -587,15 +582,19 @@ export function useUserZingCall(socket, userData, agent, messagesEndRef) {
     const rAudio = ringtoneAudio ? ringtoneAudio.current : null;
     const cAudio = callingAudio ? callingAudio.current : null;
 
-    if (callStatus === 'ringing' && isIncomingCall) { 
-      if (cAudio) cAudio.pause(); 
-      if (rAudio) rAudio.play().catch(() => {}); 
-    } else if (callStatus === 'calling' || (callStatus === 'ringing' && !isIncomingCall)) { 
-      if (rAudio) rAudio.pause(); 
-      if (cAudio) cAudio.play().catch(() => {}); 
-    } else { 
-      if (rAudio) rAudio.pause(); 
-      if (cAudio) cAudio.pause(); 
+    try {
+      if (callStatus === 'ringing' && isIncomingCall) { 
+        if (cAudio) cAudio.pause(); 
+        if (rAudio) rAudio.play().catch(() => {}); 
+      } else if (callStatus === 'calling' || (callStatus === 'ringing' && !isIncomingCall)) { 
+        if (rAudio) rAudio.pause(); 
+        if (cAudio) cAudio.play().catch(() => {}); 
+      } else { 
+        if (rAudio) rAudio.pause(); 
+        if (cAudio) cAudio.pause(); 
+      }
+    } catch (e) {
+      console.warn("Audio hardware stream deferred gracefully.");
     }
   }, [callStatus, isIncomingCall]);
 

@@ -3,7 +3,6 @@ import { io } from 'socket.io-client';
 import { useUserZingCall } from '../hooks/useUserZingCall';
 import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useRoomContext } from '@livekit/components-react';
 
-// 🔌 FIXED: Added 'export' so UserDashboard can import { UserCallContext } directly!
 export const UserCallContext = createContext(null);
 
 const socket = io(import.meta.env.VITE_API_URL, {
@@ -23,7 +22,6 @@ export const UserCallProvider = ({ children }) => {
     setAvatarError(false);
   }, [agent?.id, agent?._id]);
 
-  // Session Engine Poller Engine
   useEffect(() => {
     const token = localStorage.getItem('userToken');
     if (!token) return;
@@ -51,7 +49,6 @@ export const UserCallProvider = ({ children }) => {
 
   const callEngine = useUserZingCall(socket, userData, agent, messagesEndRef);
 
-  // Sound Engine Lifecycle Rules
   useEffect(() => {
     const isIncoming = callEngine.callStatus === 'ringing' || (callEngine.callStatus !== 'idle' && callEngine.isIncomingCall);
 
@@ -69,8 +66,7 @@ export const UserCallProvider = ({ children }) => {
         ringtoneRef.current.currentTime = 0;
       }
     }
-
-  } , [callEngine.callStatus, callEngine.isIncomingCall]);
+  }, [callEngine.callStatus, callEngine.isIncomingCall]);
 
   const finalAvatarUrl = avatarError || !agent?.photoUrl ? '/default-avatar.png' : agent.photoUrl;
 
@@ -79,7 +75,7 @@ export const UserCallProvider = ({ children }) => {
       {children}
       
       {/* LIVEKIT PIPELINE BRIDGING ENGINE */}
-      {callEngine.lkToken && (
+      {callEngine.lkToken && callEngine.callStatus !== 'idle' && (
         <LiveKitRoom
           video={false}
           audio={true}
@@ -190,13 +186,26 @@ export const UserCallProvider = ({ children }) => {
 const LocalMicController = ({ isMuted }) => {
   const { localParticipant } = useLocalParticipant();
   const room = useRoomContext();
+  const [roomState, setRoomState] = useState('idle');
+
+  // Track active room state changes to ensure we catch the 'connected' milestone event
+  useEffect(() => {
+    if (!room) return;
+    setRoomState(room.state);
+
+    const handleStateChange = (state) => setRoomState(state);
+    room.on('stateChanged', handleStateChange);
+    return () => {
+      room.off('stateChanged', handleStateChange);
+    };
+  }, [room]);
 
   useEffect(() => {
-    if (!localParticipant || !room || room.state !== 'connected') return;
+    if (!localParticipant || roomState !== 'connected') return;
     
     localParticipant.setMicrophoneEnabled(!isMuted)
       .catch(err => console.error("[User Mic Sync] Failure:", err));
-  }, [isMuted, localParticipant, room]);
+  }, [isMuted, localParticipant, roomState]);
 
   return null;
 };

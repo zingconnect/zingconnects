@@ -46,15 +46,18 @@ export const AgentCallProvider = ({ children }) => {
   const isEndingRef = useRef(false);
   const timerRef = useRef(null);
   const pollingIntervalRef = useRef(null);
-  const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3'));
-  const callingAudio = useRef(new Audio('/sounds/calling.wav'));
+  const ringtoneAudio = useRef(null);
+  const callingAudio = useRef(null);
 
   // Sync state mutations directly to background reference maps
   useEffect(() => { callStatusRef.current = callStatus; }, [callStatus]);
   useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
 
-  // --- COMPONENT INITIALIZATION AUDIO CLEANUP ---
+  // --- COMPONENT INITIALIZATION & UNIFIED AUDIO ALLOCATION ---
   useEffect(() => {
+    ringtoneAudio.current = new Audio('/sounds/ringtone.mp3');
+    callingAudio.current = new Audio('/sounds/calling.wav');
+    
     ringtoneAudio.current.loop = true;
     callingAudio.current.loop = true;
 
@@ -300,16 +303,17 @@ export const AgentCallProvider = ({ children }) => {
   useEffect(() => {
     const rAudio = ringtoneAudio.current;
     const cAudio = callingAudio.current;
+    if (!rAudio || !cAudio) return;
 
     if (callStatus === 'ringing' && isIncomingCall) {
-      if (cAudio) cAudio.pause();
-      if (rAudio) rAudio.play().catch(() => {});
+      cAudio.pause();
+      rAudio.play().catch(() => {});
     } else if (callStatus === 'dialing' || (callStatus === 'ringing' && !isIncomingCall)) {
-      if (rAudio) rAudio.pause();
-      if (cAudio) cAudio.play().catch(() => {});
+      rAudio.pause();
+      cAudio.play().catch(() => {});
     } else {
-      if (rAudio) rAudio.pause();
-      if (cAudio) cAudio.pause();
+      rAudio.pause();
+      cAudio.pause();
     }
   }, [callStatus, isIncomingCall]);
 
@@ -375,7 +379,7 @@ export const AgentCallProvider = ({ children }) => {
       socket.off('call-ended', onCallTerminated);
       socket.off('call-rejected', onCallTerminated);
     };
-  }, [handleEndCall]); // Depend on handleEndCall so listeners execute using updated handler instance
+  }, [handleEndCall]); 
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
