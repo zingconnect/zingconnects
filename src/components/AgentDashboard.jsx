@@ -248,11 +248,25 @@ useEffect(() => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
-  useEffect(() => {
-    if (!socket || !agentData?._id) return;
-    const myRoomId = agentData._id.toString();
+
+ useEffect(() => {
+  if (!socket || !agentData?._id) return;
+  const myRoomId = agentData._id.toString();
     socket.emit("join-main-room", myRoomId);
-  }, [agentData?._id, socket]);
+  const handleNewMessage = (newMessage) => {
+    if (selectedUser && newMessage.senderId === selectedUser._id) {
+      setMessages((prev) => [...prev, newMessage]);
+    }
+        setUnreadCounts((prev) => ({
+      ...prev,
+      [newMessage.senderId]: (prev[newMessage.senderId] || 0) + 1
+    }));
+  };
+  socket.on("receive-message", handleNewMessage);
+  return () => {
+    socket.off("receive-message", handleNewMessage);
+  };
+}, [agentData?._id, socket, selectedUser]); // Include selectedUser if used inside
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
@@ -682,11 +696,10 @@ const handleScroll = async () => {
     }
   }
 };
+
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
-  
-  // Reset unread count for this user upon selection
-  setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
+    setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
   
   setMessages([]); 
   setIsInitialLoad(true); 
@@ -749,53 +762,56 @@ const handleSelectUser = async (user) => {
     setIsInitialLoad(true);
   }, [selectedUser?._id]);
 
-  useEffect(() => {
+useEffect(() => {
   if (!socket) return;
-  
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
-
   const handleIncomingMessage = (data) => {
-    console.log("📥 Socket Message:", data);
+    console.log("📥 Socket Message Received:", data);
     const senderId = data.senderId?.toString();
-    const currentUserId = selectedUser?._id?.toString();
-    const isChattingWithSender = selectedUser && (senderId === currentUserId);
+    setSelectedUser((currentSelectedUser) => {
+      const currentUserId = currentSelectedUser?._id?.toString();
+      const isChattingWithSender = currentUserId && (senderId === currentUserId);
+      if (isChattingWithSender) {
+        setMessages((prev) => {
+          if (prev.some((m) => m._id === data._id)) return prev;
+          return [...prev, data];
+        });
+        const token = localStorage.getItem('agentToken');
+        fetch(`/api/messages/mark-read/${senderId}`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${token}` }
+        }).catch(console.error);
+      } else if (data.senderModel === 'User') {
+        setUnreadCounts((prev) => ({
+          ...prev,
+          [senderId]: (prev[senderId] || 0) + 1
+        }));
+      }
+      if (notificationSound.current) {
+        notificationSound.current.currentTime = 0;
+        notificationSound.current.play().catch((e) => console.warn("Audio blocked:", e));
+      }
 
-    // 1. Update messages if currently in the chat
-    if (isChattingWithSender) {
-      setMessages((prev) => {
-        if (prev.some(m => m._id === data._id)) return prev;
-        return [...prev, data];
-      });
-      const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${senderId}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(console.error);
-    } else if (data.senderModel === 'User') {
-      setUnreadCounts(prev => ({
-        ...prev,
-        [senderId]: (prev[senderId] || 0) + 1
-      }));
-    }
-    if (notificationSound.current) {
-      notificationSound.current.currentTime = 0;
-      notificationSound.current.play().catch(e => console.warn("Audio blocked:", e));
-    }
-    if (data.senderModel === 'User' && Notification.permission === "granted" && document.visibilityState !== 'visible') {
-      new Notification(`Message from ${data.senderName || 'Client'}`, {
-        body: data.text || "Sent a file",
-        icon: '/favicon.ico'
-      });
-    }
+      if (
+        data.senderModel === 'User' && 
+        Notification.permission === "granted" && 
+        document.visibilityState !== 'visible'
+      ) {
+        new Notification(`Message from ${data.senderName || 'Client'}`, {
+          body: data.text || "Sent a file",
+          icon: '/favicon.ico'
+        });
+      }
+      return currentSelectedUser; // Keep existing selection
+    });
   };
-
   socket.on('new-message', handleIncomingMessage);
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket, selectedUser]);
+}, [socket]); 
 
   // --- DEVICE COMPATIBILITY CHECKS ---
   useEffect(() => {

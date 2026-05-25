@@ -223,8 +223,6 @@ socket.on("reject-call", ({ to, callId }) => {
       io.to(targetRoom).emit("call-ended", { callId }); // Extra safety clearance rule
     }
   });
-
-  // --- DISCONNECTION LIFECYCLE FALLBACK ---
   socket.on("disconnect", async () => {
     console.log("Socket disconnected:", socket.id);
     if (socket.userId) {
