@@ -18,16 +18,14 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
-
 const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentDashboard = () => {
-  const navigate = useNavigate();
-  
+  const navigate = useNavigate(); 
   const { 
     callStatus, isIncomingCall,  activeCaller, selectedUser, setSelectedUser, isMuted, setIsMuted, isSpeakerOn, 
     setIsSpeakerOn, isVoiceConversionActive, setIsVoiceConversionActive, selectedVoiceId, setSelectedVoiceId, callTime,
-    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime, setLocalStream
+    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime, setLocalStream, localStream
    } = useAgentCall();
 
   const messagesEndRef = useRef(null);
@@ -37,7 +35,8 @@ export const AgentDashboard = () => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const lastNotifiedId = useRef(null);
-
+   const localAudioRef = useRef(null);
+   
   // --- LOCAL CHAT & PLATFORM STATES ---
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
