@@ -295,46 +295,60 @@ useEffect(() => {
   if (!socket) return;
   
   const handleIncomingMessage = (data) => {
+    // 1. Prevent processing the same message twice
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
+
+    // 2. Normalize senderId to String
+    const senderId = String(data.senderId);
     const currentSelectedUser = selectedUserRef.current;
+    
+    // Check if the message is from the user we are currently viewing
     const isChattingWithSender = currentSelectedUser && 
-      (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
+      (senderId === String(currentSelectedUser._id || currentSelectedUser.id));
+
+    // 3. Update the sidebar preview text for this user
     setLatestMessages(prev => ({
       ...prev,
-      [data.senderId]: data.text || "Sent a file"
+      [senderId]: data.text || "Sent a file"
     }));
-        if (isChattingWithSender) {
+    
+    if (isChattingWithSender) {
+      // If we are looking at them, add the message to the chat and reset the badge
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
-      setUnreadCounts(prev => ({ ...prev, [data.senderId]: 0 }));
+      setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
     } else {
-    setUnreadCounts(prev => {
-  const senderId = String(data.senderId);
-  const currentCount = prev[senderId] || 0;
-  const newCount = currentCount + 1;
-  console.log(`[Socket] Updating badge for ${senderId} to ${newCount}`);
-  return { 
-    ...prev, 
-    [senderId]: newCount 
-  };
-});
-            triggerNotification(data);
+      // If we are NOT looking at them, increment the badge and notify
+      setUnreadCounts(prev => {
+        const currentCount = prev[senderId] || 0;
+        const newCount = currentCount + 1;
+        console.log(`[Socket] Updating badge for ${senderId} to ${newCount}`);
+        return { 
+          ...prev, 
+          [senderId]: newCount 
+        };
+      });
+      
+      // Trigger browser notification / sound
+      triggerNotification(data);
     }
   };
 
   socket.on('new-message', handleIncomingMessage);
+  
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket]); // Keep dependency on socket only
+}, [socket, triggerNotification]); // Re-bind if socket or notifier changes
 
+// This tracks the selectedUser state changes
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
   selectedUserRef.current = selectedUser;
-}, [socket, triggerNotification]); 
+}, [selectedUser]); // Dependency is ONLY selectedUser
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
