@@ -1234,32 +1234,36 @@ const handleSelectUser = async (user) => {
               )}
             </div>
 
-            {/* --- FOOTER INPUT PANEL --- */}
-            <footer className="min-h-[56px] bg-card-bg px-3 py-2 flex items-center justify-between gap-2 z-10 border-t border-gray-100">
-              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
-              <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
-              
-              <div className="flex items-center shrink-0 gap-1">
-                <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsPaperclip size={18} /></button>
-                <button onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50"><BsCameraFill size={18} /></button>
-              </div>
+         {/* --- FOOTER INPUT PANEL --- */}
+<footer className="min-h-[56px] bg-card-bg px-3 py-2 flex items-center justify-between gap-2 z-10 border-t border-gray-100">
+  <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
+    <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*" capture="environment" className="hidden" />
+  
+  <div className="flex items-center shrink-0 gap-1">
+    <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50">
+      <BsPaperclip size={18} />
+    </button>
+    <button type="button" onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500 disabled:opacity-50">
+      <BsCameraFill size={18} />
+    </button>
+  </div>
 
-              <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
-                <input 
-                  value={newMessage} 
-                  onChange={(e) => setNewMessage(e.target.value)} 
-                  placeholder="Type secure instruction transmission..." 
-                  className="w-full bg-input-bg text-text-main px-4 py-2 rounded-full text-sm outline-none border border-transparent focus:border-gray-200 transition-all shadow-inner placeholder-gray-400" 
-                />
-                <button 
-                  type="submit" 
-                  disabled={!newMessage.trim() || isUploading} 
-                  className={`p-2.5 rounded-full shadow-sm transition-all shrink-0 ${newMessage.trim() && !isUploading ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-                >
-                  <BsSend size={14} />
-                </button>
-              </form>
-            </footer>
+  <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+    <input 
+      value={newMessage} 
+      onChange={(e) => setNewMessage(e.target.value)} 
+      placeholder="Type secure instruction transmission..." 
+      className="w-full bg-input-bg text-text-main px-4 py-2 rounded-full text-sm outline-none border border-transparent focus:border-gray-200 transition-all shadow-inner placeholder-gray-400" 
+    />
+    <button 
+      type="submit" 
+      disabled={!newMessage.trim() || isUploading} 
+      className={`p-2.5 rounded-full shadow-sm transition-all shrink-0 ${newMessage.trim() && !isUploading ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+    >
+      <BsSend size={14} />
+    </button>
+  </form>
+</footer>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50">

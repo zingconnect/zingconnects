@@ -1282,8 +1282,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     </div>
   </div>
 )}
-<footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
-    
+<footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">    
     {/* --- 1. REPLY PREVIEW PANEL --- */}
     {replyingTo && (
       <div className="px-2 md:px-6 pt-2">
@@ -1327,8 +1326,8 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 
   {/* --- MAIN INPUT CONTROLS --- */}
   <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
-    <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
-    <input  type="file"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden"/>
+    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden"/>
+        <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*" capture="environment" className="hidden"/>
 
     <div className="flex gap-1 md:gap-2 text-gray-500">
       <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
@@ -1336,7 +1335,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         <BsPaperclip size={22} />
       </button>
 
-      <button  type="button" onClick={() => cameraInputRef.current.click()}  disabled={isUploading}
+      <button type="button" onClick={() => cameraInputRef.current.click()} disabled={isUploading}
         className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
         <BsCameraFill size={22} />
       </button>
@@ -1344,12 +1343,12 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
       <div className="flex-1 relative flex items-center">
-        <input value={newMessage}  onChange={(e) => setNewMessage(e.target.value)} disabled={isUploading}
+        <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} disabled={isUploading}
           placeholder={isUploading ? "Uploading file..." : (replyingTo ? "Write a reply..." : "Type your secure message")} 
           className={`w-full bg-white px-4 py-2.5 md:py-3 text-[14px] outline-none shadow-sm border border-gray-100 focus:ring-1 ring-blue-500/20 transition-all ${
             replyingTo ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-full'}`}/>
       </div>
-            <button type="submit"  disabled={!newMessage.trim() && !isUploading}
+      <button type="submit" disabled={!newMessage.trim() && !isUploading}
         className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all shrink-0 ${
           newMessage.trim() 
             ? "bg-blue-600 text-white" 
