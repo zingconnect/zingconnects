@@ -346,8 +346,7 @@ useEffect(() => {
 
     return () => clearInterval(heartBeat);
   }, []);
-
-  // --- PROFILE INITIALIZATION & SUBSCRIPTION CHECK ---
+// --- PROFILE INITIALIZATION & SUBSCRIPTION CHECK ---
   useEffect(() => {
     const existingScript = document.querySelector('script[src*="flutterwave"]');
     let script;
@@ -362,58 +361,63 @@ useEffect(() => {
     const fetchInitialData = async () => {
       const token = localStorage.getItem('agentToken');
       if (!token) return navigate('/');
+      try {
+        const [profileRes, usersRes] = await Promise.all([
+          fetch('/api/agents/profile/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch('/api/agents/my-users', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).catch(err => {
+            console.warn("Pre-fetching users decoupled fallback:", err.message);
+            return null; // Don't let a secondary users endpoint failure crash the main authentication logic
+          })
+        ]);
+        if (profileRes.status === 401) {
+          localStorage.removeItem('agentToken');
+          return navigate('/');
+        }
 
-      try {
-        const profileRes = await fetch('/api/agents/profile/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        if (profileRes.status === 403) {
+          const errorData = await profileRes.json();
+          if (errorData.reason === 'dual_login') {
+            setIsDualLoginConflict(true);
+            setLoading(false);
+            return;
+          }
+        }
+        if (!profileRes.ok) throw new Error("Failed to load profile");
+        const profileData = await profileRes.json();
+        const agent = profileData.agent;
+        if (agent) {
+          setAgentData(agent);
+          const activeStatus = !!agent.isSubscribed;
+          setIsSubscribed(activeStatus);
 
-        if (profileRes.status === 401) {
-          localStorage.removeItem('agentToken');
-          return navigate('/');
-        }
-
-        if (profileRes.status === 403) {
-          const errorData = await profileRes.json();
-          if (errorData.reason === 'dual_login') {
-            setIsDualLoginConflict(true);
-            setLoading(false);
-            return;
-          }
-        }
-        if (!profileRes.ok) throw new Error("Failed to load profile");
-        const profileData = await profileRes.json();
-        const agent = profileData.agent;
-        if (agent) {
-          setAgentData(agent);
-          const activeStatus = !!agent.isSubscribed;
-          setIsSubscribed(activeStatus);
-
-          if (agent.plan) setSelectedPlan(agent.plan);
-
-          if (activeStatus) {
-            const usersRes = await fetch('/api/agents/my-users', {
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const userData = await usersRes.json();
-            if (userData.success && Array.isArray(userData.users)) {
-              setUsers(userData.users);
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Initialization error:", err);
-      } finally {
-        setLoading(false);
-      }
+          if (agent.plan) setSelectedPlan(agent.plan);
+          if (activeStatus && usersRes && usersRes.ok) {
+            const userData = await usersRes.json();
+            if (userData.success && Array.isArray(userData.users)) {
+              setUsers(userData.users);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Initialization error:", err);
+      } finally {
+        setLoading(false);
+      }
     };
+
     fetchInitialData();
+
     return () => {
       if (script && document.body.contains(script)) {
         document.body.removeChild(script);
       }
     };
   }, [navigate]);
+
 
   const handlePayment = async () => {
     if (!agentData || !agentData.email) {
@@ -852,7 +856,7 @@ const handleSelectUser = async (user) => {
 
   if (loading) return (
     <div className="h-screen flex items-center justify-center bg-page-bg text-[10px] font-bold uppercase tracking-widest text-text-secondary">
-      Initializing Secure Portal...
+      Initializing ZingConnect...
     </div>
   );
 
