@@ -249,55 +249,67 @@ useEffect(() => {
     };
   }, [socket, callStatus, isSpeakerOn]);
 
+
 useEffect(() => {
-  if (!socket || !agentData?._id) return;
-  socket.emit("join-main-room", agentData._id.toString());
+  if (!socket) return;
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
 
-  // 2. Define the single, source-of-truth handler
   const handleIncomingMessage = (data) => {
-    console.log("📥 Socket Message Received:", data);
-        if (notificationSound.current) {
-      notificationSound.current.currentTime = 0;
-      notificationSound.current.play().catch((e) => console.warn("Audio blocked:", e));
-    }
-    if (data.senderModel === 'User' && Notification.permission === "granted") {
-      new Notification(`Message from ${data.senderName || 'Client'}`, {
-        body: data.text || "Sent a file",
-        icon: '/favicon.ico'
+    console.log("📥 Real-time Socket Message Detected:", data);
+
+    // 1. Core Safeguard: Drop duplicates by tracking message ID explicitly
+    if (data._id && data._id === lastNotifiedId.current) return;
+    lastNotifiedId.current = data._id;
+
+    const isChattingWithSender = selectedUser && (data.senderId === selectedUser._id || data.senderId === selectedUser.id);
+    
+    if (isChattingWithSender) {
+      setMessages((prev) => {
+        if (prev.some(m => m._id === data._id)) return prev;
+        return [...prev, data];
       });
+
+      // Mark as read immediately on backend
+      const token = localStorage.getItem('agentToken');
+      fetch(`/api/messages/mark-read/${selectedUser._id}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(err => console.error("Mark read error:", err));
     }
-    setSelectedUser((currentSelectedUser) => {
-      const senderId = data.senderId?.toString();
-      const currentUserId = currentSelectedUser?._id?.toString();
-      const isChattingWithSender = currentUserId && (senderId === currentUserId);
-
-      if (isChattingWithSender) {
-        setMessages((prev) => {
-          if (prev.some((m) => m._id === data._id)) return prev;
-          return [...prev, data];
-        });
-        
-        // Mark as read
-        const token = localStorage.getItem('agentToken');
-        fetch(`/api/messages/mark-read/${senderId}`, {
-          method: 'PATCH',
-          headers: { 'Authorization': `Bearer ${token}` }
-        }).catch(console.error);
-      } else if (data.senderModel === 'User') {
-        setUnreadCounts((prev) => ({
-          ...prev,
-          [senderId]: (prev[senderId] || 0) + 1
-        }));
+    if (data.senderModel === 'User') {
+      if (notificationSound.current) {
+        notificationSound.current.currentTime = 0;
+        notificationSound.current.play().catch((err) => 
+          console.warn("🔊 Notification audio context autoplay restricted:", err.message)
+        );
       }
-      return currentSelectedUser;
-    });
+      
+      if ('vibrate' in navigator) {
+        navigator.vibrate([200, 100, 200]); // Double pulse haptic alert
+      }
+      const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
+      if (Notification.permission === "granted" && shouldShowPopup) {
+        const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
+          body: data.text || "Sent a file",
+          icon: data.senderPhoto || '/favicon.ico',
+          tag: 'zing-msg',
+          renotify: true
+        });
+        popup.onclick = () => { 
+          window.focus(); 
+          popup.close(); 
+        };
+      }
+    }
   };
-  socket.on("new-message", handleIncomingMessage);
 
+  socket.on('new-message', handleIncomingMessage);
   return () => {
-    socket.off("new-message", handleIncomingMessage);
+    socket.off('new-message', handleIncomingMessage);
   };
-}, [socket, agentData?._id]);
+}, [socket, selectedUser]); 
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
