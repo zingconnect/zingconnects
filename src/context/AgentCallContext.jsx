@@ -25,7 +25,6 @@ export const AgentCallProvider = ({ children }) => {
   const [activeCaller, setActiveCaller] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   
-  // --- GLOBAL UI LAYOUT CONTROL ---
   const [showFullScreenCall, setShowFullScreenCall] = useState(false);
   
   // --- AUDIO & MODIFIER CONFIGURATIONS ---
@@ -53,7 +52,6 @@ export const AgentCallProvider = ({ children }) => {
   useEffect(() => { callStatusRef.current = callStatus; }, [callStatus]);
   useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
 
-  // --- COMPONENT INITIALIZATION & UNIFIED AUDIO ALLOCATION ---
   useEffect(() => {
     ringtoneAudio.current = new Audio('/sounds/ringtone.mp3');
     callingAudio.current = new Audio('/sounds/calling.wav');
@@ -119,9 +117,7 @@ export const AgentCallProvider = ({ children }) => {
     }, 4000);
   }, []);
 
-  // --- SAFE TEARDOWN ENGINE ---
   const handleEndCall = useCallback(async () => {
-    // If we're already ending, skip to avoid double-processing event streams
     if (isEndingRef.current) return;
     
     console.log("📴 Tearing down core call channel pipelines...");
@@ -141,7 +137,6 @@ export const AgentCallProvider = ({ children }) => {
       socket.emit("end-call", { to: String(targetId).trim(), callId: currentCallId });
     }
 
-    // Terminate local sound structures immediately
     [ringtoneAudio, callingAudio].forEach(audioRef => {
       if (audioRef && audioRef.current) {
         audioRef.current.pause();

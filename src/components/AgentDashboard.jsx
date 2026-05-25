@@ -804,7 +804,7 @@ useEffect(() => {
           icon: '/favicon.ico'
         });
       }
-      return currentSelectedUser; // Keep existing selection
+      return currentSelectedUser; 
     });
   };
   socket.on('new-message', handleIncomingMessage);
