@@ -56,6 +56,7 @@ export const AgentDashboard = () => {
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [lastMessageId, setLastMessageId] = useState(null);
   // --- SUBSCRIPTION STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
@@ -206,6 +207,32 @@ useEffect(() => {
       socket.off('user_status_update', handleStatusUpdate);
     };
   }, [socket, setSelectedUser]);
+
+  useEffect(() => {
+  const latestMessage = messages[messages.length - 1];
+  if (
+    latestMessage &&
+    latestMessage.senderId !== agentData?._id &&
+    latestMessage._id !== lastMessageId
+  ) {
+    setLastMessageId(latestMessage._id);
+    triggerNotification(latestMessage);
+  }
+}, [messages]);
+
+const triggerNotification = (message) => {
+  const audio = new Audio('/sounds/notification.mp3'); // Ensure this file exists in your /public folder
+  audio.play().catch(e => console.log("Audio playback blocked by browser", e));
+  if (Notification.permission === 'granted') {
+    new Notification('New Secure Transmission', {
+      body: message.text || 'You received a new attachment.',
+      icon: '/logo.png', 
+      tag: 'zing-connect-alert'
+    });
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission();
+  }
+};
 
   useEffect(() => {
     if (!socket) return;
@@ -698,7 +725,7 @@ useEffect(() => {
     window.location.href = currentSlug ? `/${currentSlug}` : '/';
   };
 
-  
+
 const handleScroll = async (e) => {
   const container = e.target;
     const isAtTop = (container.scrollHeight - container.scrollTop - container.clientHeight) < 80;
