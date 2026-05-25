@@ -37,7 +37,6 @@ export const AgentDashboard = () => {
   const lastNotifiedId = useRef(null);
    const localAudioRef = useRef(null);
    
-  // --- LOCAL CHAT & PLATFORM STATES ---
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
   const [messages, setMessages] = useState([]);
@@ -56,6 +55,7 @@ export const AgentDashboard = () => {
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
   // --- SUBSCRIPTION STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
@@ -677,6 +677,9 @@ const handleScroll = async () => {
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
+  // Reset unread count for this user upon selection
+  setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
+  
   setMessages([]); 
   setIsInitialLoad(true); 
   setSelectedUser(user);
@@ -701,7 +704,7 @@ const handleSelectUser = async (user) => {
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
         setHasMore(data.hasMore);
-                setTimeout(() => {
+        setTimeout(() => {
           if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           }
@@ -739,48 +742,52 @@ const handleSelectUser = async (user) => {
   }, [selectedUser?._id]);
 
   useEffect(() => {
-    if (!socket) return;
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.permission === 'default' && Notification.requestPermission();
-    }
-   const handleIncomingMessage = (data) => {
-  console.log("📥 Socket Message:", data);
+  if (!socket) return;
   
-  // 1. Robust ID matching
-  const senderId = data.senderId?.toString();
-  const currentUserId = selectedUser?._id?.toString();
-  const isChattingWithSender = selectedUser && (senderId === currentUserId);
-
-  if (isChattingWithSender) {
-    setMessages((prev) => {
-      if (prev.some(m => m._id === data._id)) return prev;
-      return [...prev, data];
-    });
-        const token = localStorage.getItem('agentToken');
-    fetch(`/api/messages/mark-read/${senderId}`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token}` }
-    }).catch(console.error);
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
   }
-  if (data.senderModel === 'User') {
-    // Force sound
+
+  const handleIncomingMessage = (data) => {
+    console.log("📥 Socket Message:", data);
+    const senderId = data.senderId?.toString();
+    const currentUserId = selectedUser?._id?.toString();
+    const isChattingWithSender = selectedUser && (senderId === currentUserId);
+
+    // 1. Update messages if currently in the chat
+    if (isChattingWithSender) {
+      setMessages((prev) => {
+        if (prev.some(m => m._id === data._id)) return prev;
+        return [...prev, data];
+      });
+      const token = localStorage.getItem('agentToken');
+      fetch(`/api/messages/mark-read/${senderId}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(console.error);
+    } else if (data.senderModel === 'User') {
+      setUnreadCounts(prev => ({
+        ...prev,
+        [senderId]: (prev[senderId] || 0) + 1
+      }));
+    }
     if (notificationSound.current) {
       notificationSound.current.currentTime = 0;
       notificationSound.current.play().catch(e => console.warn("Audio blocked:", e));
     }
-        if (Notification.permission === "granted" && document.visibilityState !== 'visible') {
+    if (data.senderModel === 'User' && Notification.permission === "granted" && document.visibilityState !== 'visible') {
       new Notification(`Message from ${data.senderName || 'Client'}`, {
         body: data.text || "Sent a file",
         icon: '/favicon.ico'
       });
     }
-  }
-};
-    socket.on('new-message', handleIncomingMessage);
-    return () => {
-      socket.off('new-message', handleIncomingMessage);
-    };
-  }, [socket, selectedUser]); 
+  };
+
+  socket.on('new-message', handleIncomingMessage);
+  return () => {
+    socket.off('new-message', handleIncomingMessage);
+  };
+}, [socket, selectedUser]);
 
   // --- DEVICE COMPATIBILITY CHECKS ---
   useEffect(() => {
@@ -1048,41 +1055,45 @@ const handleSelectUser = async (user) => {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-          {users.length > 0 ? users.map((user) => (
-            <div
-              key={user._id}
-              onClick={() => handleSelectUser(user)}
-              className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
-            >
-              <div className="relative shrink-0">
-                <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
-                  <img
-                    src={user.photoUrl}
-                    alt={user.firstName}
-                    className="w-full h-full object-cover"
-                    onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
-                  />
-                </div>
-                <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
-              </div>
-              
-              <div className="ml-3 flex-1 min-w-0">
-                <div className="flex justify-between items-center mb-0.5">
-                  <h3 className="text-[13px] font-bold text-gray-800 truncate">
-                    {user.firstName} {user.lastName}
-                  </h3>
-                </div>
-                <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
-                {(user.city || user.state) && (
-                  <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
-                    <span className="opacity-70">📍</span>
-                    {user.city ? user.city : ''}{user.city && user.state ? ', ' : ''}{user.state ? user.state : ''}
-                  </p>
-                )}
-              </div>
+<div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+  {users.length > 0 ? users.map((user) => (
+    <div
+      key={user._id}
+      onClick={() => handleSelectUser(user)}
+      className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
+    >
+      <div className="relative shrink-0">
+        <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
+          <img
+            src={user.photoUrl}
+            alt={user.firstName}
+            className="w-full h-full object-cover"
+            onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
+          />
+        </div>
+        <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+      </div>
+      <div className="ml-3 flex-1 min-w-0">
+        <div className="flex justify-between items-center mb-0.5">
+          <h3 className="text-[13px] font-bold text-gray-800 truncate">
+            {user.firstName} {user.lastName}
+          </h3>
+          {unreadCounts[user._id] > 0 && (
+            <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
+              {unreadCounts[user._id]}
             </div>
-          )) : (
+          )}
+        </div>
+        <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
+        {(user.city || user.state) && (
+          <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
+            <span className="opacity-70">📍</span>
+            {user.city ? user.city : ''}{user.city && user.state ? ', ' : ''}{user.state ? user.state : ''}
+          </p>
+        )}
+      </div>
+    </div>
+  )) : (
             <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
               <p className="text-xs font-black uppercase tracking-widest text-gray-400">No Secure Links Established</p>
               <p className="text-[11px] text-gray-400 mt-1 max-w-[200px]">Waiting for downstream connections to hook into routing tables.</p>
