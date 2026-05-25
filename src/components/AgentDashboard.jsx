@@ -224,29 +224,31 @@ useEffect(() => {
 const triggerNotification = (data) => {
   if (notificationSound.current) {
     notificationSound.current.currentTime = 0;
-    notificationSound.current.play().catch((err) => 
-      console.warn("🔊 Audio autoplay restricted:", err.message)
-    );
+    const playPromise = notificationSound.current.play();
+    
+    if (playPromise !== undefined) {
+      playPromise.catch(error => {
+        console.warn("🔊 Audio autoplay blocked, waiting for user gesture:", error);
+      });
+    }
   }
   if ('vibrate' in navigator) {
     navigator.vibrate([200, 100, 200]);
   }
   if (Notification.permission === "granted") {
-    const popup = new Notification(`Message from ${data.firstName}`, {
+    const popup = new Notification(`New message from ${data.firstName || 'Client'}`, {
       body: data.text || "Sent a file",
       icon: data.senderPhoto || '/favicon.ico',
-      tag: `zing-msg-${data.senderId}`, // Groups notifications by user to prevent spam
+      tag: `zing-msg-${data.senderId}`,
       renotify: true
-    });  
+    });
+    
     popup.onclick = () => {
       window.focus();
       popup.close();
     };
-  } else if (Notification.permission !== 'denied') {
-    Notification.requestPermission();
   }
 };
-
   useEffect(() => {
     if (!socket) return;
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -298,27 +300,23 @@ const handleIncomingMessage = (data) => {
   const currentSelectedUser = selectedUserRef.current;
   const isChattingWithSender = currentSelectedUser && 
     (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
-
-    setLatestMessages(prev => ({
+  setLatestMessages(prev => ({
     ...prev,
-    [data.senderId]: data.text || "Sent a file" // Store the message snippet
+    [data.senderId]: data.text || "Sent a file"
   }));
-  
-  if (!isChattingWithSender) {
-    setUnreadCounts(prev => ({
-      ...prev,
-      [data.senderId]: (prev[data.senderId] || 0) + 1
-    }));
-  }
+    setUnreadCounts(prev => {
+    const newCount = (prev[data.senderId] || 0) + 1;
+    console.log(`[Socket] Badge incremented for ${data.senderId}: ${newCount}`);
+    return { ...prev, [data.senderId]: newCount };
+  });
   if (isChattingWithSender) {
     setMessages((prev) => {
       if (prev.some(m => m._id === data._id)) return prev;
       return [...prev, data];
     });
-    // Mark as read immediately
     markAsRead(data.senderId);
   }
-  const shouldNotify = data.senderModel === 'User' && (!isChattingWithSender || document.visibilityState !== 'visible');
+  const shouldNotify = data.senderModel === 'User' && !isChattingWithSender;
   if (shouldNotify) {
     triggerNotification(data);
   }
