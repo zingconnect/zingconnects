@@ -27,7 +27,8 @@ export const AgentDashboard = () => {
   const { 
     callStatus, isIncomingCall,  activeCaller, selectedUser, setSelectedUser, isMuted, setIsMuted, isSpeakerOn, 
     setIsSpeakerOn, isVoiceConversionActive, setIsVoiceConversionActive, selectedVoiceId, setSelectedVoiceId, callTime,
-    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime } = useAgentCall();
+    peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime, setLocalStream
+   } = useAgentCall();
 
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
@@ -55,7 +56,7 @@ export const AgentDashboard = () => {
   const [showUserModal, setShowUserModal] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
-
+  const [isEnding, setIsEnding] = useState(false);
   // --- SUBSCRIPTION STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");

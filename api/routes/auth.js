@@ -900,6 +900,7 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
     });
   }
 });
+
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();
@@ -1063,6 +1064,110 @@ router.get('/my-users', authenticateToken, async (req, res) => {
   }
 });
 
+// --- GET USER'S CURRENT ACTIVE SESSION ENGINE ---
+router.get('/my-session', authenticateToken, async (req, res) => {
+  try {
+    // 🚀 1. Enforce active database connection tunnel instantly
+    await connectToDatabase();
+    
+    // Get user ID straight from the verified token middleware
+    const userId = req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ message: "No secure user context found." });
+    }
+
+    // Update active heartbeat marker and populate connected agents list
+    const user = await User.findByIdAndUpdate(
+      userId, 
+      { lastActive: new Date() },
+      { returnDocument: 'after' } 
+    ).populate({
+      path: 'connectedAgents',
+      select: 'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
+    });
+
+    if (!user) return res.status(404).json({ message: "User account not found" });
+
+    // Track down the last connected agent profile block
+    let activeAgent = user.connectedAgents && user.connectedAgents.length > 0 
+      ? user.connectedAgents[user.connectedAgents.length - 1] 
+      : null;
+    
+    let isOnline = false;
+    let lastSeenDisplay = "Offline";
+    let signedPhotoUrl = null;
+
+    if (activeAgent) {
+      const freshAgent = await Agent.findById(activeAgent._id).lean();
+      
+      if (freshAgent) {
+        const now = new Date();
+        const lastActive = freshAgent.lastActive || freshAgent.createdAt;
+        isOnline = lastActive && (now - new Date(lastActive)) < 120000;
+
+        if (isOnline) {
+          lastSeenDisplay = "Online";
+        } else if (lastActive) {
+          const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
+          if (diffMins < 60) {
+            lastSeenDisplay = `Last seen ${diffMins}m ago`;
+          } else if (diffMins < 1440) {
+            lastSeenDisplay = `Last seen ${Math.floor(diffMins / 60)}h ago`;
+          } else {
+            lastSeenDisplay = "Offline";
+          }
+        }
+      }
+
+      // 🚀 2. Handle Cloud Infrastructure Image Signing (IDrive e2 / AWS S3)
+      if (activeAgent.photoUrl && typeof activeAgent.photoUrl === 'string') {
+        try {
+          let fileKey = activeAgent.photoUrl;
+
+          if (fileKey.includes('.com/')) {
+            fileKey = fileKey.split('.com/')[1].split('?')[0];
+          }
+          
+          let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
+          cleanKey = decodeURIComponent(cleanKey);
+
+          const client = getS3Client(); 
+          const command = new GetObjectCommand({
+            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
+            Key: cleanKey, 
+          });
+
+          signedPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
+        } catch (s3Err) {
+          console.error(`[S3 Session Error] Signing failed for agent image:`, s3Err.message);
+        }
+      }
+    }
+    if (!signedPhotoUrl && activeAgent) {
+      signedPhotoUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(activeAgent.firstName)}+${encodeURIComponent(activeAgent.lastName)}&background=0D1117&color=fff&size=128`;
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        email: user.email,
+        isProfileComplete: user.isProfileComplete,
+        lastActive: user.lastActive
+      },
+      agent: activeAgent ? {
+        ...(activeAgent.toObject ? activeAgent.toObject() : activeAgent),
+        photoUrl: signedPhotoUrl,
+        status: isOnline ? 'online' : 'offline',
+        lastSeenText: lastSeenDisplay
+      } : null
+    });
+
+  } catch (err) {
+    console.error("Session Processing Error:", err);
+    res.status(500).json({ message: "Session Error", error: err.message });
+  }
+});
 
 router.post('/unlock-voice-package', authenticateToken, async (req, res) => {
   const { transactionId, voiceId, duration } = req.body;
