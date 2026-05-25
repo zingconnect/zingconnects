@@ -850,42 +850,53 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     }
   }, { 
     axis: 'x',
-    filterTaps: true, // Prevents unintended drag triggers during simple clicks
-    pointer: { touch: true } // Maximizes hardware compatibility across Android and iOS touch surfaces
+    filterTaps: true,
+    pointer: { touch: true }
   });
-return (
-  <div className={`w-full flex flex-col ${isMe ? 'items-end' : 'items-start'} relative overflow-hidden px-1 mb-1.5`}>
-    {/* ... (Reply icon code remains the same) ... */}
-    
-    <motion.div 
-      {...bind()} 
-      animate={controls}
-      className={`max-w-[85%] md:max-w-[70%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 ... ${
-        isMe ? 'bg-[#dcf8c6] text-slate-900 rounded-tr-none' : 'bg-white text-slate-900 rounded-tl-none'
-      }`}
-    >
-      {/* 1. Render the message content passed as children */}
-      {children}
 
-      {/* 2. ADD THIS FOOTER SECTION for Status and Time */}
-      <div className={`flex items-center justify-end gap-1 mt-1 ${isMe ? 'opacity-70' : 'opacity-50'}`}>
-        <span className="text-[9px] font-bold uppercase">
-          {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
-        </span>
-
-        {isMe && (
-          <div className="flex items-center ml-1">
-            {m.status === 'sending' && <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />}
-            {m.status === 'failed' && <span className="text-[8px] text-red-600 font-bold">FAILED</span>}
-            {(m.status === 'sent' || m.status === 'delivered' || m.status === 'seen') && (
-              <BsCheckAll className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} size={14} />
-            )}
-          </div>
-        )}
+  return (
+    <div className={`w-full flex flex-col ${isMe ? 'items-end' : 'items-start'} relative overflow-hidden px-1 mb-1.5`}>
+      {/* Reply Icon Background Layer */}
+      <div className="absolute left-3 inset-y-0 flex items-center pointer-events-none z-0">
+        <div className="bg-slate-200/80 p-2 rounded-full transition-all duration-150 transform scale-90 group-active:scale-100">
+          <BsReplyFill className="text-slate-600" size={16} />
+        </div>
       </div>
-    </motion.div>
-  </div>
-);
+      <motion.div 
+        {...bind()} 
+        animate={controls}
+        className={`max-w-[85%] md:max-w-[70%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 select-none touch-none cursor-grab active:cursor-grabbing ${
+          isMe 
+            ? 'bg-[#dcf8c6] text-slate-900 rounded-tr-none' 
+            : 'bg-white text-slate-900 rounded-tl-none'
+        }`}>
+        {/* Message Content */}
+        {children}
+        {/* Footer: Time & Status */}
+        <div className={`flex items-center justify-end gap-1 mt-1 ${isMe ? 'opacity-70' : 'opacity-50'}`}>
+          <span className="text-[9px] font-bold uppercase">
+            {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
+          </span>
+          {isMe && (
+            <div className="flex items-center ml-1">
+              {m.status === 'sending' && (
+                <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+              )}
+              {m.status === 'failed' && (
+                <span className="text-[8px] text-red-600 font-bold uppercase">Failed</span>
+              )}
+              {(m.status === 'sent' || m.status === 'delivered' || m.status === 'seen') && (
+                <BsCheckAll 
+                  className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} 
+                  size={14} 
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
 };
 
   if (loading) return (
