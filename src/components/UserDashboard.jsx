@@ -855,22 +855,46 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   });
 
   return (
-    <div className="relative group">
-      {/* The Hidden Reply Icon */}
-      <div className="absolute left-[-40px] inset-y-0 flex items-center opacity-0 group-active:opacity-100 transition-opacity">
-        <div className="bg-gray-200 p-2 rounded-full">
-          <BsReplyFill className="text-gray-600" size={18} />
+    <div className={`w-full flex flex-col ${isMe ? 'items-end' : 'items-start'} relative overflow-hidden px-1 mb-1.5`}>
+      {/* Reply Icon Background Layer */}
+      <div className="absolute left-3 inset-y-0 flex items-center pointer-events-none z-0">
+        <div className="bg-slate-200/80 p-2 rounded-full transition-all duration-150 transform scale-90 group-active:scale-100">
+          <BsReplyFill className="text-slate-600" size={16} />
         </div>
       </div>
-
       <motion.div 
         {...bind()} 
         animate={controls}
-        className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
-          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-        } mb-1`}
-      >
+        className={`max-w-[85%] md:max-w-[70%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 select-none touch-none cursor-grab active:cursor-grabbing ${
+          isMe 
+            ? 'bg-[#dcf8c6] text-slate-900 rounded-tr-none' 
+            : 'bg-white text-slate-900 rounded-tl-none'
+        }`}>
         {children}
+       <div className={`flex items-center justify-end gap-1 mt-1 ${isMe ? 'opacity-70' : 'opacity-50'}`}>
+  <span className="text-[9px] font-bold uppercase">
+    {m.createdAt 
+      ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      : "00:00"}
+  </span>
+
+  {isMe && (
+    <div className="flex items-center ml-1">
+      {(m.status === 'sending') && (
+        <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+      )}
+      {m.status === 'failed' && (
+        <span className="text-[8px] text-red-600 font-bold uppercase">Failed</span>
+      )}
+      {(!m.status || m.status === 'sent' || m.status === 'delivered' || m.status === 'seen') && (
+        <BsCheckAll 
+          className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} 
+          size={14} 
+        />
+      )}
+    </div>
+  )}
+</div>
       </motion.div>
     </div>
   );
