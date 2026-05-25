@@ -293,40 +293,37 @@ const triggerNotification = (data) => {
 
 useEffect(() => {
   if (!socket) return;
-const handleIncomingMessage = (data) => {
-  if (data._id && data._id === lastNotifiedId.current) return;
-  lastNotifiedId.current = data._id;
-
-  const currentSelectedUser = selectedUserRef.current;
-  const isChattingWithSender = currentSelectedUser && 
-    (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
-  setLatestMessages(prev => ({
-    ...prev,
-    [data.senderId]: data.text || "Sent a file"
-  }));
-    setUnreadCounts(prev => {
-    const newCount = (prev[data.senderId] || 0) + 1;
-    console.log(`[Socket] Badge incremented for ${data.senderId}: ${newCount}`);
-    return { ...prev, [data.senderId]: newCount };
-  });
-  if (isChattingWithSender) {
-    setMessages((prev) => {
-      if (prev.some(m => m._id === data._id)) return prev;
-      return [...prev, data];
-    });
-    markAsRead(data.senderId);
-  }
-  const shouldNotify = data.senderModel === 'User' && !isChattingWithSender;
-  if (shouldNotify) {
-    triggerNotification(data);
-  }
-};
+  
+  const handleIncomingMessage = (data) => {
+    if (data._id && data._id === lastNotifiedId.current) return;
+    lastNotifiedId.current = data._id;
+    const currentSelectedUser = selectedUserRef.current;
+    const isChattingWithSender = currentSelectedUser && 
+      (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
+    setLatestMessages(prev => ({
+      ...prev,
+      [data.senderId]: data.text || "Sent a file"
+    }));
+        if (isChattingWithSender) {
+      setMessages((prev) => {
+        if (prev.some(m => m._id === data._id)) return prev;
+        return [...prev, data];
+      });
+      setUnreadCounts(prev => ({ ...prev, [data.senderId]: 0 }));
+    } else {
+      setUnreadCounts(prev => {
+        const newCount = (prev[data.senderId] || 0) + 1;
+        return { ...prev, [data.senderId]: newCount };
+      });
+            triggerNotification(data);
+    }
+  };
 
   socket.on('new-message', handleIncomingMessage);
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket]);
+}, [socket]); // Keep dependency on socket only
 
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
@@ -1102,9 +1099,11 @@ const handleSelectUser = async (user) => {
 
 <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
   {users.length > 0 ? users.map((user) => {
-    const isUnread = unreadCounts[user._id] > 0;
-    const lastMessage = latestMessages[user._id]; // Accessing the latest snippet
-
+   const count = unreadCounts[user._id];
+    console.log(`[UI Debug] Rendering ${user.firstName}, Unread Count state:`, count);
+    
+    const isUnread = count > 0;
+    const lastMessage = latestMessages[user._id];
     return (
       <div
         key={user._id}
@@ -1129,9 +1128,9 @@ const handleSelectUser = async (user) => {
               {user.firstName} {user.lastName}
             </h3>
             {isUnread && (
-              <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
-                {unreadCounts[user._id]}
-              </div>
+        <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
+          {count}
+        </div>
             )}
           </div>
           
