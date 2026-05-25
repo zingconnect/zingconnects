@@ -220,14 +220,10 @@ useEffect(() => {
   }
 }, [messages]);
 
-const triggerNotification = (message, shouldShowPopup) => {
-  if (notificationSound.current) {
-    notificationSound.current.currentTime = 0;
-    notificationSound.current.play().catch((err) => 
-      console.warn("🔊 Audio playback restricted:", err.message)
-    );
-  }
-    if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+const triggerNotification = (message) => {
+  const audio = new Audio('/sounds/notification.mp3'); // Ensure this file exists in your /public folder
+  audio.play().catch(e => console.log("Audio playback blocked by browser", e));
+ if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
   if (Notification.permission === "granted" && shouldShowPopup) {
     const popup = new Notification(`Message from ${message.senderName}`, {
       body: message.text || "Sent a file",
@@ -235,11 +231,8 @@ const triggerNotification = (message, shouldShowPopup) => {
       tag: `zing-msg-${message.senderId}`, // Prevents spamming, groups by user
       renotify: true
     });
-    
-    popup.onclick = () => { 
-      window.focus(); 
-      popup.close(); 
-    };
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission();
   }
 };
 
@@ -285,48 +278,69 @@ const triggerNotification = (message, shouldShowPopup) => {
     };
   }, [socket, callStatus, isSpeakerOn]);
 
-  useEffect(() => {
+// 2. Optimized Effect
+useEffect(() => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
-  console.log("📥 Real-time Socket Message Detected:", data);
+    console.log("📥 Real-time Socket Message Detected:", data);
 
-  // 1. Safeguard
-  if (data._id && data._id === lastNotifiedId.current) return;
-  lastNotifiedId.current = data._id;
-  const sender = users.find(u => u._id === data.senderId);
-  const enrichedData = {
-    ...data,
-    senderName: sender ? `${sender.firstName} ${sender.lastName}` : (data.senderName || 'Client'),
-    senderPhoto: sender ? sender.photoUrl : '/favicon.ico'
+    // Safeguard
+    if (data._id && data._id === lastNotifiedId.current) return;
+    lastNotifiedId.current = data._id;
+
+    // Use the REF to get the latest chat target
+    const currentSelectedUser = selectedUserRef.current;
+    const isChattingWithSender = currentSelectedUser && 
+      (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
+    
+    // Update State
+    if (isChattingWithSender) {
+      setMessages((prev) => {
+        if (prev.some(m => m._id === data._id)) return prev;
+        return [...prev, data];
+      });
+
+      // Mark as read
+      const token = localStorage.getItem('agentToken');
+      fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(err => console.error("Mark read error:", err));
+    }
+
+    // Audio & Notifications
+    if (data.senderModel === 'User') {
+      // Audio
+      if (notificationSound.current) {
+        notificationSound.current.currentTime = 0;
+        notificationSound.current.play().catch((err) => 
+          console.warn("🔊 Audio autoplay restricted:", err.message)
+        );
+      }
+      
+      // Haptics
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+
+      // Popups
+      const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
+      if (Notification.permission === "granted" && shouldShowPopup) {
+        const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
+          body: data.text || "Sent a file",
+          icon: data.senderPhoto || '/favicon.ico',
+          tag: 'zing-msg',
+          renotify: true
+        });
+        popup.onclick = () => { window.focus(); popup.close(); };
+      }
+    }
   };
-  const currentSelectedUser = selectedUserRef.current;
-  const isChattingWithSender = currentSelectedUser && 
-    (enrichedData.senderId === currentSelectedUser._id || enrichedData.senderId === currentSelectedUser.id);
-  
-  if (isChattingWithSender) {
-    setMessages((prev) => {
-      if (prev.some(m => m._id === enrichedData._id)) return prev;
-      return [...prev, enrichedData];
-    });
 
-    // Mark as read ONLY if chatting
-    const token = localStorage.getItem('agentToken');
-    fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token}` }
-    }).catch(err => console.error("Mark read error:", err));
-  }
-  if (enrichedData.senderModel === 'User') {
-    triggerNotification(enrichedData, true); 
-  }
-};
   socket.on('new-message', handleIncomingMessage);
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket]); // socket is the only dependency needed now
-
+}, [socket]);
 
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
