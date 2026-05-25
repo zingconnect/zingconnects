@@ -289,38 +289,38 @@ const triggerNotification = (message, shouldShowPopup) => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
-    console.log("📥 Real-time Socket Message Detected:", data);
+  console.log("📥 Real-time Socket Message Detected:", data);
 
-    // 1. Safeguard: Drop duplicates
-    if (data._id && data._id === lastNotifiedId.current) return;
-    lastNotifiedId.current = data._id;
-    const sender = users.find(u => u._id === data.senderId);
-    const enrichedData = {
-      ...data,
-      senderName: sender ? `${sender.firstName} ${sender.lastName}` : (data.senderName || 'Client'),
-      senderPhoto: sender ? sender.photoUrl : (data.senderPhoto || '/favicon.ico')
-    };
-    const currentSelectedUser = selectedUserRef.current;
-    const isChattingWithSender = currentSelectedUser && 
-      (enrichedData.senderId === currentSelectedUser._id || enrichedData.senderId === currentSelectedUser.id);
-    
-    if (isChattingWithSender) {
-      setMessages((prev) => {
-        if (prev.some(m => m._id === enrichedData._id)) return prev;
-        return [...prev, enrichedData];
-      });
-      const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.error("Mark read error:", err));
-    }
-    if (enrichedData.senderModel === 'User') {
-      const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-      triggerNotification(enrichedData, shouldShowPopup);
-    }
+  // 1. Safeguard
+  if (data._id && data._id === lastNotifiedId.current) return;
+  lastNotifiedId.current = data._id;
+  const sender = users.find(u => u._id === data.senderId);
+  const enrichedData = {
+    ...data,
+    senderName: sender ? `${sender.firstName} ${sender.lastName}` : (data.senderName || 'Client'),
+    senderPhoto: sender ? sender.photoUrl : '/favicon.ico'
   };
+  const currentSelectedUser = selectedUserRef.current;
+  const isChattingWithSender = currentSelectedUser && 
+    (enrichedData.senderId === currentSelectedUser._id || enrichedData.senderId === currentSelectedUser.id);
+  
+  if (isChattingWithSender) {
+    setMessages((prev) => {
+      if (prev.some(m => m._id === enrichedData._id)) return prev;
+      return [...prev, enrichedData];
+    });
 
+    // Mark as read ONLY if chatting
+    const token = localStorage.getItem('agentToken');
+    fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).catch(err => console.error("Mark read error:", err));
+  }
+  if (enrichedData.senderModel === 'User') {
+    triggerNotification(enrichedData, true); 
+  }
+};
   socket.on('new-message', handleIncomingMessage);
   return () => {
     socket.off('new-message', handleIncomingMessage);
