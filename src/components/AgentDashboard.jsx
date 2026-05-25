@@ -284,22 +284,22 @@ const triggerNotification = (message, shouldShowPopup) => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
-useEffect(() => {
+
+  useEffect(() => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
+
+    // 1. Safeguard: Drop duplicates
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
-
     const sender = users.find(u => u._id === data.senderId);
     const enrichedData = {
       ...data,
       senderName: sender ? `${sender.firstName} ${sender.lastName}` : (data.senderName || 'Client'),
       senderPhoto: sender ? sender.photoUrl : (data.senderPhoto || '/favicon.ico')
     };
-
-    // 3. Update UI if currently chatting with this user
     const currentSelectedUser = selectedUserRef.current;
     const isChattingWithSender = currentSelectedUser && 
       (enrichedData.senderId === currentSelectedUser._id || enrichedData.senderId === currentSelectedUser.id);
@@ -309,8 +309,6 @@ useEffect(() => {
         if (prev.some(m => m._id === enrichedData._id)) return prev;
         return [...prev, enrichedData];
       });
-
-      // Mark as read
       const token = localStorage.getItem('agentToken');
       fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
         method: 'PATCH',
@@ -328,6 +326,7 @@ useEffect(() => {
     socket.off('new-message', handleIncomingMessage);
   };
 }, [socket]); // socket is the only dependency needed now
+
 
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
