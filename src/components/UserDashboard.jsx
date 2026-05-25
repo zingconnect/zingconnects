@@ -155,6 +155,7 @@ export const UserDashboard = () => {
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   const API_BASE_URL = import.meta.env.VITE_API_URL;
   const serverUrl = import.meta.env.VITE_LIVEKIT_URL;
+
   const [formData, setFormData] = useState({
     firstName: '', lastName: '', phone: '', dob: '', gender: '', city: '', state: '' 
   });
@@ -515,7 +516,7 @@ export const UserDashboard = () => {
  const handleChatScroll = (e) => {
   const container = e.currentTarget;
   if (!container || isFetchingOlder || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
-  if (container.scrollTop <= 50 && hasMoreOlderMessages) {
+  if (container.scrollTop <= 50 && hasMore) {
     previousScrollHeightRef.current = container.scrollHeight;
     previousScrollTopRef.current = container.scrollTop;
     fetchOlderMessages();
