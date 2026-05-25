@@ -290,29 +290,33 @@ const triggerNotification = (data) => {
 
 useEffect(() => {
   if (!socket) return;
-  const handleIncomingMessage = (data) => {
-    if (data._id && data._id === lastNotifiedId.current) return;
-    lastNotifiedId.current = data._id;
-    const currentSelectedUser = selectedUserRef.current;
-    const isChattingWithSender = currentSelectedUser && 
-      (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
-        if (isChattingWithSender) {
-      setMessages((prev) => {
-        if (prev.some(m => m._id === data._id)) return prev;
-        return [...prev, data];
-      });
-      const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.error("Mark read error:", err));
-    } else {
-      const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-      if (data.senderModel === 'User' && shouldShowPopup) {
-        triggerNotification(data);
-      }
-          }
-  };
+ const handleIncomingMessage = (data) => {
+  if (data._id && data._id === lastNotifiedId.current) return;
+  lastNotifiedId.current = data._id;
+
+  const currentSelectedUser = selectedUserRef.current;
+  const isChattingWithSender = currentSelectedUser && 
+    (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
+  
+  if (isChattingWithSender) {
+    setMessages((prev) => {
+      if (prev.some(m => m._id === data._id)) return prev;
+      return [...prev, data];
+    });
+
+    // Mark as read immediately because the user is viewing it
+    const token = localStorage.getItem('agentToken');
+    fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).catch(err => console.error("Mark read error:", err));
+  }
+  const shouldNotify = data.senderModel === 'User' && (!isChattingWithSender || document.visibilityState !== 'visible');
+  
+  if (shouldNotify) {
+    triggerNotification(data);
+  }
+};
 
   socket.on('new-message', handleIncomingMessage);
   return () => {
