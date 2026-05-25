@@ -231,7 +231,7 @@ const triggerNotification = (data) => {
     navigator.vibrate([200, 100, 200]);
   }
   if (Notification.permission === "granted") {
-    const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
+    const popup = new Notification(`Message from ${data.firstName}`, {
       body: data.text || "Sent a file",
       icon: data.senderPhoto || '/favicon.ico',
       tag: `zing-msg-${data.senderId}`, // Groups notifications by user to prevent spam
@@ -290,29 +290,28 @@ const triggerNotification = (data) => {
 
 useEffect(() => {
   if (!socket) return;
- const handleIncomingMessage = (data) => {
+const handleIncomingMessage = (data) => {
   if (data._id && data._id === lastNotifiedId.current) return;
   lastNotifiedId.current = data._id;
 
   const currentSelectedUser = selectedUserRef.current;
   const isChattingWithSender = currentSelectedUser && 
     (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
-  
+  if (!isChattingWithSender) {
+    setUnreadCounts(prev => ({
+      ...prev,
+      [data.senderId]: (prev[data.senderId] || 0) + 1
+    }));
+  }
   if (isChattingWithSender) {
     setMessages((prev) => {
       if (prev.some(m => m._id === data._id)) return prev;
       return [...prev, data];
     });
-
-    // Mark as read immediately because the user is viewing it
-    const token = localStorage.getItem('agentToken');
-    fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token}` }
-    }).catch(err => console.error("Mark read error:", err));
+    // Mark as read immediately
+    markAsRead(data.senderId);
   }
   const shouldNotify = data.senderModel === 'User' && (!isChattingWithSender || document.visibilityState !== 'visible');
-  
   if (shouldNotify) {
     triggerNotification(data);
   }
@@ -327,7 +326,7 @@ useEffect(() => {
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
   selectedUserRef.current = selectedUser;
-}, [selectedUser]);
+}, [socket, triggerNotification]); 
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
@@ -763,11 +762,12 @@ const handleScroll = async (e) => {
     setIsFetchingOlder(false);
   }
 };
-
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
-    setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
   
+  // CLEAR THE BADGE IMMEDIATELY
+  setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
+ 
   setMessages([]); 
   setIsInitialLoad(true); 
   setSelectedUser(user);
@@ -799,6 +799,7 @@ const handleSelectUser = async (user) => {
         }, 60);
       }
 
+      // Mark as read on server
       fetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -812,7 +813,6 @@ const handleSelectUser = async (user) => {
     console.error("Failed to load chat history:", err);
   }
 };
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const userIdFromUrl = params.get('userId');
