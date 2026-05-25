@@ -220,17 +220,26 @@ useEffect(() => {
   }
 }, [messages]);
 
-const triggerNotification = (message) => {
-  const audio = new Audio('/sounds/notification.mp3'); // Ensure this file exists in your /public folder
-  audio.play().catch(e => console.log("Audio playback blocked by browser", e));
-  if (Notification.permission === 'granted') {
-    new Notification('New Secure Transmission', {
-      body: message.text || 'You received a new attachment.',
-      icon: '/logo.png', 
-      tag: 'zing-connect-alert'
+const triggerNotification = (message, shouldShowPopup) => {
+  if (notificationSound.current) {
+    notificationSound.current.currentTime = 0;
+    notificationSound.current.play().catch((err) => 
+      console.warn("🔊 Audio playback restricted:", err.message)
+    );
+  }
+    if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+  if (Notification.permission === "granted" && shouldShowPopup) {
+    const popup = new Notification(`Message from ${message.senderName}`, {
+      body: message.text || "Sent a file",
+      icon: message.senderPhoto,
+      tag: `zing-msg-${message.senderId}`, // Prevents spamming, groups by user
+      renotify: true
     });
-  } else if (Notification.permission !== 'denied') {
-    Notification.requestPermission();
+    
+    popup.onclick = () => { 
+      window.focus(); 
+      popup.close(); 
+    };
   }
 };
 
@@ -275,28 +284,30 @@ const triggerNotification = (message) => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
-
-// 2. Optimized Effect
 useEffect(() => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
-
-    // Safeguard
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
-    // Use the REF to get the latest chat target
+    const sender = users.find(u => u._id === data.senderId);
+    const enrichedData = {
+      ...data,
+      senderName: sender ? `${sender.firstName} ${sender.lastName}` : (data.senderName || 'Client'),
+      senderPhoto: sender ? sender.photoUrl : (data.senderPhoto || '/favicon.ico')
+    };
+
+    // 3. Update UI if currently chatting with this user
     const currentSelectedUser = selectedUserRef.current;
     const isChattingWithSender = currentSelectedUser && 
-      (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
+      (enrichedData.senderId === currentSelectedUser._id || enrichedData.senderId === currentSelectedUser.id);
     
-    // Update State
     if (isChattingWithSender) {
       setMessages((prev) => {
-        if (prev.some(m => m._id === data._id)) return prev;
-        return [...prev, data];
+        if (prev.some(m => m._id === enrichedData._id)) return prev;
+        return [...prev, enrichedData];
       });
 
       // Mark as read
@@ -306,31 +317,9 @@ useEffect(() => {
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
     }
-
-    // Audio & Notifications
-    if (data.senderModel === 'User') {
-      // Audio
-      if (notificationSound.current) {
-        notificationSound.current.currentTime = 0;
-        notificationSound.current.play().catch((err) => 
-          console.warn("🔊 Audio autoplay restricted:", err.message)
-        );
-      }
-      
-      // Haptics
-      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-
-      // Popups
+    if (enrichedData.senderModel === 'User') {
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-      if (Notification.permission === "granted" && shouldShowPopup) {
-        const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
-          body: data.text || "Sent a file",
-          icon: data.senderPhoto || '/favicon.ico',
-          tag: 'zing-msg',
-          renotify: true
-        });
-        popup.onclick = () => { window.focus(); popup.close(); };
-      }
+      triggerNotification(enrichedData, shouldShowPopup);
     }
   };
 
@@ -338,7 +327,7 @@ useEffect(() => {
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket]);
+}, [socket]); // socket is the only dependency needed now
 
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
