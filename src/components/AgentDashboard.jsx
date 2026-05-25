@@ -220,17 +220,27 @@ useEffect(() => {
   }
 }, [messages]);
 
-const triggerNotification = (message) => {
-  const audio = new Audio('/sounds/notification.mp3'); // Ensure this file exists in your /public folder
-  audio.play().catch(e => console.log("Audio playback blocked by browser", e));
- if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-  if (Notification.permission === "granted" && shouldShowPopup) {
-    const popup = new Notification(`Message from ${message.senderName}`, {
-      body: message.text || "Sent a file",
-      icon: message.senderPhoto,
-      tag: `zing-msg-${message.senderId}`, // Prevents spamming, groups by user
+const triggerNotification = (data) => {
+  if (notificationSound.current) {
+    notificationSound.current.currentTime = 0;
+    notificationSound.current.play().catch((err) => 
+      console.warn("🔊 Audio autoplay restricted:", err.message)
+    );
+  }
+  if ('vibrate' in navigator) {
+    navigator.vibrate([200, 100, 200]);
+  }
+  if (Notification.permission === "granted") {
+    const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
+      body: data.text || "Sent a file",
+      icon: data.senderPhoto || '/favicon.ico',
+      tag: `zing-msg-${data.senderId}`, // Groups notifications by user to prevent spam
       renotify: true
-    });
+    });  
+    popup.onclick = () => {
+      window.focus();
+      popup.close();
+    };
   } else if (Notification.permission !== 'denied') {
     Notification.requestPermission();
   }
@@ -278,62 +288,30 @@ const triggerNotification = (message) => {
     };
   }, [socket, callStatus, isSpeakerOn]);
 
-// 2. Optimized Effect
 useEffect(() => {
   if (!socket) return;
-
   const handleIncomingMessage = (data) => {
-    console.log("📥 Real-time Socket Message Detected:", data);
-
-    // Safeguard
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
-
-    // Use the REF to get the latest chat target
     const currentSelectedUser = selectedUserRef.current;
     const isChattingWithSender = currentSelectedUser && 
       (data.senderId === currentSelectedUser._id || data.senderId === currentSelectedUser.id);
-    
-    // Update State
-    if (isChattingWithSender) {
+        if (isChattingWithSender) {
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
-
-      // Mark as read
       const token = localStorage.getItem('agentToken');
       fetch(`/api/messages/mark-read/${currentSelectedUser._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
-    }
-
-    // Audio & Notifications
-    if (data.senderModel === 'User') {
-      // Audio
-      if (notificationSound.current) {
-        notificationSound.current.currentTime = 0;
-        notificationSound.current.play().catch((err) => 
-          console.warn("🔊 Audio autoplay restricted:", err.message)
-        );
-      }
-      
-      // Haptics
-      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-
-      // Popups
+    } else {
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-      if (Notification.permission === "granted" && shouldShowPopup) {
-        const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
-          body: data.text || "Sent a file",
-          icon: data.senderPhoto || '/favicon.ico',
-          tag: 'zing-msg',
-          renotify: true
-        });
-        popup.onclick = () => { window.focus(); popup.close(); };
+      if (data.senderModel === 'User' && shouldShowPopup) {
+        triggerNotification(data);
       }
-    }
+          }
   };
 
   socket.on('new-message', handleIncomingMessage);
