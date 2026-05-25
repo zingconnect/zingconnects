@@ -311,10 +311,16 @@ useEffect(() => {
       });
       setUnreadCounts(prev => ({ ...prev, [data.senderId]: 0 }));
     } else {
-      setUnreadCounts(prev => {
-        const newCount = (prev[data.senderId] || 0) + 1;
-        return { ...prev, [data.senderId]: newCount };
-      });
+    setUnreadCounts(prev => {
+  const senderId = String(data.senderId);
+  const currentCount = prev[senderId] || 0;
+  const newCount = currentCount + 1;
+  console.log(`[Socket] Updating badge for ${senderId} to ${newCount}`);
+  return { 
+    ...prev, 
+    [senderId]: newCount 
+  };
+});
             triggerNotification(data);
     }
   };
@@ -1081,86 +1087,87 @@ const handleSelectUser = async (user) => {
         </div>
       )}
 
-      {/* --- SIDEBAR --- */}
-      <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col border-r border-gray-100 z-[100]`}>
-        <header className="h-[60px] bg-page-bg px-4 flex justify-between items-center shrink-0 border-b border-gray-100">
-          <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center transition-colors">
-            <BsPersonCircle size={28} className="text-text-secondary" />
-          </button>
-          <BsThreeDotsVertical className="cursor-pointer text-text-secondary hover:text-text-main transition-colors" size={18} />
-        </header>
-        
-        <div className="p-3 bg-card-bg border-b border-gray-50">
-          <div className="bg-input-bg flex items-center px-3 py-2 rounded-xl border border-transparent focus-within:border-gray-200 transition-all">
-            <BsSearch className="text-text-secondary mr-3" size={12} />
-            <input placeholder="Search client networks..." className="bg-transparent text-xs w-full outline-none text-text-main placeholder-gray-400" />
-          </div>
-        </div>
+   {/* --- SIDEBAR --- */}
+<aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col border-r border-gray-100 z-[100]`}>
+  <header className="h-[60px] bg-page-bg px-4 flex justify-between items-center shrink-0 border-b border-gray-100">
+    <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center transition-colors">
+      <BsPersonCircle size={28} className="text-text-secondary" />
+    </button>
+    <BsThreeDotsVertical className="cursor-pointer text-text-secondary hover:text-text-main transition-colors" size={18} />
+  </header>
+  
+  <div className="p-3 bg-card-bg border-b border-gray-50">
+    <div className="bg-input-bg flex items-center px-3 py-2 rounded-xl border border-transparent focus-within:border-gray-200 transition-all">
+      <BsSearch className="text-text-secondary mr-3" size={12} />
+      <input placeholder="Search client networks..." className="bg-transparent text-xs w-full outline-none text-text-main placeholder-gray-400" />
+    </div>
+  </div>
 
-<div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-  {users.length > 0 ? users.map((user) => {
-   const count = unreadCounts[user._id];
-    console.log(`[UI Debug] Rendering ${user.firstName}, Unread Count state:`, count);
-    
-    const isUnread = count > 0;
-    const lastMessage = latestMessages[user._id];
-    return (
-      <div
-        key={user._id}
-        onClick={() => handleSelectUser(user)}
-        className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
-      >
-        <div className="relative shrink-0">
-          <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
-            <img
-              src={user.photoUrl}
-              alt={user.firstName}
-              className="w-full h-full object-cover"
-              onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
-            />
+  <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+    {users.length > 0 ? users.map((user) => {
+      // FORCE STRING MATCHING: convert both IDs to string
+      const userId = String(user._id);
+      const count = unreadCounts[userId] || 0;
+      const isUnread = count > 0;
+      const lastMessage = latestMessages[userId];
+
+      return (
+        <div
+          key={userId}
+          onClick={() => handleSelectUser(user)}
+          className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
+        >
+          <div className="relative shrink-0">
+            <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
+              <img
+                src={user.photoUrl}
+                alt={user.firstName}
+                className="w-full h-full object-cover"
+                onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
+              />
+            </div>
+            <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
           </div>
-          <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
-        </div>
-        
-        <div className="ml-3 flex-1 min-w-0">
-          <div className="flex justify-between items-center mb-0.5">
-            <h3 className={`text-[13px] font-bold truncate ${isUnread ? 'text-blue-600' : 'text-gray-800'}`}>
-              {user.firstName} {user.lastName}
-            </h3>
-            {isUnread && (
-        <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
-          {count}
-        </div>
+          
+          <div className="ml-3 flex-1 min-w-0">
+            <div className="flex justify-between items-center mb-0.5">
+              <h3 className={`text-[13px] font-bold truncate ${isUnread ? 'text-blue-600' : 'text-gray-800'}`}>
+                {user.firstName} {user.lastName}
+              </h3>
+              {isUnread && (
+                <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
+                  {count}
+                </div>
+              )}
+            </div>
+            
+            <p className={`text-[11px] truncate ${isUnread ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>
+              {lastMessage || user.email}
+            </p>
+            
+            {(user.city || user.state) && !isUnread && (
+              <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
+                <span className="opacity-70">📍</span>
+                {user.city}{user.city && user.state ? ', ' : ''}{user.state}
+              </p>
             )}
           </div>
-          
-          {/* UPDATED: Displays Last Message Snippet if available, otherwise Email */}
-          <p className={`text-[11px] truncate ${isUnread ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>
-            {lastMessage || user.email}
-          </p>
-          
-          {(user.city || user.state) && !isUnread && (
-            <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
-              <span className="opacity-70">📍</span>
-              {user.city}{user.city && user.state ? ', ' : ''}{user.state}
-            </p>
-          )}
         </div>
+      );
+    }) : (
+      <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
+        <p className="text-xs font-black uppercase tracking-widest text-gray-400">No Secure Links Established</p>
+        <p className="text-[11px] text-gray-400 mt-1 max-w-[200px]">Waiting for downstream connections to hook into routing tables.</p>
       </div>
-    );
-  }) : (
-    <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
-      <p className="text-xs font-black uppercase tracking-widest text-gray-400">No Secure Links Established</p>
-      <p className="text-[11px] text-gray-400 mt-1 max-w-[200px]">Waiting for downstream connections to hook into routing tables.</p>
-    </div>
-  )}
-</div>
-        <div className="p-4 border-t border-gray-100 bg-gray-50/50">
-          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-200 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-[0.98] shadow-sm">
-            <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
-          </button>
-        </div>
-      </aside>
+    )}
+  </div>
+
+  <div className="p-4 border-t border-gray-100 bg-gray-50/50">
+    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-200 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-[0.98] shadow-sm">
+      <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
+    </button>
+  </div>
+</aside>
 
       {/* --- MAIN CHAT INTERFACE --- */}
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
