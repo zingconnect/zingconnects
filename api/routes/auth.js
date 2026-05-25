@@ -904,25 +904,31 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
 router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();
+    
+    // Safety check for user identity
+    const userId = req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No user ID found" });
+    }
+
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
     
     const updateData = {
-      firstName,
-      lastName,
-      phone,
+      firstName: firstName?.trim(),
+      lastName: lastName?.trim(),
+      phone: phone?.toString().trim(),
       dob,
       gender: gender ? gender.toLowerCase().trim() : "", 
-      city,
-      state,
+      city: city?.trim(),
+      state: state?.trim(),
       isProfileComplete: true,
       isVerified: true
     };
 
     if (req.file) {
       const s3Client = getS3Client(); 
-
       const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
-      const fileKey = `users/${req.user.id}-${Date.now()}-${sanitizedName}`;
+      const fileKey = `users/${userId}-${Date.now()}-${sanitizedName}`;
       
       const uploadParams = {
         Bucket: process.env.IDRIVE_BUCKET_NAME,
@@ -931,24 +937,32 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
         ContentType: req.file.mimetype,
       };
 
-      // 2. This will no longer throw "not defined"
       await s3Client.send(new PutObjectCommand(uploadParams));      
       updateData.photoUrl = fileKey; 
     }
 
     const updatedUser = await User.findByIdAndUpdate(
-      req.user.id, 
+      userId, 
       updateData,
       { new: true, runValidators: true }
     );
+
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
 
     res.json({ success: true, user: updatedUser });
 
   } catch (err) {
     console.error("ONBOARDING ERROR:", err.message);
-    res.status(500).json({ success: false, message: err.message });
+    // Return detailed error only if it's a validation error, otherwise generic
+    res.status(500).json({ 
+        success: false, 
+        message: err.name === 'ValidationError' ? err.message : "Internal server error during onboarding" 
+    });
   }
 });
+
 // --- GET AGENT'S CONNECTED USERS (ROUTER VERSION) ---
 router.get('/my-users', authenticateToken, async (req, res) => {
   // Clear cache to ensure real-time status updates

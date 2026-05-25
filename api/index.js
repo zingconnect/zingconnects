@@ -954,28 +954,35 @@ app.get('/api/users/my-session', async (req, res) => {
     res.status(500).json({ message: "Session Error", error: err.message });
   }
 });
-
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();
-        const s3Client = getS3Client(); 
+    const s3Client = getS3Client(); 
 
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
     const userId = req.user?.id || req.user?._id;
     if (!userId) {
       return res.status(401).json({ success: false, message: "User identity not found in token" });
     }
+
+    // Safety fallback parsing checks to prevent invalid schemas crashing Mongoose validation engine
     const updateData = {
-      firstName: firstName?.trim(),
-      lastName: lastName?.trim(),
-      phone: phone?.toString().trim(),
+      firstName: firstName ? String(firstName).trim() : "",
+      lastName: lastName ? String(lastName).trim() : "",
+      phone: phone ? String(phone).trim() : "",
       dob,
-      gender: gender ? gender.toLowerCase().trim() : "", // Crucial for your Mongoose Enum
-      city: city?.trim(),
-      state: state?.trim(),
+      gender: gender && typeof gender === 'string' ? gender.toLowerCase().trim() : undefined,
+      city: city ? String(city).trim() : "",
+      state: state ? String(state).trim() : "",
       isProfileComplete: true,
       isVerified: true
     };
+
+    // If an invalid key managed to crawl into data parameters, remove it completely
+    if (req.body.profileImage) {
+      delete req.body.profileImage;
+    }
+
     if (req.file) {
       const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
       const fileKey = `users/${userId}-${Date.now()}-${sanitizedName}`;
@@ -986,23 +993,25 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
+
+      // Executes command cleanly safely against S3/iDrive structures
       await s3Client.send(new PutObjectCommand(uploadParams));
       updateData.photoUrl = fileKey; 
       
       console.log(`[Storage] Photo uploaded for User: ${userId}`);
     }
+
     const updatedUser = await User.findByIdAndUpdate(
       userId, 
       updateData,
-      { new: true, runValidators: true } // runValidators ensures gender matches enum
+      { new: true, runValidators: true }
     );
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
     }
 
-    // 6. Return success
-    res.json({ 
+    return res.json({ 
       success: true, 
       message: "Onboarding complete", 
       user: updatedUser 
@@ -1010,14 +1019,13 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
 
   } catch (err) {
     console.error("CRITICAL ONBOARDING ERROR:", err.message);
-    res.status(500).json({ 
+    return res.status(500).json({ 
       success: false, 
       message: "Update failed", 
       details: err.message 
     });
   }
 });
-
 app.get('/api/agents/:slug', async (req, res) => {
   try {
     console.log("--- Profile Request Start --- for:", req.params.slug);

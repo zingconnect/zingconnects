@@ -543,51 +543,65 @@ const handleFileChange = (e) => {
   e.target.value = ""; 
 };
 
-  const handleProfileSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.phone || formData.phone.length < 10) {
-      alert("Please enter a valid phone number with country code.");
+ const handleProfileSubmit = async (e) => {
+  e.preventDefault();
+  if (!formData.phone || formData.phone.length < 10) {
+    alert("Please enter a valid phone number with country code.");
+    return;
+  }
+  setIsUploading(true); 
+  const token = localStorage.getItem('userToken');
+  const data = new FormData();
+  const fileToUpload = formData.profileImage || onboardingFile || previewFile;
+  if (fileToUpload) {
+    data.append('photo', fileToUpload);
+  }
+  Object.keys(formData).forEach(key => {
+    if (key === 'profileImage') return; // Prevent raw File object from bleeding into text fields
+    if (formData[key] !== undefined && formData[key] !== null) {
+      data.append(key, formData[key]);
+    }
+  });
+
+  try {
+    const res = await fetch('/api/users/update-user-onboarding', {
+      method: 'PUT',
+      headers: { 
+        'Authorization': `Bearer ${token}` 
+      },
+      body: data
+    });
+    if (!res.ok) {
+      const errorText = await res.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { message: `Server error code ${res.status}` };
+      }
+      alert(errorData.message || "Initialization failed. Please check the form.");
       return;
     }
-    setIsUploading(true); 
-    const token = localStorage.getItem('userToken');
-    const data = new FormData();
-    const fileToUpload = onboardingFile || previewFile;
-    if (fileToUpload) {
-      data.append('photo', fileToUpload);
+
+    const result = await res.json();
+    if (result.success) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      if (setUserData) setUserData(result.user);
+      setShowOnboarding(false);
+      setOnboardingFile(null);
+      setPreviewFile(null);
+      setPreviewUrl(null);
+      console.log("Profile updated successfully. Phone saved:", result.user.phone);
+    } else {
+      alert(result.message || "Initialization failed. Please check the form.");
     }
-    Object.keys(formData).forEach(key => {
-      if (formData[key] !== undefined && formData[key] !== null) {
-        data.append(key, formData[key]);
-      }
-    });
-    try {
-      const res = await fetch('/api/users/update-user-onboarding', {
-        method: 'PUT',
-        headers: { 
-          'Authorization': `Bearer ${token}` 
-        },
-        body: data
-      });
-      const result = await res.json();
-      if (res.ok) {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        if (setUserData) setUserData(result.user);
-        setShowOnboarding(false);
-        setOnboardingFile(null);
-        setPreviewFile(null);
-        setPreviewUrl(null);
-        console.log("Profile updated successfully. Phone saved:", result.user.phone);
-      } else {
-        alert(result.message || "Initialization failed. Please check the form.");
-      }
-    } catch (err) {
-      console.error("Profile initialization failed:", err);
-      alert("Network error. Please check your connection.");
-    } finally {
-      setIsUploading(false);
-    }
-  };
+  } catch (err) {
+    console.error("Profile initialization failed:", err);
+    alert("Network error. Please check your connection.");
+  } finally {
+    setIsUploading(false);
+  }
+};
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -1047,9 +1061,21 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </div>
         </div>
 
-        <button type="submit" className="w-full bg-blue-600 text-white p-3 md:p-4 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-100 mt-2">
-          Launch Dashboard
-        </button>
+      <button  type="submit" disabled={isUploading}
+        className={`w-full p-3 md:p-4 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all shadow-lg mt-2 flex items-center justify-center gap-2
+    ${isUploading 
+      ? 'bg-blue-400 cursor-not-allowed opacity-80' 
+      : 'bg-blue-600 hover:bg-blue-700 active:scale-95 shadow-blue-100'
+    }`}>
+  {isUploading ? (
+    <>
+      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+      <span>Processing...</span>
+    </>
+  ) : (
+    <span>Launch Dashboard</span>
+  )}
+</button>
       </form>
     </div>
   </div>
