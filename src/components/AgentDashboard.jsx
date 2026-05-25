@@ -698,45 +698,51 @@ useEffect(() => {
     window.location.href = currentSlug ? `/${currentSlug}` : '/';
   };
 
-const handleScroll = async () => {
-  const container = scrollRef.current;
-  if (!container || isFetchingOlder || !hasMore || !selectedUser || messages.length === 0) return;
-  if (container.scrollTop <= 80) {
-    setIsFetchingOlder(true);
-        const previousScrollHeight = container.scrollHeight;
-    const previousScrollTop = container.scrollTop;
-    try {
-      const token = localStorage.getItem('agentToken');
-      const oldestMessageId = messages[0]._id || messages[0].id;
   
-      if (!oldestMessageId) {
-        setIsFetchingOlder(false);
-        return;
-      }
-      const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&beforeId=${oldestMessageId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && Array.isArray(data.messages)) {
-          setHasMore(data.hasMore);
-          if (data.messages.length > 0) {
-            setMessages(prev => [...data.messages, ...prev]);
-            requestAnimationFrame(() => {
-              if (scrollRef.current) {
-                const newHeight = scrollRef.current.scrollHeight;
-                const heightDifference = newHeight - previousScrollHeight;
-                scrollRef.current.scrollTop = previousScrollTop + heightDifference;
-              }
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.error("ZingConnect Cursor Pagination Failure:", err);
-    } finally {
+const handleScroll = async (e) => {
+  const container = e.target;
+    const isAtTop = (container.scrollHeight - container.scrollTop - container.clientHeight) < 80;
+
+  if (!isAtTop || isFetchingOlder || !hasMore || !selectedUser) return;
+
+  setIsFetchingOlder(true);
+    const previousScrollHeight = container.scrollHeight;
+  const previousScrollTop = container.scrollTop;
+
+  try {
+    const token = localStorage.getItem('agentToken');
+    const oldestMessage = messages[0]; 
+    const oldestMessageId = oldestMessage?._id || oldestMessage?.id;
+
+    if (!oldestMessageId) {
       setIsFetchingOlder(false);
+      return;
     }
+
+    const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&beforeId=${oldestMessageId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      
+      if (data.success && data.messages?.length > 0) {
+        setHasMore(data.hasMore);
+                setMessages(prev => [...data.messages, ...prev]);
+        requestAnimationFrame(() => {
+          if (container) {
+            const newHeight = container.scrollHeight;
+            const heightDifference = newHeight - previousScrollHeight;
+            container.scrollTop = previousScrollTop + heightDifference;
+          }
+        });
+      } else {
+        setHasMore(false);
+      }
+    }
+  } catch (err) {
+    console.error("ZingConnect Pagination Failure:", err);
+  } finally {
+    setIsFetchingOlder(false);
   }
 };
 

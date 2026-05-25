@@ -16,18 +16,9 @@ export default defineConfig({
       protocolImports: true,
     }),
   ],
-  resolve: {
-    alias: {
-      // Direct aliases for browser-compatible versions of Node modules
-      stream: 'stream-browserify',
-      buffer: 'buffer',
-      crypto: 'crypto-browserify',
-    },
-  },
   build: {
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
-      // Externalize backend-only libraries to prevent them from breaking the build
       external: [
         'flutterwave-node-v3', 
         'mock-aws-s3',
@@ -37,8 +28,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    // 1. REMOVED flutterwave-react-v3 from include because we are using the script tag method
-    // 2. Keep excluding the backend library
-    exclude: ['flutterwave-node-v3']
+    // This tells Vite to bypass these during the dependency pre-bundling step
+    exclude: ['flutterwave-node-v3', 'aws-sdk'] 
   }
 })
