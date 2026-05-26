@@ -146,7 +146,7 @@ export const VerifyOTP = () => {
               <BsCheckCircleFill size={48} />
             </div>
             <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">Account Ready</h2>
-            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-12">Your profile has been cryptographically verified.</p>
+            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-12">Your profile has been verified. Sign in and Subscribe</p>
 
             <div className="w-full max-w-md mx-auto space-y-4">
               <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] block">Your Public Link</span>

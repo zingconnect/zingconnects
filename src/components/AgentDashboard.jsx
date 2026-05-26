@@ -224,29 +224,28 @@ useEffect(() => {
 const triggerNotification = (data) => {
   if (notificationSound.current) {
     notificationSound.current.currentTime = 0;
-    const playPromise = notificationSound.current.play();
-    
-    if (playPromise !== undefined) {
-      playPromise.catch(error => {
-        console.warn("🔊 Audio autoplay blocked, waiting for user gesture:", error);
-      });
-    }
+    notificationSound.current.play().catch(err => 
+      console.warn("🔊 Audio blocked by browser policy until user interacts with page.")
+    );
   }
   if ('vibrate' in navigator) {
     navigator.vibrate([200, 100, 200]);
   }
-  if (Notification.permission === "granted") {
+  if ("Notification" in window && Notification.permission === "granted") {
     const popup = new Notification(`New message from ${data.firstName || 'Client'}`, {
       body: data.text || "Sent a file",
       icon: data.senderPhoto || '/favicon.ico',
       tag: `zing-msg-${data.senderId}`,
-      renotify: true
+      renotify: true,
+      requireInteraction: true // <--- CRITICAL: Keeps notification visible until clicked
     });
     
     popup.onclick = () => {
       window.focus();
       popup.close();
     };
+  } else if ("Notification" in window && Notification.permission !== "denied") {
+    Notification.requestPermission();
   }
 };
   useEffect(() => {
@@ -290,65 +289,50 @@ const triggerNotification = (data) => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
-
 useEffect(() => {
   if (!socket) return;
   
   const handleIncomingMessage = (data) => {
-    // 1. Prevent processing the same message twice
+    // 1. Prevent duplicate processing
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
-    // 2. Normalize senderId to String
     const senderId = String(data.senderId);
-    const currentSelectedUser = selectedUserRef.current;
-    
-    // Check if the message is from the user we are currently viewing
-    const isChattingWithSender = currentSelectedUser && 
-      (senderId === String(currentSelectedUser._id || currentSelectedUser.id));
+    triggerNotification(data);
 
-    // 3. Update the sidebar preview text for this user
     setLatestMessages(prev => ({
       ...prev,
       [senderId]: data.text || "Sent a file"
     }));
-    
+    const currentSelectedUser = selectedUserRef.current;
+    const isChattingWithSender = currentSelectedUser && 
+      (senderId === String(currentSelectedUser._id || currentSelectedUser.id));
     if (isChattingWithSender) {
-      // If we are looking at them, add the message to the chat and reset the badge
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
       setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
+      fetch(`/api/messages/mark-read/${senderId}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('agentToken')}` }
+      }).catch(console.error);
     } else {
-      // If we are NOT looking at them, increment the badge and notify
       setUnreadCounts(prev => {
-        const currentCount = prev[senderId] || 0;
-        const newCount = currentCount + 1;
-        console.log(`[Socket] Updating badge for ${senderId} to ${newCount}`);
-        return { 
-          ...prev, 
-          [senderId]: newCount 
-        };
+        const newCount = (prev[senderId] || 0) + 1;
+        return { ...prev, [senderId]: newCount };
       });
-      
-      // Trigger browser notification / sound
-      triggerNotification(data);
     }
   };
 
   socket.on('new-message', handleIncomingMessage);
-  
-  return () => {
-    socket.off('new-message', handleIncomingMessage);
-  };
-}, [socket, triggerNotification]); // Re-bind if socket or notifier changes
+  return () => socket.off('new-message', handleIncomingMessage);
+}, [socket]); // Removed triggerNotification dependency to prevent re-binding loops
 
-// This tracks the selectedUser state changes
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
   selectedUserRef.current = selectedUser;
-}, [selectedUser]); // Dependency is ONLY selectedUser
+}, [selectedUser]); 
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
