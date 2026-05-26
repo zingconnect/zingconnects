@@ -7,6 +7,7 @@ import {
   BsTelephoneFill, BsTelephoneXFill, BsXLg, BsGearFill, BsPlusLg, BsSend, BsPaperclip, BsCameraFill  
 } from 'react-icons/bs';
 import { useAgentCall } from '../context/AgentCallContext';
+import { useSocket } from '../context/SocketProvider';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -479,6 +480,44 @@ useEffect(() => {
     return () => clearTimeout(timeoutId);
   }
 }, [messages, isUploading, agentData?._id]);
+
+// Add these helper functions inside your component
+const playNotificationSound = () => {
+  if (audioUnlocked) {
+    const audio = new Audio('/sounds/notification.mp3'); // Ensure this path is correct
+    audio.play().catch(e => console.error("Sound play failed", e));
+  }
+};
+
+const triggerBrowserNotification = (message) => {
+  if (Notification.permission === "granted" && document.hidden) {
+    new Notification("New Message from ZingConnect", {
+      body: message.text,
+      icon: '/favicon.ico'
+    });
+  }
+};
+
+useEffect(() => {
+  if (!socket) return;
+
+  const handleNewMessage = (message) => {
+    if (message.senderId !== selectedUser?._id) {
+        playNotificationSound();
+        triggerBrowserNotification(message);
+    }
+        setUnreadCounts(prev => ({
+        ...prev,
+        [message.senderId]: (prev[message.senderId] || 0) + 1
+    }));
+  };
+
+  socket.on('new-message', handleNewMessage);
+  
+  return () => {
+    socket.off('new-message', handleNewMessage);
+  };
+}, [socket, selectedUser?._id]); // Dependency on selectedUser ensures we know who NOT to notify
 
   // --- MEMORY DISPOSAL EFFECT ---
   useEffect(() => {
