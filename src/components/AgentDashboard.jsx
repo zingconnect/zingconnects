@@ -111,7 +111,7 @@ export const AgentDashboard = () => {
   const lastNotifiedId = useRef(null);
    const localAudioRef = useRef(null);
    const selectedUserRef = useRef(selectedUser);
-    const agentDataRef = useRef(agentData);
+const agentDataRef = useRef(null);
    
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
