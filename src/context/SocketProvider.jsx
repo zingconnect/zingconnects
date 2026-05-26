@@ -8,8 +8,21 @@ export const SocketProvider = ({ children }) => {
   const audioRef = useRef(null);
 
   useEffect(() => {
-    // Initialize Audio once
+    // 1. Initialize Audio reference
     audioRef.current = new Audio('/sounds/notification.mp3');
+
+    // 2. Add an "Audio Unlock" listener to handle browser autoplay policies
+    const unlockAudio = () => {
+      if (audioRef.current) {
+        audioRef.current.play().then(() => {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+          document.removeEventListener('click', unlockAudio);
+        }).catch(() => {});
+      }
+    };
+    document.addEventListener('click', unlockAudio);
+    return () => document.removeEventListener('click', unlockAudio);
   }, []);
 
   useEffect(() => {
@@ -17,15 +30,29 @@ export const SocketProvider = ({ children }) => {
     if (!token) return;
 
     const newSocket = io(import.meta.env.VITE_API_URL, {
+      path: '/api/socket.io', // Ensure this matches your server config
       auth: { token },
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 5
     });
 
-    newSocket.on('connect', () => console.log("Socket Connected:", newSocket.id));
+    newSocket.on('connect', () => {
+      console.log("Socket Connected:", newSocket.id);
+      
+      // Auto-join the main room using the agent's ID from the JWT
+      try {
+        const decoded = JSON.parse(atob(token.split('.')[1]));
+        const agentId = decoded.id || decoded._id;
+        newSocket.emit("join-main-room", agentId);
+        console.log("Joined main room as:", agentId);
+      } catch (err) {
+        console.error("Failed to decode token for room join:", err);
+      }
+    });
 
     newSocket.on('new-message', (message) => {
-      // 1. Play Sound (Browser will only allow if user has interacted with page)
+      // 1. Play Sound
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
         audioRef.current.play().catch(e => console.warn("Audio play blocked:", e));
@@ -39,7 +66,7 @@ export const SocketProvider = ({ children }) => {
         });
       }
       
-      // 3. Dispatch global event for local state updates (Unread counts, etc.)
+      // 3. Dispatch global event for local state updates
       window.dispatchEvent(new CustomEvent('zing-new-message', { detail: message }));
     });
 
@@ -49,7 +76,7 @@ export const SocketProvider = ({ children }) => {
       newSocket.off('new-message');
       newSocket.close();
     };
-  }, [localStorage.getItem('agentToken')]);
+  }, []); // Only run once on mount
 
   const value = useMemo(() => socket, [socket]);
 
