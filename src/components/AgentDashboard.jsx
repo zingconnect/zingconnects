@@ -42,9 +42,8 @@ const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSele
       <div className="flex-1 overflow-y-auto divide-y divide-gray-50" key={JSON.stringify(unreadCounts)}>
         {users.length > 0 ? users.map((user) => {
           const userId = String(user._id);
-          console.log("Looking for ID:", userId, "in unreadCounts:", unreadCounts);
-          const count = unreadCounts[userId] || 0;
-          const isUnread = count > 0;
+         const count = 99; // Hardcoded test
+        const isUnread = true;
           const lastMessage = latestMessages[userId];
 
           return (
