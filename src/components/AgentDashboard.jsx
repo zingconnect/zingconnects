@@ -232,8 +232,8 @@ const triggerNotification = (data) => {
     navigator.vibrate([200, 100, 200]);
   }
   if ("Notification" in window && Notification.permission === "granted") {
-    const popup = new Notification(`New message from ${data.firstName || 'Client'}`, {
-      body: data.text || "Sent a file",
+    const popup = new Notification(`New message from ${user.firstName || 'Client'}`, {
+      body: data.text,
       icon: data.senderPhoto || '/favicon.ico',
       tag: `zing-msg-${data.senderId}`,
       renotify: true,
@@ -289,7 +289,7 @@ const triggerNotification = (data) => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
-useEffect(() => {
+  useEffect(() => {
   if (!socket) return;
   
   const handleIncomingMessage = (data) => {
@@ -298,8 +298,10 @@ useEffect(() => {
     lastNotifiedId.current = data._id;
 
     const senderId = String(data.senderId);
-    triggerNotification(data);
-
+        const isSentByAgent = String(data.senderId) === String(agentData?._id);
+    if (!isSentByAgent) {
+      triggerNotification(data);
+    }
     setLatestMessages(prev => ({
       ...prev,
       [senderId]: data.text || "Sent a file"
@@ -307,17 +309,16 @@ useEffect(() => {
     const currentSelectedUser = selectedUserRef.current;
     const isChattingWithSender = currentSelectedUser && 
       (senderId === String(currentSelectedUser._id || currentSelectedUser.id));
+
     if (isChattingWithSender) {
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
-      setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
-      fetch(`/api/messages/mark-read/${senderId}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('agentToken')}` }
-      }).catch(console.error);
-    } else {
+      if (!isSentByAgent) {
+        setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
+      }
+    } else if (!isSentByAgent) {
       setUnreadCounts(prev => {
         const newCount = (prev[senderId] || 0) + 1;
         return { ...prev, [senderId]: newCount };
@@ -327,7 +328,7 @@ useEffect(() => {
 
   socket.on('new-message', handleIncomingMessage);
   return () => socket.off('new-message', handleIncomingMessage);
-}, [socket]); // Removed triggerNotification dependency to prevent re-binding loops
+}, [socket, agentData?._id]); // Added agentData._id dependency
 
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
