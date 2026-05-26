@@ -42,6 +42,7 @@ const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSele
       <div className="flex-1 overflow-y-auto divide-y divide-gray-50" key={JSON.stringify(unreadCounts)}>
         {users.length > 0 ? users.map((user) => {
           const userId = String(user._id);
+          console.log("Looking for ID:", userId, "in unreadCounts:", unreadCounts);
           const count = unreadCounts[userId] || 0;
           const isUnread = count > 0;
           const lastMessage = latestMessages[userId];
@@ -109,6 +110,8 @@ export const AgentDashboard = () => {
   const cameraInputRef = useRef(null);
   const lastNotifiedId = useRef(null);
    const localAudioRef = useRef(null);
+   const selectedUserRef = useRef(selectedUser);
+    const agentDataRef = useRef(agentData);
    
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
@@ -348,41 +351,45 @@ const triggerNotification = (data) => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
+
+// 1. Ensure refs are updated whenever the state changes
+useEffect(() => {
+  selectedUserRef.current = selectedUser;
+  agentDataRef.current = agentData;
+}, [selectedUser, agentData]);
+
+// 2. This effect only cares about the socket connection
 useEffect(() => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
-  if (data._id && data._id === lastNotifiedId.current) return;
-  lastNotifiedId.current = data._id;
-
-  const senderId = String(data.senderId);
-  const isSentByAgent = String(data.senderId) === String(agentData?._id);
-  setLatestMessages(prev => ({ ...prev, [senderId]: data.text || "Sent a file" }));
-  if (!isSentByAgent) {
-    triggerNotification(data);
+    // ALWAYS use the .current value to get the freshest data
+    const senderId = String(data.senderId);
+    const activeSelectedUser = selectedUserRef.current;
+    
+    // Update unread counts using the ref
     setUnreadCounts(prev => {
-      if (selectedUser && senderId === String(selectedUser._id)) {
+      // If the message is from the user currently opened in the chat, reset their count
+      if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
         return { ...prev, [senderId]: 0 };
       }
       return { ...prev, [senderId]: (prev[senderId] || 0) + 1 };
     });
-  }
-  if (selectedUser && senderId === String(selectedUser._id)) {
-    setMessages((prev) => {
-      if (prev.some(m => m._id === data._id)) return prev;
-      return [...prev, data];
-    });
-  }
-};
+
+    // Update messages only if the sender matches the CURRENT active chat
+    if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
+      setMessages((prev) => {
+        if (prev.some(m => m._id === data._id)) return prev;
+        return [...prev, data];
+      });
+    }
+  };
 
   socket.on('new-message', handleIncomingMessage);
+  
+  // Clean up
   return () => socket.off('new-message', handleIncomingMessage);
-}, [socket, agentData, selectedUser]); // ADDED selectedUser HERE
-
-const selectedUserRef = useRef(selectedUser);
-useEffect(() => {
-  selectedUserRef.current = selectedUser;
-}, [selectedUser]); 
+}, [socket]); // Only re-run if socket changes
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
