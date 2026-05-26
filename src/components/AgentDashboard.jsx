@@ -57,6 +57,7 @@ export const AgentDashboard = () => {
   const [isEnding, setIsEnding] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastMessageId, setLastMessageId] = useState(null);
+  const [latestMessages, setLatestMessages] = useState({});
   // --- SUBSCRIPTION STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
