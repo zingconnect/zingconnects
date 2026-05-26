@@ -125,11 +125,9 @@ const authenticateToken = (req, res, next) => {
           $set: { lastLogin: new Date() } 
         });
       }
-
-      next();
+            next();
     } catch (dbErr) {
       console.error("🔴 index.js Auth Middleware Error:", dbErr.message);
-      // Non-blocking fallback: pass to route handler instead of bricking the request
       next(); 
     }
   });
