@@ -21,7 +21,6 @@ function urlBase64ToUint8Array(base64String) {
 const socket = io(import.meta.env.VITE_API_URL);
 
 const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSelectUser, handleLogout, showSidebar, navigate }) => {
-  console.log("Sidebar received unreadCounts:", unreadCounts);
   return (
     <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col border-r border-gray-100 z-[100]`}>
       <header className="h-[60px] bg-page-bg px-4 flex justify-between items-center shrink-0 border-b border-gray-100">
@@ -38,11 +37,9 @@ const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSele
         </div>
       </div>
 
-      {/* The KEY below forces a re-render when unreadCounts changes */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-50" key={JSON.stringify(unreadCounts)}>
         {users.length > 0 ? users.map((user) => {
           const userId = String(user._id);
-          console.log("Looking for ID:", userId, "in unreadCounts:", unreadCounts);
           const count = unreadCounts[userId] || 0;
           const isUnread = count > 0;
           const lastMessage = latestMessages[userId];
@@ -71,6 +68,14 @@ const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSele
                     </div>
                   )}
                 </div>
+
+                {/* UPDATED: Location Display */}
+                <div className="flex items-center gap-1 text-[10px] text-gray-400 mb-0.5">
+                  <span>{user.city || 'Location N/A'}</span>
+                  {user.city && user.state && <span>•</span>}
+                  <span>{user.state}</span>
+                </div>
+
                 <p className={`text-[11px] truncate ${isUnread ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>
                   {lastMessage || user.email}
                 </p>
