@@ -21,6 +21,7 @@ function urlBase64ToUint8Array(base64String) {
 const socket = io(import.meta.env.VITE_API_URL);
 
 const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSelectUser, handleLogout, showSidebar, navigate }) => {
+  console.log("Sidebar received unreadCounts:", unreadCounts);
   return (
     <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col border-r border-gray-100 z-[100]`}>
       <header className="h-[60px] bg-page-bg px-4 flex justify-between items-center shrink-0 border-b border-gray-100">
