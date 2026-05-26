@@ -57,7 +57,6 @@ export const AgentDashboard = () => {
   const [isEnding, setIsEnding] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastMessageId, setLastMessageId] = useState(null);
-  const [latestMessages, setLatestMessages] = useState({});
   // --- SUBSCRIPTION STRUCTURES ---
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
@@ -209,17 +208,7 @@ useEffect(() => {
     };
   }, [socket, setSelectedUser]);
 
-  useEffect(() => {
-  const latestMessage = messages[messages.length - 1];
-  if (
-    latestMessage &&
-    latestMessage.senderId !== agentData?._id &&
-    latestMessage._id !== lastMessageId
-  ) {
-    setLastMessageId(latestMessage._id);
-    triggerNotification(latestMessage);
-  }
-}, [messages]);
+  
 
 const triggerNotification = (data) => {
   if (notificationSound.current) {
@@ -289,46 +278,36 @@ const triggerNotification = (data) => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
+
   useEffect(() => {
   if (!socket) return;
   
   const handleIncomingMessage = (data) => {
-    // 1. Prevent duplicate processing
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
-
     const senderId = String(data.senderId);
         const isSentByAgent = String(data.senderId) === String(agentData?._id);
+    
     if (!isSentByAgent) {
-      triggerNotification(data);
+       console.log("🔊 Incoming message detected, triggering notification...");
+       triggerNotification(data);
     }
-    setLatestMessages(prev => ({
-      ...prev,
-      [senderId]: data.text || "Sent a file"
-    }));
+    setLatestMessages(prev => ({ ...prev, [senderId]: data.text || "Sent a file" }));
     const currentSelectedUser = selectedUserRef.current;
-    const isChattingWithSender = currentSelectedUser && 
-      (senderId === String(currentSelectedUser._id || currentSelectedUser.id));
-
-    if (isChattingWithSender) {
+    if (currentSelectedUser && senderId === String(currentSelectedUser._id)) {
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
-      if (!isSentByAgent) {
-        setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
-      }
+      if (!isSentByAgent) setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
     } else if (!isSentByAgent) {
-      setUnreadCounts(prev => {
-        const newCount = (prev[senderId] || 0) + 1;
-        return { ...prev, [senderId]: newCount };
-      });
+      setUnreadCounts(prev => ({ ...prev, [senderId]: (prev[senderId] || 0) + 1 }));
     }
   };
 
   socket.on('new-message', handleIncomingMessage);
   return () => socket.off('new-message', handleIncomingMessage);
-}, [socket, agentData?._id]); // Added agentData._id dependency
+}, [socket, agentData]); // Keep agentData here
 
 const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
