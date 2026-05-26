@@ -366,28 +366,69 @@ useEffect(() => {
 useEffect(() => {
   if (!socket) return;
 
-  const handleIncomingMessage = (data) => {
-    console.log("Incoming message received:", data); // Add this
-    const senderId = String(data.senderId);
-    const activeSelectedUser = selectedUserRef.current;
-        setUnreadCounts(prev => {
-          console.log("Updating unread counts for sender:", senderId); // Add this
-      if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
-        return { ...prev, [senderId]: 0 };
-      }
-      return { ...prev, [senderId]: (prev[senderId] || 0) + 1 };
+ const handleIncomingMessage = (data) => {
+  const senderId = String(data.senderId);
+  const activeSelectedUser = selectedUserRef.current;
+
+  // 1. Force a new object reference to trigger re-renders
+  setUnreadCounts(prev => {
+    const isCurrentChat = activeSelectedUser && senderId === String(activeSelectedUser._id);
+    
+    // If it's the open chat, reset to 0, otherwise increment
+    const newCount = isCurrentChat ? 0 : (prev[senderId] || 0) + 1;
+    
+    // Spread into a brand new object to ensure React detects the change
+    return { 
+      ...prev, 
+      [senderId]: newCount 
+    };
+  });
+
+  // 2. Update message list
+  if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
+    setMessages(prev => {
+      if (prev.some(m => m._id === data._id)) return prev;
+      return [...prev, data];
     });
-    if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
-      setMessages((prev) => {
-        if (prev.some(m => m._id === data._id)) return prev;
-        return [...prev, data];
-      });
-    }
-  };
+  }
+};
 
   socket.on('new-message', handleIncomingMessage);
     return () => socket.off('new-message', handleIncomingMessage);
 }, [socket]); // Only re-run if socket changes
+
+useEffect(() => {
+  if (!selectedUser) return;
+  const runSync = async () => {
+    try {
+      const token = localStorage.getItem('agentToken');
+      const response = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessages(prev => {
+          const newMessages = data.messages;
+          const allMessages = [...prev];
+          
+          newMessages.forEach(msg => {
+            if (!allMessages.find(m => m._id === msg._id)) {
+              allMessages.push(msg);
+            }
+          });
+          return allMessages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        });
+      }
+    } catch (err) {
+      console.error("Background sync jitter:", err);
+    }
+  };
+  runSync();
+  const interval = setInterval(runSync, 30000); 
+  
+  return () => clearInterval(interval);
+}, [selectedUser]);
+
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
