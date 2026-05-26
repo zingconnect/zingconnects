@@ -214,30 +214,26 @@ useEffect(() => {
 const triggerNotification = (data) => {
   if (notificationSound.current) {
     notificationSound.current.currentTime = 0;
-    notificationSound.current.play().catch(err => 
-      console.warn("🔊 Audio blocked by browser policy until user interacts with page.")
-    );
+    notificationSound.current.play().catch(err => console.warn("Audio blocked"));
   }
-  if ('vibrate' in navigator) {
-    navigator.vibrate([200, 100, 200]);
-  }
+  
   if ("Notification" in window && Notification.permission === "granted") {
-    const popup = new Notification(`New message from ${user.firstName || 'Client'}`, {
-      body: data.text,
+    // FIX: Changed 'user.firstName' to 'data.firstName'
+    const popup = new Notification(`New message from ${data.firstName || 'Client'}`, {
+      body: data.text || "New message received",
       icon: data.senderPhoto || '/favicon.ico',
       tag: `zing-msg-${data.senderId}`,
       renotify: true,
-      requireInteraction: true // <--- CRITICAL: Keeps notification visible until clicked
+      requireInteraction: true
     });
     
     popup.onclick = () => {
       window.focus();
       popup.close();
     };
-  } else if ("Notification" in window && Notification.permission !== "denied") {
-    Notification.requestPermission();
   }
 };
+
   useEffect(() => {
     if (!socket) return;
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -282,29 +278,28 @@ const triggerNotification = (data) => {
 
   useEffect(() => {
   if (!socket) return;
-  
   const handleIncomingMessage = (data) => {
-    if (data._id && data._id === lastNotifiedId.current) return;
-    lastNotifiedId.current = data._id;
-    const senderId = String(data.senderId);
-        const isSentByAgent = String(data.senderId) === String(agentData?._id);
-    
-    if (!isSentByAgent) {
-       console.log("🔊 Incoming message detected, triggering notification...");
-       triggerNotification(data);
+  if (data._id && data._id === lastNotifiedId.current) return;
+  lastNotifiedId.current = data._id;
+
+  const senderId = String(data.senderId);
+  const isSentByAgent = String(data.senderId) === String(agentData?._id);
+  setLatestMessages(prev => ({ ...prev, [senderId]: data.text || "Sent a file" }));
+  if (!isSentByAgent) {
+    triggerNotification(data);
+    setUnreadCounts(prev => ({ ...prev, [senderId]: (prev[senderId] || 0) + 1 }));
+  }
+  if (selectedUser && senderId === String(selectedUser._id)) {
+    setMessages((prev) => {
+      if (prev.some(m => m._id === data._id)) return prev;
+      return [...prev, data];
+    });
+        if (!isSentByAgent) {
+      setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
+      // Optional: Send "mark-read" to server here
     }
-    setLatestMessages(prev => ({ ...prev, [senderId]: data.text || "Sent a file" }));
-    const currentSelectedUser = selectedUserRef.current;
-    if (currentSelectedUser && senderId === String(currentSelectedUser._id)) {
-      setMessages((prev) => {
-        if (prev.some(m => m._id === data._id)) return prev;
-        return [...prev, data];
-      });
-      if (!isSentByAgent) setUnreadCounts(prev => ({ ...prev, [senderId]: 0 }));
-    } else if (!isSentByAgent) {
-      setUnreadCounts(prev => ({ ...prev, [senderId]: (prev[senderId] || 0) + 1 }));
-    }
-  };
+  }
+};
 
   socket.on('new-message', handleIncomingMessage);
   return () => socket.off('new-message', handleIncomingMessage);
