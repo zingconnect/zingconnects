@@ -19,7 +19,6 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
-const socket = io(import.meta.env.VITE_API_URL);
 
 const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSelectUser, handleLogout, showSidebar, navigate }) => {
   return (
@@ -107,7 +106,7 @@ export const AgentDashboard = () => {
     peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime, setLocalStream, localStream
    } = useAgentCall();
 
-   
+   const socket = useSocket();
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const scrollRef = useRef(null);
@@ -291,7 +290,21 @@ useEffect(() => {
     };
   }, [socket, setSelectedUser]);
 
-  
+  useEffect(() => {
+    const handleZingMessage = (event) => {
+      const message = event.detail;
+            if (selectedUser && message.senderId === selectedUser._id) {
+        setMessages(prev => [...prev, message]);
+      }
+            setUnreadCounts(prev => ({
+        ...prev,
+        [message.senderId]: (prev[message.senderId] || 0) + 1
+      }));
+    };
+
+    window.addEventListener('zing-new-message', handleZingMessage);
+    return () => window.removeEventListener('zing-new-message', handleZingMessage);
+  }, [selectedUser]);
 
 const triggerNotification = (data) => {
   if (notificationSound.current) {
@@ -498,26 +511,6 @@ const triggerBrowserNotification = (message) => {
   }
 };
 
-useEffect(() => {
-  if (!socket) return;
-
-  const handleNewMessage = (message) => {
-    if (message.senderId !== selectedUser?._id) {
-        playNotificationSound();
-        triggerBrowserNotification(message);
-    }
-        setUnreadCounts(prev => ({
-        ...prev,
-        [message.senderId]: (prev[message.senderId] || 0) + 1
-    }));
-  };
-
-  socket.on('new-message', handleNewMessage);
-  
-  return () => {
-    socket.off('new-message', handleNewMessage);
-  };
-}, [socket, selectedUser?._id]); // Dependency on selectedUser ensures we know who NOT to notify
 
   // --- MEMORY DISPOSAL EFFECT ---
   useEffect(() => {
