@@ -145,28 +145,24 @@ const isAdmin = (req, res, next) => {
 
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
- socket.on("join-main-room", async (userId) => {
-  if (!userId) return;
-  const roomId = userId.toString();
-  socket.userId = roomId; 
-  socket.join(roomId);
-  console.log(`Socket ${socket.id} joined room: ${roomId}`);
-  try {
-    await User.findByIdAndUpdate(roomId, { 
-      isOnline: true, 
-      lastSeen: new Date() 
-    });
-    io.emit("user_status_update", { 
-      userId: roomId, 
-      isOnline: true, 
-      lastSeen: new Date() 
-    });
-    
-    console.log(`User ${roomId} set to online in database.`);
-  } catch (err) {
-    console.error("❌ Join Room DB Sync Failed:", err.message);
-  }
-});
+  socket.on("join-main-room", async (userId) => {
+    if (userId) {
+      socket.userId = userId; // Encapsulate ID context directly onto the socket instance
+      socket.join(userId.toString());
+      
+      try {
+        await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
+        io.emit("user_status_update", { 
+          userId, 
+          isOnline: true, 
+          lastSeen: new Date() 
+        });
+        console.log(`User ${userId} is online.`);
+      } catch (err) {
+        console.error("❌ Join Room DB Sync Failed:", err.message);
+      }
+    }
+  });
   
 socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName, voiceId }) => {
     if (!userToCall || !roomName) return;
@@ -1506,6 +1502,8 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
     if (!text || !receiverId) {
       return res.status(400).json({ success: false, message: "Text and receiverId are required" });
     }
+
+    // 1. Create and Save Message
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
@@ -1515,10 +1513,15 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
       notificationSent: false 
     });
     await newMessage.save();
+
+    // 2. Fetch Receiver and Sender for notification context
     const TargetModel = receiverModel === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId);
+    
     const SenderModel = senderRole === 'Agent' ? Agent : User;
     const sender = await SenderModel.findById(myId);
+
+    // 3. Socket.io Connection Check
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
@@ -1549,8 +1552,11 @@ if (!isOnline && receiver) {
     const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
     if (now - lastEmailTime > COOLDOWN) {
+      // await sendWithSES(receiver, sender, text, receiverModel); 
       await sendOfflineNotification(receiver, sender, text, receiverModel);
-            await TargetModel.findByIdAndUpdate(receiverId, { 
+      
+      // 3. Immediately update the database to prevent "race condition" double-sends
+      await TargetModel.findByIdAndUpdate(receiverId, { 
         lastNotificationEmail: new Date() 
       });
     }

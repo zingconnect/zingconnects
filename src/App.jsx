@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useLayoutEffect } from 'react'; 
+// Imported 'Outlet' so the layout can render child components
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 
 // Component Imports
@@ -18,11 +19,15 @@ import ZingDashboard from './components/ZingDashboard';
 import { UserCallProvider } from './context/UserCallContext';
 import { AgentCallProvider } from './context/AgentCallContext';
 
-const AgentLayoutWrapper = () => (
-  <AgentCallProvider>
-    <Outlet />
-  </AgentCallProvider>
-);
+// --- AGENT COORD LAYOUT COMPONENT ---
+const AgentLayoutWrapper = () => {
+  return (
+    <AgentCallProvider>
+      {/* Renders your child components inside the context lifecycle */}
+      <Outlet />
+    </AgentCallProvider>
+  );
+};
 
 const PWAController = ({ children }) => {
   const navigate = useNavigate();
@@ -30,9 +35,14 @@ const PWAController = ({ children }) => {
   const [isChecking, setIsChecking] = React.useState(true);
 
   React.useLayoutEffect(() => {
-    const isStandalone = !!window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+    const isStandalone = !!window.navigator.standalone || 
+                         window.matchMedia('(display-mode: standalone)').matches;
+
     const params = new URLSearchParams(window.location.search);
-    const target = params.get('pwa') || localStorage.getItem('agentSlug');
+    const urlSlug = params.get('pwa');
+    const storageSlug = localStorage.getItem('agentSlug');
+    const target = urlSlug || storageSlug;
+
     const isAtRoot = location.pathname === '/' || location.pathname === '/pricing';
 
     if (isStandalone && isAtRoot && target) {
@@ -45,6 +55,7 @@ const PWAController = ({ children }) => {
   if (isChecking && (window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
     return <div className="min-h-screen bg-white" />; 
   }
+
   return children;
 };
 
@@ -53,11 +64,28 @@ const ThemeInitializer = () => {
     const applyTheme = () => {
       const savedTheme = localStorage.getItem('theme') || 'system';
       const root = window.document.documentElement;
-      const isDark = savedTheme === 'dark' || (savedTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-      root.classList.toggle('dark', isDark);
+      
+      const isDark = 
+        savedTheme === 'dark' || 
+        (savedTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+      if (isDark) {
+        root.classList.add('dark');
+      } else {
+        root.classList.remove('dark');
+      }
     };
+
     applyTheme();
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      if (localStorage.getItem('theme') === 'system') applyTheme();
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
+
   return null;
 };
 
@@ -67,22 +95,33 @@ function App() {
       <PWAController>
         <ThemeInitializer />
         <Routes>
+          {/* --- 1. PUBLIC & AUTH ROUTES --- */}
           <Route path="/" element={<PricingPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/registration" element={<Registration />} />
           <Route path="/verify-otp" element={<VerifyOTP />} />
+
+          {/* --- 2. PROTECTED AGENT ROUTES --- */}
           <Route element={<AgentLayoutWrapper />}>
             <Route path="/agent/dashboard" element={<AgentDashboard />} />
             <Route path="/agent/profile" element={<AgentProfile />} />
             <Route path="/agent/call-settings" element={<CallSetting />} />
           </Route>
+
+          {/* --- 3. PROTECTED USER ROUTES (Wrapped in UserCallProvider) --- */}
           <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
             <Route path="/user/dashboard" element={<UserDashboard />} />
             <Route path="/user/profile" element={<UserProfile />} />
           </Route>
+
+          {/* --- 4. ADMINISTRATOR ROUTES --- */}
           <Route path="/admin/terminal" element={<ZingAdmin />} /> 
           <Route path="/admin/dashboard" element={<ZingDashboard />} />
+          
+          {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
           <Route path="/:slug" element={<AgentSlug />} />
+          
+          {/* --- 6. GLOBAL FALLBACK --- */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </PWAController>

@@ -19,6 +19,7 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
+const socket = io(import.meta.env.VITE_API_URL)
 
 const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSelectUser, handleLogout, showSidebar, navigate }) => {
   return (
@@ -106,7 +107,7 @@ export const AgentDashboard = () => {
     peerConnected, handleStartCall, handleAcceptCall, handleEndCall, formatTime, setLocalStream, localStream
    } = useAgentCall();
 
-   const socket = useSocket();
+   
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const scrollRef = useRef(null);
@@ -290,21 +291,7 @@ useEffect(() => {
     };
   }, [socket, setSelectedUser]);
 
-  useEffect(() => {
-    const handleZingMessage = (event) => {
-      const message = event.detail;
-            if (selectedUser && message.senderId === selectedUser._id) {
-        setMessages(prev => [...prev, message]);
-      }
-            setUnreadCounts(prev => ({
-        ...prev,
-        [message.senderId]: (prev[message.senderId] || 0) + 1
-      }));
-    };
-
-    window.addEventListener('zing-new-message', handleZingMessage);
-    return () => window.removeEventListener('zing-new-message', handleZingMessage);
-  }, [selectedUser]);
+  
 
 const triggerNotification = (data) => {
   if (notificationSound.current) {
@@ -511,6 +498,26 @@ const triggerBrowserNotification = (message) => {
   }
 };
 
+useEffect(() => {
+  if (!socket) return;
+
+  const handleNewMessage = (message) => {
+    if (message.senderId !== selectedUser?._id) {
+        playNotificationSound();
+        triggerBrowserNotification(message);
+    }
+        setUnreadCounts(prev => ({
+        ...prev,
+        [message.senderId]: (prev[message.senderId] || 0) + 1
+    }));
+  };
+
+  socket.on('new-message', handleNewMessage);
+  
+  return () => {
+    socket.off('new-message', handleNewMessage);
+  };
+}, [socket, selectedUser?._id]); // Dependency on selectedUser ensures we know who NOT to notify
 
   // --- MEMORY DISPOSAL EFFECT ---
   useEffect(() => {
@@ -1047,6 +1054,18 @@ const handleSelectUser = async (user) => {
 
   return (
     <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
+     {!audioUnlocked && (
+        <div 
+          onClick={unlockAudio} 
+          className="fixed inset-0 z-[100000] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center cursor-pointer"
+        >
+          <div className="bg-white p-8 rounded-3xl shadow-2xl text-center max-w-xs animate-in zoom-in duration-300">
+            <div className="mb-4 text-blue-600 animate-pulse text-2xl">🔊</div>
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-800 mb-2">Audio Systems Locked</h3>
+            <p className="text-[11px] text-slate-500">Click anywhere to initialize secure audio transmission protocols.</p>
+          </div>
+        </div>
+      )}
       <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
 
       {/* --- BACKGROUND LIVEKIT WEBRTC WRAPPER CONTEXT --- */}
