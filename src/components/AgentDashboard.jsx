@@ -42,8 +42,9 @@ const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSele
       <div className="flex-1 overflow-y-auto divide-y divide-gray-50" key={JSON.stringify(unreadCounts)}>
         {users.length > 0 ? users.map((user) => {
           const userId = String(user._id);
-         const count = 99; // Hardcoded test
-        const isUnread = true;
+          console.log("Looking for ID:", userId, "in unreadCounts:", unreadCounts);
+          const count = unreadCounts[userId] || 0;
+          const isUnread = count > 0;
           const lastMessage = latestMessages[userId];
 
           return (
@@ -357,25 +358,20 @@ useEffect(() => {
   agentDataRef.current = agentData;
 }, [selectedUser, agentData]);
 
-// 2. This effect only cares about the socket connection
 useEffect(() => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
-    // ALWAYS use the .current value to get the freshest data
+    console.log("Incoming message received:", data); // Add this
     const senderId = String(data.senderId);
     const activeSelectedUser = selectedUserRef.current;
-    
-    // Update unread counts using the ref
-    setUnreadCounts(prev => {
-      // If the message is from the user currently opened in the chat, reset their count
+        setUnreadCounts(prev => {
+          console.log("Updating unread counts for sender:", senderId); // Add this
       if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
         return { ...prev, [senderId]: 0 };
       }
       return { ...prev, [senderId]: (prev[senderId] || 0) + 1 };
     });
-
-    // Update messages only if the sender matches the CURRENT active chat
     if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
@@ -385,9 +381,7 @@ useEffect(() => {
   };
 
   socket.on('new-message', handleIncomingMessage);
-  
-  // Clean up
-  return () => socket.off('new-message', handleIncomingMessage);
+    return () => socket.off('new-message', handleIncomingMessage);
 }, [socket]); // Only re-run if socket changes
 
  useEffect(() => {
@@ -824,6 +818,7 @@ const handleScroll = async (e) => {
     setIsFetchingOlder(false);
   }
 };
+
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
     setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
