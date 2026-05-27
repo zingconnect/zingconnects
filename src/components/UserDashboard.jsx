@@ -769,6 +769,7 @@ const handleFileChange = (e) => {
       senderId: userData._id,
       senderModel: 'User',
       text: textToSend,
+      receiverModel: 'Agent',
       status: 'sending',
       createdAt: new Date().toISOString(),
       isTemp: true
@@ -786,6 +787,7 @@ const handleFileChange = (e) => {
         },
         body: JSON.stringify({
           receiverId: agent._id,
+          receiverModel: 'Agent', // 👈 ADDED THIS
           text: textToSend,
           fileType: 'text',
           replyToId: replyingTo?._id 
@@ -1163,8 +1165,8 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       />
     );
   }
-  const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
-  
+
+const isMe = m.senderModel === 'User' || m.senderId?._id === userData?._id || m.senderId === userData?._id;  
   return (
     <MessageBubble
       key={msgKey}

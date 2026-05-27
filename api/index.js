@@ -1498,6 +1498,7 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to save subscription" });
   }
 });
+
 // --- SEND MESSAGE ROUTE (HYBRID NOTIFICATION LOGIC WITH HIGH-SPEED REDIS CACHE) ---
 app.post('/api/messages/send', authenticateToken, async (req, res) => {
   try {
@@ -1619,7 +1620,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Server failed to process message" });
   }
 });
-
 // --- GET CHAT MESSAGES WITH SANITIZATION ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
@@ -1627,13 +1627,20 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     const myId = req.user.id;
     const { otherUserId } = req.params;
     
+    // 1. Fetch conversations AND look up profiles via dynamic refPaths
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    }).sort({ createdAt: 1 }).lean();
+    })
+    .sort({ createdAt: 1 })
+    // Only fetch necessary fields to keep function memory light on Vercel
+    .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug' })
+    .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug' })
+    .lean();
 
+    // 2. Map and sign IDrive E2 URLs
     const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl) {
         let fileKey = m.fileUrl;
@@ -1655,7 +1662,6 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });
-
 // 4. Protected Dashboard
 app.get('/api/portal/dashboard', authenticateToken, async (req, res) => {
   try {
