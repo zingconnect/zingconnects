@@ -11,16 +11,15 @@ if (!cached) {
 }
 
 const commonOpts = {
-  maxPoolSize: 10,                 
+  maxPoolSize: 2,   // Reduced from 10 to protect multi-instance cluster exhaustion
   minPoolSize: 1,                  
   serverSelectionTimeoutMS: 5000, 
   socketTimeoutMS: 30000,
   family: 4,
-  bufferCommands: false, // Stop queries from hanging when the database goes offline
+  bufferCommands: false, 
   autoIndex: false, 
   connectTimeoutMS: 10000, 
 };
-
 /**
  * Serverless Fail-Safe Connection Handler
  */

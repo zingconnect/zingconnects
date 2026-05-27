@@ -21,6 +21,25 @@ import { fileURLToPath } from 'url';
 import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
+import { createClient } from 'redis'; // 👈 Added Redis Import
+
+// --- REDIS CACHING CLIENT INITIALIZATION ---
+const redisClient = createClient({
+  url: process.env.REDIS_URL
+});
+
+redisClient.on('error', (err) => console.error('🔴 Redis Cache Client Error:', err));
+redisClient.on('connect', () => console.log('⚡ Connected to Redis Cache Cloud successfully!'));
+
+// Establish the connection instantly on execution context startup
+(async () => {
+  try {
+    await redisClient.connect();
+  } catch (err) {
+    console.error('⚠️ Could not initialize Redis connection:', err.message);
+  }
+})();
+// ------------------------------------------
 
 // 3. Database & Shared Configurations
 import { connectToDatabase } from './config/db.js';
@@ -49,6 +68,9 @@ const app = express();
 const terminatingCallsCache = new Set();
 app.set('terminatingCallsCache', terminatingCallsCache);
 
+// Expose redis cache global registry context into routing modules 
+app.set('redisClient', redisClient); 
+
 const corsOptions = {
   origin: "https://zingconnect.vercel.app",
   methods: ["GET", "POST", "PUT", "DELETE"],
@@ -66,7 +88,6 @@ const io = new Server(server, {
   transports: ['polling', 'websocket'],
   allowEIO3: true
 });
-
 
 app.set('socketio', io);
 app.use('/api/calls', callRoutes);
@@ -101,7 +122,6 @@ const authenticateToken = (req, res, next) => {
     try {
       // 1. Logic for Agents: Serverless safe check & Atomic tracking update
       if (decoded.role === 'agent') {
-        // Enforce safe model resolution from Mongoose's internal registry
         const AgentModel = mongoose.models.Agent || Agent;
 
         const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
@@ -125,7 +145,7 @@ const authenticateToken = (req, res, next) => {
           $set: { lastLogin: new Date() } 
         });
       }
-            next();
+      next();
     } catch (dbErr) {
       console.error("🔴 index.js Auth Middleware Error:", dbErr.message);
       next(); 
@@ -145,7 +165,7 @@ io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
   socket.on("join-main-room", async (userId) => {
     if (userId) {
-      socket.userId = userId; // Encapsulate ID context directly onto the socket instance
+      socket.userId = userId; 
       socket.join(userId.toString());
       
       try {
@@ -162,7 +182,7 @@ io.on("connection", (socket) => {
     }
   });
   
-socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName, voiceId }) => {
+  socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName, voiceId }) => {
     if (!userToCall || !roomName) return;
     try {
       let signedUrl = photoUrl;
@@ -193,7 +213,7 @@ socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName
     }
   });
 
-socket.on("answer-call", ({ to, callId, roomName }) => {
+  socket.on("answer-call", ({ to, callId, roomName }) => {
     if (!to || !roomName) return;
     const cleanRoom = String(roomName).trim();
     console.log(`📡 Handshake Accepted: Relaying call-accepted to Caller room ${to}`);
@@ -203,24 +223,24 @@ socket.on("answer-call", ({ to, callId, roomName }) => {
     });
   });
 
- // Keep this exact short block in your socket initialization layer
-socket.on("end-call", ({ to, callId }) => {
-  if (to) {
-    const targetRoom = to.toString().trim();
-    console.log(`📴 Relaying call-ended termination sequence to: ${targetRoom}`);
-        io.to(targetRoom).emit("call-ended", { callId });
-    io.to(targetRoom).emit("end-call", { callId }); 
-  }
-});
+  socket.on("end-call", ({ to, callId }) => {
+    if (to) {
+      const targetRoom = to.toString().trim();
+      console.log(`📴 Relaying call-ended termination sequence to: ${targetRoom}`);
+      io.to(targetRoom).emit("call-ended", { callId });
+      io.to(targetRoom).emit("end-call", { callId }); 
+    }
+  });
 
-socket.on("reject-call", ({ to, callId }) => {
+  socket.on("reject-call", ({ to, callId }) => {
     if (to) {
       const targetRoom = to.toString().trim();
       console.log(`❌ Relaying call-rejected state directly to: ${targetRoom}`);
       io.to(targetRoom).emit("call-rejected", { callId });
-      io.to(targetRoom).emit("call-ended", { callId }); // Extra safety clearance rule
+      io.to(targetRoom).emit("call-ended", { callId }); 
     }
   });
+
   socket.on("disconnect", async () => {
     console.log("Socket disconnected:", socket.id);
     if (socket.userId) {
@@ -241,73 +261,74 @@ socket.on("reject-call", ({ to, callId }) => {
     }
   });
 
-socket.on("join-support-as-guest", (guestId) => {
-  if (guestId) {
-    socket.guestId = guestId;
-    socket.join(guestId); // The guest sits in their own private room
-    console.log(`Guest ${guestId} joined support.`);
-        io.emit("admin_new_guest_online", { guestId, timestamp: new Date() });
-  }
-});
-
-socket.on("guest_to_admin_message", async (payload) => {
-  try {
-    const { guestId, text } = payload;
-        await connectToDatabase(); 
-
-    if (!guestId || !text) {
-      return console.error("Database Save Denied: Missing guestId or text content.");
+  socket.on("join-support-as-guest", (guestId) => {
+    if (guestId) {
+      socket.guestId = guestId;
+      socket.join(guestId); 
+      console.log(`Guest ${guestId} joined support.`);
+      io.emit("admin_new_guest_online", { guestId, timestamp: new Date() });
     }
-    const savedMsg = await SupportMessage.create({
-      guestId: String(guestId),
-      text: text,
-      senderType: 'Guest',
-      isAdminRead: false
-    });
-    console.log("Database Success: Message stored under ID:", savedMsg._id);
-    io.emit("admin_receive_support_message", {
-      _id: savedMsg._id,
-      guestId: savedMsg.guestId,
-      text: savedMsg.text,
-      isAdmin: false,
-      timestamp: savedMsg.createdAt
-    });
-  } catch (err) {
-    console.error("Critical Database Error:", err.message);
-  }
-});
-socket.on("admin_to_guest_message", async (payload) => {
-  console.log("📥 Admin Payload Received:", payload);
-  
-  try {
-    await connectToDatabase(); 
-    const { guestId, text, senderType } = payload;
+  });
 
-    if (!guestId || !text) {
-      console.error("❌ Save Blocked: Missing guestId or text");
-      return;
+  socket.on("guest_to_admin_message", async (payload) => {
+    try {
+      const { guestId, text } = payload;
+      await connectToDatabase(); 
+
+      if (!guestId || !text) {
+        return console.error("Database Save Denied: Missing guestId or text content.");
+      }
+      const savedMsg = await SupportMessage.create({
+        guestId: String(guestId),
+        text: text,
+        senderType: 'Guest',
+        isAdminRead: false
+      });
+      console.log("Database Success: Message stored under ID:", savedMsg._id);
+      io.emit("admin_receive_support_message", {
+        _id: savedMsg._id,
+        guestId: savedMsg.guestId,
+        text: savedMsg.text,
+        isAdmin: false,
+        timestamp: savedMsg.createdAt
+      });
+    } catch (err) {
+      console.error("Critical Database Error:", err.message);
     }
-    const savedMsg = await SupportMessage.create({
-      guestId: String(guestId),
-      text: text,
-      senderType: senderType || 'Admin', 
-      isAdminRead: true
-    });
+  });
 
-    console.log("✅ Database Save Successful:", savedMsg._id);
-    socket.join(String(guestId));
-    io.to(String(guestId)).emit("guest_receive_admin_message", {
-      _id: savedMsg._id,
-      text: savedMsg.text,
-      isAdmin: true,
-      timestamp: savedMsg.createdAt
-    });
-    socket.emit("admin_message_stored", savedMsg);
+  socket.on("admin_to_guest_message", async (payload) => {
+    console.log("📥 Admin Payload Received:", payload);
+    
+    try {
+      await connectToDatabase(); 
+      const { guestId, text, senderType } = payload;
 
-  } catch (err) {
-    console.error("❌ Mongoose Error Details:", err);
-  }
-});
+      if (!guestId || !text) {
+        console.error("❌ Save Blocked: Missing guestId or text");
+        return;
+      }
+      const savedMsg = await SupportMessage.create({
+        guestId: String(guestId),
+        text: text,
+        senderType: senderType || 'Admin', 
+        isAdminRead: true
+      });
+
+      console.log("✅ Database Save Successful:", savedMsg._id);
+      socket.join(String(guestId));
+      io.to(String(guestId)).emit("guest_receive_admin_message", {
+        _id: savedMsg._id,
+        text: savedMsg.text,
+        isAdmin: true,
+        timestamp: savedMsg.createdAt
+      });
+      socket.emit("admin_message_stored", savedMsg);
+
+    } catch (err) {
+      console.error("❌ Mongoose Error Details:", err);
+    }
+  });
 });
 
 const transporter = nodemailer.createTransport({
@@ -334,14 +355,13 @@ app.use(async (req, res, next) => {
     next();
   } catch (error) {
     console.error("CRITICAL MIDDLEWARE DB TIMEOUT:", error.message);
-    
-    // Return an immediate 503 error to prevent Vercel execution limits from freezing
     return res.status(503).json({ 
       success: false, 
       message: "Database connection temporarily unavailable. Request aborted safely." 
     });
   }
 });
+
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res) => {
     console.log("Registration Stage 1 (Complete Fields) started...");
 
@@ -1418,59 +1438,49 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     });
   }
 });
-
-// --- UPDATED: GET CHAT MESSAGES WITH CURSOR PAGINATION & SANITIZATION ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
-        const { beforeId, limit } = req.query;
-    const maxMessages = parseInt(limit, 10) || 50;
-    const baseQuery = {
+    
+    // Add pagination query values with strict defaults
+    const limit = parseInt(req.query.limit) || 30;
+    const skip = parseInt(req.query.skip) || 0;
+
+    const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    };
-    if (beforeId && mongoose.Types.ObjectId.isValid(beforeId)) {
-      baseQuery._id = { $lt: new mongoose.Types.ObjectId(beforeId) };
-    }
-    const messages = await Message.find(baseQuery)
-      .sort({ createdAt: -1 }) 
-      .limit(maxMessages)
-      .lean();
-    const chronologicalMessages = messages.reverse();
-    const signedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
+    })
+    .sort({ createdAt: -1 }) // Sort newest first for mobile/chat feeds
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+    // Mapping presigned assets remains fast because it's capped at the limit size
+    const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl) {
         let fileKey = m.fileUrl;
         if (fileKey.startsWith('http')) {
           const urlParts = fileKey.split('idrivee2.com/');
           if (urlParts.length > 1) {
-            const pathParts = urlParts[1].split('/');
-            fileKey = pathParts.slice(1).join('/'); 
+            fileKey = urlParts[1].split('/').slice(1).join('/'); 
           }
         }
-        try {
-          m.fileUrl = await getPrivateUrl(fileKey);
-        } catch (s3Error) {
-          console.error(`S3 signing failure for key ${fileKey}:`, s3Error.message);
-        }
+        m.fileUrl = await getPrivateUrl(fileKey);
       }
       return m;
     }));
 
-    res.json({ 
-      success: true, 
-      messages: signedMessages,
-      hasMore: signedMessages.length === maxMessages 
-    });
+    // Reverse back to chronological order for UI insertion
+    res.json({ success: true, messages: signedMessages.reverse() });
   } catch (err) {
     console.error("Chat Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });
-
 // --- NEW: SAVE PUSH SUBSCRIPTION ---
 app.post('/api/save-subscription', authenticateToken, async (req, res) => {
   try {
@@ -1488,8 +1498,7 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to save subscription" });
   }
 });
-
-// --- SEND MESSAGE ROUTE (HYBRID NOTIFICATION LOGIC) ---
+// --- SEND MESSAGE ROUTE (HYBRID NOTIFICATION LOGIC WITH HIGH-SPEED REDIS CACHE) ---
 app.post('/api/messages/send', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1501,23 +1510,55 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Text and receiverId are required" });
     }
 
+    // Grab the global Redis client context
+    const redis = req.app.get('redisClient');
+
     // 1. Create and Save Message
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
       receiverId,
-      receiverModel: receiverModel, // Already passed in body
+      receiverModel: receiverModel, 
       text,
       notificationSent: false 
     });
     await newMessage.save();
 
-    // 2. Fetch Receiver and Sender for notification context
-    const TargetModel = receiverModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId);
-    
-    const SenderModel = senderRole === 'Agent' ? Agent : User;
-    const sender = await SenderModel.findById(myId);
+    // 2. Fetch Receiver and Sender profiles (OPTIMIZED VIA REDIS CLOUD)
+    let receiver = null;
+    let sender = null;
+
+    if (redis) {
+      try {
+        // Attempt to fetch profiles from the high-speed Redis Cache
+        const [cachedReceiver, cachedSender] = await Promise.all([
+          redis.get(`profile:${receiverId}`),
+          redis.get(`profile:${myId}`)
+        ]);
+
+        if (cachedReceiver) receiver = JSON.parse(cachedReceiver);
+        if (cachedSender) sender = JSON.parse(cachedSender);
+      } catch (redisErr) {
+        console.error("⚠️ Redis Cache Read Failed, falling back safely to MongoDB:", redisErr.message);
+      }
+    }
+
+    // If cache missed, query MongoDB and update the Redis Cache cluster (Expires in 30 minutes)
+    if (!receiver) {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      receiver = await TargetModel.findById(receiverId).lean();
+      if (receiver && redis) {
+        await redis.setEx(`profile:${receiverId}`, 1800, JSON.stringify(receiver)).catch(() => {});
+      }
+    }
+
+    if (!sender) {
+      const SenderModel = senderRole === 'Agent' ? Agent : User;
+      sender = await SenderModel.findById(myId).lean();
+      if (sender && redis) {
+        await redis.setEx(`profile:${myId}`, 1800, JSON.stringify(sender)).catch(() => {});
+      }
+    }
 
     // 3. Socket.io Connection Check
     const io = req.app.get('socketio');
@@ -1529,7 +1570,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
           title: `New Message from ${sender.firstName || 'Zing'}`,
           body: text || "Sent an attachment",
           data: { 
-            // Fixed variable from finalReceiverModel to receiverModel
             url: receiverModel === 'Agent' 
               ? `/agent/dashboard?userId=${myId}` 
               : `/user/dashboard?agentId=${myId}` 
@@ -1543,25 +1583,30 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
         console.error("Push delivery failed:", pushErr.message);
       }
     }
-if (!isOnline && receiver) {
-  try {
-    const COOLDOWN = 30 * 60 * 1000; 
-    const now = Date.now();
-    const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
-    if (now - lastEmailTime > COOLDOWN) {
-      // await sendWithSES(receiver, sender, text, receiverModel); 
-      await sendOfflineNotification(receiver, sender, text, receiverModel);
-      
-      // 3. Immediately update the database to prevent "race condition" double-sends
-      await TargetModel.findByIdAndUpdate(receiverId, { 
-        lastNotificationEmail: new Date() 
-      });
+    if (!isOnline && receiver) {
+      try {
+        const COOLDOWN = 30 * 60 * 1000; 
+        const now = Date.now();
+        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+
+        if (now - lastEmailTime > COOLDOWN) {
+          await sendOfflineNotification(receiver, sender, text, receiverModel);
+          
+          const TargetModel = receiverModel === 'Agent' ? Agent : User;
+          await TargetModel.findByIdAndUpdate(receiverId, { 
+            lastNotificationEmail: new Date() 
+          });
+
+          // Invalidate the cache item since we modified a field on the document string
+          if (redis) {
+            await redis.del(`profile:${receiverId}`).catch(() => {});
+          }
+        }
+      } catch (mailErr) {
+        console.error("Email Throttle Error:", mailErr.message);
+      }
     }
-  } catch (mailErr) {
-    console.error("Email Throttle Error:", mailErr.message);
-  }
-}
 
     // C. REAL-TIME EMIT
     if (isOnline) {
@@ -1575,25 +1620,26 @@ if (!isOnline && receiver) {
   }
 });
 
-// --- UPDATED: GET CHAT MESSAGES WITH SANITIZATION ---
+// --- GET CHAT MESSAGES WITH SANITIZATION ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
+    
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
     }).sort({ createdAt: 1 }).lean();
+
     const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl) {
         let fileKey = m.fileUrl;
         if (fileKey.startsWith('http')) {
           const urlParts = fileKey.split('idrivee2.com/');
           if (urlParts.length > 1) {
-            // Split by '/' and remove the first part (the bucket name)
             const pathParts = urlParts[1].split('/');
             fileKey = pathParts.slice(1).join('/'); 
           }
@@ -1652,14 +1698,11 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-// --- 6. UPLOAD MEDIA ROUTE (WITH PUSH & EMAIL) ---
+// --- 6. UPLOAD MEDIA ROUTE (WITH PUSH, EMAIL & REDIS PROFILE LOOKUP) ---
 app.post('/api/messages/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
-    // 1. Trigger the connection helper
     await connectToDatabase(); 
 
-    // 2. Resilience Loop for bufferCommands: false
     let connectionRetries = 0;
     while (mongoose.connection.readyState !== 1 && connectionRetries < 5) {
       console.log(`⏳ DB stabilizing for upload... Attempt ${connectionRetries + 1}`);
@@ -1674,14 +1717,15 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     const { receiverId, text } = req.body; 
     if (!req.file) return res.status(400).json({ success: false, message: "No file provided" });
 
+    const redis = req.app.get('redisClient');
     const mimeType = req.file.mimetype;
     const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
     const fileExtension = req.file.originalname.split('.').pop();
     const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
 
-    // 3. Execute Upload to iDrive
+    // Execute Upload to iDrive
     const parallelUploads3 = new Upload({
-      client: s3Client, // Ensure s3Client is imported/defined
+      client: s3Client, 
       params: {
         Bucket: process.env.IDRIVE_BUCKET_NAME,
         Key: fileName,
@@ -1695,7 +1739,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     const receiverModel = isAgent ? 'User' : 'Agent';
     const senderModel = isAgent ? 'Agent' : 'User';
 
-    // 4. Save Message to Database
+    // Save Message to Database
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel,
@@ -1707,18 +1751,45 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
       status: 'sent',
       notificationSent: false
     });
-
     await newMessage.save();
 
-    // --- 5. NOTIFICATION LOGIC (PUSH & EMAIL) ---
-    const TargetModel = receiverModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId);
-    const sender = await (isAgent ? Agent : User).findById(req.user.id);
+    // NOTIFICATION LOGIC (SPEED OPTIMIZED VIA REDIS)
+    let receiver = null;
+    let sender = null;
+
+    if (redis) {
+      try {
+        const [cachedReceiver, cachedSender] = await Promise.all([
+          redis.get(`profile:${receiverId}`),
+          redis.get(`profile:${req.user.id}`)
+        ]);
+        if (cachedReceiver) receiver = JSON.parse(cachedReceiver);
+        if (cachedSender) sender = JSON.parse(cachedSender);
+      } catch (redisErr) {
+        console.error("⚠️ Redis Read Failure on Media Upload fallback to Mongo:", redisErr.message);
+      }
+    }
+
+    if (!receiver) {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      receiver = await TargetModel.findById(receiverId).lean();
+      if (receiver && redis) {
+        await redis.setEx(`profile:${receiverId}`, 1800, JSON.stringify(receiver)).catch(() => {});
+      }
+    }
+
+    if (!sender) {
+      const SenderModel = isAgent ? Agent : User;
+      sender = await SenderModel.findById(req.user.id).lean();
+      if (sender && redis) {
+        await redis.setEx(`profile:${req.user.id}`, 1800, JSON.stringify(sender)).catch(() => {});
+      }
+    }
 
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
-    // A. Web Push Notification
+    // Web Push Notification
     if (receiver?.pushSubscription) {
       try {
         const payload = JSON.stringify({
@@ -1734,29 +1805,36 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
         console.error("Media Push delivery failed:", pushErr.message);
       }
     }
+
     if (!isOnline && receiver) {
       try {
-        const COOLDOWN = 30 * 60 * 1000; // 30 mins
+        const COOLDOWN = 30 * 60 * 1000; 
         const now = Date.now();
         const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmail > COOLDOWN) {
-          await sendOfflineNotification(receiver, sender, text,  fileUrl, fileType, receiverModel);
+          await sendOfflineNotification(receiver, sender, text, fileName, detectedType, receiverModel);
           
+          const TargetModel = receiverModel === 'Agent' ? Agent : User;
           await TargetModel.findByIdAndUpdate(receiverId, { 
             lastNotificationEmail: new Date() 
           });
+
+          // Clear out mutated database string in Redis
+          if (redis) {
+            await redis.del(`profile:${receiverId}`).catch(() => {});
+          }
           console.log(`[Email] Offline media notification sent to ${receiver.email}`);
         }
       } catch (mailErr) {
         console.error("Email Throttle Error:", mailErr.message);
       }
     }
+
     if (isOnline) {
       io.to(receiverId.toString()).emit("new-message", newMessage);
     }
 
-    // 6. Response
     const responseData = newMessage.toObject();
     responseData.fileUrl = await getPrivateUrl(fileName);
 
@@ -1768,7 +1846,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
   }
 });
 
-// --- 1. GET UPLOAD PERMISSION ---
+// --- 1. GET UPLOAD PERMISSION (Presigned URL generation does not require modifications) ---
 app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
@@ -1796,13 +1874,12 @@ app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => 
     });
   }
 });
-// --- 2. CONFIRM UPLOAD & SAVE TO DB ---
+
+// --- 2. CONFIRM UPLOAD & SAVE TO DB (REDIS OPTIMIZED) ---
 app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
-    // 1. Trigger the connection helper
     await connectToDatabase(); 
 
-    // 2. Resilience Loop: Wait for Mongoose to move from "Connecting" (2) to "Connected" (1)
     let connectionRetries = 0;
     while (mongoose.connection.readyState !== 1 && connectionRetries < 5) {
       console.log(`⏳ Waiting for DB stabilization... Attempt ${connectionRetries + 1}`);
@@ -1815,16 +1892,16 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     }
 
     const { receiverId, text, fileUrl, fileType } = req.body;
-    
     if (!receiverId || !fileUrl) {
       return res.status(400).json({ success: false, message: "Missing receiverId or fileUrl" });
     }
 
+    const redis = req.app.get('redisClient');
     const isAgent = req.user.role === 'agent';
     const receiverModel = isAgent ? 'User' : 'Agent';
     const senderModel = isAgent ? 'Agent' : 'User';
 
-    // 3. Save Message to Database
+    // Save Message to Database
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: senderModel,
@@ -1838,15 +1915,43 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
     await newMessage.save();
 
-    // --- 4. NOTIFICATION LOGIC (PUSH & EMAIL) ---
-    const TargetModel = receiverModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId);
-    const sender = await (isAgent ? Agent : User).findById(req.user.id);
+    // FETCH TARGET AND SENDER PROFILE (VIA REDIS PROMISES)
+    let receiver = null;
+    let sender = null;
+
+    if (redis) {
+      try {
+        const [cachedReceiver, cachedSender] = await Promise.all([
+          redis.get(`profile:${receiverId}`),
+          redis.get(`profile:${req.user.id}`)
+        ]);
+        if (cachedReceiver) receiver = JSON.parse(cachedReceiver);
+        if (cachedSender) sender = JSON.parse(cachedSender);
+      } catch (redisErr) {
+        console.error("⚠️ Redis Read Failure on Confirm Upload:", redisErr.message);
+      }
+    }
+
+    if (!receiver) {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      receiver = await TargetModel.findById(receiverId).lean();
+      if (receiver && redis) {
+        await redis.setEx(`profile:${receiverId}`, 1800, JSON.stringify(receiver)).catch(() => {});
+      }
+    }
+
+    if (!sender) {
+      const SenderModel = isAgent ? Agent : User;
+      sender = await SenderModel.findById(req.user.id).lean();
+      if (sender && redis) {
+        await redis.setEx(`profile:${req.user.id}`, 1800, JSON.stringify(sender)).catch(() => {});
+      }
+    }
 
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
-    // A. Web Push (Always attempt)
+    // Web Push
     if (receiver?.pushSubscription) {
       try {
         const payload = JSON.stringify({
@@ -1863,33 +1968,36 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
       }
     }
 
-    // B. Email Notification (If offline and cooldown passed)
+    // Email Notification
     if (!isOnline && receiver) {
       try {
-        const COOLDOWN = 30 * 60 * 1000; // 30 Minutes
+        const COOLDOWN = 30 * 60 * 1000; 
         const now = Date.now();
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmailTime > COOLDOWN) {
-          // Pass the fileType context to sendOfflineNotification if you want specific wording
           const emailText = text || `Sent a ${fileType} attachment`;
-          
           await sendOfflineNotification(receiver, sender, emailText, fileUrl, fileType, receiverModel);
           
+          const TargetModel = receiverModel === 'Agent' ? Agent : User;
           await TargetModel.findByIdAndUpdate(receiverId, { 
             lastNotificationEmail: new Date() 
           });
+
+          if (redis) {
+            await redis.del(`profile:${receiverId}`).catch(() => {});
+          }
           console.log(`[Email] Offline notification for ${fileType} sent to ${receiver.email}`);
         }
       } catch (mailErr) {
         console.error("Email Throttle Error:", mailErr.message);
       }
     }
+
     if (isOnline) {
       io.to(receiverId.toString()).emit("new-message", newMessage);
     }
 
-    // 5. Final Response
     const signedUrlForFrontend = await getPrivateUrl(fileUrl);
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
@@ -1909,7 +2017,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
   }
 });
 
-// --- DELETE MESSAGE ROUTE (SECURE) ---
+// --- DELETE MESSAGE ROUTE ---
 app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1935,6 +2043,7 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Server failed to delete message" });
   }
 });
+
 // ==========================================
 // 📞 1. INITIATE SECURE DIAL OUT
 // ==========================================
@@ -1948,7 +2057,6 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
 
     const callerId = String(req.user.id || req.user._id).trim();
     const targetId = String(receiverId).trim();
-    
     const roomName = `room_${Date.now()}_${callerId.slice(-4)}`;
     
     await connectToDatabase();
@@ -1990,6 +2098,7 @@ app.post('/api/calls/start', authenticateToken, async (req, res) => {
     }
   }
 });
+
 // ==========================================
 // 🔍 2. INCOMING BACKGROUND POLLING ENGINE
 // ==========================================

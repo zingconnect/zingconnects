@@ -1,19 +1,20 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import webpush from 'web-push';
-import multer from 'multer';
+import Redis from 'ioredis'; 
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import Agent from '../models/Agent.js';
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; 
-import { Upload } from "@aws-sdk/lib-storage";
 import { connectToDatabase } from '../config/db.js';
 import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
 import { authenticateToken } from './auth.js';
 import { sendOfflineNotification } from '../utils/mailer.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+
+// Initialize connection to your Redis instance used for high-speed caching
+const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379');
 
 // --- 1. GET CHAT HISTORY (WITH PAGINATION AND TIMELINE CURSORS) ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
@@ -23,7 +24,6 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
     const { otherUserId } = req.params;
     const { beforeId, limit } = req.query;
 
-    // Build standard query criteria matching messages between the two users
     const query = {
       $or: [
         { senderId: myId, receiverId: otherUserId },
@@ -37,11 +37,12 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
       }
     }
 
-    const parsedLimit = parseInt(limit) || 20;
+    const parsedLimit = Math.min(parseInt(limit) || 20, 50); // Performance safeguard cap
     const messages = await Message.find(query)
       .sort({ createdAt: -1 })
       .limit(parsedLimit)
       .lean();
+      
     const displayMessages = messages.reverse();
     const finalMessages = await Promise.all(displayMessages.map(async (m) => {
       if (m.fileUrl && (m.fileType === 'image' || m.fileType === 'video')) {
@@ -60,6 +61,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
 // --- 2. SEND TEXT MESSAGE ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {
+    await connectToDatabase();
     const { receiverId, text, receiverModel } = req.body;
     const myId = req.user.id; 
     const senderRole = req.user.role === 'agent' ? 'Agent' : 'User';
@@ -81,8 +83,11 @@ router.post('/send', authenticateToken, async (req, res) => {
     await newMessage.save();
 
     const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId);
-    const sender = await (senderRole === 'Agent' ? Agent : User).findById(myId);
+    const SenderModel = senderRole === 'Agent' ? Agent : User;
+
+    // HIGH SPEED CACHE: Pull fields from Redis to construct metadata payloads instantly
+    const receiver = await getUserProfileCached(receiverId, TargetModel, finalReceiverModel.toLowerCase());
+    const sender = await getUserProfileCached(myId, SenderModel, senderRole.toLowerCase());
 
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
@@ -114,7 +119,10 @@ router.post('/send', authenticateToken, async (req, res) => {
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmailTime > COOLDOWN) {
+          // Invalidate the cache key locally before modifying the database instance field
+          await redis.del(`${finalReceiverModel.toLowerCase()}:${receiverId}`);
           await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
+          
           await sendOfflineNotification(receiver, sender, text, finalReceiverModel);
         }
       } catch (mailErr) {
@@ -133,104 +141,29 @@ router.post('/send', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 3. SERVER-SIDE MULTIPART UPLOAD ---
-router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
-  try {
-    await connectToDatabase();
-    const { receiverId, text } = req.body; 
-    if (!req.file) return res.status(400).json({ success: false, message: "No file provided" });
-
-    const mimeType = req.file.mimetype;
-    const detectedType = mimeType.startsWith('video') ? 'video' : 'image';
-    const fileName = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${req.file.originalname.split('.').pop()}`;
-
-    // Upload to iDrive S3 Storage
-    const parallelUploads3 = new Upload({
-      client: getS3Client(),
-      params: {
-        Bucket: process.env.IDRIVE_BUCKET_NAME,
-        Key: fileName,
-        Body: req.file.buffer,
-        ContentType: mimeType,
-      },
-    });
-    await parallelUploads3.done();
-
-    const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
-    const senderModel = req.user.role === 'agent' ? 'Agent' : 'User';
-    
-    const newMessage = new Message({
-      senderId: req.user.id,
-      senderModel,
-      receiverId,
-      receiverModel,
-      text: text || "", 
-      fileUrl: fileName, 
-      fileType: detectedType,
-      status: 'sent',
-      notificationSent: false
-    });
-    await newMessage.save();
-
-    // Resolve pre-signed URL for front-end consumption
-    const signedUrlForFrontend = await getPrivateUrl(fileName);
-
-    // Build immediate payload wrapper to avoid real-time socket race conditions
-    const outputPayload = { ...newMessage.toObject(), fileUrl: signedUrlForFrontend };
-
-    // --- NOTIFICATION & SOCKET PIPELINE ---
-    const TargetModel = receiverModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId);
-    const sender = await (senderModel === 'Agent' ? Agent : User).findById(req.user.id);
-    const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
-
-    if (receiver?.pushSubscription) {
-      const payload = JSON.stringify({
-        title: `New ${detectedType} from ${sender?.firstName || 'Zing'}`,
-        body: text || `Sent an ${detectedType}`,
-        data: { url: receiverModel === 'Agent' ? '/agent/dashboard' : '/user/dashboard' }
-      });
-      webpush.sendNotification(receiver.pushSubscription).catch(e => console.error(e));
-    }
-
-    if (!isOnline && receiver) {
-      const COOLDOWN = 30 * 60 * 1000;
-      const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-      if (Date.now() - lastEmail > COOLDOWN) {
-        // FIXED: Swapped out reference-breaking fileUrl with verified fileName variable wrapper
-        await sendOfflineNotification(receiver, sender, text || `Sent an ${detectedType}`, receiverModel);
-        await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
-      }
-    }
-
-    if (isOnline && io) { 
-      io.to(receiverId.toString()).emit("new-message", outputPayload); 
-    }
-
-    res.status(201).json({ success: true, message: outputPayload });
-  } catch (err) {
-    console.error("UPLOAD ERROR:", err.message);
-    res.status(500).json({ success: false, message: "Upload failed" });
-  }
-});
-
-// --- 4. MARK AS READ ---
+// --- 3. MARK AS READ ---
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res) => {
   try {
+    await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
     const result = await Message.updateMany(
       { senderId: otherUserId, receiverId: myId, status: { $ne: 'seen' } },
       { $set: { status: 'seen', seenAt: new Date() } }
     );
+    
+    const io = req.app.get('socketio');
+    if (io) {
+      io.to(otherUserId.toString()).emit("messages-seen", { readerId: myId });
+    }
+
     res.json({ success: true, count: result.modifiedCount });
   } catch (err) {
     res.status(500).json({ success: false });
   }
 });
 
-// --- 5. GET PRESIGNED URL FOR CLIENT-SIDE UPLOAD ---
+// --- 4. GET PRESIGNED URL FOR CLIENT-SIDE UPLOAD ---
 router.post('/get-upload-url', authenticateToken, async (req, res) => {
   try {
     const { fileName, fileType } = req.body;
@@ -251,16 +184,10 @@ router.post('/get-upload-url', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 6. CONFIRM CLIENT-SIDE UPLOAD ---
+// --- 5. CONFIRM CLIENT-SIDE UPLOAD ---
 router.post('/confirm-upload', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase(); 
-    let retries = 0;
-    while (mongoose.connection.readyState !== 1 && retries < 4) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      retries++;
-    }
-
     const { receiverId, text, fileUrl, fileType } = req.body;
     const receiverModel = req.user.role === 'agent' ? 'User' : 'Agent';
     const senderModel = req.user.role === 'agent' ? 'Agent' : 'User';
@@ -278,14 +205,16 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
     });
     await newMessage.save();
 
-    // Resolve pre-signed secure URL mapping
     const signedUrlForFrontend = await getPrivateUrl(fileUrl);
     const outputPayload = { ...newMessage.toObject(), fileUrl: signedUrlForFrontend };
 
-    // --- NOTIFICATION & SOCKET PIPELINE ---
     const TargetModel = receiverModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId);
-    const sender = await (senderModel === 'Agent' ? Agent : User).findById(req.user.id);
+    const SenderModel = senderModel === 'Agent' ? Agent : User;
+
+    // HIGH SPEED CACHE: Pull metadata instantly from memory cache instead of executing heavy queries
+    const receiver = await getUserProfileCached(receiverId, TargetModel, receiverModel.toLowerCase());
+    const sender = await getUserProfileCached(req.user.id, SenderModel, senderModel.toLowerCase());
+
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
@@ -302,9 +231,9 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
       const COOLDOWN = 30 * 60 * 1000;
       const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       if (Date.now() - lastEmail > COOLDOWN) {
-        // FIXED: Standardized signature matching to match your core mailing parameters
-        await sendOfflineNotification(receiver, sender, text || `Sent a file asset`, receiverModel);
+        await redis.del(`${receiverModel.toLowerCase()}:${receiverId}`);
         await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
+        await sendOfflineNotification(receiver, sender, text || `Sent a file asset`, receiverModel);
       }
     }
 
@@ -318,9 +247,10 @@ router.post('/confirm-upload', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 7. DELETE MESSAGE ---
+// --- 6. DELETE MESSAGE ---
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
+    await connectToDatabase();
     const messageId = req.params.id;
     const myId = req.user.id;
     const message = await Message.findOne({ _id: messageId, senderId: myId });

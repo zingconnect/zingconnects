@@ -39,6 +39,7 @@
     "react-phone-input-2": "^2.15.1",
     "react-router-dom": "^7.14.0",
     "recharts": "^3.8.1",
+    "redis": "^5.12.1",
     "simple-peer": "^9.11.1",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
