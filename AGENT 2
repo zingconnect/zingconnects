@@ -18,7 +18,85 @@ function urlBase64ToUint8Array(base64String) {
   }
   return outputArray;
 }
-const socket = io(import.meta.env.VITE_API_URL);
+const socket = io(import.meta.env.VITE_API_URL)
+
+const Sidebar = ({ users, unreadCounts, latestMessages, selectedUser, handleSelectUser, handleLogout, showSidebar, navigate }) => {
+  return (
+    <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col border-r border-gray-100 z-[100]`}>
+      <header className="h-[60px] bg-page-bg px-4 flex justify-between items-center shrink-0 border-b border-gray-100">
+        <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center transition-colors">
+          <BsPersonCircle size={28} className="text-text-secondary" />
+        </button>
+        <BsThreeDotsVertical className="cursor-pointer text-text-secondary hover:text-text-main transition-colors" size={18} />
+      </header>
+      
+      <div className="p-3 bg-card-bg border-b border-gray-50">
+        <div className="bg-input-bg flex items-center px-3 py-2 rounded-xl border border-transparent focus-within:border-gray-200 transition-all">
+          <BsSearch className="text-text-secondary mr-3" size={12} />
+          <input placeholder="Search client networks..." className="bg-transparent text-xs w-full outline-none text-text-main placeholder-gray-400" />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto divide-y divide-gray-50" key={JSON.stringify(unreadCounts)}>
+        {users.length > 0 ? users.map((user) => {
+          const userId = String(user._id);
+          const count = unreadCounts[userId] || 0;
+          const isUnread = count > 0;
+          const lastMessage = latestMessages[userId];
+
+          return (
+            <div
+              key={userId}
+              onClick={() => handleSelectUser(user)}
+              className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
+            >
+              <div className="relative shrink-0">
+                <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
+                  <img src={user.photoUrl} alt={user.firstName} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }} />
+                </div>
+                <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+              </div>
+              
+              <div className="ml-3 flex-1 min-w-0">
+                <div className="flex justify-between items-center mb-0.5">
+                  <h3 className={`text-[13px] font-bold truncate ${isUnread ? 'text-blue-600' : 'text-gray-800'}`}>
+                    {user.firstName} {user.lastName}
+                  </h3>
+                  {isUnread && (
+                    <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
+                      {count}
+                    </div>
+                  )}
+                </div>
+
+                {/* UPDATED: Location Display */}
+                <div className="flex items-center gap-1 text-[10px] text-gray-400 mb-0.5">
+                  <span>{user.city || 'Location N/A'}</span>
+                  {user.city && user.state && <span>•</span>}
+                  <span>{user.state}</span>
+                </div>
+
+                <p className={`text-[11px] truncate ${isUnread ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>
+                  {lastMessage || user.email}
+                </p>
+              </div>
+            </div>
+          );
+        }) : (
+          <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
+            <p className="text-xs font-black uppercase tracking-widest text-gray-400">No Secure Links Established</p>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 border-t border-gray-100 bg-gray-50/50">
+        <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-200 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-[0.98] shadow-sm">
+          <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
+        </button>
+      </div>
+    </aside>
+  );
+};
 
 export const AgentDashboard = () => {
   const navigate = useNavigate(); 
@@ -37,6 +115,8 @@ export const AgentDashboard = () => {
   const cameraInputRef = useRef(null);
   const lastNotifiedId = useRef(null);
    const localAudioRef = useRef(null);
+   const selectedUserRef = useRef(selectedUser);
+const agentDataRef = useRef(null);
    
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
@@ -276,27 +356,37 @@ const triggerNotification = (data) => {
       }
     };
   }, [socket, callStatus, isSpeakerOn]);
+
+// 1. Ensure refs are updated whenever the state changes
+useEffect(() => {
+  selectedUserRef.current = selectedUser;
+  agentDataRef.current = agentData;
+}, [selectedUser, agentData]);
+
 useEffect(() => {
   if (!socket) return;
 
-  const handleIncomingMessage = (data) => {
-  if (data._id && data._id === lastNotifiedId.current) return;
-  lastNotifiedId.current = data._id;
-
+ const handleIncomingMessage = (data) => {
   const senderId = String(data.senderId);
-  const isSentByAgent = String(data.senderId) === String(agentData?._id);
-  setLatestMessages(prev => ({ ...prev, [senderId]: data.text || "Sent a file" }));
-  if (!isSentByAgent) {
-    triggerNotification(data);
-    setUnreadCounts(prev => {
-      if (selectedUser && senderId === String(selectedUser._id)) {
-        return { ...prev, [senderId]: 0 };
-      }
-      return { ...prev, [senderId]: (prev[senderId] || 0) + 1 };
-    });
-  }
-  if (selectedUser && senderId === String(selectedUser._id)) {
-    setMessages((prev) => {
+  const activeSelectedUser = selectedUserRef.current;
+
+  // 1. Force a new object reference to trigger re-renders
+  setUnreadCounts(prev => {
+    const isCurrentChat = activeSelectedUser && senderId === String(activeSelectedUser._id);
+    
+    // If it's the open chat, reset to 0, otherwise increment
+    const newCount = isCurrentChat ? 0 : (prev[senderId] || 0) + 1;
+    
+    // Spread into a brand new object to ensure React detects the change
+    return { 
+      ...prev, 
+      [senderId]: newCount 
+    };
+  });
+
+  // 2. Update message list
+  if (activeSelectedUser && senderId === String(activeSelectedUser._id)) {
+    setMessages(prev => {
       if (prev.some(m => m._id === data._id)) return prev;
       return [...prev, data];
     });
@@ -304,13 +394,41 @@ useEffect(() => {
 };
 
   socket.on('new-message', handleIncomingMessage);
-  return () => socket.off('new-message', handleIncomingMessage);
-}, [socket, agentData, selectedUser]); // ADDED selectedUser HERE
+    return () => socket.off('new-message', handleIncomingMessage);
+}, [socket]); // Only re-run if socket changes
 
-const selectedUserRef = useRef(selectedUser);
 useEffect(() => {
-  selectedUserRef.current = selectedUser;
-}, [selectedUser]); 
+  if (!selectedUser) return;
+  const runSync = async () => {
+    try {
+      const token = localStorage.getItem('agentToken');
+      const response = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (data.success) {
+        setMessages(prev => {
+          const newMessages = data.messages;
+          const allMessages = [...prev];
+          
+          newMessages.forEach(msg => {
+            if (!allMessages.find(m => m._id === msg._id)) {
+              allMessages.push(msg);
+            }
+          });
+          return allMessages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        });
+      }
+    } catch (err) {
+      console.error("Background sync jitter:", err);
+    }
+  };
+  runSync();
+  const interval = setInterval(runSync, 30000); 
+  
+  return () => clearInterval(interval);
+}, [selectedUser]);
+
 
  useEffect(() => {
     const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
@@ -361,6 +479,44 @@ useEffect(() => {
     return () => clearTimeout(timeoutId);
   }
 }, [messages, isUploading, agentData?._id]);
+
+// Add these helper functions inside your component
+const playNotificationSound = () => {
+  if (audioUnlocked) {
+    const audio = new Audio('/sounds/notification.mp3'); // Ensure this path is correct
+    audio.play().catch(e => console.error("Sound play failed", e));
+  }
+};
+
+const triggerBrowserNotification = (message) => {
+  if (Notification.permission === "granted" && document.hidden) {
+    new Notification("New Message from ZingConnect", {
+      body: message.text,
+      icon: '/favicon.ico'
+    });
+  }
+};
+
+useEffect(() => {
+  if (!socket) return;
+
+  const handleNewMessage = (message) => {
+    if (message.senderId !== selectedUser?._id) {
+        playNotificationSound();
+        triggerBrowserNotification(message);
+    }
+        setUnreadCounts(prev => ({
+        ...prev,
+        [message.senderId]: (prev[message.senderId] || 0) + 1
+    }));
+  };
+
+  socket.on('new-message', handleNewMessage);
+  
+  return () => {
+    socket.off('new-message', handleNewMessage);
+  };
+}, [socket, selectedUser?._id]); // Dependency on selectedUser ensures we know who NOT to notify
 
   // --- MEMORY DISPOSAL EFFECT ---
   useEffect(() => {
@@ -746,6 +902,7 @@ const handleScroll = async (e) => {
     setIsFetchingOlder(false);
   }
 };
+
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
     setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
@@ -1063,87 +1220,16 @@ const handleSelectUser = async (user) => {
         </div>
       )}
 
-   {/* --- SIDEBAR --- */}
-<aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col border-r border-gray-100 z-[100]`}>
-  <header className="h-[60px] bg-page-bg px-4 flex justify-between items-center shrink-0 border-b border-gray-100">
-    <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center transition-colors">
-      <BsPersonCircle size={28} className="text-text-secondary" />
-    </button>
-    <BsThreeDotsVertical className="cursor-pointer text-text-secondary hover:text-text-main transition-colors" size={18} />
-  </header>
-  
-  <div className="p-3 bg-card-bg border-b border-gray-50">
-    <div className="bg-input-bg flex items-center px-3 py-2 rounded-xl border border-transparent focus-within:border-gray-200 transition-all">
-      <BsSearch className="text-text-secondary mr-3" size={12} />
-      <input placeholder="Search client networks..." className="bg-transparent text-xs w-full outline-none text-text-main placeholder-gray-400" />
-    </div>
-  </div>
-
-  <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-    {users.length > 0 ? users.map((user) => {
-      const userId = String(user._id);
-      const count = unreadCounts[userId] || 0;
-      console.log(`User: ${user.firstName}, ID: ${userId}, Count: ${count}`);
-      const isUnread = count > 0;
-      const lastMessage = latestMessages[userId];
-
-      return (
-        <div
-          key={userId}
-          onClick={() => handleSelectUser(user)}
-          className={`flex items-center px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50 ${selectedUser?._id === user._id ? 'bg-gray-100/80' : ''}`}
-        >
-          <div className="relative shrink-0">
-            <div className="w-11 h-11 rounded-full overflow-hidden border border-gray-100 bg-white">
-              <img
-                src={user.photoUrl}
-                alt={user.firstName}
-                className="w-full h-full object-cover"
-                onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
-              />
-            </div>
-            <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-3.5 h-3.5 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
-          </div>
-          
-          <div className="ml-3 flex-1 min-w-0">
-            <div className="flex justify-between items-center mb-0.5">
-              <h3 className={`text-[13px] font-bold truncate ${isUnread ? 'text-blue-600' : 'text-gray-800'}`}>
-                {user.firstName} {user.lastName}
-              </h3>
-              {isUnread && (
-                <div className="bg-blue-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm animate-pulse">
-                  {count}
-                </div>
-              )}
-            </div>
-            
-            <p className={`text-[11px] truncate ${isUnread ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>
-              {lastMessage || user.email}
-            </p>
-            
-            {(user.city || user.state) && !isUnread && (
-              <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
-                <span className="opacity-70">📍</span>
-                {user.city}{user.city && user.state ? ', ' : ''}{user.state}
-              </p>
-            )}
-          </div>
-        </div>
-      );
-    }) : (
-      <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
-        <p className="text-xs font-black uppercase tracking-widest text-gray-400">No Secure Links Established</p>
-        <p className="text-[11px] text-gray-400 mt-1 max-w-[200px]">Waiting for downstream connections to hook into routing tables.</p>
-      </div>
-    )}
-  </div>
-
-  <div className="p-4 border-t border-gray-100 bg-gray-50/50">
-    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-200 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-[0.98] shadow-sm">
-      <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
-    </button>
-  </div>
-</aside>
+<Sidebar 
+  users={users}
+  unreadCounts={unreadCounts}
+  latestMessages={latestMessages}
+  selectedUser={selectedUser}
+  handleSelectUser={handleSelectUser}
+  handleLogout={handleLogout}
+  showSidebar={showSidebar}
+  navigate={navigate}
+/>
 
       {/* --- MAIN CHAT INTERFACE --- */}
       <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
