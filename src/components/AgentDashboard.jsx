@@ -7,7 +7,6 @@ import {
   BsTelephoneFill, BsTelephoneXFill, BsXLg, BsGearFill, BsPlusLg, BsSend, BsPaperclip, BsCameraFill  
 } from 'react-icons/bs';
 import { useAgentCall } from '../context/AgentCallContext';
-import { useSocket } from '../context/SocketProvider';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);

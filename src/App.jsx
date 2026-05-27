@@ -19,7 +19,6 @@ import ZingDashboard from './components/ZingDashboard';
 import { UserCallProvider } from './context/UserCallContext';
 import { AgentCallProvider } from './context/AgentCallContext';
 
-// --- AGENT COORD LAYOUT COMPONENT ---
 const AgentLayoutWrapper = () => {
   return (
     <AgentCallProvider>
