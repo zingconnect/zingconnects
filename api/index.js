@@ -1498,7 +1498,6 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to save subscription" });
   }
 });
-
 // --- SEND MESSAGE ROUTE (HYBRID NOTIFICATION LOGIC WITH HIGH-SPEED REDIS CACHE) ---
 app.post('/api/messages/send', authenticateToken, async (req, res) => {
   try {
@@ -1514,12 +1513,12 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
     // Grab the global Redis client context
     const redis = req.app.get('redisClient');
 
-    // 1. Create and Save Message
+    // 1. Create and Save Message (Explicit payload formatting alignment)
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
       receiverId,
-      receiverModel: receiverModel, 
+      receiverModel: receiverModel || 'Agent', 
       text,
       notificationSent: false 
     });
@@ -1531,7 +1530,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
 
     if (redis) {
       try {
-        // Attempt to fetch profiles from the high-speed Redis Cache
         const [cachedReceiver, cachedSender] = await Promise.all([
           redis.get(`profile:${receiverId}`),
           redis.get(`profile:${myId}`)
@@ -1546,7 +1544,8 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
 
     // If cache missed, query MongoDB and update the Redis Cache cluster (Expires in 30 minutes)
     if (!receiver) {
-      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      // Direct fallbacks if models aren't bound inside your main global scopes
+      const TargetModel = receiverModel === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
       receiver = await TargetModel.findById(receiverId).lean();
       if (receiver && redis) {
         await redis.setEx(`profile:${receiverId}`, 1800, JSON.stringify(receiver)).catch(() => {});
@@ -1554,37 +1553,47 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
     }
 
     if (!sender) {
-      const SenderModel = senderRole === 'Agent' ? Agent : User;
+      const SenderModel = senderRole === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
       sender = await SenderModel.findById(myId).lean();
       if (sender && redis) {
         await redis.setEx(`profile:${myId}`, 1800, JSON.stringify(sender)).catch(() => {});
       }
     }
 
-    // 3. Socket.io Connection Check
+    // 3. Safe Socket.io Context Guard
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+    let isOnline = false;
+    if (io && io.sockets && io.sockets.adapter) {
+      isOnline = io.sockets.adapter.rooms.has(receiverId.toString());
+    }
 
+    // 4. Web Push Notification Engine (Isolated in a protective safe-catch bubble)
     if (receiver && receiver.pushSubscription) {
       try {
-        const payload = JSON.stringify({
-          title: `New Message from ${sender.firstName || 'Zing'}`,
-          body: text || "Sent an attachment",
-          data: { 
-            url: receiverModel === 'Agent' 
-              ? `/agent/dashboard?userId=${myId}` 
-              : `/user/dashboard?agentId=${myId}` 
-          }
-        });
+        // Double-check if the webpush library dependency instance is loaded safely
+        if (typeof webpush !== 'undefined') {
+          const payload = JSON.stringify({
+            title: `New Message from ${sender?.firstName || 'Zing'}`,
+            body: text || "Sent an attachment",
+            data: { 
+              url: receiverModel === 'Agent' 
+                ? `/agent/dashboard?userId=${myId}` 
+                : `/user/dashboard?agentId=${myId}` 
+            }
+          });
 
-        await webpush.sendNotification(receiver.pushSubscription, payload);
-        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
-        newMessage.notificationSent = true;
+          await webpush.sendNotification(receiver.pushSubscription, payload);
+          await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+          newMessage.notificationSent = true;
+        } else {
+          console.warn("⚠️ Webpush module dependency is not imported/defined at top of file.");
+        }
       } catch (pushErr) {
         console.error("Push delivery failed:", pushErr.message);
       }
     }
 
+    // 5. Offline Email Routing Engine
     if (!isOnline && receiver) {
       try {
         const COOLDOWN = 30 * 60 * 1000; 
@@ -1592,16 +1601,18 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmailTime > COOLDOWN) {
-          await sendOfflineNotification(receiver, sender, text, receiverModel);
-          
-          const TargetModel = receiverModel === 'Agent' ? Agent : User;
-          await TargetModel.findByIdAndUpdate(receiverId, { 
-            lastNotificationEmail: new Date() 
-          });
+          // Wrapped safely so a timing out mail connection won't trigger a 500 API collapse
+          if (typeof sendOfflineNotification === 'function') {
+            await sendOfflineNotification(receiver, sender, text, receiverModel);
+            
+            const TargetModel = receiverModel === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
+            await TargetModel.findByIdAndUpdate(receiverId, { 
+              lastNotificationEmail: new Date() 
+            });
 
-          // Invalidate the cache item since we modified a field on the document string
-          if (redis) {
-            await redis.del(`profile:${receiverId}`).catch(() => {});
+            if (redis) {
+              await redis.del(`profile:${receiverId}`).catch(() => {});
+            }
           }
         }
       } catch (mailErr) {
@@ -1609,17 +1620,24 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
       }
     }
 
-    // C. REAL-TIME EMIT
-    if (isOnline) {
-      io.to(receiverId.toString()).emit("new-message", newMessage);
+    // 6. Realtime WebSockets Broadcast Engine
+    if (isOnline && io) {
+      try {
+        io.to(receiverId.toString()).emit("new-message", newMessage);
+      } catch (ioEmitErr) {
+        console.error("WebSocket serverless event broadcast skipped:", ioEmitErr.message);
+      }
     }
 
-    res.status(201).json({ success: true, message: newMessage });
+    // 7. Standardized Success Return Frame Object
+    return res.status(201).json({ success: true, message: newMessage });
+
   } catch (err) {
-    console.error("SEND MESSAGE ERROR:", err);
-    res.status(500).json({ success: false, message: "Server failed to process message" });
+    console.error("CRITICAL BACKEND COLLAPSE:", err);
+    return res.status(500).json({ success: false, message: "Server failed to process message" });
   }
 });
+
 // --- GET CHAT MESSAGES WITH SANITIZATION ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {

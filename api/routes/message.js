@@ -53,7 +53,6 @@ router.get('/:otherUserId', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Error loading chat history" });
   }
 });
-
 // --- 2. SEND TEXT MESSAGE ---
 router.post('/send', authenticateToken, async (req, res) => {
   try {
@@ -68,6 +67,7 @@ router.post('/send', authenticateToken, async (req, res) => {
 
     const finalReceiverModel = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
     
+    // 1. Create and Save Message (Ensures persistence ahead of side-effects)
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
@@ -78,36 +78,53 @@ router.post('/send', authenticateToken, async (req, res) => {
     });
     await newMessage.save();
 
-    const TargetModel = finalReceiverModel === 'Agent' ? Agent : User;
-    const SenderModel = senderRole === 'Agent' ? Agent : User;
+    // Dynamically retrieve model blueprints from the Mongoose registry
+    const TargetModel = finalReceiverModel === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
+    const SenderModel = senderRole === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
 
-    // HIGH SPEED CACHE: Pull fields from Redis to construct metadata payloads instantly
-    const receiver = await getUserProfileCached(receiverId, TargetModel, finalReceiverModel.toLowerCase());
-    const sender = await getUserProfileCached(myId, SenderModel, senderRole.toLowerCase());
+    // 2. Fetch Profiles from Cache/DB via helper contexts
+    let receiver = null;
+    let sender = null;
+    try {
+      receiver = await getUserProfileCached(receiverId, TargetModel, finalReceiverModel.toLowerCase());
+      sender = await getUserProfileCached(myId, SenderModel, senderRole.toLowerCase());
+    } catch (cacheErr) {
+      console.warn("⚠️ Profile resolution fallback:", cacheErr.message);
+      // Absolute fallback if cache helpers fail under serverless cold-starts
+      receiver = await TargetModel.findById(receiverId).lean();
+      sender = await SenderModel.findById(myId).lean();
+    }
 
+    // 3. Safe Socket Instance Checks for Vercel
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+    let isOnline = false;
+    if (io && io.sockets && io.sockets.adapter) {
+      isOnline = io.sockets.adapter.rooms.has(receiverId.toString());
+    }
 
-    // --- WEB PUSH ---
+    // 4. --- WEB PUSH ENGAGEMENT ENGINE ---
     if (receiver?.pushSubscription) {
       try {
-        const payload = JSON.stringify({
-          title: `New Message from ${sender?.firstName || 'Zing'}`,
-          body: text,
-          data: { 
-            url: finalReceiverModel === 'Agent' 
-              ? `/agent/dashboard?userId=${myId}` 
-              : `/user/dashboard?agentId=${myId}` 
-          }
-        });
-        await webpush.sendNotification(receiver.pushSubscription, payload);
-        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+        if (typeof webpush !== 'undefined') {
+          const payload = JSON.stringify({
+            title: `New Message from ${sender?.firstName || 'Zing'}`,
+            body: text,
+            data: { 
+              url: finalReceiverModel === 'Agent' 
+                ? `/agent/dashboard?userId=${myId}` 
+                : `/user/dashboard?agentId=${myId}` 
+            }
+          });
+          await webpush.sendNotification(receiver.pushSubscription, payload);
+          await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+          newMessage.notificationSent = true;
+        }
       } catch (pushErr) {
         console.error("Push Notification Failed:", pushErr.message);
       }
     }
 
-    // --- EMAIL OFFLINE NOTIFICATION ---
+    // 5. --- EMAIL OFFLINE NOTIFICATION ENGINE ---
     if (!isOnline && receiver) {
       try {
         const COOLDOWN = 30 * 60 * 1000; 
@@ -115,25 +132,40 @@ router.post('/send', authenticateToken, async (req, res) => {
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmailTime > COOLDOWN) {
-          // Invalidate the cache key locally before modifying the database instance field
-          await redis.del(`${finalReceiverModel.toLowerCase()}:${receiverId}`);
+          // FIX: Pull down Redis from the app context interface safely to avoid runtime crashes
+          const redisClient = req.app.get('redisClient');
+          if (redisClient) {
+            // Clear both potential key schemas to prevent un-synced cache mutations
+            await redisClient.del(`${finalReceiverModel.toLowerCase()}:${receiverId}`).catch(() => {});
+            await redisClient.del(`profile:${receiverId}`).catch(() => {});
+          }
+
           await TargetModel.findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
           
-          await sendOfflineNotification(receiver, sender, text, finalReceiverModel);
+          if (typeof sendOfflineNotification === 'function') {
+            await sendOfflineNotification(receiver, sender, text, finalReceiverModel);
+          }
         }
       } catch (mailErr) {
         console.error("Email Throttle Error:", mailErr.message);
       }
     }
 
+    // 6. --- REAL-TIME SERVER EMIT ---
     if (isOnline && io) {
-      io.to(receiverId.toString()).emit("new-message", newMessage);
+      try {
+        io.to(receiverId.toString()).emit("new-message", newMessage);
+      } catch (emitErr) {
+        console.error("Serverless WS propagation bypassed:", emitErr.message);
+      }
     }
 
-    res.status(201).json({ success: true, message: newMessage });
+    // 7. --- INSTANT API RETURN TRACER ---
+    return res.status(201).json({ success: true, message: newMessage });
+
   } catch (err) {
     console.error("Critical Send Error:", err);
-    res.status(500).json({ success: false, message: "Failed to send", error: err.message });
+    return res.status(500).json({ success: false, message: "Failed to send", error: err.message });
   }
 });
 

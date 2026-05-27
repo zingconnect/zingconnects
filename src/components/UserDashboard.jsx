@@ -754,19 +754,20 @@ const handleFileChange = (e) => {
 
     pollingRef.current = pollInterval;
   };
-
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
+const handleSendMessage = async (e) => {
+    if (e) e.preventDefault();
     if (!newMessage.trim() || !agent?._id) return;
     
     const textToSend = newMessage;
     const tempId = Date.now().toString(); 
+    
+    // 1. Instantly clear out input field to prevent double taps
     setNewMessage(''); 
 
     const pendingMessage = {
       _id: tempId,
       tempId: tempId,
-      senderId: userData._id,
+      senderId: userData?._id,
       senderModel: 'User',
       text: textToSend,
       receiverModel: 'Agent',
@@ -774,6 +775,7 @@ const handleFileChange = (e) => {
       createdAt: new Date().toISOString(),
       isTemp: true
     };
+    
     setMessages(prev => [...prev, pendingMessage]);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
 
@@ -787,28 +789,45 @@ const handleFileChange = (e) => {
         },
         body: JSON.stringify({
           receiverId: agent._id,
-          receiverModel: 'Agent', // 👈 ADDED THIS
+          receiverModel: 'Agent',
           text: textToSend,
           fileType: 'text',
           replyToId: replyingTo?._id 
         })
       });
 
+      // 2. CRITICAL VERCEL SAFEGUARD: Handle non-JSON or HTTP error crashes cleanly 
+      if (!response.ok) {
+        throw new Error(`Server returned HTTP status ${response.status}`);
+      }
+
       const data = await response.json();
-      if (data.success) {
+      
+      if (data && data.success) {
         setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
-        socket.emit("sendMessage", data.message); 
+        
+        // 3. SAFE SOCKET WRAPPER: Serverless routing safety gate
+        if (typeof socket !== 'undefined' && socket && socket.connected) {
+          try {
+            socket.emit("sendMessage", data.message); 
+          } catch (socketErr) {
+            console.warn("⚠️ WebSocket broadcast skipped via Serverless Node context:", socketErr);
+          }
+        }
+        
         setReplyingTo(null);
       } else {
-        throw new Error();
+        throw new Error(data?.message || "Failed execution status.");
       }
     } catch (err) {
+      console.error("❌ Send Pipeline Failed:", err);
+      // Update the temp UI bubble state exactly once without compounding array stacks
       setMessages(prev => prev.map(m => 
-        m._id === tempId ? { ...m, status: 'failed' } : m
+        (m._id === tempId || m.tempId === tempId) ? { ...m, status: 'failed' } : m
       ));
     }
   };
-
+  
   const handleResend = (msg) => {
     setMessages(prev => prev.filter(m => m._id !== msg._id));
     if (msg.fileType === 'image' || msg.fileType === 'video') {
