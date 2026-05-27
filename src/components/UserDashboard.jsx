@@ -159,8 +159,6 @@ export const UserDashboard = () => {
   const [formData, setFormData] = useState({
     firstName: '', lastName: '', phone: '', dob: '', gender: '', city: '', state: '' 
   });
-
-  // Consuming signaling states and event loops straight out of UserCallContext
   const { 
     callStatus, setCallStatus, activeCall, setActiveCall, activeCaller, setActiveCaller, isMuted, setIsMuted, isSpeakerOn, setIsSpeakerOn,
     callTime, setCallTime, peerConnected, setPeerConnected, isEnding, setIsEnding, liveKitToken, setLiveKitToken, showFullScreenCall, setShowFullScreenCall,
