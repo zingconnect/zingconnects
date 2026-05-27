@@ -1498,7 +1498,8 @@ app.post('/api/save-subscription', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to save subscription" });
   }
 });
-// --- SEND MESSAGE ROUTE (HYBRID NOTIFICATION LOGIC WITH HIGH-SPEED REDIS CACHE) ---
+
+// --- SEND MESSAGE ROUTE (HYBRID NOTIFICATION LOGIC) ---
 app.post('/api/messages/send', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1510,131 +1511,77 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Text and receiverId are required" });
     }
 
-    // Grab the global Redis client context
-    const redis = req.app.get('redisClient');
-
-    // 1. Create and Save Message (Explicit payload formatting alignment)
+    // 1. Create and Save Message
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
       receiverId,
-      receiverModel: receiverModel || 'Agent', 
+      receiverModel: receiverModel, // Already passed in body
       text,
       notificationSent: false 
     });
     await newMessage.save();
 
-    // 2. Fetch Receiver and Sender profiles (OPTIMIZED VIA REDIS CLOUD)
-    let receiver = null;
-    let sender = null;
+    // 2. Fetch Receiver and Sender for notification context
+    const TargetModel = receiverModel === 'Agent' ? Agent : User;
+    const receiver = await TargetModel.findById(receiverId);
+    
+    const SenderModel = senderRole === 'Agent' ? Agent : User;
+    const sender = await SenderModel.findById(myId);
 
-    if (redis) {
-      try {
-        const [cachedReceiver, cachedSender] = await Promise.all([
-          redis.get(`profile:${receiverId}`),
-          redis.get(`profile:${myId}`)
-        ]);
-
-        if (cachedReceiver) receiver = JSON.parse(cachedReceiver);
-        if (cachedSender) sender = JSON.parse(cachedSender);
-      } catch (redisErr) {
-        console.error("⚠️ Redis Cache Read Failed, falling back safely to MongoDB:", redisErr.message);
-      }
-    }
-
-    // If cache missed, query MongoDB and update the Redis Cache cluster (Expires in 30 minutes)
-    if (!receiver) {
-      // Direct fallbacks if models aren't bound inside your main global scopes
-      const TargetModel = receiverModel === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
-      receiver = await TargetModel.findById(receiverId).lean();
-      if (receiver && redis) {
-        await redis.setEx(`profile:${receiverId}`, 1800, JSON.stringify(receiver)).catch(() => {});
-      }
-    }
-
-    if (!sender) {
-      const SenderModel = senderRole === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
-      sender = await SenderModel.findById(myId).lean();
-      if (sender && redis) {
-        await redis.setEx(`profile:${myId}`, 1800, JSON.stringify(sender)).catch(() => {});
-      }
-    }
-
-    // 3. Safe Socket.io Context Guard
+    // 3. Socket.io Connection Check
     const io = req.app.get('socketio');
-    let isOnline = false;
-    if (io && io.sockets && io.sockets.adapter) {
-      isOnline = io.sockets.adapter.rooms.has(receiverId.toString());
-    }
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
-    // 4. Web Push Notification Engine (Isolated in a protective safe-catch bubble)
     if (receiver && receiver.pushSubscription) {
       try {
-        // Double-check if the webpush library dependency instance is loaded safely
-        if (typeof webpush !== 'undefined') {
-          const payload = JSON.stringify({
-            title: `New Message from ${sender?.firstName || 'Zing'}`,
-            body: text || "Sent an attachment",
-            data: { 
-              url: receiverModel === 'Agent' 
-                ? `/agent/dashboard?userId=${myId}` 
-                : `/user/dashboard?agentId=${myId}` 
-            }
-          });
+        const payload = JSON.stringify({
+          title: `New Message from ${sender.firstName || 'Zing'}`,
+          body: text || "Sent an attachment",
+          data: { 
+            // Fixed variable from finalReceiverModel to receiverModel
+            url: receiverModel === 'Agent' 
+              ? `/agent/dashboard?userId=${myId}` 
+              : `/user/dashboard?agentId=${myId}` 
+          }
+        });
 
-          await webpush.sendNotification(receiver.pushSubscription, payload);
-          await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
-          newMessage.notificationSent = true;
-        } else {
-          console.warn("⚠️ Webpush module dependency is not imported/defined at top of file.");
-        }
+        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+        newMessage.notificationSent = true;
       } catch (pushErr) {
         console.error("Push delivery failed:", pushErr.message);
       }
     }
+if (!isOnline && receiver) {
+  try {
+    const COOLDOWN = 30 * 60 * 1000; 
+    const now = Date.now();
+    const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
-    // 5. Offline Email Routing Engine
-    if (!isOnline && receiver) {
-      try {
-        const COOLDOWN = 30 * 60 * 1000; 
-        const now = Date.now();
-        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+    if (now - lastEmailTime > COOLDOWN) {
+      // await sendWithSES(receiver, sender, text, receiverModel); 
+      await sendOfflineNotification(receiver, sender, text, receiverModel);
+      
+      // 3. Immediately update the database to prevent "race condition" double-sends
+      await TargetModel.findByIdAndUpdate(receiverId, { 
+        lastNotificationEmail: new Date() 
+      });
+    }
+  } catch (mailErr) {
+    console.error("Email Throttle Error:", mailErr.message);
+  }
+}
 
-        if (now - lastEmailTime > COOLDOWN) {
-          // Wrapped safely so a timing out mail connection won't trigger a 500 API collapse
-          if (typeof sendOfflineNotification === 'function') {
-            await sendOfflineNotification(receiver, sender, text, receiverModel);
-            
-            const TargetModel = receiverModel === 'Agent' ? mongoose.model('Agent') : mongoose.model('User');
-            await TargetModel.findByIdAndUpdate(receiverId, { 
-              lastNotificationEmail: new Date() 
-            });
-
-            if (redis) {
-              await redis.del(`profile:${receiverId}`).catch(() => {});
-            }
-          }
-        }
-      } catch (mailErr) {
-        console.error("Email Throttle Error:", mailErr.message);
-      }
+    // C. REAL-TIME EMIT
+    if (isOnline) {
+      io.to(receiverId.toString()).emit("new-message", newMessage);
     }
 
-    // 6. Realtime WebSockets Broadcast Engine
-    if (isOnline && io) {
-      try {
-        io.to(receiverId.toString()).emit("new-message", newMessage);
-      } catch (ioEmitErr) {
-        console.error("WebSocket serverless event broadcast skipped:", ioEmitErr.message);
-      }
-    }
-
-    // 7. Standardized Success Return Frame Object
-    return res.status(201).json({ success: true, message: newMessage });
-
+    res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
-    console.error("CRITICAL BACKEND COLLAPSE:", err);
-    return res.status(500).json({ success: false, message: "Server failed to process message" });
+    console.error("SEND MESSAGE ERROR:", err);
+    res.status(500).json({ success: false, message: "Server failed to process message" });
   }
 });
 
