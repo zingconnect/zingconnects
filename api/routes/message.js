@@ -1,7 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import webpush from 'web-push';
-import Redis from 'ioredis'; 
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import Agent from '../models/Agent.js';
@@ -13,10 +12,7 @@ import { sendOfflineNotification } from '../utils/mailer.js';
 
 const router = express.Router();
 
-// Initialize connection to your Redis instance used for high-speed caching
-const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379');
 
-// --- 1. GET CHAT HISTORY (WITH PAGINATION AND TIMELINE CURSORS) ---
 router.get('/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
