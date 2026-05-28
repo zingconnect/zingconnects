@@ -107,6 +107,7 @@ const nextStartTimeRef = useRef(0);
 const [hasMore, setHasMore] = useState(true);
 const scrollRef = useRef(null);
 const observerRef = useRef(null);
+const prevScrollHeightRef = useRef(0);
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -128,7 +129,6 @@ const observerRef = useRef(null);
   const [peerConnected, setPeerConnected] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   
-
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingFile, setOnboardingFile] = useState(null);
@@ -1146,20 +1146,13 @@ useEffect(() => {
     return () => clearInterval(interval);
   }, [navigate]);
 
-  useEffect(() => {
-  fetchMessages(true);
-  const interval = setInterval(() => fetchMessages(true), 5000);
-  return () => clearInterval(interval);
-}, [fetchMessages]); // Dependency on the stable useCallback
 
 const fetchMessages = useCallback(async (isInitial = false) => {
   const token = localStorage.getItem('userToken');
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
   const targetAgentId = agent?._id || agent?.id;
 
   if (!token || !targetAgentId) return;
-
-  // Pagination logic: use the oldest message as a cursor
   const oldestMessage = isInitial || messages.length === 0 ? null : messages[0];
   const url = `${API_BASE_URL}/api/messages/${targetAgentId}?limit=${isInitial ? 50 : 20}${
     oldestMessage ? `&before=${oldestMessage._id}` : ''
@@ -1173,10 +1166,7 @@ const fetchMessages = useCallback(async (isInitial = false) => {
       const incomingMessages = data.messages || [];
 
       if (isInitial) {
-        // --- POLLING / INITIAL LOAD ---
         const lastMsg = incomingMessages[incomingMessages.length - 1];
-
-        // 1. Silent Notification & Seen Logic
         if (lastMsg && lastMsg.senderModel === 'Agent' && lastMsg.status !== 'seen' && lastMsg._id !== lastNotifiedId.current) {
           lastNotifiedId.current = lastMsg._id;
           if (notificationSound.current) {
@@ -1195,8 +1185,6 @@ const fetchMessages = useCallback(async (isInitial = false) => {
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
-
-        // 2. State Sync: Merge with in-flight messages
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
           const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
@@ -1219,6 +1207,13 @@ const fetchMessages = useCallback(async (isInitial = false) => {
     if (isInitial) setLoading(false);
   }
 }, [agent?._id, agent?.id, messages]);
+
+  useEffect(() => {
+  fetchMessages(true);
+  const interval = setInterval(() => fetchMessages(true), 5000);
+  return () => clearInterval(interval);
+}, [fetchMessages]); // Dependency on the stable useCallback
+
 
 
 const handleFileChange = (e) => {
