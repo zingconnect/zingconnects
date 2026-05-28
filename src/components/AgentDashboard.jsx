@@ -1278,7 +1278,7 @@ if (activeStatus) {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   const userData = await usersRes.json();
-  
+  console.log("API Response Users:", userData.users); // <--- CHECK THIS LOG!
   if (userData.success && Array.isArray(userData.users)) {
     setUsers(userData.users);
     const initialUnreadCounts = {};
@@ -1699,8 +1699,6 @@ useEffect(() => {
 
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
-
-    // Use the REF to check the current state
     const currentChat = selectedUserRef.current;
     const isChattingWithSender = currentChat && (data.senderId === currentChat._id || data.senderId === currentChat.id);
     
@@ -1719,11 +1717,14 @@ useEffect(() => {
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
     } else {
-      // B. Always update the badge count if NOT in the current chat
-      setUnreadCounts(prev => ({ ...prev, [data.senderId]: (prev[data.senderId] || 0) + 1 }));
-    }
+      setUnreadCounts(prev => {
+      const updated = { ...prev };
+      const senderId = String(data.senderId); // Force string to match sidebar key
+      updated[senderId] = (updated[senderId] || 0) + 1;
+      return updated; 
+    });
+  }
 
-    // C. Always trigger notification/sound if it's a User message
     if (data.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
@@ -2226,6 +2227,11 @@ return (
       // 1. Ensure a string ID for reliable comparison and lookup
       const userId = String(user._id);
       const count = unreadCounts[userId] || 0;
+      {(() => {
+  console.log("Current unreadCounts State:", unreadCounts);
+  console.log("Checking ID:", userId, "Value:", unreadCounts[userId]);
+  return null;
+})()}
 
       return (
         <div
@@ -2250,7 +2256,7 @@ return (
             </div>
 
             {/* 2. Badge: Render only if count > 0, using the safe 'count' variable */}
-            {count > 99 && (
+            {count > 0 && (
               <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-10 transition-all duration-300 transform scale-100">
                 {count > 99 ? '99+' : count}
               </div>
