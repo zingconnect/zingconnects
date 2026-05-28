@@ -995,31 +995,33 @@ useEffect(() => {
     }
   };
 }, [agentData?._id, callStatus]); // Triggers poll only when status returns to 'idle'
-
 useEffect(() => {
   const handleVisibilityChange = async () => {
     if (document.visibilityState === 'visible') {
-      console.log("📱 ZingConnect: App returned to foreground.");
-      if (callStatus !== 'idle') {
-        console.log("📞 Call active. Skipping re-sync to maintain connection.");
-        return; 
-      }
-
-      if (socket) {
-        if (agentData?._id) {
-          socket.emit("join-main-room", agentData._id.toString());
-        }
+      // 1. Maintain connection if necessary
+      if (socket && agentData?._id) {
         if (!socket.connected) socket.connect();
+        socket.emit("join-main-room", agentData._id.toString());
       }
-
-      if (selectedUser?._id) {
+      if (callStatus === 'idle' && selectedUser?._id) {
         const token = localStorage.getItem('agentToken');
         try {
           const response = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           const data = await response.json();
-          if (data.success) setMessages(data.messages);
+          
+          if (data.success && Array.isArray(data.messages)) {
+            setMessages(prev => {
+              const lastPrev = prev[prev.length - 1];
+              const lastNew = data.messages[data.messages.length - 1];
+              
+              if (lastPrev && lastNew && lastPrev._id === lastNew._id) {
+                return prev; // No new messages, keep current state
+              }
+              return data.messages;
+            });
+          }
         } catch (err) {
           console.warn("Message catch-up failed:", err);
         }
@@ -1029,8 +1031,7 @@ useEffect(() => {
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-}, [agentData?._id, selectedUser?._id, callStatus]);
-
+}, [agentData?._id, selectedUser?._id, callStatus, socket]);
 
 useEffect(() => {
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
@@ -1444,31 +1445,34 @@ const handleDeleteMessage = async (msgId) => {
     console.error("Delete request failed:", err);
   }
 };
-
 const loadOlderMessages = useCallback(async () => {
-  if (loadingMore || !hasMore || !selectedUser) return;
+  // 1. Guard clause: Ensure we don't trigger while loading or if no messages/user
+  if (loadingMore || !hasMore || !selectedUser?._id) return;
   
   setLoadingMore(true);
+  
   const scrollContainer = scrollRef.current;
+  if (!scrollContainer) return;
+  
+  // Capture current state before the fetch
   const previousScrollHeight = scrollContainer.scrollHeight;
 
   try {
     const token = localStorage.getItem('agentToken');
+    // Using messages.length from the closure is fine, 
+    // but ensure your component state 'messages' is updated correctly.
     const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${messages.length}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     
     const data = await response.json();
-    if (data.success && data.messages.length > 0) {
+    
+    if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
       setMessages(prev => [...data.messages, ...prev]);
-      if (data.messages.length < 30) setHasMore(false);
-      
-      // Preserve scroll position: Wait for render, then adjust
-      requestAnimationFrame(() => {
-        if (scrollContainer) {
-          const newScrollHeight = scrollContainer.scrollHeight;
-          scrollContainer.scrollTop = newScrollHeight - previousScrollHeight;
-        }
+            if (data.messages.length < 30) setHasMore(false);
+            requestAnimationFrame(() => {
+        const newScrollHeight = scrollContainer.scrollHeight;
+        scrollContainer.scrollTop = newScrollHeight - previousScrollHeight;
       });
     } else {
       setHasMore(false);
@@ -1478,7 +1482,7 @@ const loadOlderMessages = useCallback(async () => {
   } finally {
     setLoadingMore(false);
   }
-}, [loadingMore, hasMore, selectedUser, messages.length]);
+}, [loadingMore, hasMore, selectedUser?._id, messages.length]);
 
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
@@ -1542,6 +1546,7 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
+
   const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
@@ -1602,66 +1607,19 @@ useEffect(() => {
   }
 }, [users, navigate]); // Fires as soon as the user list is loaded from the API
 
-
 useEffect(() => {
   const container = scrollRef.current;
   if (!container) return;
 
   const handleScroll = () => {
-    if (container.scrollTop <= 10 && !loadingMore && hasMore) {
+    if (container.scrollTop <= 50 && !loadingMore && hasMore) {
       loadOlderMessages();
     }
   };
+  
   container.addEventListener('scroll', handleScroll);
   return () => container.removeEventListener('scroll', handleScroll);
-}, [loadOlderMessages]); // Only re-bind if the load function changes
-
-useEffect(() => {
-  if (!isSubscribed || !agentData?._id) return;
-
-  const refreshData = async () => {
-    // Don't poll if we are busy in a call
-    if (['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
-    
-    const token = localStorage.getItem('agentToken');
-    try {
-      const userRes = await fetch('/api/agents/my-users', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const userData = await userRes.json();
-      if (userData.success) setUsers(userData.users);
-      if (selectedUser?._id && document.visibilityState === 'visible') {
-        const msgRes = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const msgData = await msgRes.json();
-        
-        if (msgData.success && Array.isArray(msgData.messages)) {
-          const incomingMsgs = msgData.messages;
-          const targetLatestMsg = incomingMsgs[incomingMsgs.length - 1];
-          if (targetLatestMsg && targetLatestMsg.senderModel === 'User' && targetLatestMsg._id !== lastNotifiedId.current) {
-            lastNotifiedId.current = targetLatestMsg._id;
-            
-            if (notificationSound.current) {
-              notificationSound.current.currentTime = 0;
-              notificationSound.current.play().catch(() => {});
-            }
-          }
-
-          setMessages(prev => {
-            const isNew = incomingMsgs.length !== prev.length || 
-                          (incomingMsgs[0]?._id !== prev[0]?._id) ||
-                          (incomingMsgs[incomingMsgs.length - 1]?._id !== prev[prev.length - 1]?._id);
-            return isNew ? incomingMsgs : prev;
-          });
-        }
-      }
-    } catch (err) { console.warn("Refresh jitter fallback skipped"); }
-  };
-
-  const interval = setInterval(refreshData, 5000);
-  return () => clearInterval(interval);
-}, [isSubscribed, selectedUser?._id, callStatus]);
+}, [loadOlderMessages, loadingMore, hasMore]); // Added missing deps
 
 useEffect(() => {
   const setupNotifications = async () => {
@@ -1779,8 +1737,8 @@ useEffect(() => {
       }
 
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-      if (Notification.permission === "granted" && shouldShowPopup) {
-        const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
+    if (Notification.permission === "granted" && shouldShowPopup && !document.hasFocus()) {
+          const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
           body: data.text || "Sent a file",
           icon: data.senderPhoto || '/favicon.ico',
           tag: 'zing-msg',
@@ -1801,10 +1759,53 @@ useEffect(() => {
 }, [socket, selectedUser]);
 
 useEffect(() => {
+  // 1. Browser Support Check
   if (!("Notification" in window)) {
-    console.log("This browser does not support desktop notifications");
-  } else if (Notification.permission !== "granted") {
+    console.warn("This browser does not support desktop notifications.");
+    return;
+  }
+
+  // 2. Request permission if not already granted
+  if (Notification.permission === "default") {
     Notification.requestPermission();
+  }
+    const setupPush = async () => {
+    try {
+      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
+      if (!publicKey) return;
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return;
+
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+      
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey)
+        });
+      }
+
+      const token = localStorage.getItem('agentToken');
+      if (!token) return;
+
+      await fetch('/api/save-subscription', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ subscription }) 
+      });
+      console.log("✅ Agent Mobile Push Synced to DB");
+    } catch (err) {
+      console.error("Agent Push setup failed:", err);
+    }
+  };
+
+  if ('serviceWorker' in navigator && 'PushManager' in window) {
+    setupPush();
   }
 }, []);
 
@@ -1853,7 +1854,7 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
-
+console.log("Server response:", data);
     if (data.success) {
       setMessages(prev => 
         prev.map(msg => msg._id === tempId ? data.message : msg)
