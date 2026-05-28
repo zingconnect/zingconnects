@@ -78,7 +78,7 @@ export const AgentDashboard = () => {
   const [lkToken, setLkToken] = useState(null);
   const [isEnding, setIsEnding] = useState(false);
   const [offset, setOffset] = useState(30);
-
+const [unreadCounts, setUnreadCounts] = useState({});
   const [activeCall, setActiveCall] = useState(null);
   const [callStatus, setCallStatus] = useState('idle'); 
   const [isIncomingCall, setIsIncomingCall] = useState(false);
@@ -1551,15 +1551,21 @@ const handleFinalSend = async () => {
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
+  // 1. Reset chat UI state
   setMessages([]); 
   setSelectedUser(user);
   setHasMore(true); 
+
+  // 2. Clear the red notification badge for this user
+  setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
+
   if (socket) socket.emit('join-chat', user._id); 
 
   try {
     const token = localStorage.getItem('agentToken');
     if (!token) return;
 
+    // 3. Fetch messages
     const response = await fetch(`/api/messages/${user._id}?limit=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -1570,17 +1576,21 @@ const handleSelectUser = async (user) => {
       
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
-        
         setOffset(data.messages.length);
-                if (data.messages.length < 30) setHasMore(false);
+        if (data.messages.length < 30) setHasMore(false);
         
         requestAnimationFrame(() => {
           if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           }
         });
+
+        // 4. Mark all messages as read on the backend
+        fetch(`/api/messages/mark-read/${user._id}`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${token}` }
+        }).catch(err => console.error("Failed to mark messages as read:", err));
       }
-      // ... mark read logic
     }
   } catch (err) {
     setConnectionStatus('connecting');
@@ -1711,15 +1721,17 @@ useEffect(() => {
           }
         });
       }
-
-      // Mark as read immediately on backend
-      const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${selectedUser._id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.error("Mark read error:", err));
-    }
-
+    const token = localStorage.getItem('agentToken');
+    fetch(`/api/messages/mark-read/${selectedUser._id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).catch(err => console.error("Mark read error:", err));
+  } else {
+    setUnreadCounts(prev => ({
+      ...prev,
+      [data.senderId]: (prev[data.senderId] || 0) + 1
+    }));
+  }
     if (data.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
@@ -2206,67 +2218,77 @@ return (
   </div>
 )}
 
-    {/* --- SIDEBAR --- */}
-    <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
-  <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center  shrink-0">
+{/* --- SIDEBAR --- */}
+<aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
+  <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center shrink-0">
     <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center">
       <BsPersonCircle size={32} className="text-text-secondary" />
     </button>
     <BsThreeDotsVertical className="cursor-pointer text-text-secondary" size={18} />
   </header>
-    <div className="p-2 bg-card-bg">
+
+  <div className="p-2 bg-card-bg">
     <div className="bg-input-bg flex items-center px-3 py-1.5 rounded-lg">
       <BsSearch className="text-text-secondary mr-3" size={12} />
       <input placeholder="Search" className="bg-transparent text-xs w-full outline-none text-text-main" />
     </div>
   </div>
-      <div className="flex-1 overflow-y-auto">
-{users.length > 0 ? users.map((user) => (
-  <div
-    key={user._id}
-    onClick={() => handleSelectUser(user)}
-    className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6]  ${selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''}`}
-  >
-    <div className="relative shrink-0">
-      <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
-        <img
-          src={user.photoUrl}
-          alt={user.firstName}
-          className="w-full h-full object-cover"
-          onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
-        />
+
+  <div className="flex-1 overflow-y-auto">
+    {users.length > 0 ? users.map((user) => (
+      <div
+        key={user._id}
+        onClick={() => handleSelectUser(user)}
+        className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] ${selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''}`}
+      >
+        <div className="relative shrink-0">
+          <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
+            <img
+              src={user.photoUrl}
+              alt={user.firstName}
+              className="w-full h-full object-cover"
+              onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
+            />
+          </div>
+          
+          {/* NEW: Notification Badge */}
+          {unreadCounts[user._id] > 0 && (
+            <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-10">
+              {unreadCounts[user._id]}
+            </div>
+          )}
+
+          <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+        </div>
+        
+        <div className="ml-3 flex-1 min-w-0">
+          <div className="flex justify-between items-center mb-0.5">
+            <h3 className="text-[13px] font-bold text-gray-800 truncate">
+              {user.firstName} {user.lastName}
+            </h3>
+          </div>
+          
+          <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
+          
+          {(user.city || user.state) && (
+            <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
+              <span className="opacity-70">📍</span>
+              {user.city ? user.city : ''}{user.city && user.state ? ', ' : ''}{user.state ? user.state : ''}
+            </p>
+          )}
+        </div>
       </div>
-      <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
-    </div>
-    
-    <div className="ml-3 flex-1 min-w-0">
-      <div className="flex justify-between items-center mb-0.5">
-        <h3 className="text-[13px] font-bold text-gray-800 truncate">
-          {user.firstName} {user.lastName}
-        </h3>
-      </div>
-      
-      <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
-      
-      {/* NEW: City and State Display */}
-      {(user.city || user.state) && (
-        <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
-          <span className="opacity-70">📍</span>
-          {user.city ? user.city : ''}{user.city && user.state ? ', ' : ''}{user.state ? user.state : ''}
-        </p>
-      )}
-    </div>
+    )) : (
+      <p className="text-center text-gray-500 py-10 text-xs font-bold uppercase tracking-widest">No users connected.</p>
+    )}
   </div>
-)) : (
-  <p className="text-center text-gray-500 py-10 text-xs font-bold uppercase tracking-widest">No users connected.</p>
-)}
-      </div>
-      <div className="p-4 border-t bg-gray-50/50">
-        <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95">
-          <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
-        </button>
-      </div>
-    </aside>
+
+  <div className="p-4 border-t bg-gray-50/50">
+    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95">
+      <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
+    </button>
+  </div>
+</aside>
 
     {/* --- MAIN CHAT INTERFACE --- */}
 <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
