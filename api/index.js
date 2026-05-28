@@ -1822,10 +1822,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     await connectToDatabase(); 
 
     const { receiverId, text, fileUrl, fileType } = req.body;
-
-    // 1. Hard Validation
     if (!receiverId || !fileUrl) {
-      console.error("❌ Validation Failed: Missing receiverId or fileUrl", req.body);
       return res.status(400).json({ success: false, message: "Missing receiverId or fileUrl" });
     }
 
@@ -1833,54 +1830,43 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     const receiverModel = isAgent ? 'User' : 'Agent';
     const senderModel = isAgent ? 'Agent' : 'User';
 
-    // 2. Prepare Data (Explicitly sanitize inputs)
-    const newMessageData = {
+    // 1. Save Message
+    const newMessage = await Message.create({
       senderId: req.user.id,
       senderModel,
-      receiverId: receiverId.toString(), // Ensure ID is stringified
+      receiverId,
       receiverModel,
-      text: typeof text === 'string' ? text : "", // Ensure text is a string
+      text: text || "",
       fileUrl, 
-      fileType: fileType || 'image',
+      fileType,
       status: 'sent',
       notificationSent: false
-    };
+    });
 
-    console.log("DEBUG: Attempting to save message:", newMessageData);
-    
-    // 3. Save Message
-    const newMessage = await Message.create(newMessageData);
+    // 2. Fetch Profiles (REMOVE the call to getUserProfileCached)
+    let receiver = null, sender = null;
+    try {
+        const TargetModel = receiverModel === 'Agent' ? Agent : User;
+        const SenderModel = isAgent ? Agent : User;
+        [receiver, sender] = await Promise.all([
+            TargetModel.findById(receiverId).lean(),
+            SenderModel.findById(req.user.id).lean()
+        ]);
+    } catch (e) { console.error("Profile lookup error:", e); }
 
-    // 4. Notifications & Profiles (Completely wrapped to avoid blocking)
-    (async () => {
-        try {
-            const TargetModel = receiverModel === 'Agent' ? Agent : User;
-            const SenderModel = isAgent ? Agent : User;
-            const [receiver, sender] = await Promise.all([
-                TargetModel.findById(receiverId).lean(),
-                SenderModel.findById(req.user.id).lean()
-            ]);
+    // 3. Isolated Notification Block
+    // (Ensure you aren't calling getUserProfileCached inside here either)
+    try {
+        const io = req.app.get('socketio');
+        const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+        if (isOnline) io.to(receiverId.toString()).emit("new-message", newMessage);
+    } catch (e) { console.error("Notification failed", e); }
 
-            if (receiver || sender) {
-                const io = req.app.get('socketio');
-                const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
-                
-                if (isOnline) {
-                    io.to(receiverId.toString()).emit("new-message", newMessage);
-                } else if (receiver?.pushSubscription) {
-                    // ... push logic ...
-                }
-            }
-        } catch (e) {
-            console.error("Async notification background task failed:", e);
-        }
-    })();
-
-    // 5. Return Success
+    // 4. Return Success
     let signedUrlForFrontend = fileUrl;
     try {
         signedUrlForFrontend = await getPrivateUrl(fileUrl);
-    } catch (e) { console.error("Signed URL generation failed:", e); }
+    } catch (e) { console.error("URL signing failed", e); }
 
     return res.status(201).json({ 
         success: true, 
@@ -1888,7 +1874,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
 
   } catch (err) {
-    console.error("❌ CRITICAL ERROR in confirm-upload:", err);
+    console.error("❌ CRITICAL ERROR:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
