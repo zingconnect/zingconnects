@@ -1079,17 +1079,7 @@ useEffect(() => {
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
 
-useEffect(() => {
-  const container = messagesEndRef.current?.parentElement; 
-  if (!container) return;
-  const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-  if (isNearBottom) {
-    const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-    return () => clearTimeout(timer);
-  }
-  }, [messages]);
+
 
   useEffect(() => {
     const token = localStorage.getItem('userToken');
@@ -1202,12 +1192,8 @@ useEffect(() => {
       if (isFirstLoad) setLoading(false);
     }
   };
-
-  // Immediate invocation on change/mount
   fetchMessages();
-  
-  // Set up background long-poll tracker
-  const interval = setInterval(fetchMessages, 5000); 
+    const interval = setInterval(fetchMessages, 5000); 
   
   return () => clearInterval(interval);
 }, [agent?._id, agent?.id]);
@@ -1240,6 +1226,37 @@ useEffect(() => {
   }
 };
 
+useEffect(() => {
+  const container = chatContainerRef.current;
+  if (!container) return;
+  const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+  if (isNearBottom) {
+    const timer = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+    return () => clearTimeout(timer);
+  }
+}, [messages]);
+
+useEffect(() => {
+  const container = chatContainerRef.current;
+  const observer = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && !loadingMore && hasMore) {
+      const prevScrollHeight = container.scrollHeight;
+      const prevScrollTop = container.scrollTop;
+
+      fetchOlderMessages().then(() => {
+        // 2. Adjust scrollTop after messages are prepended to prevent the "jump"
+        const newScrollHeight = container.scrollHeight;
+        container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+      });
+    }
+  }, { threshold: 1.0 });
+
+  if (scrollSentinelRef.current) observer.observe(scrollSentinelRef.current);
+  return () => observer.disconnect();
+}, [loadingMore, hasMore]); // Remove scrollSentinelRef.current from dependency
+
 const handleFileChange = (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -1270,14 +1287,10 @@ const handleProfileSubmit = async (e) => {
   setIsUploading(true); 
   const token = localStorage.getItem('userToken');
   const data = new FormData();
-  
-  // 1. Handle File logic
-  const fileToUpload = onboardingFile || previewFile;
+    const fileToUpload = onboardingFile || previewFile;
   if (fileToUpload) {
     data.append('photo', fileToUpload);
   }
-
-  // 2. Automatically appends firstName, lastName, phone, dob, gender, city, state
   Object.keys(formData).forEach(key => {
     if (formData[key] !== undefined && formData[key] !== null) {
       data.append(key, formData[key]);
@@ -1696,7 +1709,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         </header>
         
         <main 
-        ref={chatContainerRef}
         className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide pb-10">
             <div className="w-24 h-24 rounded-[2rem] bg-gray-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center relative">
                 {agent?.photoUrl ? (
@@ -1879,7 +1891,18 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 />
 </div>
         </header>
-<main className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide">
+        <main 
+  ref={chatContainerRef}
+  className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
+>
+  {/* 0. TOP SENTINEL FOR PAGINATION */}
+  <div ref={scrollSentinelRef} className="h-4 w-full" />
+  {loadingMore && (
+    <div className="text-center text-[10px] font-bold text-gray-500 uppercase tracking-widest py-2">
+      Loading previous messages...
+    </div>
+  )}
+
   {/* 1. Background Pattern */}
   <div 
     className="absolute inset-0 opacity-[0.05] pointer-events-none" 
@@ -1898,18 +1921,16 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   {messages.map((m) => {
     const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
 
-    // Handle Secure LiveKit Room Call Events
     if (m.fileType === 'voice_call') {
       return (
         <CallStatusMessage 
           key={msgKey}
-          status={m.status} // 'ringing', 'missed', 'ended'
+          status={m.status}
           time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         />
       );
     }
 
-    // Determine Message Ownership Correctly (Fixes the Optimistic Media Left-Side Skew)
     const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
 
     return (
@@ -1928,85 +1949,39 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
                   src={m.fileUrl} 
                   alt="attachment" 
                   onClick={() => setFullscreenImage(m.fileUrl)} 
-                  className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer transition-opacity hover:opacity-95" 
-                  onError={(e) => {
-                    e.target.onerror = null;
-                    e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable';
-                  }}
+                  className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer" 
+                  onError={(e) => { e.target.onerror = null; e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable'; }}
                 />
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }}
-                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                >
-                  <BsDownload size={14} />
-                </button>
+                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
               </>
             ) : (
               <div className="relative">
-                <video 
-                  className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black shadow-inner cursor-pointer"
-                  onClick={() => setFullscreenVideo(m.fileUrl)}
-                >
+                <video className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
                   <source src={m.fileUrl} type="video/mp4" />
                 </video>
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="bg-black/40 p-3 rounded-full text-white backdrop-blur-sm">
-                    <BsPlayFill size={30} />
-                  </div>
-                </div>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }}
-                  className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
-                >
-                  <BsDownload size={14} />
-                </button>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="bg-black/40 p-3 rounded-full text-white"><BsPlayFill size={30} /></div></div>
+                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
               </div>
             )}
           </div>
         )}
 
-        {/* Text Content (Caption / Standard Message) */}
         {m.text && (
-          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType === 'image' || m.fileType === 'video' ? 'mt-1 mb-1' : ''}`}>
+          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType ? 'mt-1 mb-1' : ''}`}>
             {m.text}
           </p>
         )}
 
-        {/* Time / Status Bar */}
         <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
           <span className="text-[9px] text-gray-400 font-bold uppercase">
             {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
-
-          {/* Verification Delivery Checks (Only for Local User Submissions) */}
           {isMe && (
             <div className="flex items-center ml-1">
-              
-              {/* 1. SENDING STATE (iDrive E2 Pipe Active) */}
-              {m.status === 'sending' && (
-                <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-              )}
-
-              {/* 2. FAILED STATE */}
-              {m.status === 'failed' && (
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleResend(m); }}
-                  className="flex items-center bg-red-500 text-white px-1.5 py-0.5 rounded shadow-sm hover:bg-red-600 active:scale-95 transition-all"
-                >
-                  <span className="text-[8px] font-black mr-1 uppercase">Retry</span>
-                  <BsPlusLg className="rotate-45" size={10} />
-                </button>
-              )}
-
-              {/* 3. SUCCESS DELIVERED STATES */}
+              {m.status === 'sending' && <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />}
+              {m.status === 'failed' && <button onClick={() => handleResend(m)} className="bg-red-500 text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase">Retry</button>}
               {(!m.status || m.status === 'sent' || m.status === 'seen') && (
-                <div className="flex items-center">
-                  {m.status === 'seen' ? (
-                    <BsCheckAll className="text-blue-500" size={16} title="Read" />
-                  ) : (
-                    <BsCheckAll className="text-gray-400" size={16} title="Sent" />
-                  )}
-                </div>
+                <BsCheckAll className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} size={16} />
               )}
             </div>
           )}
@@ -2015,7 +1990,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     );
   })}
 
-  {/* Auto-scroll viewport Anchor */}
   <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
