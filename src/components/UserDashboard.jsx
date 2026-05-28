@@ -90,8 +90,6 @@ const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New
 const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const serverUrl = import.meta.env.VITE_LIVEKIT_URL
 
-  
-  
   const connectionRef = useRef(null);
   const pollingRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
@@ -104,6 +102,7 @@ const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const peerConnectedRef = useRef(false);
   const audioCtxRef = useRef(null);
 const nextStartTimeRef = useRef(0);
+const chatContainerRef = useRef(null);
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1077,12 +1076,17 @@ useEffect(() => {
 }, [socket, isSpeakerOn]);
 
 useEffect(() => {
-    // Timeout ensures the DOM has rendered the new message before scrolling
+  const container = messagesEndRef.current?.parentElement; 
+  if (!container) return;
+  const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+  if (isNearBottom) {
     const timer = setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, 100);
     return () => clearTimeout(timer);
+  }
   }, [messages]);
+
   useEffect(() => {
     const token = localStorage.getItem('userToken');
     if (!token) return navigate('/');
@@ -1663,7 +1667,9 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
             </button>
         </header>
         
-        <main className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide pb-10">
+        <main 
+        ref={chatContainerRef}
+        className="flex-1 p-6 flex flex-col items-center text-center space-y-5 overflow-y-auto scrollbar-hide pb-10">
             <div className="w-24 h-24 rounded-[2rem] bg-gray-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center relative">
                 {agent?.photoUrl ? (
                     <img src={agent.photoUrl} alt="Agent" className="w-full h-full object-cover" />
