@@ -1846,17 +1846,16 @@ app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => 
     });
   }
 });
+
 app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase(); 
-    // (Keep your existing Mongoose retry logic here)
 
     const { receiverId, text, fileUrl, fileType } = req.body;
     if (!receiverId || !fileUrl) {
       return res.status(400).json({ success: false, message: "Missing receiverId or fileUrl" });
     }
 
-    const redis = req.app.get('redisClient');
     const isAgent = req.user.role === 'agent';
     const receiverModel = isAgent ? 'User' : 'Agent';
     const senderModel = isAgent ? 'Agent' : 'User';
@@ -1875,22 +1874,16 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
     await newMessage.save();
 
-    // 2. Fetch Profiles Safely
-    let receiver = null;
-    let sender = null;
-
+    // 2. Safely Fetch Profiles
+    let receiver = null, sender = null;
     try {
         const TargetModel = receiverModel === 'Agent' ? Agent : User;
         const SenderModel = isAgent ? Agent : User;
-        
-        // Parallel fetch from DB if not in Redis
         [receiver, sender] = await Promise.all([
             TargetModel.findById(receiverId).lean(),
             SenderModel.findById(req.user.id).lean()
         ]);
-    } catch (dbErr) {
-        console.error("Profile lookup failed:", dbErr.message);
-    }
+    } catch (e) { console.error("Profile lookup failed:", e.message); }
 
     // 3. Isolated Notification Block (Cannot crash the request)
     if (receiver || sender) {
@@ -1898,7 +1891,6 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
             const io = req.app.get('socketio');
             const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
-            // Web Push
             if (isOnline) {
                 io.to(receiverId.toString()).emit("new-message", newMessage);
             } else if (receiver?.pushSubscription) {
@@ -1908,16 +1900,15 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
                     data: { url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}` }
                 });
                 await webpush.sendNotification(receiver.pushSubscription, payload).catch(console.error);
-                await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+                await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true }).catch(console.error);
             }
 
-            // Email Notification
             if (!isOnline && receiver) {
                 const COOLDOWN = 30 * 60 * 1000;
                 const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
                 if (Date.now() - lastEmailTime > COOLDOWN) {
-                    await sendOfflineNotification(receiver, sender, text, fileUrl, fileType, receiverModel);
-                    await (receiverModel === 'Agent' ? Agent : User).findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() });
+                    await sendOfflineNotification(receiver, sender, text, fileUrl, fileType, receiverModel).catch(console.error);
+                    await (receiverModel === 'Agent' ? Agent : User).findByIdAndUpdate(receiverId, { lastNotificationEmail: new Date() }).catch(console.error);
                 }
             }
         } catch (notificationErr) {
@@ -1926,7 +1917,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     }
 
     // 4. Return Success
-    const signedUrlForFrontend = await getPrivateUrl(fileUrl);
+    const signedUrlForFrontend = await getPrivateUrl(fileUrl).catch(() => fileUrl);
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
 

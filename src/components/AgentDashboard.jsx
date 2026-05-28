@@ -1443,7 +1443,6 @@ const handleDeleteMessage = async (msgId) => {
     console.error("Delete request failed:", err);
   }
 };
-
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
   setIsUploading(true);
@@ -1458,6 +1457,7 @@ const handleFinalSend = async () => {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ fileName: previewFile.name, fileType: previewFile.type })
     });
+    if (!urlResponse.ok) throw new Error("Could not get upload URL");
     const { uploadUrl, key } = await urlResponse.json();
 
     // 2. Upload directly to S3/Cloud Storage
@@ -1466,7 +1466,6 @@ const handleFinalSend = async () => {
       body: previewFile,
       headers: { 'Content-Type': previewFile.type }
     });
-
     if (!directUpload.ok) throw new Error("Cloud upload failed");
 
     // 3. Confirm to DB
@@ -1482,15 +1481,25 @@ const handleFinalSend = async () => {
     });
 
     const finalData = await confirmResponse.json();
-    if (finalData.success) {
+    
+    // Check for success or if it's a 500 error where the message might have still been saved
+    if (confirmResponse.ok && finalData.success) {
       setMessages(prev => [...prev, finalData.message]);
-      // Cleanup
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-      setPreviewFile(null);
-      setCaption("");
+    } else if (confirmResponse.status === 500) {
+        console.warn("Backend 500 error, but checking if message saved...");
+        // Optionally trigger a re-fetch of the messages list here
+    } else {
+        throw new Error(finalData.message || "Confirmation failed");
     }
+
+    // Cleanup (Always happens if we didn't throw)
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setPreviewFile(null);
+    setCaption("");
+
   } catch (err) {
+    console.error("Upload process error:", err);
     alert("Upload failed. Please check your connection.");
   } finally {
     setIsUploading(false);
