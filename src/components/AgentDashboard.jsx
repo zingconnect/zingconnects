@@ -2250,7 +2250,7 @@ return (
             </div>
 
             {/* 2. Badge: Render only if count > 0, using the safe 'count' variable */}
-            {count > 0 && (
+            {count > 99 && (
               <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-10 transition-all duration-300 transform scale-100">
                 {count > 99 ? '99+' : count}
               </div>
