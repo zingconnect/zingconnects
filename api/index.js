@@ -1352,7 +1352,8 @@ app.post('/api/subscriptions/verify', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-// --- GET AGENT'S CONNECTED USERS ---
+
+// --- GET AGENT'S CONNECTED USERS WITH UNREAD COUNTS ---
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -1362,44 +1363,57 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     await connectToDatabase();
     
     const agentId = req.user?.id || req.user?._id;
-
     if (!agentId) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized: Missing agent session metadata." 
-      });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
+
     const ActiveUserModel = mongoose.models.User || User;
+    
+    // 1. Fetch connected users
     const users = await ActiveUserModel.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
 
+    // 2. Aggregate unread counts (status != 'seen')
+    const unreadCountsData = await Message.aggregate([
+      { 
+        $match: { 
+          receiverId: new mongoose.Types.ObjectId(agentId), 
+          receiverModel: 'Agent', 
+          status: { $ne: 'seen' } 
+        } 
+      },
+      { 
+        $group: { 
+          _id: "$senderId", 
+          count: { $sum: 1 } 
+        } 
+      }
+    ]);
+
+    // Create a lookup map
+    const unreadMap = {};
+    unreadCountsData.forEach(item => {
+      unreadMap[item._id.toString()] = item.count;
+    });
+
+    // 3. Process users and attach unreadCount
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
+      // ... [Keep your existing photo logic here] ...
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
-          let fileKey = user.photoUrl;          
-          if (fileKey.includes('.com/')) {
-            fileKey = fileKey.split('.com/')[1].split('?')[0];
-          }
+          let fileKey = user.photoUrl;
+          if (fileKey.includes('.com/')) fileKey = fileKey.split('.com/')[1].split('?')[0];
           let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
           
-          try {
-            cleanKey = decodeURIComponent(cleanKey);
-          } catch (e) {
-            // Keep going if decode fails
-          }
-
-          // 🚀 3. Safe invocation using the constructor re-exported from s3.js
           const client = getS3Client(); 
           const command = new GetObjectCommand({
             Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
             Key: cleanKey, 
           });
-
-          // Generate the temporary signed URL for IDrive e2
           finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
         } catch (s3Err) {
           console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
@@ -1417,9 +1431,11 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
       return {
         ...user,
         photoUrl: finalPhotoUrl,   
-        avatar: finalPhotoUrl,     
+        avatar: finalPhotoUrl,    
         avatarUrl: finalPhotoUrl,  
-        status: isOnline ? 'online' : 'offline'
+        status: isOnline ? 'online' : 'offline',
+        // ATTACH THE DYNAMIC COUNT
+        unreadCount: unreadMap[user._id.toString()] || 0 
       };
     }));
 
@@ -1431,13 +1447,10 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 
   } catch (err) {
     console.error("🔴 CRITICAL ERROR FETCHING AGENT USERS:", err);
-    return res.status(500).json({ 
-      success: false,
-      message: "Internal server error while retrieving user list",
-      error: err.message
-    });
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
+
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -2020,6 +2033,44 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
   }
 });
 
+app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const myId = req.user?.id || req.user?._id;
+    const { otherUserId } = req.params;
+    const result = await Message.updateMany(
+      { 
+        senderId: otherUserId, 
+        receiverId: myId, 
+        status: { $ne: 'seen' } 
+      },
+      { 
+        $set: { 
+          status: 'seen', 
+          seenAt: new Date() 
+        } 
+      }
+    );
+        const io = req.app.get('socketio');
+    if (io) {
+      io.to(otherUserId.toString()).emit("messages-seen", { 
+        readerId: myId 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      count: result.modifiedCount 
+    });
+  } catch (err) {
+    console.error("🔴 Error marking messages as read:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to update message status" 
+    });
+  }
+});
 // ==========================================
 // 📞 1. INITIATE SECURE DIAL OUT
 // ==========================================
