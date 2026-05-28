@@ -140,6 +140,7 @@ const observerRef = useRef(null);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   const [showFullScreenCall, setShowFullScreenCall] = useState(false);
   const [isIncomingCall, setIsIncomingCall] = useState(false);
+  const SHOW_CALL_FEATURES = false;
   
   const API_BASE_URL = import.meta.env.VITE_API_URL
 
@@ -1145,76 +1146,42 @@ useEffect(() => {
     return () => clearInterval(interval);
   }, [navigate]);
 
-const fetchMessages = async (isInitial = false) => {
+  useEffect(() => {
+  fetchMessages(true);
+  const interval = setInterval(() => fetchMessages(true), 5000);
+  return () => clearInterval(interval);
+}, [fetchMessages]); // Dependency on the stable useCallback
+
+const fetchMessages = useCallback(async (isInitial = false) => {
   const token = localStorage.getItem('userToken');
-  const API_BASE_URL = import.meta.env.VITE_API_URL;
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
   const targetAgentId = agent?._id || agent?.id;
 
   if (!token || !targetAgentId) return;
+
+  // Pagination logic: use the oldest message as a cursor
   const oldestMessage = isInitial || messages.length === 0 ? null : messages[0];
-  const url = `${API_BASE_URL}/api/messages/${targetAgentId}?limit=20${
+  const url = `${API_BASE_URL}/api/messages/${targetAgentId}?limit=${isInitial ? 50 : 20}${
     oldestMessage ? `&before=${oldestMessage._id}` : ''
   }`;
-  
+
   try {
-    const res = await fetch(url, { 
-      headers: { 'Authorization': `Bearer ${token}` } 
-    });
-    const data = await res.json();
-    
-    if (res.ok && data.success) {
-      const newBatch = data.messages || [];
-      if (newBatch.length < 20) setHasMore(false);
+    const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+    const data = await response.json();
 
-      setMessages(prev => {
-        if (isInitial) {
-          return newBatch; // Full refresh for initial load
-        }
-        return [...newBatch, ...prev];
-      });
+    if (response.ok && data.success) {
+      const incomingMessages = data.messages || [];
 
-      // Handle initial scroll
       if (isInitial) {
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' }), 100);
-      }
-    }
-  } catch (err) {
-    console.error("Sync error:", err);
-  }
-};
-
-  useEffect(() => {
-  const token = localStorage.getItem('userToken');
-  const targetAgentId = agent?._id || agent?.id;
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-  
-  if (!token || !targetAgentId) return;
-
-  let isFirstLoad = true;
-
-  const fetchMessages = async () => {
-    try {
-      // Added your ?limit=50 param to optimize historical fetching payload sizes
-      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        const incomingMessages = data.messages;
+        // --- POLLING / INITIAL LOAD ---
         const lastMsg = incomingMessages[incomingMessages.length - 1];
 
         // 1. Silent Notification & Seen Logic
-        if (
-          lastMsg && 
-          lastMsg.senderModel === 'Agent' && 
-          lastMsg.status !== 'seen' && 
-          lastMsg._id !== lastNotifiedId.current
-        ) {
+        if (lastMsg && lastMsg.senderModel === 'Agent' && lastMsg.status !== 'seen' && lastMsg._id !== lastNotifiedId.current) {
           lastNotifiedId.current = lastMsg._id;
           if (notificationSound.current) {
             notificationSound.current.currentTime = 0;
-            notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
+            notificationSound.current.play().catch(() => {});
           }
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
@@ -1223,55 +1190,35 @@ const fetchMessages = async (isInitial = false) => {
               tag: 'zing-msg'
             });
           }
-
           fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` }
           }).catch(err => console.error("Mark read failed:", err));
         }
 
-        // 2. State Sync: Merge incoming messages with local in-flight ones
+        // 2. State Sync: Merge with in-flight messages
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
           const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
-          const uniqueInFlight = inFlight.filter(m => 
-            !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
-          );
+          const uniqueInFlight = inFlight.filter(m => !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId));
           const newCombined = [...incomingMessages, ...uniqueInFlight];
-          
-          if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
-            return prev;
-          }
-          return newCombined;
+          return (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) ? prev : newCombined;
         });
 
-        // 3. Smart Viewport Anchoring
-        setTimeout(() => {
-          if (isFirstLoad) {
-            // Instant snap on mount so user doesn't see scroll animation lag
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-            isFirstLoad = false;
-          } else {
-            // Smooth adjustment for passive incoming messages while chatting
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-          }
-        }, 100);
+        // 3. Auto-scroll
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      } else {
+        // --- HISTORICAL LOAD ---
+        if (incomingMessages.length < 20) setHasMore(false);
+        setMessages(prev => [...incomingMessages, ...prev]);
       }
-    } catch (err) {
-      console.error("ZingConnect Sync Jitter:", err);
-    } finally {
-      if (isFirstLoad) setLoading(false);
     }
-  };
-
-  // Immediate invocation on change/mount
-  fetchMessages();
-  
-  // Set up background long-poll tracker
-  const interval = setInterval(fetchMessages, 5000); 
-  
-  return () => clearInterval(interval);
-}, [agent?._id, agent?.id]);
+  } catch (err) {
+    console.error("Sync error:", err);
+  } finally {
+    if (isInitial) setLoading(false);
+  }
+}, [agent?._id, agent?.id, messages]);
 
 
 const handleFileChange = (e) => {
@@ -1898,20 +1845,25 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
             </div>
           </div>
 
-        <div className="flex items-center gap-5 md:gap-8 text-gray-500 pr-1">
-  <BsTelephoneFill 
-    className="cursor-pointer hover:text-blue-600 transition-colors active:scale-90" 
-    size={16} 
-    onClick={handleStartCall} // <--- Added this
+      <div className="flex items-center gap-5 md:gap-8 text-gray-500 pr-1">
+  
+  {/* The call button is now hidden from the UI */}
+  {SHOW_CALL_FEATURES && (
+    <BsTelephoneFill 
+      className="cursor-pointer hover:text-blue-600 transition-colors active:scale-90" 
+      size={16} 
+      onClick={handleStartCall} 
+    />
+  )}
+
+  <BsGearFill 
+    className="cursor-pointer hover:text-gray-700 transition-colors active:scale-90" 
+    size={18} 
+    onClick={() => navigate('/user/profile')} 
   />
-<BsGearFill 
-  className="cursor-pointer hover:text-gray-700 transition-colors active:scale-90" 
-  size={18} 
-  onClick={() => navigate('/user/profile')} 
-/>
 </div>
         </header>
-<main 
+        <main 
   ref={scrollRef} 
   className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
 >
@@ -1921,20 +1873,9 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     style={{ backgroundImage: "url('https://w0.peakpx.com/wallpaper/580/678/OH-wallpaper-whatsapp-dark-mode.jpg')" }} 
   />
 
-  {/* 2. Sentinel for Historical Loading (Placed at the TOP) */}
- {hasMore && (
-    <div 
-      ref={(node) => {
-        if (!node) return;
-        const observer = new IntersectionObserver((entries) => {
-          if (entries[0].isIntersecting && !loading) {
-            fetchMessages(false);
-          }
-        }, { rootMargin: '200px' }); // Load slightly before reaching top
-        observer.observe(node);
-      }} 
-      className="h-10 w-full" 
-    />
+  {/* 2. Sentinel for Historical Loading (Uses memoized lastMessageRef) */}
+  {hasMore && (
+    <div ref={lastMessageRef} className="h-10 w-full" />
   )}
 
   {/* 3. Encryption Notice */}
@@ -1968,7 +1909,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
         } mb-3`}
       >
-        {/* Media Handling logic remains the same */}
+        {/* Media Handling */}
         {(m.fileType === 'image' || m.fileType === 'video') && (
            <div className="relative mb-2 mt-1 group">
              {/* ... your existing media rendering code ... */}
