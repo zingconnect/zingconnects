@@ -1196,30 +1196,6 @@ useEffect(() => {
 
   const handlePhotoClick = () => fileInputRef.current.click();
 
-  const fetchOlderMessages = async () => {
-  if (loadingMore || !hasMore) return;
-  setLoadingMore(true);
-
-  try {
-    const nextPage = page + 1;
-    const response = await fetch(
-      `${API_BASE_URL}/api/messages/${targetAgentId}?page=${nextPage}&limit=50`,
-      { headers: { 'Authorization': `Bearer ${token}` } }
-    );
-    const data = await response.json();
-    if (data.messages.length > 0) {
-      setMessages(prev => [...data.messages, ...prev]); // Prepend new data
-      setPage(nextPage);
-    } else {
-      setHasMore(false); // No more history
-    }
-  } catch (err) {
-    console.error("Failed to load history", err);
-  } finally {
-    setLoadingMore(false);
-  }
-};
-
 useEffect(() => {
   const container = chatContainerRef.current;
   if (!container) return;
@@ -1252,6 +1228,66 @@ useEffect(() => {
   if (scrollSentinelRef.current) observer.observe(scrollSentinelRef.current);
   return () => observer.disconnect();
 }, [loadingMore, hasMore]); // Remove scrollSentinelRef.current from dependency
+
+
+  // 2. FETCH OLDER MESSAGES (Pagination)
+  const fetchOlderMessages = async () => {
+    if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
+    
+    const token = localStorage.getItem('userToken');
+    const targetAgentId = agent._id || agent.id;
+    const API_BASE_URL = import.meta.env.VITE_API_URL;
+    const oldestMessage = messages.find(m => m._id && !m.isTemp);
+    
+    if (!oldestMessage) return;
+
+    setIsFetchingOlder(true);
+    isAdjustingScrollRef.current = true;
+    const container = chatContainerRef.current;
+    const prevScrollHeight = container?.scrollHeight || 0;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        if (data.messages.length < 30) setHasMore(false);
+        
+        if (data.messages.length > 0) {
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m._id));
+            const uniqueHistorical = data.messages.filter(m => !existingIds.has(m._id));
+            return [...uniqueHistorical, ...prev];
+          });
+          requestAnimationFrame(() => {
+            if (container) {
+              const newHeight = container.scrollHeight;
+              container.scrollTop = newHeight - prevScrollHeight;
+            }
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load history:", err);
+    } finally {
+      setIsFetchingOlder(false);
+      isAdjustingScrollRef.current = false;
+    }
+  };
+
+
+ const handleChatScroll = (e) => {
+  const container = e.currentTarget;
+  if (!container || isFetchingOlder || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
+  if (container.scrollTop <= 50 && hasMore) {
+    previousScrollHeightRef.current = container.scrollHeight;
+    previousScrollTopRef.current = container.scrollTop;
+    fetchOlderMessages();
+  }
+};
+
 
 const handleFileChange = (e) => {
   const file = e.target.files[0];
@@ -1889,15 +1925,22 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         </header>
         <main 
   ref={chatContainerRef}
+  onScroll={handleChatScroll}
   className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
+  style={{
+    scrollAnchor: 'none',            
+    overscrollBehaviorY: 'contain',  
+    WebkitOverflowScrolling: 'touch'  
+  }}
 >
-  {/* 0. TOP SENTINEL FOR PAGINATION */}
-  <div ref={scrollSentinelRef} className="h-4 w-full" />
-  {loadingMore && (
-    <div className="text-center text-[10px] font-bold text-gray-500 uppercase tracking-widest py-2">
-      Loading previous messages...
+   {/* Fetching State Indicator */}
+  {isFetchingOlder && (
+    <div className="self-center z-20 my-2 px-3 py-1.5 bg-[#005c4b] text-white rounded-full text-[10px] font-bold tracking-wider flex items-center gap-2 shadow-md border border-emerald-500/20 animate-pulse">
+      <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      <span>LOADING OLDER MESSAGES...</span>
     </div>
   )}
+
 
   {/* 1. Background Pattern */}
   <div 
