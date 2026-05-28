@@ -1585,26 +1585,31 @@ if (!isOnline && receiver) {
   }
 });
 
-// --- GET CHAT MESSAGES WITH SANITIZATION ---
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
     
-    // 1. Fetch conversations AND look up profiles via dynamic refPaths
+    const limit = parseInt(req.query.limit) || 30;
+    const skip = parseInt(req.query.skip) || 0;
+        
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
     })
-    .sort({ createdAt: 1 })
-    // Only fetch necessary fields to keep function memory light on Vercel
+    .sort({ createdAt: -1 }) // 1. SORT NEWEST FIRST
+    .skip(skip)              // 2. SKIP NEWEST BATCHES
+    .limit(limit)            // 3. GET NEXT OLDEST BATCH
     .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug' })
     .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug' })
     .lean();
-
+    
+    // 4. NOW reverse only the retrieved batch so it appears chronologically 
+    // in your frontend's [...data.messages, ...prev] state update
+    messages.reverse();
     // 2. Map and sign IDrive E2 URLs
     const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl) {

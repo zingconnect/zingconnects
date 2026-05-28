@@ -77,6 +77,7 @@ export const AgentDashboard = () => {
   const [localStream, setLocalStream] = useState(null);
   const [lkToken, setLkToken] = useState(null);
   const [isEnding, setIsEnding] = useState(false);
+  const [offset, setOffset] = useState(30);
 
   const [activeCall, setActiveCall] = useState(null);
   const [callStatus, setCallStatus] = useState('idle'); 
@@ -1447,22 +1448,18 @@ const handleDeleteMessage = async (msgId) => {
 };
 
 const loadOlderMessages = useCallback(async () => {
-  // 1. Guard clause: Ensure we don't trigger while loading or if no messages/user
   if (loadingMore || !hasMore || !selectedUser?._id) return;
   
   setLoadingMore(true);
-  
   const scrollContainer = scrollRef.current;
   if (!scrollContainer) return;
   
-  // Capture current state before the fetch
   const previousScrollHeight = scrollContainer.scrollHeight;
 
   try {
     const token = localStorage.getItem('agentToken');
-    // Using messages.length from the closure is fine, 
-    // but ensure your component state 'messages' is updated correctly.
-    const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${messages.length}`, {
+    // We use the stable 'offset' state instead of messages.length
+    const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${offset}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     
@@ -1470,8 +1467,13 @@ const loadOlderMessages = useCallback(async () => {
     
     if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
       setMessages(prev => [...data.messages, ...prev]);
-            if (data.messages.length < 30) setHasMore(false);
-            requestAnimationFrame(() => {
+      
+      // Update offset for the NEXT load
+      setOffset(prev => prev + data.messages.length);
+      
+      if (data.messages.length < 30) setHasMore(false);
+      
+      requestAnimationFrame(() => {
         const newScrollHeight = scrollContainer.scrollHeight;
         scrollContainer.scrollTop = newScrollHeight - previousScrollHeight;
       });
@@ -1483,7 +1485,7 @@ const loadOlderMessages = useCallback(async () => {
   } finally {
     setLoadingMore(false);
   }
-}, [loadingMore, hasMore, selectedUser?._id, messages.length]);
+}, [loadingMore, hasMore, selectedUser?._id, offset]);
 
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
@@ -1552,6 +1554,7 @@ const handleFinalSend = async () => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
   setMessages([]); 
+  setOffset(30);
   setSelectedUser(user);
   setHasMore(true); // Reset pagination for the new user
   if (socket) socket.emit('join-chat', user._id); 
@@ -1578,7 +1581,6 @@ const handleFinalSend = async () => {
           }
         });
       }
-      
       fetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
