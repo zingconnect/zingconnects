@@ -793,64 +793,6 @@ const terminateLocalSession = useCallback(() => {
   }, 3000);
 }, [localStream, ringtoneAudio, callingAudio]);
 
-// 1. Move inside your component
-const handleEndCall = useCallback(async () => {
-  // Use a ref for stable access to avoid stale closures
-  const active = activeCallRef.current;
-  const myId = userData?._id || userData?.id;
-  const currentCallId = active?.callId || active?._id || active?.roomName;
-  
-  // Cleanup timers
-  if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
-  if (pollingRef.current) clearInterval(pollingRef.current);
-
-  const token = localStorage.getItem('userToken');
-  const targetId = active?.fromId === myId ? active?.toId : active?.fromId;
-
-  try {
-    if (currentCallId && token) {
-      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-    }
-    if (socket && targetId) {
-      socket.emit("end-call", { to: targetId.toString().trim(), callId: currentCallId });
-    }
-  } catch (err) {
-    console.warn("⚠️ Error during end-call:", err);
-  } finally {
-    terminateLocalSession(); // Ensure this is also memoized
-  }
-}, [socket, userData, terminateLocalSession]);
-
-const handleRejectCall = useCallback(() => {
-  console.log("🚫 User rejecting Agent call...");
-  const currentCall = activeCallRef.current;
-  
-  if (!currentCall) {
-    handleEndCall();
-    return;
-  }
-
-  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
-  const myId = userData?._id?.toString();
-  const targetId = (currentCall.fromId?.toString() === myId) 
-    ? (currentCall.toId?.toString() || currentCall.receiverId?.toString())
-    : currentCall.fromId?.toString();
-
-  if (socket && targetId && callId) {
-    socket.emit("reject-call", { 
-      to: targetId, 
-      fromId: myId, 
-      callId: String(callId).trim() 
-    });
-  }
-  handleEndCall();
-}, [socket, userData, handleEndCall]);
 
 useEffect(() => {
   if (!hasInteracted) {
