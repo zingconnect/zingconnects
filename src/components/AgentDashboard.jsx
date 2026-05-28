@@ -1445,6 +1445,7 @@ const handleDeleteMessage = async (msgId) => {
     console.error("Delete request failed:", err);
   }
 };
+
 const loadOlderMessages = useCallback(async () => {
   // 1. Guard clause: Ensure we don't trigger while loading or if no messages/user
   if (loadingMore || !hasMore || !selectedUser?._id) return;
