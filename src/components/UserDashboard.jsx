@@ -836,7 +836,34 @@ const handleEndCall = useCallback(async () => {
   }
 }, [socket, userData, activeCall, terminateLocalSession]);
 
+async function handleRejectCall() {
+  console.log("🚫 User rejecting Agent call...");
+  const currentCall = activeCallRef.current || activeCall;
+  
+  if (!currentCall) {
+    console.warn("⚠️ Reject failed: No active call found in state/ref");
+    handleEndCall(); 
+    return;
+  }
+  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
+    const myId = userData?._id?.toString();
+  const initiatorId = currentCall.fromId?.toString();
+  const receiverId = currentCall.receiverId?.toString() || currentCall.toId?.toString();
+  const targetId = (initiatorId === myId) ? receiverId : initiatorId;
 
+  console.log("📡 Emitting reject-call to:", targetId, "for room:", callId);
+
+  if (socket && targetId && callId) {
+    socket.emit("reject-call", { 
+      to: targetId, 
+      fromId: myId, 
+      callId: String(callId).trim() 
+    });
+  } else {
+    console.error("❌ Missing Socket, Target, or CallID", { targetId, callId });
+  }
+  handleEndCall();
+}
 
 useEffect(() => {
   if (!hasInteracted) {
@@ -1353,113 +1380,76 @@ useEffect(() => {
     }
   }
 }, [isSpeakerOn, callStatus]);
-
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
   const myId = userData._id.toString();
   socket.emit("join-main-room", myId);
 
- const onIncoming = async (data) => {
-  if (callStatusRef.current !== 'idle' || isEnding) return;
+  // Centralized signal handler to avoid duplicate logic
+  const handleCallEnded = (data) => {
+    // Use the ref for the most up-to-date call ID without needing the dependency array
+    const currentId = activeCallRef.current?.callId || activeCallRef.current?.roomName || activeCallRef.current?._id;
+    const incomingId = data?.callId || data?.roomName || data?._id;
 
-  const roomName = data.callId || data.roomName;
+    console.log("📴 Signal Received:", { incomingId, currentId });
+
+    // Validate if the signal is for the current session
+    if (currentId && incomingId && String(currentId) !== String(incomingId)) {
+      console.warn("⏭️ Ignoring signal: ID mismatch", { incomingId, currentId });
+      return;
+    }
+
+    // If we have an ID mismatch but we aren't idle, clean up zombie UI
+    if (!currentId && callStatusRef.current !== 'idle') {
+      console.log("🧹 Cleaning up zombie UI session");
+    }
+
+    handleEndCall();
+  };
+
+  const handleIncoming = async (data) => {
+    if (callStatusRef.current !== 'idle' || isEnding) return;
+
+    const roomName = data.callId || data.roomName;
     setActiveCall({
-    ...data,
-    roomName: roomName,
-    fromId: data.fromId || data.callerData?.callerId
-  });
-  setIsIncomingCall(true);
-  setCallStatus('ringing');
-  if (socket) {
-    socket.emit("confirm-ringing", { to: data.fromId || data.callerData?.callerId });
-  }
-  try {
-    const token = localStorage.getItem('userToken');
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      ...data,
+      roomName: roomName,
+      fromId: data.fromId || data.callerData?.callerId
     });
-    const statusData = await res.json();
+    setIsIncomingCall(true);
+    setCallStatus('ringing');
     
-    if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
-      handleEndCall(); 
+    socket.emit("confirm-ringing", { to: data.fromId || data.callerData?.callerId });
+
+    // Polling status validation
+    try {
+      const token = localStorage.getItem('userToken');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const statusData = await res.json();
+      if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
+        handleEndCall();
+      }
+    } catch (err) {
+      console.warn("Incoming check jitter ignored.");
     }
-  } catch (err) {
-    console.warn("Incoming check jitter ignored.");
-  }
-};
+  };
 
-const onRemoteEnd = (data) => {
-  const currentId = activeCallRef.current?.roomName || 
-                    activeCallRef.current?.callId || 
-                    activeCallRef.current?._id;
-  const incomingId = data?.callId || data?.roomName || data?._id;
-
-  console.log("📴 Signal Received:", { incomingId, currentId });
-  if (!currentId) {
-    if (callStatus !== 'idle') {
-       console.log("Cleaning up zombie UI session");
-       handleEndCall();
-    }
-    return;
-  }
-  if (incomingId && currentId && String(incomingId) !== String(currentId)) {
-    console.warn("⏭️ Ignoring end signal: Session mismatch", { incomingId, currentId });
-    return;
-  }
-
-  // 5. Final Execution
-  console.log("✅ Call termination confirmed via Socket.");
-  handleEndCall();
-};
-  socket.on("incoming-call", onIncoming);
-  socket.on("call-ended", onRemoteEnd);
-  socket.on("end-call", onRemoteEnd);
-  socket.on("call-rejected", onRemoteEnd);
-  socket.on("call-accepted", (data) => {
-     if (data.signal || data.answerSignal) {
-     }
-  });
+  // Register all events in one place
+  socket.on("incoming-call", handleIncoming);
+  socket.on("call-ended", handleCallEnded);
+  socket.on("end-call", handleCallEnded);
+  socket.on("call-rejected", handleCallEnded);
 
   return () => {
-    socket.off("incoming-call", onIncoming);
-    socket.off("call-ended", onRemoteEnd);
-    socket.off("end-call", onRemoteEnd);
-    socket.off("call-rejected", onRemoteEnd);
-    socket.off("call-accepted");
+    socket.off("incoming-call", handleIncoming);
+    socket.off("call-ended", handleCallEnded);
+    socket.off("end-call", handleCallEnded);
+    socket.off("call-rejected", handleCallEnded);
   };
-}, [socket, userData?._id, handleEndCall]);
-
-
-async function handleRejectCall() {
-  console.log("🚫 User rejecting Agent call...");
-  const currentCall = activeCallRef.current || activeCall;
-  
-  if (!currentCall) {
-    console.warn("⚠️ Reject failed: No active call found in state/ref");
-    handleEndCall(); 
-    return;
-  }
-  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
-    const myId = userData?._id?.toString();
-  const initiatorId = currentCall.fromId?.toString();
-  const receiverId = currentCall.receiverId?.toString() || currentCall.toId?.toString();
-  const targetId = (initiatorId === myId) ? receiverId : initiatorId;
-
-  console.log("📡 Emitting reject-call to:", targetId, "for room:", callId);
-
-  if (socket && targetId && callId) {
-    socket.emit("reject-call", { 
-      to: targetId, 
-      fromId: myId, 
-      callId: String(callId).trim() 
-    });
-  } else {
-    console.error("❌ Missing Socket, Target, or CallID", { targetId, callId });
-  }
-  handleEndCall();
-}
-
+}, [socket, userData?._id, handleEndCall, isEnding]);
 useEffect(() => {
   if (!socket) return;
   socket.on("new-message", (msg) => {
