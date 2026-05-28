@@ -1448,6 +1448,7 @@ const handleDeleteMessage = async (msgId) => {
 };
 
 const loadOlderMessages = useCallback(async () => {
+  // Prevent duplicate calls
   if (loadingMore || !hasMore || !selectedUser?._id) return;
   
   setLoadingMore(true);
@@ -1458,25 +1459,22 @@ const loadOlderMessages = useCallback(async () => {
 
   try {
     const token = localStorage.getItem('agentToken');
-  const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${offset}`, {
-  headers: { 
-    'Authorization': `Bearer ${token}`,
-    'Cache-Control': 'no-cache' // Force fresh data
-  }
-});
+    const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${offset}`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Cache-Control': 'no-cache' }
+    });
     const data = await response.json();
-    
     if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
       setMessages(prev => [...data.messages, ...prev]);
-      
-      // Update offset for the NEXT load
       setOffset(prev => prev + data.messages.length);
       
-      if (data.messages.length < 30) setHasMore(false);
-      
+      if (data.messages.length < 30) {
+        setHasMore(false);
+      }
       requestAnimationFrame(() => {
-        const newScrollHeight = scrollContainer.scrollHeight;
-        scrollContainer.scrollTop = newScrollHeight - previousScrollHeight;
+        if (scrollRef.current) {
+          const newScrollHeight = scrollRef.current.scrollHeight;
+          scrollRef.current.scrollTop = newScrollHeight - previousScrollHeight;
+        }
       });
     } else {
       setHasMore(false);
