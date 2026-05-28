@@ -116,7 +116,10 @@ const chatContainerRef = useRef(null);
 const [hasMore, setHasMore] = useState(true);
 const [loadingMore, setLoadingMore] = useState(false);
 const scrollSentinelRef = useRef(null); 
-  
+const [isFetchingOlder, setIsFetchingOlder] = useState(false);
+const isAdjustingScrollRef = useRef(false); 
+const previousScrollHeightRef = useRef(0);
+const previousScrollTopRef = useRef(0);
 
   const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
@@ -1230,7 +1233,6 @@ useEffect(() => {
 }, [loadingMore, hasMore]); // Remove scrollSentinelRef.current from dependency
 
 
-  // 2. FETCH OLDER MESSAGES (Pagination)
   const fetchOlderMessages = async () => {
     if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
     
@@ -1277,17 +1279,16 @@ useEffect(() => {
     }
   };
 
-
- const handleChatScroll = (e) => {
+const handleChatScroll = (e) => {
   const container = e.currentTarget;
-  if (!container || isFetchingOlder || (isAdjustingScrollRef && isAdjustingScrollRef.current)) return;
+    if (!container || isFetchingOlder || isAdjustingScrollRef.current) return;
+
   if (container.scrollTop <= 50 && hasMore) {
     previousScrollHeightRef.current = container.scrollHeight;
     previousScrollTopRef.current = container.scrollTop;
-    fetchOlderMessages();
+        fetchOlderMessages();
   }
 };
-
 
 const handleFileChange = (e) => {
   const file = e.target.files[0];
