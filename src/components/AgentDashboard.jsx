@@ -35,6 +35,7 @@ export const AgentDashboard = () => {
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
   const scrollRef = useRef(null);
+  const prevScrollHeightRef = useRef(0);
   const userStreamRef = useRef(null);
   const peerConnectedRef = useRef(false);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
@@ -50,6 +51,8 @@ export const AgentDashboard = () => {
   const activeCallerRef = useRef(null);
   const pollingRef = useRef(null); 
   const aiMediaRecorderRef = useRef(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
@@ -1194,7 +1197,6 @@ useEffect(() => {
   };
 }, []);
 
- // 1. Modified Heartbeat with Dual Login detection
 useEffect(() => {
   const heartBeat = setInterval(async () => {
     const token = localStorage.getItem('agentToken');
@@ -1223,7 +1225,6 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
-  // 1. Flutterwave Script Injection (Anti-Duplicate Logic)
   const existingScript = document.querySelector('script[src*="flutterwave"]');
   let script;
 
@@ -1444,6 +1445,41 @@ const handleDeleteMessage = async (msgId) => {
   }
 };
 
+const loadOlderMessages = useCallback(async () => {
+  if (loadingMore || !hasMore || !selectedUser) return;
+  
+  setLoadingMore(true);
+  const scrollContainer = scrollRef.current;
+  const previousScrollHeight = scrollContainer.scrollHeight;
+
+  try {
+    const token = localStorage.getItem('agentToken');
+    const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${messages.length}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    const data = await response.json();
+    if (data.success && data.messages.length > 0) {
+      setMessages(prev => [...data.messages, ...prev]);
+      if (data.messages.length < 30) setHasMore(false);
+      
+      // Preserve scroll position: Wait for render, then adjust
+      requestAnimationFrame(() => {
+        if (scrollContainer) {
+          const newScrollHeight = scrollContainer.scrollHeight;
+          scrollContainer.scrollTop = newScrollHeight - previousScrollHeight;
+        }
+      });
+    } else {
+      setHasMore(false);
+    }
+  } catch (err) {
+    console.error("Pagination error:", err);
+  } finally {
+    setLoadingMore(false);
+  }
+}, [loadingMore, hasMore, selectedUser, messages.length]);
+
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
   setIsUploading(true);
@@ -1590,6 +1626,19 @@ useEffect(() => {
     }
   }
 }, [messages, isInitialLoad]);
+
+useEffect(() => {
+  const container = scrollRef.current;
+  if (!container) return;
+
+  const handleScroll = () => {
+    if (container.scrollTop <= 10 && !loadingMore && hasMore) {
+      loadOlderMessages();
+    }
+  };
+  container.addEventListener('scroll', handleScroll);
+  return () => container.removeEventListener('scroll', handleScroll);
+}, [loadOlderMessages]); // Only re-bind if the load function changes
 
 useEffect(() => {
   if (!isSubscribed || !agentData?._id) return;
@@ -1779,14 +1828,11 @@ const handleResend = async (failedMsg) => {
 const handleSendMessage = async (e) => {
   e.preventDefault();
   
-  // 1. Basic validation
   if (!newMessage.trim() || !selectedUser || isUploading) return;
 
   const textToSend = newMessage;
   const tempId = Date.now().toString(); // Temporary ID for the UI key
   setNewMessage(''); // Clear input immediately for speed
-
-  // 2. Create the Optimistic Message (Shows up instantly)
   const optimisticMsg = {
     _id: tempId,
     text: textToSend,
@@ -1840,8 +1886,6 @@ if (loading) return (
 return (
 <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
   <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
-
-{/* --- CALL ENGINE (FIXED POSITIONING & DESIGN STABILITY) --- */}
 
 {callStatus !== 'idle' && (
   <>
@@ -1921,9 +1965,6 @@ return (
       </div>
     )}
 
-
-    {/* C. FULLSCREEN OVERLAY */}
-    {/* Forces itself into view instantly if callStatus is 'ringing' or if expanded manually */}
     {(showFullScreenCall || callStatus === 'ringing') && (
       <div className="fixed inset-0 z-[40000] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white animate-in fade-in zoom-in duration-300">
         <div className="flex flex-col items-center space-y-10 relative w-full max-w-lg">
