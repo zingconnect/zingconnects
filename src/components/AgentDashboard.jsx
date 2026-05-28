@@ -1458,11 +1458,12 @@ const loadOlderMessages = useCallback(async () => {
 
   try {
     const token = localStorage.getItem('agentToken');
-    // We use the stable 'offset' state instead of messages.length
-    const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${offset}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
+  const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${offset}`, {
+  headers: { 
+    'Authorization': `Bearer ${token}`,
+    'Cache-Control': 'no-cache' // Force fresh data
+  }
+});
     const data = await response.json();
     
     if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
@@ -1549,14 +1550,12 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
-
-  const handleSelectUser = async (user) => {
+const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
   setMessages([]); 
-  setOffset(30);
   setSelectedUser(user);
-  setHasMore(true); // Reset pagination for the new user
+  setHasMore(true); 
   if (socket) socket.emit('join-chat', user._id); 
 
   try {
@@ -1574,20 +1573,16 @@ const handleFinalSend = async () => {
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
         
-        // MANUALLY scroll to bottom ONLY once after data is set
+        setOffset(data.messages.length);
+                if (data.messages.length < 30) setHasMore(false);
+        
         requestAnimationFrame(() => {
           if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           }
         });
       }
-      fetch(`/api/messages/mark-read/${user._id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.error("Mark read error:", err));
-      
-    } else {
-      setConnectionStatus('connecting');
+      // ... mark read logic
     }
   } catch (err) {
     setConnectionStatus('connecting');
@@ -2339,12 +2334,17 @@ return (
   </div>
 </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50">
-            {messages.length >= limit && (
-              <div className="flex justify-center py-6">
-                <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase text-gray-500 bg-white/50 px-4 py-2 rounded-full border border-gray-300 hover:bg-white transition-colors">↑ Load Older Messages</button>
-              </div>
-            )}
+      <div ref={scrollRef}  onScroll={(e) => {
+    if (e.target.scrollTop <= 50 && !loadingMore && hasMore) {
+      loadOlderMessages();
+    }
+  }}
+  className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50">
+  {loadingMore && (
+    <div className="flex justify-center py-4">
+      <span className="text-[10px] font-black uppercase text-gray-400 animate-pulse">Loading older messages...</span>
+    </div>
+  )}
             {messages.map((m) => {
               const isMe = m.senderId === agentData?._id;
               const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
