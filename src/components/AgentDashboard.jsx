@@ -1545,11 +1545,9 @@ const handleFinalSend = async () => {
   const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
-  // 1. Prepare the UI for a fresh jump
   setMessages([]); 
-  setIsInitialLoad(true); // <--- CRITICAL: Reset this so the scroll logic triggers
   setSelectedUser(user);
-  setLimit(30);
+  setHasMore(true); // Reset pagination for the new user
   if (socket) socket.emit('join-chat', user._id); 
 
   try {
@@ -1566,11 +1564,19 @@ const handleFinalSend = async () => {
       
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
+        
+        // MANUALLY scroll to bottom ONLY once after data is set
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }
+        });
       }
-            fetch(`/api/messages/mark-read/${user._id}`, {
+      
+      fetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.error("Mark read background error:", err));
+      }).catch(err => console.error("Mark read error:", err));
       
     } else {
       setConnectionStatus('connecting');
@@ -1596,36 +1602,6 @@ useEffect(() => {
   }
 }, [users, navigate]); // Fires as soon as the user list is loaded from the API
 
-
-useEffect(() => {
-  setIsInitialLoad(true);
-}, [selectedUser?._id]);
-
-useEffect(() => {
-  const container = scrollRef.current;
-  if (!container || messages.length === 0) return;
-
-  if (isInitialLoad) {
-    container.scrollTop = container.scrollHeight;
-    requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
-      const timeoutId = setTimeout(() => {
-        container.scrollTop = container.scrollHeight;
-        setIsInitialLoad(false); 
-      }, 150); // 150ms is the "sweet spot" for mobile layout stability
-
-      return () => clearTimeout(timeoutId);
-    });
-  } else {
-    const threshold = 150;
-    const isNearBottom = 
-      container.scrollHeight - container.scrollTop <= container.clientHeight + threshold;
-
-    if (isNearBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }
-}, [messages, isInitialLoad]);
 
 useEffect(() => {
   const container = scrollRef.current;
@@ -1754,17 +1730,33 @@ useEffect(() => {
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
 
-    // 1. Core Safeguard: Drop duplicates by tracking message ID explicitly
+    // 1. Core Safeguard: Drop duplicates
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
     const isChattingWithSender = selectedUser && (data.senderId === selectedUser._id || data.senderId === selectedUser.id);
     
     if (isChattingWithSender) {
+      const container = scrollRef.current;
+      
+      // Determine if the user is already at the bottom (150px threshold)
+      const isAtBottom = container 
+        ? container.scrollHeight - container.scrollTop <= container.clientHeight + 150 
+        : false;
+
       setMessages((prev) => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
+
+      // ONLY auto-scroll if the agent was already at the bottom
+      if (isAtBottom) {
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }
+        });
+      }
 
       // Mark as read immediately on backend
       const token = localStorage.getItem('agentToken');
@@ -1773,6 +1765,7 @@ useEffect(() => {
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
     }
+
     if (data.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
@@ -1782,8 +1775,9 @@ useEffect(() => {
       }
       
       if ('vibrate' in navigator) {
-        navigator.vibrate([200, 100, 200]); // Double pulse haptic alert
+        navigator.vibrate([200, 100, 200]);
       }
+
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
       if (Notification.permission === "granted" && shouldShowPopup) {
         const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
@@ -1804,7 +1798,7 @@ useEffect(() => {
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket, selectedUser]); 
+}, [socket, selectedUser]);
 
 useEffect(() => {
   if (!("Notification" in window)) {
