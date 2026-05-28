@@ -154,10 +154,6 @@ const prevScrollHeightRef = useRef(0);
     state: ''
   });
 
-    useEffect(() => {
-    callStatusRef.current = callStatus;
-  }, [callStatus]);
-
 
   const agentStatus = getStatusInfo(agent);
   const handlePhotoClick = () => fileInputRef.current.click();
@@ -246,6 +242,602 @@ const lastMessageRef = useCallback((node) => {
   if (node) observerRef.current.observe(node);
 }, [loading, hasMore]);
 
+
+const fetchMessages = useCallback(async (isInitial = false) => {
+  const token = localStorage.getItem('userToken');
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
+  const targetAgentId = agent?._id || agent?.id;
+
+  if (!token || !targetAgentId) return;
+  const oldestMessage = isInitial || messages.length === 0 ? null : messages[0];
+  const url = `${API_BASE_URL}/api/messages/${targetAgentId}?limit=${isInitial ? 50 : 20}${
+    oldestMessage ? `&before=${oldestMessage._id}` : ''
+  }`;
+
+  try {
+    const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      const incomingMessages = data.messages || [];
+
+      if (isInitial) {
+        const lastMsg = incomingMessages[incomingMessages.length - 1];
+        if (lastMsg && lastMsg.senderModel === 'Agent' && lastMsg.status !== 'seen' && lastMsg._id !== lastNotifiedId.current) {
+          lastNotifiedId.current = lastMsg._id;
+          if (notificationSound.current) {
+            notificationSound.current.currentTime = 0;
+            notificationSound.current.play().catch(() => {});
+          }
+          if (Notification.permission === "granted") {
+            new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
+              body: lastMsg.text || "Sent a file",
+              icon: '/logo-s.png',
+              tag: 'zing-msg'
+            });
+          }
+          fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).catch(err => console.error("Mark read failed:", err));
+        }
+        setMessages(prev => {
+          const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
+          const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
+          const uniqueInFlight = inFlight.filter(m => !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId));
+          const newCombined = [...incomingMessages, ...uniqueInFlight];
+          return (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) ? prev : newCombined;
+        });
+
+        // 3. Auto-scroll
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      } else {
+        // --- HISTORICAL LOAD ---
+        if (incomingMessages.length < 20) setHasMore(false);
+        setMessages(prev => [...incomingMessages, ...prev]);
+      }
+    }
+  } catch (err) {
+    console.error("Sync error:", err);
+  } finally {
+    if (isInitial) setLoading(false);
+  }
+}, [agent?._id, agent?.id, messages]);
+
+const handleFileChange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+  }
+
+  const url = URL.createObjectURL(file);
+  
+  if (showOnboarding) {
+    setPreviewUrl(url); 
+    setFormData(prev => ({ ...prev, profileImage: file }));
+  } else {
+    setPreviewFile(file); // Stores the actual File object for S3 upload
+    setPreviewUrl(url);   // Triggers the Fullscreen WhatsApp-style preview
+    setCaption("");       // Reset caption so previous message text doesn't persist
+  }
+  e.target.value = ""; 
+};
+
+const handleProfileSubmit = async (e) => {
+  e.preventDefault();
+    if (!formData.phone || formData.phone.length < 10) {
+    alert("Please enter a valid phone number with country code.");
+    return;
+  }
+
+  setIsUploading(true); 
+  const token = localStorage.getItem('userToken');
+  const data = new FormData();
+  
+  // 1. Handle File logic
+  const fileToUpload = onboardingFile || previewFile;
+  if (fileToUpload) {
+    data.append('photo', fileToUpload);
+  }
+
+  // 2. Automatically appends firstName, lastName, phone, dob, gender, city, state
+  Object.keys(formData).forEach(key => {
+    if (formData[key] !== undefined && formData[key] !== null) {
+      data.append(key, formData[key]);
+    }
+  });
+
+  try {
+    const res = await fetch('/api/users/update-user-onboarding', {
+      method: 'PUT',
+      headers: { 
+        'Authorization': `Bearer ${token}` 
+      },
+      body: data
+    });
+
+    const result = await res.json();
+
+    if (res.ok) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+
+      if (setUserData) setUserData(result.user);
+      
+      // 3. Success Reset
+      setShowOnboarding(false);
+      setOnboardingFile(null);
+      setPreviewFile(null);
+      setPreviewUrl(null);
+      
+      console.log("Profile updated successfully. Phone saved:", result.user.phone);
+    } else {
+      alert(result.message || "Initialization failed. Please check the form.");
+    }
+  } catch (err) {
+    console.error("Profile initialization failed:", err);
+    alert("Network error. Please check your connection.");
+  } finally {
+    setIsUploading(false);
+  }
+};
+
+const handleFileUpload = (e) => {
+  const file = e.target.files[0];
+  if (!file || !agent?._id) return;
+
+  const isVideo = file.type.startsWith('video/');
+  const isImage = file.type.startsWith('image/');
+  
+  if (!isVideo && !isImage) {
+    alert("Please upload only images or videos.");
+    return;
+  }
+   const maxLimit = 100 * 1024 * 1024; 
+  if (file.size > maxLimit) {
+    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
+    e.target.value = null; 
+    return;
+  }
+
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+  }
+
+  // Set State for the WhatsApp-style preview overlay
+  const localUrl = URL.createObjectURL(file);
+  setPreviewFile(file);
+  setPreviewUrl(localUrl);
+  setCaption(""); 
+  if (e.target) e.target.value = null; 
+};
+
+const handleFinalSend = async () => {
+  if (!previewFile || isUploading || !agent?._id) return;
+
+  const tempId = Date.now().toString();
+  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
+  const savedFile = previewFile; // Keep a reference for resending
+  const savedCaption = caption;
+
+  // Optimistic UI for Media
+  const pendingMedia = {
+    _id: tempId,
+    tempId: tempId,
+    senderId: userData._id,
+    senderModel: 'User',
+    text: savedCaption,
+    fileUrl: previewUrl, // Use the local blob URL for preview
+    fileType: detectedType,
+    status: 'sending',
+    createdAt: new Date().toISOString(),
+    isTemp: true,
+    originalFile: savedFile // Store file in object for resending
+  };
+
+  setMessages(prev => [...prev, pendingMedia]);
+  setPreviewUrl(null); // Close the preview overlay
+  setPreviewFile(null);
+
+  setIsUploading(true);
+  const token = localStorage.getItem('userToken'); 
+
+  try {
+    const urlResponse = await fetch('/api/messages/get-upload-url', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
+    });
+
+    const urlData = await urlResponse.json();
+    if (!urlData.success) throw new Error("Upload permission failed");
+
+    await fetch(urlData.uploadUrl, {
+      method: 'PUT',
+      body: savedFile,
+      headers: { 'Content-Type': savedFile.type }
+    });
+
+    const confirmResponse = await fetch('/api/messages/confirm-upload', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({
+        receiverId: agent._id,
+        text: savedCaption.trim(),
+        fileUrl: urlData.key, 
+        fileType: detectedType
+      })
+    });
+
+    const data = await confirmResponse.json();
+    if (data.success) {
+      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+      setReplyingTo(null);
+    } else {
+      throw new Error();
+    }
+  } catch (err) {
+    setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
+  } finally {
+    setIsUploading(false);
+  }
+};
+
+const handleDownload = async (url, type) => {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `zing-${type}-${Date.now()}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error("Download failed:", err);
+  }
+};
+
+const startStatusPolling = (roomName) => {
+  const token = localStorage.getItem('userToken');
+  const startTime = Date.now(); // Mark when polling started
+
+  if (pollingRef.current) clearInterval(pollingRef.current);
+
+  const pollInterval = setInterval(async () => {
+    if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.status === 404) {
+        if (Date.now() - startTime > 8000) {
+          console.warn("🏳️ Polling: Call record missing.");
+          handleEndCall();
+        }
+        return;
+      }
+      const data = await res.json();
+      const terminalStates = ['ended', 'rejected', 'missed', 'declined'];
+
+      if (terminalStates.includes(data.status) || data.active === false) {
+        if (Date.now() - startTime > 5000) {
+          console.log("🏳️ Polling: Remote side terminated call.");
+          handleEndCall();
+        }
+      }
+    } catch (err) {
+      console.warn("Status sync jitter:", err.message);
+    }
+  }, 4000);
+
+  pollingRef.current = pollInterval;
+};
+const handleStartCall = async () => {
+  // 1. Validation and Setup
+  const currentUserId = userData?._id || userData?.id;
+  const currentAgentId = agent?._id || agent?.id;
+  const token = localStorage.getItem('userToken');
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+
+  if (!currentAgentId || !currentUserId) {
+    alert("Profile data still loading. Please try again.");
+    return;
+  }
+  setCallStatus('calling'); 
+  setShowFullScreenCall(true);
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({ 
+        receiverId: currentAgentId, 
+        receiverModel: 'Agent',
+        voiceId: "natural" 
+      })
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.message || "Agent unavailable");
+    }
+    const photoPath = userData?.photoUrl;
+    const fullPhotoUrl = photoPath?.startsWith('http') 
+      ? photoPath 
+      : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
+
+    setActiveCall({ 
+      callId: data.roomName, 
+      roomName: data.roomName,
+      toId: currentAgentId.toString(),
+      fromId: currentUserId,
+      isInitiator: true,
+      callerData: {
+        fromName: `${userData?.firstName} ${userData?.lastName}`,
+        photoUrl: fullPhotoUrl,
+        callerId: currentUserId
+      }
+    });
+    socket.emit("call-agent", { 
+      agentToCall: currentAgentId.toString(),
+      fromId: currentUserId,
+      fromName: `${userData?.firstName} ${userData?.lastName}`,
+      photoUrl: fullPhotoUrl,
+      callId: data.roomName
+    });
+    setCallStatus('ringing'); 
+    setTimeout(() => {
+      if (data.lkToken) {
+        console.log("🚀 ZingConnect: Initializing Secure Media Handshake...");
+        setLiveKitToken(data.lkToken); 
+      }
+    }, 500);
+
+    // 7. Start the Safety Poller
+    startStatusPolling(data.roomName);
+
+  } catch (err) {
+    console.error("❌ ZingConnect: Call initialization failed:", err);
+    handleEndCall();
+  }
+};
+
+ const handleSendMessage = async (e) => {
+  e.preventDefault();
+  if (!newMessage.trim() || !agent?._id) return;
+  
+  const textToSend = newMessage;
+  const tempId = Date.now().toString(); 
+  setNewMessage(''); 
+  const pendingMessage = {
+    _id: tempId,
+    tempId: tempId,
+    senderId: userData._id,
+    senderModel: 'User', // Ensure this matches your CSS logic
+    text: textToSend,
+    status: 'sending',
+    createdAt: new Date().toISOString(),
+    isTemp: true
+  };
+  setMessages(prev => [...prev, pendingMessage]);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+  try {
+    const token = localStorage.getItem('userToken');
+    const response = await fetch('/api/messages/send', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        receiverId: agent._id,
+        text: textToSend,
+        fileType: 'text',
+        replyToId: replyingTo?._id 
+      })
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+      socket.emit("sendMessage", data.message); 
+      
+      setReplyingTo(null);
+    } else {
+      throw new Error();
+    }
+  } catch (err) {
+    setMessages(prev => prev.map(m => 
+      m._id === tempId ? { ...m, status: 'failed' } : m
+    ));
+  }
+};
+const toggleMute = () => {
+  setIsMuted(prev => {
+    const newState = !prev;
+  const stream = localStream || userStreamRef.current;  
+    if (stream) {
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = !newState; // Track enabled = not muted
+      });
+      console.log(`Mic ${newState ? 'disabled' : 'enabled'}`);
+    } else {
+      console.warn("No active stream found to mute");
+    }
+    return newState;
+  });
+};
+
+const handleAcceptCall = async () => {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (AudioContext) {
+    const audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume().catch(e => console.warn("Context unlock blocked:", e));
+    }
+  }
+  if (ringtoneAudio.current) {
+    ringtoneAudio.current.pause();
+    ringtoneAudio.current.currentTime = 0;
+  }
+  const token = localStorage.getItem('userToken');
+  const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
+
+  if (!callId) {
+    console.error("❌ ZingConnect: No valid Call ID found for acceptance.");
+    return;
+  }
+  try {
+    setIsEnding(false); 
+    isTransitioningRef.current = true;
+        setCallStatus('connecting');
+    setShowFullScreenCall(true);
+
+    console.log(`📡 Sending acceptance to server engine for room/call: ${callId}...`);
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    const data = await response.json();    
+    if (data.success && data.lkToken) {
+      console.log("✅ Secure LiveKit token verified and cached locally.");
+            const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
+      if (socket && agentId) {
+        socket.emit("answer-call", { 
+          to: agentId, 
+          callId: data.roomName || callId, 
+          myId: userData?._id?.toString() 
+        });
+      }
+      peerConnectedRef.current = true; 
+      setPeerConnected(true);
+            setLiveKitToken(data.lkToken); 
+            isTransitioningRef.current = false;
+      setIsIncomingCall(false); // Move incoming flag change here post-auth verification 
+    } else {
+      throw new Error(data.message || "LiveKit RTC token missing from server engine");
+    }
+  } catch (err) {
+    console.error("❌ ZingConnect acceptance runtime exception:", err);
+    setIsEnding(false); 
+    isTransitioningRef.current = false;
+    handleEndCall(); // Safely fall back to structural teardown logic
+  }
+};
+
+const handleResend = (msg) => {
+  setMessages(prev => prev.filter(m => m._id !== msg._id));
+  if (msg.fileType === 'image' || msg.fileType === 'video') {
+    setPreviewFile(msg.originalFile);
+    setPreviewUrl(msg.fileUrl);
+    setCaption(msg.text);
+  } else {
+    setNewMessage(msg.text);
+  }
+};
+
+function AudioTracks({ active }) {
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Microphone, filter: (track) => track.isRemote },
+    ],
+    { updateOnlyOnChanges: true },
+  );
+
+  return null; // This component doesn't need to render anything visual
+};
+const terminateLocalSession = useCallback(() => {
+  console.log("🧹 Executing Full Local Cleanup...");
+    setIsEnding(true);
+  
+  [ringtoneAudio, callingAudio].forEach(ref => {
+    if (ref?.current) {
+      ref.current.pause();
+      ref.current.currentTime = 0;
+    }
+  });
+
+  setLiveKitToken(null);
+  setCallStatus('idle');
+  setIsIncomingCall(false);
+  setActiveCall(null);
+  setCallTime(0);
+  setShowFullScreenCall(false);
+  setPeerConnected(false);
+
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    setLocalStream(null);
+  }
+  setTimeout(() => {
+    setIsEnding(false);
+  }, 3000);
+}, [localStream, ringtoneAudio, callingAudio]);
+
+
+const handleEndCall = useCallback(async () => {
+  console.log("📴 Initiating Call End Sequence...");  
+  if (connectionTimeoutRef.current) {
+    clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = null;
+  }
+  if (pollingRef.current) {
+    console.log("🛑 Stopping background status polling...");
+    clearInterval(pollingRef.current);
+    pollingRef.current = null;
+  }
+  const myId = userData?._id || userData?.id;
+  const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
+  const token = localStorage.getItem('userToken');
+  const targetId = activeCall?.fromId === myId 
+    ? activeCall?.toId 
+    : activeCall?.fromId;
+  try {
+    if (currentCallId && token) {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log("✅ Server notified: Call marked as inactive.");
+    }
+    if (socket && targetId) {
+      socket.emit("end-call", { 
+        to: targetId.toString().trim(), 
+        callId: currentCallId 
+      });
+      socket.off("ai-audio-chunk");
+    }
+  } catch (err) {
+    console.warn("⚠️ Error during end-call handshake:", err);
+  } finally {
+    terminateLocalSession();
+  }
+}, [socket, userData, activeCall, terminateLocalSession]);
+
+
+
 useEffect(() => {
   if (!hasInteracted) {
     window.addEventListener('click', unlockAudio);
@@ -288,43 +880,19 @@ useEffect(() => {
     }
   });
 
-  // 3. Socket Room Join
   if (socket && agent?._id) {
     socket.emit("join-private-room", agent._id);
   }
 }, [agent?._id]); // Runs when agent data loads
 
-const terminateLocalSession = useCallback(() => {
-  console.log("🧹 Executing Full Local Cleanup...");
-    setIsEnding(true);
-  
-  [ringtoneAudio, callingAudio].forEach(ref => {
-    if (ref?.current) {
-      ref.current.pause();
-      ref.current.currentTime = 0;
-    }
-  });
-
-  setLiveKitToken(null);
-  setCallStatus('idle');
-  setIsIncomingCall(false);
-  setActiveCall(null);
-  setCallTime(0);
-  setShowFullScreenCall(false);
-  setPeerConnected(false);
-
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
-    setLocalStream(null);
-  }
-  setTimeout(() => {
-    setIsEnding(false);
-  }, 3000);
-}, [localStream, ringtoneAudio, callingAudio]);
-
 useEffect(() => {
   activeCallRef.current = activeCall;
 }, [activeCall]);
+
+    useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
+
 
 useEffect(() => {
   socket.on("voice-state-updated", (data) => {
@@ -377,9 +945,7 @@ useEffect(() => {
   if (!audioCtxRef.current) {
     audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
   }
-  
   const audioCtx = audioCtxRef.current;
-
   const handleAiAudioChunk = async (base64Audio) => {
     const isNaturalMode = activeCall?.voiceId === 'natural' || !activeCall?.voiceId;
     if (callStatus !== 'connected' || isNaturalMode) return;
@@ -429,50 +995,6 @@ useEffect(() => {
     document.removeEventListener('touchstart', unlockAudio);
   };
 }, [hasInteracted, agent?._id]); // Re-bind if agent loads later
-
-const handleEndCall = useCallback(async () => {
-  console.log("📴 Initiating Call End Sequence...");
-  
-  // 1. Clear Timeouts and Pollers
-  if (connectionTimeoutRef.current) {
-    clearTimeout(connectionTimeoutRef.current);
-    connectionTimeoutRef.current = null;
-  }
-  if (pollingRef.current) {
-    console.log("🛑 Stopping background status polling...");
-    clearInterval(pollingRef.current);
-    pollingRef.current = null;
-  }
-  const myId = userData?._id || userData?.id;
-  const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
-  const token = localStorage.getItem('userToken');
-  const targetId = activeCall?.fromId === myId 
-    ? activeCall?.toId 
-    : activeCall?.fromId;
-  try {
-    if (currentCallId && token) {
-      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      console.log("✅ Server notified: Call marked as inactive.");
-    }
-    if (socket && targetId) {
-      socket.emit("end-call", { 
-        to: targetId.toString().trim(), 
-        callId: currentCallId 
-      });
-      socket.off("ai-audio-chunk");
-    }
-  } catch (err) {
-    console.warn("⚠️ Error during end-call handshake:", err);
-  } finally {
-    terminateLocalSession();
-  }
-}, [socket, userData, activeCall, terminateLocalSession]);
 
 useEffect(() => {
   if (!socket || !userData?._id) return;
@@ -831,89 +1353,6 @@ useEffect(() => {
     }
   }
 }, [isSpeakerOn, callStatus]);
-const toggleMute = () => {
-  setIsMuted(prev => {
-    const newState = !prev;
-  const stream = localStream || userStreamRef.current;  
-    if (stream) {
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !newState; // Track enabled = not muted
-      });
-      console.log(`Mic ${newState ? 'disabled' : 'enabled'}`);
-    } else {
-      console.warn("No active stream found to mute");
-    }
-    return newState;
-  });
-};
-
-const handleAcceptCall = async () => {
-  // 1. Audio Pipeline Wake-up
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (AudioContext) {
-    const audioCtx = new AudioContext();
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume().catch(e => console.warn("Context unlock blocked:", e));
-    }
-  }
-
-  // 2. Kill Local Ringtone
-  if (ringtoneAudio.current) {
-    ringtoneAudio.current.pause();
-    ringtoneAudio.current.currentTime = 0;
-  }
-
-  const token = localStorage.getItem('userToken');
-  const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
-
-  if (!callId) {
-    console.error("❌ ZingConnect: No valid Call ID found for acceptance.");
-    return;
-  }
-  try {
-    setIsEnding(false); 
-    isTransitioningRef.current = true;
-        setCallStatus('connecting');
-    setShowFullScreenCall(true);
-
-    console.log(`📡 Sending acceptance to server engine for room/call: ${callId}...`);
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    const data = await response.json();    
-    if (data.success && data.lkToken) {
-      console.log("✅ Secure LiveKit token verified and cached locally.");
-            const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
-      
-      if (socket && agentId) {
-        socket.emit("answer-call", { 
-          to: agentId, 
-          callId: data.roomName || callId, 
-          myId: userData?._id?.toString() 
-        });
-      }
-      peerConnectedRef.current = true; 
-      setPeerConnected(true);
-            setLiveKitToken(data.lkToken); 
-            isTransitioningRef.current = false;
-      setIsIncomingCall(false); // Move incoming flag change here post-auth verification
-      
-    } else {
-      throw new Error(data.message || "LiveKit RTC token missing from server engine");
-    }
-
-  } catch (err) {
-    console.error("❌ ZingConnect acceptance runtime exception:", err);
-    setIsEnding(false); 
-    isTransitioningRef.current = false;
-    handleEndCall(); // Safely fall back to structural teardown logic
-  }
-};
 
 useEffect(() => {
   if (!socket || !userData?._id) return;
@@ -1109,27 +1548,24 @@ useEffect(() => {
 }, [socket, isSpeakerOn]);
 
 useEffect(() => {
-    // Timeout ensures the DOM has rendered the new message before scrolling
     const timer = setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, 100);
     return () => clearTimeout(timer);
   }, [messages]);
+
   useEffect(() => {
     const token = localStorage.getItem('userToken');
     if (!token) return navigate('/');
-
     const fetchUserSession = async () => {
   try {
     const response = await fetch('/api/users/my-session', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await response.json();
-    
     if (response.ok) {
       setAgent(data.agent); 
       setUserData(data.user); 
-      
       if (!data.user.isProfileComplete) {
         setShowOnboarding(true);
       }
@@ -1140,475 +1576,17 @@ useEffect(() => {
     setLoading(false);
   }
 };
-
     fetchUserSession();
     const interval = setInterval(fetchUserSession, 30000); 
     return () => clearInterval(interval);
   }, [navigate]);
 
 
-const fetchMessages = useCallback(async (isInitial = false) => {
-  const token = localStorage.getItem('userToken');
-  const API_BASE_URL = import.meta.env.VITE_API_URL;
-  const targetAgentId = agent?._id || agent?.id;
-
-  if (!token || !targetAgentId) return;
-  const oldestMessage = isInitial || messages.length === 0 ? null : messages[0];
-  const url = `${API_BASE_URL}/api/messages/${targetAgentId}?limit=${isInitial ? 50 : 20}${
-    oldestMessage ? `&before=${oldestMessage._id}` : ''
-  }`;
-
-  try {
-    const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await response.json();
-
-    if (response.ok && data.success) {
-      const incomingMessages = data.messages || [];
-
-      if (isInitial) {
-        const lastMsg = incomingMessages[incomingMessages.length - 1];
-        if (lastMsg && lastMsg.senderModel === 'Agent' && lastMsg.status !== 'seen' && lastMsg._id !== lastNotifiedId.current) {
-          lastNotifiedId.current = lastMsg._id;
-          if (notificationSound.current) {
-            notificationSound.current.currentTime = 0;
-            notificationSound.current.play().catch(() => {});
-          }
-          if (Notification.permission === "granted") {
-            new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
-              body: lastMsg.text || "Sent a file",
-              icon: '/logo-s.png',
-              tag: 'zing-msg'
-            });
-          }
-          fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
-            method: 'PATCH',
-            headers: { 'Authorization': `Bearer ${token}` }
-          }).catch(err => console.error("Mark read failed:", err));
-        }
-        setMessages(prev => {
-          const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
-          const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
-          const uniqueInFlight = inFlight.filter(m => !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId));
-          const newCombined = [...incomingMessages, ...uniqueInFlight];
-          return (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) ? prev : newCombined;
-        });
-
-        // 3. Auto-scroll
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-      } else {
-        // --- HISTORICAL LOAD ---
-        if (incomingMessages.length < 20) setHasMore(false);
-        setMessages(prev => [...incomingMessages, ...prev]);
-      }
-    }
-  } catch (err) {
-    console.error("Sync error:", err);
-  } finally {
-    if (isInitial) setLoading(false);
-  }
-}, [agent?._id, agent?.id, messages]);
-
   useEffect(() => {
   fetchMessages(true);
   const interval = setInterval(() => fetchMessages(true), 5000);
   return () => clearInterval(interval);
 }, [fetchMessages]); // Dependency on the stable useCallback
-
-
-
-const handleFileChange = (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-  }
-
-  const url = URL.createObjectURL(file);
-  
-  if (showOnboarding) {
-    setPreviewUrl(url); 
-    setFormData(prev => ({ ...prev, profileImage: file }));
-  } else {
-    setPreviewFile(file); // Stores the actual File object for S3 upload
-    setPreviewUrl(url);   // Triggers the Fullscreen WhatsApp-style preview
-    setCaption("");       // Reset caption so previous message text doesn't persist
-  }
-  e.target.value = ""; 
-};
-
-const handleProfileSubmit = async (e) => {
-  e.preventDefault();
-    if (!formData.phone || formData.phone.length < 10) {
-    alert("Please enter a valid phone number with country code.");
-    return;
-  }
-
-  setIsUploading(true); 
-  const token = localStorage.getItem('userToken');
-  const data = new FormData();
-  
-  // 1. Handle File logic
-  const fileToUpload = onboardingFile || previewFile;
-  if (fileToUpload) {
-    data.append('photo', fileToUpload);
-  }
-
-  // 2. Automatically appends firstName, lastName, phone, dob, gender, city, state
-  Object.keys(formData).forEach(key => {
-    if (formData[key] !== undefined && formData[key] !== null) {
-      data.append(key, formData[key]);
-    }
-  });
-
-  try {
-    const res = await fetch('/api/users/update-user-onboarding', {
-      method: 'PUT',
-      headers: { 
-        'Authorization': `Bearer ${token}` 
-      },
-      body: data
-    });
-
-    const result = await res.json();
-
-    if (res.ok) {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-
-      if (setUserData) setUserData(result.user);
-      
-      // 3. Success Reset
-      setShowOnboarding(false);
-      setOnboardingFile(null);
-      setPreviewFile(null);
-      setPreviewUrl(null);
-      
-      console.log("Profile updated successfully. Phone saved:", result.user.phone);
-    } else {
-      alert(result.message || "Initialization failed. Please check the form.");
-    }
-  } catch (err) {
-    console.error("Profile initialization failed:", err);
-    alert("Network error. Please check your connection.");
-  } finally {
-    setIsUploading(false);
-  }
-};
-
-const handleFileUpload = (e) => {
-  const file = e.target.files[0];
-  if (!file || !agent?._id) return;
-
-  const isVideo = file.type.startsWith('video/');
-  const isImage = file.type.startsWith('image/');
-  
-  if (!isVideo && !isImage) {
-    alert("Please upload only images or videos.");
-    return;
-  }
-   const maxLimit = 100 * 1024 * 1024; 
-  if (file.size > maxLimit) {
-    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
-    e.target.value = null; 
-    return;
-  }
-
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-  }
-
-  // Set State for the WhatsApp-style preview overlay
-  const localUrl = URL.createObjectURL(file);
-  setPreviewFile(file);
-  setPreviewUrl(localUrl);
-  setCaption(""); 
-  if (e.target) e.target.value = null; 
-};
-
-const handleFinalSend = async () => {
-  if (!previewFile || isUploading || !agent?._id) return;
-
-  const tempId = Date.now().toString();
-  const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-  const savedFile = previewFile; // Keep a reference for resending
-  const savedCaption = caption;
-
-  // Optimistic UI for Media
-  const pendingMedia = {
-    _id: tempId,
-    tempId: tempId,
-    senderId: userData._id,
-    senderModel: 'User',
-    text: savedCaption,
-    fileUrl: previewUrl, // Use the local blob URL for preview
-    fileType: detectedType,
-    status: 'sending',
-    createdAt: new Date().toISOString(),
-    isTemp: true,
-    originalFile: savedFile // Store file in object for resending
-  };
-
-  setMessages(prev => [...prev, pendingMedia]);
-  setPreviewUrl(null); // Close the preview overlay
-  setPreviewFile(null);
-
-  setIsUploading(true);
-  const token = localStorage.getItem('userToken'); 
-
-  try {
-    const urlResponse = await fetch('/api/messages/get-upload-url', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
-    });
-
-    const urlData = await urlResponse.json();
-    if (!urlData.success) throw new Error("Upload permission failed");
-
-    await fetch(urlData.uploadUrl, {
-      method: 'PUT',
-      body: savedFile,
-      headers: { 'Content-Type': savedFile.type }
-    });
-
-    const confirmResponse = await fetch('/api/messages/confirm-upload', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({
-        receiverId: agent._id,
-        text: savedCaption.trim(),
-        fileUrl: urlData.key, 
-        fileType: detectedType
-      })
-    });
-
-    const data = await confirmResponse.json();
-    if (data.success) {
-      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
-      setReplyingTo(null);
-    } else {
-      throw new Error();
-    }
-  } catch (err) {
-    setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
-  } finally {
-    setIsUploading(false);
-  }
-};
-
-const handleDownload = async (url, type) => {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const blobUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = `zing-${type}-${Date.now()}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(blobUrl);
-  } catch (err) {
-    console.error("Download failed:", err);
-  }
-};
-
-const startStatusPolling = (roomName) => {
-  const token = localStorage.getItem('userToken');
-  const startTime = Date.now(); // Mark when polling started
-
-  if (pollingRef.current) clearInterval(pollingRef.current);
-
-  const pollInterval = setInterval(async () => {
-    if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
-
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (res.status === 404) {
-        if (Date.now() - startTime > 8000) {
-          console.warn("🏳️ Polling: Call record missing.");
-          handleEndCall();
-        }
-        return;
-      }
-      const data = await res.json();
-      const terminalStates = ['ended', 'rejected', 'missed', 'declined'];
-
-      if (terminalStates.includes(data.status) || data.active === false) {
-        if (Date.now() - startTime > 5000) {
-          console.log("🏳️ Polling: Remote side terminated call.");
-          handleEndCall();
-        }
-      }
-    } catch (err) {
-      console.warn("Status sync jitter:", err.message);
-    }
-  }, 4000);
-
-  pollingRef.current = pollInterval;
-};
-const handleStartCall = async () => {
-  // 1. Validation and Setup
-  const currentUserId = userData?._id || userData?.id;
-  const currentAgentId = agent?._id || agent?.id;
-  const token = localStorage.getItem('userToken');
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-
-  if (!currentAgentId || !currentUserId) {
-    alert("Profile data still loading. Please try again.");
-    return;
-  }
-
-  // UI State: Move to calling immediately
-  setCallStatus('calling'); 
-  setShowFullScreenCall(true);
-
-  try {
-    // 2. Request a Secure LiveKit Room from Backend
-    const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({ 
-        receiverId: currentAgentId, 
-        receiverModel: 'Agent',
-        voiceId: "natural" 
-      })
-    });
-
-    const data = await res.json();
-
-    if (!data.success) {
-      throw new Error(data.message || "Agent unavailable");
-    }
-
-    // 3. Resolve Photo URL
-    const photoPath = userData?.photoUrl;
-    const fullPhotoUrl = photoPath?.startsWith('http') 
-      ? photoPath 
-      : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
-
-    // 4. Set Active Call Metadata IMMEDIATELY (Updates UI)
-    setActiveCall({ 
-      callId: data.roomName, 
-      roomName: data.roomName,
-      toId: currentAgentId.toString(),
-      fromId: currentUserId,
-      isInitiator: true,
-      callerData: {
-        fromName: `${userData?.firstName} ${userData?.lastName}`,
-        photoUrl: fullPhotoUrl,
-        callerId: currentUserId
-      }
-    });
-    socket.emit("call-agent", { 
-      agentToCall: currentAgentId.toString(),
-      fromId: currentUserId,
-      fromName: `${userData?.firstName} ${userData?.lastName}`,
-      photoUrl: fullPhotoUrl,
-      callId: data.roomName
-    });
-    setCallStatus('ringing'); 
-    setTimeout(() => {
-      if (data.lkToken) {
-        console.log("🚀 ZingConnect: Initializing Secure Media Handshake...");
-        setLiveKitToken(data.lkToken); 
-      }
-    }, 500);
-
-    // 7. Start the Safety Poller
-    startStatusPolling(data.roomName);
-
-  } catch (err) {
-    console.error("❌ ZingConnect: Call initialization failed:", err);
-    handleEndCall();
-  }
-};
-
- const handleSendMessage = async (e) => {
-  e.preventDefault();
-  if (!newMessage.trim() || !agent?._id) return;
-  
-  const textToSend = newMessage;
-  const tempId = Date.now().toString(); 
-  setNewMessage(''); 
-
-  const pendingMessage = {
-    _id: tempId,
-    tempId: tempId,
-    senderId: userData._id,
-    senderModel: 'User', // Ensure this matches your CSS logic
-    text: textToSend,
-    status: 'sending',
-    createdAt: new Date().toISOString(),
-    isTemp: true
-  };
-  setMessages(prev => [...prev, pendingMessage]);
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-
-  try {
-    const token = localStorage.getItem('userToken');
-    const response = await fetch('/api/messages/send', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        receiverId: agent._id,
-        text: textToSend,
-        fileType: 'text',
-        replyToId: replyingTo?._id 
-      })
-    });
-
-    const data = await response.json();
-    if (data.success) {
-      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
-      socket.emit("sendMessage", data.message); 
-      
-      setReplyingTo(null);
-    } else {
-      throw new Error();
-    }
-  } catch (err) {
-    setMessages(prev => prev.map(m => 
-      m._id === tempId ? { ...m, status: 'failed' } : m
-    ));
-  }
-};
-
-const handleResend = (msg) => {
-  setMessages(prev => prev.filter(m => m._id !== msg._id));
-  if (msg.fileType === 'image' || msg.fileType === 'video') {
-    setPreviewFile(msg.originalFile);
-    setPreviewUrl(msg.fileUrl);
-    setCaption(msg.text);
-  } else {
-    setNewMessage(msg.text);
-  }
-};
-
-function AudioTracks({ active }) {
-  const tracks = useTracks(
-    [
-      { source: Track.Source.Microphone, filter: (track) => track.isRemote },
-    ],
-    { updateOnlyOnChanges: true },
-  );
-
-  return null; // This component doesn't need to render anything visual
-};
 
 const MessageBubble = ({ m, isMe, onReply, children }) => {
   const controls = useAnimation();
