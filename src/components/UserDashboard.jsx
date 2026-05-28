@@ -79,6 +79,34 @@ const CallStatusMessage = ({ status, time }) => {
     </div>
   );
 };
+const AudioSession = ({ isMuted, isMasked }) => {
+  return (
+    <>
+      <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
+      <RoomAudioRenderer />
+    </>
+  );
+};
+
+const LocalUserMuteController = ({ isMuted, isMasked }) => {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    if (!localParticipant) return;
+    const syncMic = async () => {
+      const shouldPublish = !isMasked && !isMuted;
+      try {
+        await localParticipant.setMicrophoneEnabled(shouldPublish);
+        console.log(`🎤 ZingConnect Mic Sync: ${shouldPublish ? 'PUBLISHING' : 'MUTED/MASKED'}`);
+      } catch (err) {
+        console.error("❌ LiveKit Mic Sync Error:", err);
+      }
+    };
+
+    syncMic();
+  }, [isMuted, isMasked, localParticipant]);
+
+  return null;
+};
 
 export const UserDashboard = () => {
   const navigate = useNavigate();
@@ -201,34 +229,9 @@ const unlockAudio = useCallback(() => {
   }
 }, [hasInteracted]);
 
-const LocalUserMuteController = ({ isMuted, isMasked }) => {
-  const { localParticipant } = useLocalParticipant();
-  useEffect(() => {
-    if (!localParticipant) return;
-    const syncMic = async () => {
-      const shouldPublish = !isMasked && !isMuted;
-      try {
-        await localParticipant.setMicrophoneEnabled(shouldPublish);
-        console.log(`🎤 ZingConnect Mic Sync: ${shouldPublish ? 'PUBLISHING' : 'MUTED/MASKED'}`);
-      } catch (err) {
-        console.error("❌ LiveKit Mic Sync Error:", err);
-      }
-    };
 
-    syncMic();
-  }, [isMuted, isMasked, localParticipant]);
 
-  return null;
-};
 
-const AudioSession = ({ isMuted, isMasked }) => {
-  return (
-    <>
-      <LocalUserMuteController isMuted={isMuted} isMasked={isMasked} />
-      <RoomAudioRenderer />
-    </>
-  );
-};
 const lastMessageRef = useCallback((node) => {
   if (loading) return; // Prevent fetching while another fetch is in progress
   if (observerRef.current) observerRef.current.disconnect();
@@ -793,6 +796,77 @@ const terminateLocalSession = useCallback(() => {
   }, 3000);
 }, [localStream, ringtoneAudio, callingAudio]);
 
+
+const handleEndCall = useCallback(async () => {
+  console.log("📴 Initiating Call End Sequence...");  
+  if (connectionTimeoutRef.current) {
+    clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = null;
+  }
+  if (pollingRef.current) {
+    console.log("🛑 Stopping background status polling...");
+    clearInterval(pollingRef.current);
+    pollingRef.current = null;
+  }
+  const myId = userData?._id || userData?.id;
+  const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
+  const token = localStorage.getItem('userToken');
+  const targetId = activeCall?.fromId === myId 
+    ? activeCall?.toId 
+    : activeCall?.fromId;
+  try {
+    if (currentCallId && token) {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      console.log("✅ Server notified: Call marked as inactive.");
+    }
+    if (socket && targetId) {
+      socket.emit("end-call", { 
+        to: targetId.toString().trim(), 
+        callId: currentCallId 
+      });
+      socket.off("ai-audio-chunk");
+    }
+  } catch (err) {
+    console.warn("⚠️ Error during end-call handshake:", err);
+  } finally {
+    terminateLocalSession();
+  }
+}, [socket, userData, activeCall, terminateLocalSession]);
+
+async function handleRejectCall() {
+  console.log("🚫 User rejecting Agent call...");
+  const currentCall = activeCallRef.current || activeCall;
+  
+  if (!currentCall) {
+    console.warn("⚠️ Reject failed: No active call found in state/ref");
+    handleEndCall(); 
+    return;
+  }
+  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
+    const myId = userData?._id?.toString();
+  const initiatorId = currentCall.fromId?.toString();
+  const receiverId = currentCall.receiverId?.toString() || currentCall.toId?.toString();
+  const targetId = (initiatorId === myId) ? receiverId : initiatorId;
+
+  console.log("📡 Emitting reject-call to:", targetId, "for room:", callId);
+
+  if (socket && targetId && callId) {
+    socket.emit("reject-call", { 
+      to: targetId, 
+      fromId: myId, 
+      callId: String(callId).trim() 
+    });
+  } else {
+    console.error("❌ Missing Socket, Target, or CallID", { targetId, callId });
+  }
+  handleEndCall();
+}
 
 useEffect(() => {
   if (!hasInteracted) {
