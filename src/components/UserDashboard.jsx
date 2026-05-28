@@ -147,16 +147,6 @@ const prevScrollHeightRef = useRef(0);
   const [liveKitToken, setLiveKitToken] = useState(null);
   const [prevScrollHeight, setPrevScrollHeight] = useState(0);
 
-  const [callStatus, setCallStatus] = useState('idle'); 
-  const [activeCall, setActiveCall] = useState(null); 
-  const [activeCaller, setActiveCaller] = useState(null); 
-  const [localStream, setLocalStream] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-  const [callTime, setCallTime] = useState(0);
-  const [peerConnected, setPeerConnected] = useState(false);
-  const [isEnding, setIsEnding] = useState(false);
-  
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingFile, setOnboardingFile] = useState(null);
@@ -546,78 +536,6 @@ const startStatusPolling = (roomName) => {
 
   pollingRef.current = pollInterval;
 };
-const handleStartCall = async () => {
-  // 1. Validation and Setup
-  const currentUserId = userData?._id || userData?.id;
-  const currentAgentId = agent?._id || agent?.id;
-  const token = localStorage.getItem('userToken');
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
-
-  if (!currentAgentId || !currentUserId) {
-    alert("Profile data still loading. Please try again.");
-    return;
-  }
-  setCallStatus('calling'); 
-  setShowFullScreenCall(true);
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({ 
-        receiverId: currentAgentId, 
-        receiverModel: 'Agent',
-        voiceId: "natural" 
-      })
-    });
-
-    const data = await res.json();
-
-    if (!data.success) {
-      throw new Error(data.message || "Agent unavailable");
-    }
-    const photoPath = userData?.photoUrl;
-    const fullPhotoUrl = photoPath?.startsWith('http') 
-      ? photoPath 
-      : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
-
-    setActiveCall({ 
-      callId: data.roomName, 
-      roomName: data.roomName,
-      toId: currentAgentId.toString(),
-      fromId: currentUserId,
-      isInitiator: true,
-      callerData: {
-        fromName: `${userData?.firstName} ${userData?.lastName}`,
-        photoUrl: fullPhotoUrl,
-        callerId: currentUserId
-      }
-    });
-    socket.emit("call-agent", { 
-      agentToCall: currentAgentId.toString(),
-      fromId: currentUserId,
-      fromName: `${userData?.firstName} ${userData?.lastName}`,
-      photoUrl: fullPhotoUrl,
-      callId: data.roomName
-    });
-    setCallStatus('ringing'); 
-    setTimeout(() => {
-      if (data.lkToken) {
-        console.log("🚀 ZingConnect: Initializing Secure Media Handshake...");
-        setLiveKitToken(data.lkToken); 
-      }
-    }, 500);
-
-    // 7. Start the Safety Poller
-    startStatusPolling(data.roomName);
-
-  } catch (err) {
-    console.error("❌ ZingConnect: Call initialization failed:", err);
-    handleEndCall();
-  }
-};
 
  const handleSendMessage = async (e) => {
   e.preventDefault();
@@ -626,6 +544,7 @@ const handleStartCall = async () => {
   const textToSend = newMessage;
   const tempId = Date.now().toString(); 
   setNewMessage(''); 
+
   const pendingMessage = {
     _id: tempId,
     tempId: tempId,
@@ -670,82 +589,19 @@ const handleStartCall = async () => {
     ));
   }
 };
-const toggleMute = () => {
-  setIsMuted(prev => {
-    const newState = !prev;
-  const stream = localStream || userStreamRef.current;  
-    if (stream) {
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !newState; // Track enabled = not muted
-      });
-      console.log(`Mic ${newState ? 'disabled' : 'enabled'}`);
-    } else {
-      console.warn("No active stream found to mute");
-    }
-    return newState;
-  });
-};
+useLayoutEffect(() => {
+  const container = scrollRef.current;
+  if (!container) return;
 
-const handleAcceptCall = async () => {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (AudioContext) {
-    const audioCtx = new AudioContext();
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume().catch(e => console.warn("Context unlock blocked:", e));
-    }
+  const currentScrollHeight = container.scrollHeight;
+  const scrollDiff = currentScrollHeight - prevScrollHeightRef.current;
+  
+  if (prevScrollHeightRef.current > 0 && scrollDiff > 0) {
+    container.scrollTop += scrollDiff;
   }
-  if (ringtoneAudio.current) {
-    ringtoneAudio.current.pause();
-    ringtoneAudio.current.currentTime = 0;
-  }
-  const token = localStorage.getItem('userToken');
-  const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
 
-  if (!callId) {
-    console.error("❌ ZingConnect: No valid Call ID found for acceptance.");
-    return;
-  }
-  try {
-    setIsEnding(false); 
-    isTransitioningRef.current = true;
-        setCallStatus('connecting');
-    setShowFullScreenCall(true);
-
-    console.log(`📡 Sending acceptance to server engine for room/call: ${callId}...`);
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    const data = await response.json();    
-    if (data.success && data.lkToken) {
-      console.log("✅ Secure LiveKit token verified and cached locally.");
-            const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
-      if (socket && agentId) {
-        socket.emit("answer-call", { 
-          to: agentId, 
-          callId: data.roomName || callId, 
-          myId: userData?._id?.toString() 
-        });
-      }
-      peerConnectedRef.current = true; 
-      setPeerConnected(true);
-            setLiveKitToken(data.lkToken); 
-            isTransitioningRef.current = false;
-      setIsIncomingCall(false); // Move incoming flag change here post-auth verification 
-    } else {
-      throw new Error(data.message || "LiveKit RTC token missing from server engine");
-    }
-  } catch (err) {
-    console.error("❌ ZingConnect acceptance runtime exception:", err);
-    setIsEnding(false); 
-    isTransitioningRef.current = false;
-    handleEndCall(); // Safely fall back to structural teardown logic
-  }
-};
+  prevScrollHeightRef.current = currentScrollHeight;
+}, [messages]);
 
 const handleResend = (msg) => {
   setMessages(prev => prev.filter(m => m._id !== msg._id));
@@ -757,116 +613,6 @@ const handleResend = (msg) => {
     setNewMessage(msg.text);
   }
 };
-
-function AudioTracks({ active }) {
-  const tracks = useTracks(
-    [
-      { source: Track.Source.Microphone, filter: (track) => track.isRemote },
-    ],
-    { updateOnlyOnChanges: true },
-  );
-
-  return null; // This component doesn't need to render anything visual
-};
-const terminateLocalSession = useCallback(() => {
-  console.log("🧹 Executing Full Local Cleanup...");
-    setIsEnding(true);
-  
-  [ringtoneAudio, callingAudio].forEach(ref => {
-    if (ref?.current) {
-      ref.current.pause();
-      ref.current.currentTime = 0;
-    }
-  });
-
-  setLiveKitToken(null);
-  setCallStatus('idle');
-  setIsIncomingCall(false);
-  setActiveCall(null);
-  setCallTime(0);
-  setShowFullScreenCall(false);
-  setPeerConnected(false);
-
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
-    setLocalStream(null);
-  }
-  setTimeout(() => {
-    setIsEnding(false);
-  }, 3000);
-}, [localStream, ringtoneAudio, callingAudio]);
-
-
-const handleEndCall = useCallback(async () => {
-  console.log("📴 Initiating Call End Sequence...");  
-  if (connectionTimeoutRef.current) {
-    clearTimeout(connectionTimeoutRef.current);
-    connectionTimeoutRef.current = null;
-  }
-  if (pollingRef.current) {
-    console.log("🛑 Stopping background status polling...");
-    clearInterval(pollingRef.current);
-    pollingRef.current = null;
-  }
-  const myId = userData?._id || userData?.id;
-  const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
-  const token = localStorage.getItem('userToken');
-  const targetId = activeCall?.fromId === myId 
-    ? activeCall?.toId 
-    : activeCall?.fromId;
-  try {
-    if (currentCallId && token) {
-      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      console.log("✅ Server notified: Call marked as inactive.");
-    }
-    if (socket && targetId) {
-      socket.emit("end-call", { 
-        to: targetId.toString().trim(), 
-        callId: currentCallId 
-      });
-      socket.off("ai-audio-chunk");
-    }
-  } catch (err) {
-    console.warn("⚠️ Error during end-call handshake:", err);
-  } finally {
-    terminateLocalSession();
-  }
-}, [socket, userData, activeCall, terminateLocalSession]);
-
-async function handleRejectCall() {
-  console.log("🚫 User rejecting Agent call...");
-  const currentCall = activeCallRef.current || activeCall;
-  
-  if (!currentCall) {
-    console.warn("⚠️ Reject failed: No active call found in state/ref");
-    handleEndCall(); 
-    return;
-  }
-  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
-    const myId = userData?._id?.toString();
-  const initiatorId = currentCall.fromId?.toString();
-  const receiverId = currentCall.receiverId?.toString() || currentCall.toId?.toString();
-  const targetId = (initiatorId === myId) ? receiverId : initiatorId;
-
-  console.log("📡 Emitting reject-call to:", targetId, "for room:", callId);
-
-  if (socket && targetId && callId) {
-    socket.emit("reject-call", { 
-      to: targetId, 
-      fromId: myId, 
-      callId: String(callId).trim() 
-    });
-  } else {
-    console.error("❌ Missing Socket, Target, or CallID", { targetId, callId });
-  }
-  handleEndCall();
-}
 
 useEffect(() => {
   if (!hasInteracted) {
@@ -915,41 +661,7 @@ useEffect(() => {
   }
 }, [agent?._id]); // Runs when agent data loads
 
-useEffect(() => {
-  activeCallRef.current = activeCall;
-}, [activeCall]);
 
-    useEffect(() => {
-    callStatusRef.current = callStatus;
-  }, [callStatus]);
-
-
-useEffect(() => {
-  socket.on("voice-state-updated", (data) => {
-    if (data.mode === 'natural') {
-      const remoteAudio = document.getElementById('remoteAudio');
-      if (remoteAudio) {
-        remoteAudio.muted = false; // Force unmute the WebRTC stream
-        remoteAudio.volume = isSpeakerOn ? 1.0 : 0.7;
-        console.log("🔊 Switch to Natural: WebRTC Unmuted");
-      }
-    }
-  });
-  return () => socket.off("voice-state-updated");
-}, [socket, isSpeakerOn]);
-
-useLayoutEffect(() => {
-  const container = scrollRef.current;
-  if (!container) return;
-
-  const currentScrollHeight = container.scrollHeight;
-  const scrollDiff = currentScrollHeight - prevScrollHeightRef.current;
-  if (prevScrollHeightRef.current > 0 && scrollDiff > 0) {
-    container.scrollTop += scrollDiff;
-  }
-
-  prevScrollHeightRef.current = currentScrollHeight;
-}, [messages]);
 
 useEffect(() => {
   if ('serviceWorker' in navigator) {
