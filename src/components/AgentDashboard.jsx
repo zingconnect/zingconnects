@@ -1468,29 +1468,25 @@ const handleFinalSend = async () => {
     });
     if (!directUpload.ok) throw new Error("Cloud upload failed");
 
-    // 3. Confirm to DB
-    const confirmResponse = await fetch('/api/messages/confirm-upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        receiverId: selectedUser._id,
-        text: caption,
-        fileUrl: key,
-        fileType: detectedType
-      })
-    });
+   // Change your confirmation block to this:
+const confirmResponse = await fetch('/api/messages/confirm-upload', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+  body: JSON.stringify({ /* ... */ })
+});
 
-    const finalData = await confirmResponse.json();
-    
-    // Check for success or if it's a 500 error where the message might have still been saved
-    if (confirmResponse.ok && finalData.success) {
-      setMessages(prev => [...prev, finalData.message]);
-    } else if (confirmResponse.status === 500) {
-        console.warn("Backend 500 error, but checking if message saved...");
-        // Optionally trigger a re-fetch of the messages list here
-    } else {
-        throw new Error(finalData.message || "Confirmation failed");
-    }
+const finalData = await confirmResponse.json();
+if (finalData.message) {
+  setMessages(prev => [...prev, finalData.message]);
+  
+  // Cleanup
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  setPreviewUrl(null);
+  setPreviewFile(null);
+  setCaption("");
+} else {
+  alert("Error: " + (finalData.message || "Unknown error"));
+}
 
     // Cleanup (Always happens if we didn't throw)
     if (previewUrl) URL.revokeObjectURL(previewUrl);
