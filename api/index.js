@@ -1607,9 +1607,8 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug' })
     .lean();
     
-    // 4. NOW reverse only the retrieved batch so it appears chronologically 
-    // in your frontend's [...data.messages, ...prev] state update
     messages.reverse();
+    console.log("Backend received skip:", req.query.skip);
     // 2. Map and sign IDrive E2 URLs
     const signedMessages = await Promise.all(messages.map(async (m) => {
       if (m.fileUrl) {
