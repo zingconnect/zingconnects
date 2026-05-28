@@ -793,24 +793,20 @@ const terminateLocalSession = useCallback(() => {
   }, 3000);
 }, [localStream, ringtoneAudio, callingAudio]);
 
-
+// 1. Move inside your component
 const handleEndCall = useCallback(async () => {
-  console.log("📴 Initiating Call End Sequence...");  
-  if (connectionTimeoutRef.current) {
-    clearTimeout(connectionTimeoutRef.current);
-    connectionTimeoutRef.current = null;
-  }
-  if (pollingRef.current) {
-    console.log("🛑 Stopping background status polling...");
-    clearInterval(pollingRef.current);
-    pollingRef.current = null;
-  }
+  // Use a ref for stable access to avoid stale closures
+  const active = activeCallRef.current;
   const myId = userData?._id || userData?.id;
-  const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
+  const currentCallId = active?.callId || active?._id || active?.roomName;
+  
+  // Cleanup timers
+  if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+  if (pollingRef.current) clearInterval(pollingRef.current);
+
   const token = localStorage.getItem('userToken');
-  const targetId = activeCall?.fromId === myId 
-    ? activeCall?.toId 
-    : activeCall?.fromId;
+  const targetId = active?.fromId === myId ? active?.toId : active?.fromId;
+
   try {
     if (currentCallId && token) {
       await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
@@ -820,38 +816,31 @@ const handleEndCall = useCallback(async () => {
           'Content-Type': 'application/json'
         }
       });
-      console.log("✅ Server notified: Call marked as inactive.");
     }
     if (socket && targetId) {
-      socket.emit("end-call", { 
-        to: targetId.toString().trim(), 
-        callId: currentCallId 
-      });
-      socket.off("ai-audio-chunk");
+      socket.emit("end-call", { to: targetId.toString().trim(), callId: currentCallId });
     }
   } catch (err) {
-    console.warn("⚠️ Error during end-call handshake:", err);
+    console.warn("⚠️ Error during end-call:", err);
   } finally {
-    terminateLocalSession();
+    terminateLocalSession(); // Ensure this is also memoized
   }
-}, [socket, userData, activeCall, terminateLocalSession]);
+}, [socket, userData, terminateLocalSession]);
 
-async function handleRejectCall() {
+const handleRejectCall = useCallback(() => {
   console.log("🚫 User rejecting Agent call...");
-  const currentCall = activeCallRef.current || activeCall;
+  const currentCall = activeCallRef.current;
   
   if (!currentCall) {
-    console.warn("⚠️ Reject failed: No active call found in state/ref");
-    handleEndCall(); 
+    handleEndCall();
     return;
   }
-  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
-    const myId = userData?._id?.toString();
-  const initiatorId = currentCall.fromId?.toString();
-  const receiverId = currentCall.receiverId?.toString() || currentCall.toId?.toString();
-  const targetId = (initiatorId === myId) ? receiverId : initiatorId;
 
-  console.log("📡 Emitting reject-call to:", targetId, "for room:", callId);
+  const callId = currentCall.callId || currentCall._id || currentCall.roomName;
+  const myId = userData?._id?.toString();
+  const targetId = (currentCall.fromId?.toString() === myId) 
+    ? (currentCall.toId?.toString() || currentCall.receiverId?.toString())
+    : currentCall.fromId?.toString();
 
   if (socket && targetId && callId) {
     socket.emit("reject-call", { 
@@ -859,11 +848,9 @@ async function handleRejectCall() {
       fromId: myId, 
       callId: String(callId).trim() 
     });
-  } else {
-    console.error("❌ Missing Socket, Target, or CallID", { targetId, callId });
   }
   handleEndCall();
-}
+}, [socket, userData, handleEndCall]);
 
 useEffect(() => {
   if (!hasInteracted) {
