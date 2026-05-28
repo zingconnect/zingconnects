@@ -1817,14 +1817,15 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     res.status(500).json({ success: false, message: "Upload failed", error: err.message });
   }
 });
-
 app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
-    // Ensure DB is ready
     await connectToDatabase(); 
 
     const { receiverId, text, fileUrl, fileType } = req.body;
+
+    // 1. Hard Validation
     if (!receiverId || !fileUrl) {
+      console.error("❌ Validation Failed: Missing receiverId or fileUrl", req.body);
       return res.status(400).json({ success: false, message: "Missing receiverId or fileUrl" });
     }
 
@@ -1832,44 +1833,54 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     const receiverModel = isAgent ? 'User' : 'Agent';
     const senderModel = isAgent ? 'Agent' : 'User';
 
-    // IMPORTANT: Use lean() and ensure fields match schema exactly
+    // 2. Prepare Data (Explicitly sanitize inputs)
     const newMessageData = {
       senderId: req.user.id,
       senderModel,
-      receiverId,
+      receiverId: receiverId.toString(), // Ensure ID is stringified
       receiverModel,
-      text: text || "",
+      text: typeof text === 'string' ? text : "", // Ensure text is a string
       fileUrl, 
-      fileType,
+      fileType: fileType || 'image',
       status: 'sent',
       notificationSent: false
     };
 
+    console.log("DEBUG: Attempting to save message:", newMessageData);
+    
+    // 3. Save Message
     const newMessage = await Message.create(newMessageData);
 
-    // FETCH PROFILES - Use a wrapper that never throws
-    let receiver = null, sender = null;
-    try {
-        const TargetModel = receiverModel === 'Agent' ? Agent : User;
-        const SenderModel = isAgent ? Agent : User;
-        [receiver, sender] = await Promise.all([
-            TargetModel.findById(receiverId).lean(),
-            SenderModel.findById(req.user.id).lean()
-        ]);
-    } catch (e) { console.error("Profile lookup error:", e); }
+    // 4. Notifications & Profiles (Completely wrapped to avoid blocking)
+    (async () => {
+        try {
+            const TargetModel = receiverModel === 'Agent' ? Agent : User;
+            const SenderModel = isAgent ? Agent : User;
+            const [receiver, sender] = await Promise.all([
+                TargetModel.findById(receiverId).lean(),
+                SenderModel.findById(req.user.id).lean()
+            ]);
 
-    // NOTIFICATIONS (Isolated)
-    // Wrap entire logic in a background process if possible, 
-    // but keep it safe here for now.
-    try {
-       // ... (your existing notification logic)
-    } catch (e) { console.error("Notification logic failed:", e); }
+            if (receiver || sender) {
+                const io = req.app.get('socketio');
+                const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+                
+                if (isOnline) {
+                    io.to(receiverId.toString()).emit("new-message", newMessage);
+                } else if (receiver?.pushSubscription) {
+                    // ... push logic ...
+                }
+            }
+        } catch (e) {
+            console.error("Async notification background task failed:", e);
+        }
+    })();
 
-    // SUCCESS - Ensure signed URL doesn't crash the response
+    // 5. Return Success
     let signedUrlForFrontend = fileUrl;
     try {
         signedUrlForFrontend = await getPrivateUrl(fileUrl);
-    } catch (e) { console.error("Signed URL failed:", e); }
+    } catch (e) { console.error("Signed URL generation failed:", e); }
 
     return res.status(201).json({ 
         success: true, 
@@ -1877,8 +1888,7 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
 
   } catch (err) {
-    // LOG THE ACTUAL ERROR TO VERCEL
-    console.error("❌ CRITICAL ERROR:", err);
+    console.error("❌ CRITICAL ERROR in confirm-upload:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
