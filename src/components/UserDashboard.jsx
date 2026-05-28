@@ -1117,23 +1117,17 @@ useEffect(() => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL;
-  
   if (!token || !targetAgentId) return;
-
   let isFirstLoad = true;
-
   const fetchMessages = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
-
       if (response.ok && data.success) {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
-
-        // 1. Silent Notification & Seen Logic
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
@@ -1230,13 +1224,15 @@ useEffect(() => {
   const container = chatContainerRef.current;
   if (!container) return;
   const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-  if (isNearBottom) {
+  const lastMessage = messages[messages.length - 1];
+  const isNewMessage = lastMessage && (Date.now() - new Date(lastMessage.createdAt).getTime() < 5000);
+  if (isNearBottom && isNewMessage) {
     const timer = setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, 100);
     return () => clearTimeout(timer);
   }
-}, [messages]);
+  }, [messages]);
 
 useEffect(() => {
   const container = chatContainerRef.current;
