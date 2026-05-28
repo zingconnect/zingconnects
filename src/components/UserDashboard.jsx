@@ -112,6 +112,10 @@ const chatContainerRef = useRef(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [liveKitToken, setLiveKitToken] = useState(null);
+  const [page, setPage] = useState(1);
+const [hasMore, setHasMore] = useState(true);
+const [loadingMore, setLoadingMore] = useState(false);
+const scrollSentinelRef = useRef(null); 
   
 
   const [callStatus, setCallStatus] = useState('idle'); 
@@ -1118,10 +1122,11 @@ useEffect(() => {
     return () => clearInterval(interval);
   }, [navigate]);
 
+
   useEffect(() => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
   
   if (!token || !targetAgentId) return;
 
@@ -1129,7 +1134,6 @@ useEffect(() => {
 
   const fetchMessages = async () => {
     try {
-      // Added your ?limit=50 param to optimize historical fetching payload sizes
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -1211,6 +1215,30 @@ useEffect(() => {
   const agentStatus = getStatusInfo(agent);
 
   const handlePhotoClick = () => fileInputRef.current.click();
+
+  const fetchOlderMessages = async () => {
+  if (loadingMore || !hasMore) return;
+  setLoadingMore(true);
+
+  try {
+    const nextPage = page + 1;
+    const response = await fetch(
+      `${API_BASE_URL}/api/messages/${targetAgentId}?page=${nextPage}&limit=50`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    const data = await response.json();
+    if (data.messages.length > 0) {
+      setMessages(prev => [...data.messages, ...prev]); // Prepend new data
+      setPage(nextPage);
+    } else {
+      setHasMore(false); // No more history
+    }
+  } catch (err) {
+    console.error("Failed to load history", err);
+  } finally {
+    setLoadingMore(false);
+  }
+};
 
 const handleFileChange = (e) => {
   const file = e.target.files[0];
