@@ -89,7 +89,7 @@ const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
 const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
 const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
   const serverUrl = import.meta.env.VITE_LIVEKIT_URL
-
+const isFirstLoad = useRef(true);
   const connectionRef = useRef(null);
   const pollingRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
@@ -1115,22 +1115,25 @@ useEffect(() => {
     return () => clearInterval(interval);
   }, [navigate]);
 
-
-  useEffect(() => {
+useEffect(() => {
   const token = localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL;
+  
   if (!token || !targetAgentId) return;
-  let isFirstLoad = true;
+
   const fetchMessages = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
+      
       if (response.ok && data.success) {
         const incomingMessages = data.messages;
         const lastMsg = incomingMessages[incomingMessages.length - 1];
+
+        // 1. Silent Notification & Seen Logic
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
@@ -1140,7 +1143,7 @@ useEffect(() => {
           lastNotifiedId.current = lastMsg._id;
           if (notificationSound.current) {
             notificationSound.current.currentTime = 0;
-            notificationSound.current.play().catch(() => console.log("Audio blocked by browser"));
+            notificationSound.current.play().catch(() => console.log("Audio blocked"));
           }
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
@@ -1156,13 +1159,11 @@ useEffect(() => {
           }).catch(err => console.error("Mark read failed:", err));
         }
 
-        // 2. State Sync: Merge incoming messages with local in-flight ones
+        // 2. State Sync
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
           const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
-          const uniqueInFlight = inFlight.filter(m => 
-            !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId)
-          );
+          const uniqueInFlight = inFlight.filter(m => !serverMessageIds.has(m._id) && !serverMessageIds.has(m.tempId));
           const newCombined = [...incomingMessages, ...uniqueInFlight];
           
           if (prev.length === newCombined.length && prev[prev.length-1]?._id === newCombined[newCombined.length-1]?._id) {
@@ -1171,26 +1172,23 @@ useEffect(() => {
           return newCombined;
         });
 
-        // 3. Smart Viewport Anchoring
-        setTimeout(() => {
-          if (isFirstLoad) {
-            // Instant snap on mount so user doesn't see scroll animation lag
+        // 3. Smart Viewport Anchoring (Only on Initial Load)
+        if (isFirstLoad.current) {
+          setTimeout(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-            isFirstLoad = false;
-          } else {
-            // Smooth adjustment for passive incoming messages while chatting
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-          }
-        }, 100);
+          }, 100);
+          isFirstLoad.current = false;
+        }
       }
     } catch (err) {
       console.error("ZingConnect Sync Jitter:", err);
     } finally {
-      if (isFirstLoad) setLoading(false);
+      if (isFirstLoad.current) setLoading(false);
     }
   };
+
   fetchMessages();
-    const interval = setInterval(fetchMessages, 5000); 
+  const interval = setInterval(fetchMessages, 5000); 
   
   return () => clearInterval(interval);
 }, [agent?._id, agent?.id]);
@@ -1202,35 +1200,37 @@ useEffect(() => {
 useEffect(() => {
   const container = chatContainerRef.current;
   if (!container) return;
+
   const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-  const lastMessage = messages[messages.length - 1];
-  const isNewMessage = lastMessage && (Date.now() - new Date(lastMessage.createdAt).getTime() < 5000);
-  if (isNearBottom && isNewMessage) {
-    const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-    return () => clearTimeout(timer);
+  // Only scroll if we are already at the bottom and a new message exists
+  if (isNearBottom) {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }
-  }, [messages]);
+}, [messages.length]);
 
 useEffect(() => {
-  const container = chatContainerRef.current;
   const observer = new IntersectionObserver((entries) => {
     if (entries[0].isIntersecting && !loadingMore && hasMore) {
+      const container = chatContainerRef.current;
       const prevScrollHeight = container.scrollHeight;
       const prevScrollTop = container.scrollTop;
 
       fetchOlderMessages().then(() => {
-        // 2. Adjust scrollTop after messages are prepended to prevent the "jump"
-        const newScrollHeight = container.scrollHeight;
-        container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+        // Restore scroll position to keep the user focused on the same messages
+        requestAnimationFrame(() => {
+          container.scrollTop = prevScrollTop + (container.scrollHeight - prevScrollHeight);
+        });
       });
     }
   }, { threshold: 1.0 });
 
-  if (scrollSentinelRef.current) observer.observe(scrollSentinelRef.current);
-  return () => observer.disconnect();
-}, [loadingMore, hasMore]); // Remove scrollSentinelRef.current from dependency
+  const sentinel = scrollSentinelRef.current;
+  if (sentinel) observer.observe(sentinel);
+  
+  return () => {
+    if (sentinel) observer.unobserve(sentinel);
+  };
+}, [loadingMore, hasMore]);
 
 
   const fetchOlderMessages = async () => {
