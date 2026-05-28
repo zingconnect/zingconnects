@@ -1443,16 +1443,9 @@ const handleDeleteMessage = async (msgId) => {
     console.error("Delete request failed:", err);
   }
 };
-const handleFinalSend = async () => {
-  // Debug Log: Validate state before starting
-  console.log("DEBUG: Initiating send. Selected User ID:", selectedUser?._id);
 
-  if (!previewFile || isUploading || !selectedUser?._id) {
-    console.error("Missing critical data: PreviewFile, Uploading State, or SelectedUser ID.");
-    alert("Error: No recipient selected or invalid file.");
-    return;
-  }
-  
+const handleFinalSend = async () => {
+  if (!previewFile || isUploading || !selectedUser) return;
   setIsUploading(true);
 
   try {
@@ -1465,7 +1458,6 @@ const handleFinalSend = async () => {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ fileName: previewFile.name, fileType: previewFile.type })
     });
-    if (!urlResponse.ok) throw new Error("Could not get upload URL");
     const { uploadUrl, key } = await urlResponse.json();
 
     // 2. Upload directly to S3/Cloud Storage
@@ -1474,47 +1466,37 @@ const handleFinalSend = async () => {
       body: previewFile,
       headers: { 'Content-Type': previewFile.type }
     });
+
     if (!directUpload.ok) throw new Error("Cloud upload failed");
 
     // 3. Confirm to DB
-    const requestBody = {
-      receiverId: selectedUser._id, // Ensure this is sent correctly
-      text: caption,
-      fileUrl: key,
-      fileType: detectedType
-    };
-
-    console.log("DEBUG: Sending to backend:", requestBody);
-
     const confirmResponse = await fetch('/api/messages/confirm-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({
+        receiverId: selectedUser._id,
+        text: caption,
+        fileUrl: key,
+        fileType: detectedType
+      })
     });
 
     const finalData = await confirmResponse.json();
-
-    // 4. Update UI (Check for message object even if response status was 500)
-    if (finalData.message) {
+    if (finalData.success) {
       setMessages(prev => [...prev, finalData.message]);
-      
-      // Cleanup UI
+      // Cleanup
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
       setPreviewFile(null);
       setCaption("");
-    } else {
-      console.error("Backend Error Response:", finalData);
-      alert("Error: " + (finalData.message || "Failed to confirm upload."));
     }
-
   } catch (err) {
-    console.error("Upload process error:", err);
     alert("Upload failed. Please check your connection.");
   } finally {
     setIsUploading(false);
   }
 };
+
   const handleLogout = () => {
     const currentSlug = agentData.slug;
     localStorage.removeItem('agentToken');

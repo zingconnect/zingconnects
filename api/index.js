@@ -1818,13 +1818,40 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
   }
 });
 
-// --- 2. CONFIRM UPLOAD & SAVE TO DB ---
+// --- 1. GET UPLOAD PERMISSION (Presigned URL generation does not require modifications) ---
+app.post('/api/messages/get-upload-url', authenticateToken, async (req, res) => {
+  try {
+    const { fileName, fileType } = req.body;
+    if (!fileName || !fileType) {
+      return res.status(400).json({ success: false, message: "File metadata missing" });
+    }
+    const fileExtension = fileName.split('.').pop();
+    const key = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${fileExtension}`;
+    const client = getS3Client();
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.IDRIVE_BUCKET_NAME,
+      Key: key,
+      ContentType: fileType,
+    });
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 900 });
+
+    res.json({ success: true, uploadUrl, key });
+  } catch (err) {
+    console.error("Presigned URL Error:", err.message);
+    res.status(500).json({ 
+      success: false, 
+      message: "Could not generate upload pass", 
+      error: err.message 
+    });
+  }
+});
+
+// --- 2. CONFIRM UPLOAD & SAVE TO DB (REDIS OPTIMIZED) ---
 app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => {
   try {
-    // 1. Trigger the connection helper
     await connectToDatabase(); 
 
-    // 2. Resilience Loop: Wait for Mongoose to move from "Connecting" (2) to "Connected" (1)
     let connectionRetries = 0;
     while (mongoose.connection.readyState !== 1 && connectionRetries < 5) {
       console.log(`⏳ Waiting for DB stabilization... Attempt ${connectionRetries + 1}`);
@@ -1837,16 +1864,16 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     }
 
     const { receiverId, text, fileUrl, fileType } = req.body;
-    
     if (!receiverId || !fileUrl) {
       return res.status(400).json({ success: false, message: "Missing receiverId or fileUrl" });
     }
 
+    const redis = req.app.get('redisClient');
     const isAgent = req.user.role === 'agent';
     const receiverModel = isAgent ? 'User' : 'Agent';
     const senderModel = isAgent ? 'Agent' : 'User';
 
-    // 3. Save Message to Database
+    // Save Message to Database
     const newMessage = new Message({
       senderId: req.user.id,
       senderModel: senderModel,
@@ -1860,15 +1887,43 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
     await newMessage.save();
 
-    // --- 4. NOTIFICATION LOGIC (PUSH & EMAIL) ---
-    const TargetModel = receiverModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId);
-    const sender = await (isAgent ? Agent : User).findById(req.user.id);
+    // FETCH TARGET AND SENDER PROFILE (VIA REDIS PROMISES)
+    let receiver = null;
+    let sender = null;
+
+    if (redis) {
+      try {
+        const [cachedReceiver, cachedSender] = await Promise.all([
+          redis.get(`profile:${receiverId}`),
+          redis.get(`profile:${req.user.id}`)
+        ]);
+        if (cachedReceiver) receiver = JSON.parse(cachedReceiver);
+        if (cachedSender) sender = JSON.parse(cachedSender);
+      } catch (redisErr) {
+        console.error("⚠️ Redis Read Failure on Confirm Upload:", redisErr.message);
+      }
+    }
+
+    if (!receiver) {
+      const TargetModel = receiverModel === 'Agent' ? Agent : User;
+      receiver = await TargetModel.findById(receiverId).lean();
+      if (receiver && redis) {
+        await redis.setEx(`profile:${receiverId}`, 1800, JSON.stringify(receiver)).catch(() => {});
+      }
+    }
+
+    if (!sender) {
+      const SenderModel = isAgent ? Agent : User;
+      sender = await SenderModel.findById(req.user.id).lean();
+      if (sender && redis) {
+        await redis.setEx(`profile:${req.user.id}`, 1800, JSON.stringify(sender)).catch(() => {});
+      }
+    }
 
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
-    // A. Web Push (Always attempt)
+    // Web Push
     if (receiver?.pushSubscription) {
       try {
         const payload = JSON.stringify({
@@ -1885,33 +1940,36 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
       }
     }
 
-    // B. Email Notification (If offline and cooldown passed)
+    // Email Notification
     if (!isOnline && receiver) {
       try {
-        const COOLDOWN = 30 * 60 * 1000; // 30 Minutes
+        const COOLDOWN = 30 * 60 * 1000; 
         const now = Date.now();
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmailTime > COOLDOWN) {
-          // Pass the fileType context to sendOfflineNotification if you want specific wording
           const emailText = text || `Sent a ${fileType} attachment`;
-          
           await sendOfflineNotification(receiver, sender, emailText, fileUrl, fileType, receiverModel);
           
+          const TargetModel = receiverModel === 'Agent' ? Agent : User;
           await TargetModel.findByIdAndUpdate(receiverId, { 
             lastNotificationEmail: new Date() 
           });
+
+          if (redis) {
+            await redis.del(`profile:${receiverId}`).catch(() => {});
+          }
           console.log(`[Email] Offline notification for ${fileType} sent to ${receiver.email}`);
         }
       } catch (mailErr) {
         console.error("Email Throttle Error:", mailErr.message);
       }
     }
+
     if (isOnline) {
       io.to(receiverId.toString()).emit("new-message", newMessage);
     }
 
-    // 5. Final Response
     const signedUrlForFrontend = await getPrivateUrl(fileUrl);
     const responseData = newMessage.toObject();
     responseData.fileUrl = signedUrlForFrontend;
@@ -1930,7 +1988,6 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
     });
   }
 });
-
 
 // --- DELETE MESSAGE ROUTE ---
 app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
