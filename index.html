@@ -2,38 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Browser Tab Icon -->
     <link rel="icon" type="image/png" href="/logo-s.png" />
     
-    <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
     
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <meta name="theme-color" content="#000000" />
     
-    <!-- Third Party Integrations -->
     <script src="https://checkout.flutterwave.com/v3.js"></script>
     
     <title>ZingConnect</title>
 
-    <!-- General PWA Meta -->
-    <meta name="mobile-web-app-capable" content="yes"> 
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    
-    <!-- iOS Specific Refinement -->
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="ZingConnect">
     
-    <!-- Use icon.png (192x192) for the home screen icon -->
     <link rel="apple-touch-icon" href="/icon.png">
 
-    <!-- Use logo-s.png (512x512) for the splash screen -->
     <link rel="apple-touch-startup-image" href="/logo-s.png">
   </head>
   <body>
+    <script>
+      (function() {
+        const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+        
+        if (isStandalone) {
+          const storedSlug = localStorage.getItem('agentSlug') || localStorage.getItem('lastVisitedSlug');
+          
+          if (storedSlug && (window.location.pathname === '/' || window.location.pathname.includes('/pricing'))) {
+            window.location.replace('/' + storedSlug);
+          }
+        }
+      })();
+    </script>
+    
     <div id="root"></div>
-    <!-- Ensure this path matches your Vite/React project structure -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

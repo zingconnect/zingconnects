@@ -73,6 +73,20 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+window.notificationSound = new Audio('/sound/notification.mp3');
+
+const primeAudio = () => {
+  window.notificationSound.play().then(() => {
+    window.notificationSound.pause();
+    window.notificationSound.currentTime = 0;
+  }).catch(() => {
+    // Expected to fail until user interaction
+  });
+  document.removeEventListener('click', primeAudio);
+};
+
+document.addEventListener('click', primeAudio, { once: true, capture: true });
+
 // --- 5. RENDER SYSTEM ---
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
