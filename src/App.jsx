@@ -101,20 +101,6 @@ const RootGate = () => {
   return slug ? <Navigate to={`/${slug}`} replace /> : <PricingPage />;
 };
 
-
-// Create the component
-const Launcher = () => {
-  const navigate = useNavigate();
-  useEffect(() => {
-    const slug = localStorage.getItem('agentSlug') || localStorage.getItem('lastVisitedSlug');
-    if (slug) {
-      navigate(`/${slug}`, { replace: true });
-    } else {
-      navigate('/pricing', { replace: true });
-    }
-  }, [navigate]);
-  return <div className="loading-spinner">Loading your workspace...</div>;
-};
 function App() {
   return (
     <Router>
@@ -148,9 +134,7 @@ function App() {
           
           {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
           <Route path="/:slug" element={<AgentSlug />} />
-          
-          <Route path="/launcher" element={<Launcher />} />
-
+        
 
           {/* --- 6. GLOBAL FALLBACK --- */}
           <Route path="*" element={<Navigate to="/" replace />} />
