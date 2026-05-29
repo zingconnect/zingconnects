@@ -84,6 +84,8 @@ export const UserDashboard = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const cameraPhotoRef = useRef(null); 
+const cameraVideoRef = useRef(null);
   const messagesEndRef = useRef(null);
 const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
 const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
@@ -345,7 +347,7 @@ useEffect(() => {
   }
 }, []);
 
-const triggerCamera = (mode = 'photo') => {
+const triggerCamera = (mode) => {
   if (mode === 'photo' && cameraPhotoRef.current) {
     cameraPhotoRef.current.value = '';
     cameraPhotoRef.current.click();
@@ -2168,7 +2170,14 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
   <BsCameraFill size={22} />
 </button>
+
+{showCameraMenu && (
+    <div className="absolute bottom-12 right-0 bg-white rounded-xl shadow-xl p-2 border border-gray-100 animate-in fade-in zoom-in-95">
+      <button onClick={() => { triggerCamera('photo'); setShowCameraMenu(false); }} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Photo</button>
+      <button onClick={() => { triggerCamera('video'); setShowCameraMenu(false); }} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Video</button>
     </div>
+  )}
+</div>
     
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
       <div className="flex-1 relative flex items-center">
