@@ -99,14 +99,31 @@ const ThemeInitializer = () => {
 const RootGate = () => {
   const slug = localStorage.getItem('agentSlug');
 
-  console.log('ROOTGATE');
-  console.log('agentSlug:', slug);
-  console.log('pathname:', window.location.pathname);
-  console.log('search:', window.location.search);
+  return (
+    <div
+      style={{
+        padding: '40px',
+        fontFamily: 'monospace',
+        fontSize: '14px'
+      }}
+    >
+      <h2>DEBUG MODE</h2>
 
-  return slug
-    ? <Navigate to={`/${slug}`} replace />
-    : <PricingPage />;
+      <p>Path: {window.location.pathname}</p>
+      <p>Search: {window.location.search}</p>
+      <p>Stored Slug: {slug || 'NULL'}</p>
+
+      <button
+        onClick={() => {
+          if (slug) {
+            window.location.href = '/' + slug;
+          }
+        }}
+      >
+        Continue
+      </button>
+    </div>
+  );
 };
 
 function App() {
