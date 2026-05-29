@@ -1277,6 +1277,8 @@ if (activeStatus) {
   const usersRes = await fetch('/api/agents/my-users', {
     headers: { 'Authorization': `Bearer ${token}` }
   });
+  const userData = await usersRes.json();
+  
   if (userData.success && Array.isArray(userData.users)) {
   setUsers(userData.users);
   const initialUnreadCounts = {};
