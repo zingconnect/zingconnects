@@ -105,6 +105,9 @@ const isFirstLoad = useRef(true);
   const audioCtxRef = useRef(null);
 const nextStartTimeRef = useRef(0);
 const chatContainerRef = useRef(null);
+const isAdjustingScrollRef = useRef(false); 
+const previousScrollHeightRef = useRef(0);
+const previousScrollTopRef = useRef(0);
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -119,9 +122,7 @@ const [hasMore, setHasMore] = useState(true);
 const [loadingMore, setLoadingMore] = useState(false);
 const scrollSentinelRef = useRef(null); 
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
-const isAdjustingScrollRef = useRef(false); 
-const previousScrollHeightRef = useRef(0);
-const previousScrollTopRef = useRef(0);
+
 
   const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
@@ -132,6 +133,7 @@ const previousScrollTopRef = useRef(0);
   const [callTime, setCallTime] = useState(0);
   const [peerConnected, setPeerConnected] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
+  const [showCameraMenu, setShowCameraMenu] = useState(false);
   
 
   const [showProfilePanel, setShowProfilePanel] = useState(false);
