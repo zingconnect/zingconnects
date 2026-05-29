@@ -1707,13 +1707,13 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
+
 useEffect(() => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
     
-    // Prevent duplicate notification processing
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
@@ -1722,59 +1722,52 @@ useEffect(() => {
     const isChattingWithSender = currentChat && (senderIdStr === String(currentChat._id));
 
     if (isChattingWithSender) {
-      // Update UI messages
       setMessages((prev) => prev.some(m => m._id === data._id) ? prev : [...prev, data]);
       
-      // Auto-scroll logic
       const container = scrollRef.current;
       if (container && (container.scrollHeight - container.scrollTop <= container.clientHeight + 150)) {
         requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
       }
       
-      // Mark as read
       const token = localStorage.getItem('agentToken');
       fetch(`/api/messages/mark-read/${data.senderId}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
-
     } else {
-      // Unread count update
       setUnreadCounts(prev => ({
         ...prev,
         [senderIdStr]: (Number(prev[senderIdStr]) || 0) + 1
       }));
     }
-const audio = notificationSound.current;
-  
-  console.log("Audio State:", {
-    readyState: audio.readyState, // Should be 4 (HAVE_ENOUGH_DATA)
-    paused: audio.paused,
-    muted: audio.muted
-  });
-    audio.currentTime = 0; // Reset sound to start immediately
-    audio.play().catch(e => {
-      console.warn("Audio playback deferred: waiting for user interaction.", e.message);
-    });
+
+    // 🚀 ROBUST UNIFIED NOTIFICATION BLOCK
+    const audio = notificationSound.current;
     
-    // 2. Vibrate (Mobile support)
+    // Ensure the audio is actually loaded before attempting play
+    if (audio.readyState >= 2) { // 2 = HAVE_CURRENT_DATA
+      audio.pause();
+      audio.currentTime = 0;
+      audio.play().catch(e => console.warn("Playback blocked:", e.message));
+    } else {
+      // If not loaded, force a load
+      audio.load();
+      audio.oncanplaythrough = () => {
+        audio.play().catch(e => console.warn("Delayed playback blocked:", e.message));
+        audio.oncanplaythrough = null; // Clear listener
+      };
+    }
+    
+    // Vibration
     if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
     
-    // 3. Desktop Notification
+    // Desktop Notification
     if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !document.hasFocus())) {
       const bodyText = data.text ? data.text : (data.fileType === 'image' ? "Sent an image" : "Sent a file");
-      
-      const notification = new Notification(`New message from ${data.senderName || 'Client'}`, {
+      new Notification(`New message from ${data.senderName || 'Client'}`, {
         body: bodyText,
-        icon: data.senderPhoto || '/favicon.ico',
-        tag: 'zing-msg',
-        renotify: true
+        icon: data.senderPhoto || '/favicon.ico'
       });
-      
-      notification.onclick = (e) => { 
-        e.target.close(); 
-        window.focus(); 
-      };
     }
   };
   
@@ -1782,19 +1775,23 @@ const audio = notificationSound.current;
   return () => socket.off('new-message', handleIncomingMessage);
 }, [socket]);
 
+
 useEffect(() => {
   selectedUserRef.current = selectedUser;
 }, [selectedUser]);
 
-// Add this in your AgentDashboard component
 useEffect(() => {
   const primeAudio = () => {
     const audio = notificationSound.current;
-    audio.play().then(() => {
-      audio.pause();
-      audio.currentTime = 0;
-      console.log("Audio engine primed.");
-    }).catch(err => console.log("Priming deferred:", err));
+        if (audio.paused) {
+      audio.play().then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        console.log("✅ Audio engine successfully primed.");
+      }).catch(err => {
+        console.log("Audio priming deferred until first real notification.");
+      });
+    }
   };
 
   document.addEventListener('click', primeAudio, { once: true });
