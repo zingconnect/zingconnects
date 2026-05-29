@@ -1690,11 +1690,10 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
-
 useEffect(() => {
   if (!socket) return;
 
- const handleIncomingMessage = (data) => {
+  const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
@@ -1730,31 +1729,40 @@ useEffect(() => {
       });
     }
 
-    // 🚀 UNIFIED NOTIFICATION BLOCK:
-    // This now runs for all messages, including images, without strict senderModel dependency.
-    if (notificationSound.current) {
-      notificationSound.current.currentTime = 0;
-      notificationSound.current.play().catch(e => console.warn("Audio blocked:", e.message));
+    // 🚀 ROBUST UNIFIED NOTIFICATION BLOCK
+    // Using a fresh Audio instance per notification to avoid browser state locks
+    try {
+      const sound = new Audio('/sounds/notification.mp3');
+      sound.volume = 1.0;
+      sound.play().catch(e => console.error("Audio playback failed:", e.message));
+    } catch (e) {
+      console.error("Audio initialization failed:", e);
     }
     
+    // Vibrate
     if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
     
+    // Desktop Notification
     if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !document.hasFocus())) {
       const bodyText = data.text ? data.text : (data.fileType === 'image' ? "Sent an image" : "Sent a file");
-      const popup = new Notification(`New message from ${data.senderName || 'Client'}`, {
+      
+      const notification = new Notification(`New message from ${data.senderName || 'Client'}`, {
         body: bodyText,
         icon: data.senderPhoto || '/favicon.ico',
         tag: 'zing-msg',
         renotify: true
       });
-      popup.onclick = () => { window.focus(); popup.close(); };
+      
+      notification.onclick = (e) => { 
+        e.target.close(); 
+        window.focus(); 
+      };
     }
   };
   
   socket.on('new-message', handleIncomingMessage);
   return () => socket.off('new-message', handleIncomingMessage);
 }, [socket]);
-
 
 useEffect(() => {
   selectedUserRef.current = selectedUser;
