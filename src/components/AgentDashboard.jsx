@@ -2471,7 +2471,6 @@ return (
           </div>
         )}
 
-        {/* --- MEDIA PREVIEW OVERLAY --- */}
         {previewUrl && (
           <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col">
             <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white">
