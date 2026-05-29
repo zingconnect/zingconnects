@@ -2143,8 +2143,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   type="file" 
   ref={cameraInputRef} 
   onChange={handleFileUpload} 
-  // Explicitly tell the OS this is for media capture
-  accept="image/*;capture=camera,video/*;capture=camcorder"
+  accept="image/*,video/*" 
   capture="environment" 
   className="hidden" 
 />
