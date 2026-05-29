@@ -345,10 +345,13 @@ useEffect(() => {
   }
 }, []);
 
-const triggerCamera = () => {
-  if (cameraInputRef.current) {
-    cameraInputRef.current.value = ''; 
-    cameraInputRef.current.click();
+const triggerCamera = (mode = 'photo') => {
+  if (mode === 'photo' && cameraPhotoRef.current) {
+    cameraPhotoRef.current.value = '';
+    cameraPhotoRef.current.click();
+  } else if (mode === 'video' && cameraVideoRef.current) {
+    cameraVideoRef.current.value = '';
+    cameraVideoRef.current.click();
   }
 };
 
@@ -2138,8 +2141,23 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   {/* --- MAIN INPUT CONTROLS --- */}
    <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
     <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
-    <input  type="file"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden" />
-
+{/* Separate inputs for hardware-level forcing */}
+<input 
+  type="file" 
+  ref={cameraPhotoRef} 
+  onChange={handleFileUpload} 
+  accept="image/*" 
+  capture="environment" 
+  className="hidden" 
+/>
+<input 
+  type="file" 
+  ref={cameraVideoRef} 
+  onChange={handleFileUpload} 
+  accept="video/*" 
+  capture="camcorder" 
+  className="hidden" 
+/>
     <div className="flex gap-1 md:gap-2 text-gray-500">
       <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
         className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
