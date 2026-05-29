@@ -37,20 +37,29 @@ const PWAController = ({ children }) => {
     const isStandalone = !!window.navigator.standalone || 
                          window.matchMedia('(display-mode: standalone)').matches;
 
+    // 1. Identify if we are at a "default" landing state
+    const isAtRoot = location.pathname === '/' || location.pathname === '/pricing' || location.pathname === '/registration';
+    
+    // 2. Define routes we SHOULD NOT interrupt
+    // If the URL is already something specific, don't redirect to the "target"
+    const isAlreadyDeepLinked = location.pathname.split('/').length > 2 || 
+                               (location.pathname !== '/' && location.pathname !== '/pricing');
+
     const params = new URLSearchParams(window.location.search);
     const urlSlug = params.get('pwa');
     const storageSlug = localStorage.getItem('agentSlug');
     const target = urlSlug || storageSlug;
 
-    const isAtRoot = location.pathname === '/' || location.pathname === '/pricing';
-
-    if (isStandalone && isAtRoot && target) {
+    // 3. Only redirect if we are standalone, at root, have a target, 
+    // AND are not already navigating somewhere specific
+    if (isStandalone && isAtRoot && target && !isAlreadyDeepLinked) {
       navigate(`/${target}`, { replace: true });
     } else {
       setIsChecking(false);
     }
   }, [navigate, location.pathname]);
 
+  // Only show the loading screen if we are actually doing the check
   if (isChecking && (window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
     return <div className="min-h-screen bg-white" />; 
   }
