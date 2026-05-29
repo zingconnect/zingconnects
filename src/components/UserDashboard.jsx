@@ -1354,35 +1354,33 @@ const handleProfileSubmit = async (e) => {
   }
 };
 
-const handleFileUpload = (e) => {
-  const file = e.target.files[0];
-  if (!file || !agent?._id) return;
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file || !agent?._id) return;
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) {
+      alert("Please upload only images or videos.");
+      return;
+    }
+    const maxLimit = 100 * 1024 * 1024; 
+    if (file.size > maxLimit) {
+      alert(`This file is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
+      e.target.value = null; 
+      return;
+    }
 
-  const isVideo = file.type.startsWith('video/');
-  const isImage = file.type.startsWith('image/');
-  
-  if (!isVideo && !isImage) {
-    alert("Please upload only images or videos.");
-    return;
-  }
-   const maxLimit = 100 * 1024 * 1024; 
-  if (file.size > maxLimit) {
-    alert(`This ${detectedType} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
-    e.target.value = null; 
-    return;
-  }
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
 
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-  }
+    const localUrl = URL.createObjectURL(file);
+    setPreviewFile(file);
+    setPreviewUrl(localUrl);
+    setCaption(""); 
+    if (e.target) e.target.value = null; 
+  };
 
-  // Set State for the WhatsApp-style preview overlay
-  const localUrl = URL.createObjectURL(file);
-  setPreviewFile(file);
-  setPreviewUrl(localUrl);
-  setCaption(""); 
-  if (e.target) e.target.value = null; 
-};
 
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
