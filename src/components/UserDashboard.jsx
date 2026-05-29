@@ -84,8 +84,6 @@ export const UserDashboard = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
-  const cameraPhotoRef = useRef(null); 
-const cameraVideoRef = useRef(null);
   const messagesEndRef = useRef(null);
 const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
 const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
@@ -105,9 +103,6 @@ const isFirstLoad = useRef(true);
   const audioCtxRef = useRef(null);
 const nextStartTimeRef = useRef(0);
 const chatContainerRef = useRef(null);
-const isAdjustingScrollRef = useRef(false); 
-const previousScrollHeightRef = useRef(0);
-const previousScrollTopRef = useRef(0);
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -122,7 +117,9 @@ const [hasMore, setHasMore] = useState(true);
 const [loadingMore, setLoadingMore] = useState(false);
 const scrollSentinelRef = useRef(null); 
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
-
+const isAdjustingScrollRef = useRef(false); 
+const previousScrollHeightRef = useRef(0);
+const previousScrollTopRef = useRef(0);
 
   const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
@@ -133,7 +130,6 @@ const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   const [callTime, setCallTime] = useState(0);
   const [peerConnected, setPeerConnected] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
-  const [showCameraMenu, setShowCameraMenu] = useState(false);
   
 
   const [showProfilePanel, setShowProfilePanel] = useState(false);
@@ -349,13 +345,10 @@ useEffect(() => {
   }
 }, []);
 
-const triggerCamera = (mode) => {
-  if (mode === 'photo' && cameraPhotoRef.current) {
-    cameraPhotoRef.current.value = '';
-    cameraPhotoRef.current.click();
-  } else if (mode === 'video' && cameraVideoRef.current) {
-    cameraVideoRef.current.value = '';
-    cameraVideoRef.current.click();
+const triggerCamera = () => {
+  if (cameraInputRef.current) {
+    cameraInputRef.current.value = ''; 
+    cameraInputRef.current.click();
   }
 };
 
@@ -2145,23 +2138,8 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   {/* --- MAIN INPUT CONTROLS --- */}
    <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
     <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
-{/* Separate inputs for hardware-level forcing */}
-<input 
-  type="file" 
-  ref={cameraPhotoRef} 
-  onChange={handleFileUpload} 
-  accept="image/*" 
-  capture="environment" 
-  className="hidden" 
-/>
-<input 
-  type="file" 
-  ref={cameraVideoRef} 
-  onChange={handleFileUpload} 
-  accept="video/*" 
-  capture="camcorder" 
-  className="hidden" 
-/>
+    <input  type="file"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden" />
+
     <div className="flex gap-1 md:gap-2 text-gray-500">
       <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
         className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
@@ -2172,14 +2150,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
   <BsCameraFill size={22} />
 </button>
-
-{showCameraMenu && (
-    <div className="absolute bottom-12 right-0 bg-white rounded-xl shadow-xl p-2 border border-gray-100 animate-in fade-in zoom-in-95">
-      <button onClick={() => { triggerCamera('photo'); setShowCameraMenu(false); }} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Photo</button>
-      <button onClick={() => { triggerCamera('video'); setShowCameraMenu(false); }} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50">Video</button>
     </div>
-  )}
-</div>
     
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
       <div className="flex-1 relative flex items-center">
