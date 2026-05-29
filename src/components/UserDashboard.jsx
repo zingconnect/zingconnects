@@ -2131,41 +2131,20 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
     )}
 
   {/* --- MAIN INPUT CONTROLS --- */}
-  <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
-    <input 
-      type="file" 
-      ref={fileInputRef} 
-      onChange={handleFileUpload} 
-      accept="image/*,video/*" 
-      className="hidden" 
-    />
-   <input 
-  type="file" 
-  ref={cameraInputRef} 
-  onChange={handleFileUpload} 
-  accept="image/*,video/*" 
-  capture="environment" 
-  className="hidden" 
-/>
+   <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
+    <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
+    <input  type="file"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden"/>
 
     <div className="flex gap-1 md:gap-2 text-gray-500">
-      <button 
-        type="button"
-        onClick={() => fileInputRef.current.click()} 
-        disabled={isUploading}
-        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
-      >
+      <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
         <BsPaperclip size={22} />
       </button>
 
-    <button 
-  type="button"
-  onClick={() => cameraInputRef.current.click()} 
-  disabled={isUploading}
-  className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
->
-  <BsCameraFill size={22} />
-</button>
+      <button  type="button" onClick={() => cameraInputRef.current.click()}  disabled={isUploading}
+        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
+        <BsCameraFill size={22} />
+      </button>
     </div>
     
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
