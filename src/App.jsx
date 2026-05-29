@@ -97,14 +97,21 @@ const ThemeInitializer = () => {
   return null;
 };
 
+const RootGate = () => {
+  const slug = localStorage.getItem('agentSlug');
+  return slug ? <Navigate to={`/${slug}`} replace /> : <PricingPage />;
+};
+
 function App() {
   return (
     <Router>
       <PWAController>
         <ThemeInitializer />
         <Routes>
-          {/* --- 1. PUBLIC & AUTH ROUTES --- */}
-          <Route path="/" element={<PricingPage />} />
+          {/* --- 1. UPDATED PUBLIC ROUTE --- */}
+          {/* Replace your old path="/" with the RootGate */}
+          <Route path="/" element={<RootGate />} />
+          
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/registration" element={<Registration />} />
           <Route path="/verify-otp" element={<VerifyOTP />} />
@@ -116,7 +123,7 @@ function App() {
             <Route path="/agent/call-settings" element={<CallSetting />} />
           </Route>
 
-          {/* --- 3. PROTECTED USER ROUTES (Wrapped in UserCallProvider) --- */}
+          {/* --- 3. PROTECTED USER ROUTES --- */}
           <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
             <Route path="/user/dashboard" element={<UserDashboard />} />
             <Route path="/user/profile" element={<UserProfile />} />
