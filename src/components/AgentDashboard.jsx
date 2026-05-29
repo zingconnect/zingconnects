@@ -136,6 +136,15 @@ const selectedUserRef = useRef(selectedUser);
     }
   };
 
+  const playSound = (audioRef) => {
+  if (audioRef.current) {
+    if (!document.body.contains(audioRef.current)) {
+      document.body.appendChild(audioRef.current);
+    }
+    audioRef.current.play().catch(err => console.warn("Audio blocked by browser:", err));
+  }
+};
+
   const handleStartCall = async (targetUserId) => {
     if (!targetUserId || !agentData) return;
     peerConnectedRef.current = false; 
@@ -1176,6 +1185,14 @@ const handleRemoteEnd = (data) => {
 }, [socket, activeCall?.callId, activeCall?._id, activeCaller?.callId]);
 
 
+useEffect(() => {
+  document.addEventListener('click', unlockAudio);
+  document.addEventListener('touchstart', unlockAudio);
+  return () => {
+    document.removeEventListener('click', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
+  };
+}, [unlockAudio]); // Ensure unlockAudio is memoized or defined before this 
 
 useEffect(() => {
   if (isVoiceConversionActive) return;
@@ -1695,6 +1712,8 @@ useEffect(() => {
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
+    
+    // Prevent duplicate notification processing
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
@@ -1703,13 +1722,16 @@ useEffect(() => {
     const isChattingWithSender = currentChat && (senderIdStr === String(currentChat._id));
 
     if (isChattingWithSender) {
+      // Update UI messages
       setMessages((prev) => prev.some(m => m._id === data._id) ? prev : [...prev, data]);
       
+      // Auto-scroll logic
       const container = scrollRef.current;
       if (container && (container.scrollHeight - container.scrollTop <= container.clientHeight + 150)) {
         requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
       }
       
+      // Mark as read
       const token = localStorage.getItem('agentToken');
       fetch(`/api/messages/mark-read/${data.senderId}`, {
         method: 'PATCH',
@@ -1718,31 +1740,24 @@ useEffect(() => {
 
     } else {
       // Unread count update
-      setUnreadCounts(prev => {
-        const senderId = String(data.senderId);
-        const nextState = { 
-          ...prev, 
-          [senderId]: (Number(prev[senderId]) || 0) + 1 
-        };
-        console.log("🛠️ New UnreadCounts State:", nextState);
-        return nextState;
-      });
+      setUnreadCounts(prev => ({
+        ...prev,
+        [senderIdStr]: (Number(prev[senderIdStr]) || 0) + 1
+      }));
     }
 
     // 🚀 ROBUST UNIFIED NOTIFICATION BLOCK
-    // Using a fresh Audio instance per notification to avoid browser state locks
-    try {
-      const sound = new Audio('/sounds/notification.mp3');
-      sound.volume = 1.0;
-      sound.play().catch(e => console.error("Audio playback failed:", e.message));
-    } catch (e) {
-      console.error("Audio initialization failed:", e);
-    }
+    // 1. Play Audio using the persistent ref
+    const audio = notificationSound.current;
+    audio.currentTime = 0; // Reset sound to start immediately
+    audio.play().catch(e => {
+      console.warn("Audio playback deferred: waiting for user interaction.", e.message);
+    });
     
-    // Vibrate
+    // 2. Vibrate (Mobile support)
     if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
     
-    // Desktop Notification
+    // 3. Desktop Notification
     if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !document.hasFocus())) {
       const bodyText = data.text ? data.text : (data.fileType === 'image' ? "Sent an image" : "Sent a file");
       
@@ -1925,9 +1940,6 @@ return (
       </LiveKitRoom>
     )}
 
-    {/* B. IN-CHAT STATUS BAR */}
-    {/* Displays mini-status controls once actively connecting or connected. */}
-    {/* ✅ FIX: Stays hidden during 'calling' and 'ringing' states to avoid overlay mismatches */}
     {!showFullScreenCall && !['calling', 'ringing'].includes(callStatus) && (
       <div className="absolute top-0 left-0 w-full z-[150] animate-in slide-in-from-top duration-300">
         <div className={`h-[55px] md:h-[65px] flex items-center justify-between px-6 shadow-lg backdrop-blur-md transition-all duration-300 ${
