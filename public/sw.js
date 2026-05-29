@@ -46,7 +46,6 @@ self.addEventListener('push', function(event) {
     vibrate: isCall ? [500, 200, 500, 200, 500] : [200, 100, 200],
     requireInteraction: isCall,
     tag: isCall ? 'incoming-call' : 'new-msg',
-    sound: '/notification-sound.mp3', // Note: Most mobile browsers ignore this
     renotify: true,
     data: {
       url: data.data?.url || data.url || '/dashboard'
