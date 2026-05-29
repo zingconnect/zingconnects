@@ -39,23 +39,22 @@ self.addEventListener('push', function(event) {
   const iconUrl = '/logo-s.png'; 
   const isCall = data.type === 'CALL_INVITE' || data.title?.toLowerCase().includes('call');
 
-  const options = {
-    body: data.body || 'New Notification',
-    icon: iconUrl,
-    badge: iconUrl,
-    vibrate: isCall ? [500, 200, 500, 200, 500] : [200, 100, 200],
-    requireInteraction: isCall,
-    tag: isCall ? 'incoming-call' : 'new-msg',
-    renotify: true,
-    data: {
-      url: data.data?.url || data.url || '/dashboard'
-    },
-    actions: isCall ? [
-      { action: 'answer', title: '✅ Answer' },
-      { action: 'decline', title: '❌ Decline' }
-    ] : []
-  };
-
+const options = {
+  body: data.body || 'New Notification',
+  icon: iconUrl,
+  badge: iconUrl,
+  vibrate: isCall ? [500, 200, 500, 200, 500] : [200, 100, 200],
+  requireInteraction: isCall, 
+  tag: isCall ? 'incoming-call' : 'new-msg',
+  renotify: true,
+  data: {
+    url: data.data?.url || data.url || '/dashboard'
+  },
+  actions: isCall ? [
+    { action: 'answer', title: '✅ Answer' },
+    { action: 'decline', title: '❌ Decline' }
+  ] : []
+};
   event.waitUntil(
     self.registration.showNotification(data.title || 'ZingConnect', options)
   );
