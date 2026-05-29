@@ -98,7 +98,15 @@ const ThemeInitializer = () => {
 
 const RootGate = () => {
   const slug = localStorage.getItem('agentSlug');
-  return slug ? <Navigate to={`/${slug}`} replace /> : <PricingPage />;
+
+  console.log('ROOTGATE');
+  console.log('agentSlug:', slug);
+  console.log('pathname:', window.location.pathname);
+  console.log('search:', window.location.search);
+
+  return slug
+    ? <Navigate to={`/${slug}`} replace />
+    : <PricingPage />;
 };
 
 function App() {
