@@ -1102,23 +1102,6 @@ useEffect(() => {
   };
 }, [socket, activeCall?.callId, activeCall?._id]);
 
-useEffect(() => {
-  const container = scrollRef.current;
-  if (!container) return;
-  const threshold = 200; 
-  const isNearBottom = 
-    container.scrollHeight - container.scrollTop <= container.clientHeight + threshold;
-  if (isNearBottom || isUploading) {
-    const timeoutId = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ 
-        behavior: isUploading ? "auto" : "smooth", 
-        block: "end" 
-      });
-    }, 100);
-
-    return () => clearTimeout(timeoutId);
-  }
-}, [messages, isUploading]);
 
 useEffect(() => {
   const ringtone = ringtoneAudio.current;
@@ -2237,8 +2220,8 @@ return (
     </aside>
 
     {/* --- MAIN CHAT INTERFACE --- */}
-<main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
-        {selectedUser ? (
+<main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden h-screen`}>
+          {selectedUser ? (
         <>
 <header className="h-[75px] bg-card-bg px-3 flex justify-between items-center z-30 shadow-sm relative">
     <div className="flex items-center gap-3">
@@ -2300,7 +2283,8 @@ return (
   </div>
 </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50">
+<div 
+    ref={scrollRef}     className="flex-1 overflow-y-auto scroll-manual p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50"  >    
             {messages.length >= limit && (
               <div className="flex justify-center py-6">
                 <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase text-gray-500 bg-white/50 px-4 py-2 rounded-full border border-gray-300 hover:bg-white transition-colors">↑ Load Older Messages</button>
