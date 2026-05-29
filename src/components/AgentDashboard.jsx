@@ -35,7 +35,6 @@ export const AgentDashboard = () => {
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
   const scrollRef = useRef(null);
-  const prevScrollHeightRef = useRef(0);
   const userStreamRef = useRef(null);
   const peerConnectedRef = useRef(false);
   const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
@@ -51,8 +50,6 @@ export const AgentDashboard = () => {
   const activeCallerRef = useRef(null);
   const pollingRef = useRef(null); 
   const aiMediaRecorderRef = useRef(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
 
   const [agentData, setAgentData] = useState(null);
   const [users, setUsers] = useState([]); 
@@ -77,9 +74,7 @@ export const AgentDashboard = () => {
   const [localStream, setLocalStream] = useState(null);
   const [lkToken, setLkToken] = useState(null);
   const [isEnding, setIsEnding] = useState(false);
-  const [offset, setOffset] = useState(30);
-const [unreadCounts, setUnreadCounts] = useState({});
-const selectedUserRef = useRef(selectedUser);
+
   const [activeCall, setActiveCall] = useState(null);
   const [callStatus, setCallStatus] = useState('idle'); 
   const [isIncomingCall, setIsIncomingCall] = useState(false);
@@ -135,15 +130,6 @@ const selectedUserRef = useRef(selectedUser);
         return <BsCheck className="text-gray-400" size={16} />;
     }
   };
-
-  const playSound = (audioRef) => {
-  if (audioRef.current) {
-    if (!document.body.contains(audioRef.current)) {
-      document.body.appendChild(audioRef.current);
-    }
-    audioRef.current.play().catch(err => console.warn("Audio blocked by browser:", err));
-  }
-};
 
   const handleStartCall = async (targetUserId) => {
     if (!targetUserId || !agentData) return;
@@ -749,7 +735,6 @@ useEffect(() => {
     }
   };
 }, [socket, callStatus, isSpeakerOn]);
-
 const unlockAudio = () => {
   setAudioUnlocked(true);
   console.log("Initializing secure audio channels for Agent...");
@@ -1007,33 +992,31 @@ useEffect(() => {
     }
   };
 }, [agentData?._id, callStatus]); // Triggers poll only when status returns to 'idle'
+
 useEffect(() => {
   const handleVisibilityChange = async () => {
     if (document.visibilityState === 'visible') {
-      // 1. Maintain connection if necessary
-      if (socket && agentData?._id) {
-        if (!socket.connected) socket.connect();
-        socket.emit("join-main-room", agentData._id.toString());
+      console.log("📱 ZingConnect: App returned to foreground.");
+      if (callStatus !== 'idle') {
+        console.log("📞 Call active. Skipping re-sync to maintain connection.");
+        return; 
       }
-      if (callStatus === 'idle' && selectedUser?._id) {
+
+      if (socket) {
+        if (agentData?._id) {
+          socket.emit("join-main-room", agentData._id.toString());
+        }
+        if (!socket.connected) socket.connect();
+      }
+
+      if (selectedUser?._id) {
         const token = localStorage.getItem('agentToken');
         try {
           const response = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           const data = await response.json();
-          
-          if (data.success && Array.isArray(data.messages)) {
-            setMessages(prev => {
-              const lastPrev = prev[prev.length - 1];
-              const lastNew = data.messages[data.messages.length - 1];
-              
-              if (lastPrev && lastNew && lastPrev._id === lastNew._id) {
-                return prev; // No new messages, keep current state
-              }
-              return data.messages;
-            });
-          }
+          if (data.success) setMessages(data.messages);
         } catch (err) {
           console.warn("Message catch-up failed:", err);
         }
@@ -1043,7 +1026,8 @@ useEffect(() => {
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-}, [agentData?._id, selectedUser?._id, callStatus, socket]);
+}, [agentData?._id, selectedUser?._id, callStatus]);
+
 
 useEffect(() => {
   const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
@@ -1185,14 +1169,6 @@ const handleRemoteEnd = (data) => {
 }, [socket, activeCall?.callId, activeCall?._id, activeCaller?.callId]);
 
 
-useEffect(() => {
-  document.addEventListener('click', unlockAudio);
-  document.addEventListener('touchstart', unlockAudio);
-  return () => {
-    document.removeEventListener('click', unlockAudio);
-    document.removeEventListener('touchstart', unlockAudio);
-  };
-}, [unlockAudio]); // Ensure unlockAudio is memoized or defined before this 
 
 useEffect(() => {
   if (isVoiceConversionActive) return;
@@ -1218,6 +1194,7 @@ useEffect(() => {
   };
 }, []);
 
+ // 1. Modified Heartbeat with Dual Login detection
 useEffect(() => {
   const heartBeat = setInterval(async () => {
     const token = localStorage.getItem('agentToken');
@@ -1246,6 +1223,7 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
+  // 1. Flutterwave Script Injection (Anti-Duplicate Logic)
   const existingScript = document.querySelector('script[src*="flutterwave"]');
   let script;
 
@@ -1291,23 +1269,16 @@ useEffect(() => {
 
         if (agent.plan) setSelectedPlan(agent.plan);
 
-if (activeStatus) {
-  const usersRes = await fetch('/api/agents/my-users', {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  const userData = await usersRes.json();
-
-  if (userData.success && Array.isArray(userData.users)) {
-  setUsers(userData.users);
-  const initialUnreadCounts = {};
-  userData.users.forEach(user => {
-    const userId = String(user._id);
-    initialUnreadCounts[userId] = Number(user.unreadCount) || 0;
-  });
-    setUnreadCounts(initialUnreadCounts);
-  console.log("Initialized Unread Counts State:", initialUnreadCounts); 
-}
-}
+        // 3. Conditional Data Loading (Only for active subscribers)
+        if (activeStatus) {
+          const usersRes = await fetch('/api/agents/my-users', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const userData = await usersRes.json();
+          if (userData.success && Array.isArray(userData.users)) {
+            setUsers(userData.users);
+          }
+        }
       }
     } catch (err) {
       console.error("Initialization error:", err);
@@ -1473,45 +1444,6 @@ const handleDeleteMessage = async (msgId) => {
   }
 };
 
-const loadOlderMessages = useCallback(async () => {
-  // Prevent duplicate calls
-  if (loadingMore || !hasMore || !selectedUser?._id) return;
-  
-  setLoadingMore(true);
-  const scrollContainer = scrollRef.current;
-  if (!scrollContainer) return;
-  
-  const previousScrollHeight = scrollContainer.scrollHeight;
-
-  try {
-    const token = localStorage.getItem('agentToken');
-    const response = await fetch(`/api/messages/${selectedUser._id}?limit=30&skip=${offset}`, {
-      headers: { 'Authorization': `Bearer ${token}`, 'Cache-Control': 'no-cache' }
-    });
-    const data = await response.json();
-    if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
-      setMessages(prev => [...data.messages, ...prev]);
-      setOffset(prev => prev + data.messages.length);
-      
-      if (data.messages.length < 30) {
-        setHasMore(false);
-      }
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          const newScrollHeight = scrollRef.current.scrollHeight;
-          scrollRef.current.scrollTop = newScrollHeight - previousScrollHeight;
-        }
-      });
-    } else {
-      setHasMore(false);
-    }
-  } catch (err) {
-    console.error("Pagination error:", err);
-  } finally {
-    setLoadingMore(false);
-  }
-}, [loadingMore, hasMore, selectedUser?._id, offset]);
-
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
   setIsUploading(true);
@@ -1576,20 +1508,18 @@ const handleFinalSend = async () => {
   };
   const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
-    setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
   
+  // 1. Prepare the UI for a fresh jump
   setMessages([]); 
+  setIsInitialLoad(true); // <--- CRITICAL: Reset this so the scroll logic triggers
   setSelectedUser(user);
-  setHasMore(true); 
-  
-  // 2. Notify backend that the chat is active
+  setLimit(30);
   if (socket) socket.emit('join-chat', user._id); 
 
   try {
     const token = localStorage.getItem('agentToken');
     if (!token) return;
 
-    // 3. Fetch messages
     const response = await fetch(`/api/messages/${user._id}?limit=30`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -1600,20 +1530,14 @@ const handleFinalSend = async () => {
       
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
-        setOffset(data.messages.length);
-        if (data.messages.length < 30) setHasMore(false);
-        
-        requestAnimationFrame(() => {
-          if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-          }
-        });
-
-        await fetch(`/api/messages/mark-read/${user._id}`, {
-          method: 'PATCH',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
       }
+            fetch(`/api/messages/mark-read/${user._id}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(err => console.error("Mark read background error:", err));
+      
+    } else {
+      setConnectionStatus('connecting');
     }
   } catch (err) {
     setConnectionStatus('connecting');
@@ -1636,19 +1560,83 @@ useEffect(() => {
   }
 }, [users, navigate]); // Fires as soon as the user list is loaded from the API
 
+
+useEffect(() => {
+  setIsInitialLoad(true);
+}, [selectedUser?._id]);
+
 useEffect(() => {
   const container = scrollRef.current;
-  if (!container) return;
+  if (!container || messages.length === 0) return;
 
-  const handleScroll = () => {
-    if (container.scrollTop <= 50 && !loadingMore && hasMore) {
-      loadOlderMessages();
+  if (isInitialLoad) {
+    container.scrollTop = container.scrollHeight;
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+      const timeoutId = setTimeout(() => {
+        container.scrollTop = container.scrollHeight;
+        setIsInitialLoad(false); 
+      }, 150); // 150ms is the "sweet spot" for mobile layout stability
+
+      return () => clearTimeout(timeoutId);
+    });
+  } else {
+    const threshold = 150;
+    const isNearBottom = 
+      container.scrollHeight - container.scrollTop <= container.clientHeight + threshold;
+
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
+  }
+}, [messages, isInitialLoad]);
+
+useEffect(() => {
+  if (!isSubscribed || !agentData?._id) return;
+
+  const refreshData = async () => {
+    // Don't poll if we are busy in a call
+    if (['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
+    
+    const token = localStorage.getItem('agentToken');
+    try {
+      const userRes = await fetch('/api/agents/my-users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const userData = await userRes.json();
+      if (userData.success) setUsers(userData.users);
+      if (selectedUser?._id && document.visibilityState === 'visible') {
+        const msgRes = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const msgData = await msgRes.json();
+        
+        if (msgData.success && Array.isArray(msgData.messages)) {
+          const incomingMsgs = msgData.messages;
+          const targetLatestMsg = incomingMsgs[incomingMsgs.length - 1];
+          if (targetLatestMsg && targetLatestMsg.senderModel === 'User' && targetLatestMsg._id !== lastNotifiedId.current) {
+            lastNotifiedId.current = targetLatestMsg._id;
+            
+            if (notificationSound.current) {
+              notificationSound.current.currentTime = 0;
+              notificationSound.current.play().catch(() => {});
+            }
+          }
+
+          setMessages(prev => {
+            const isNew = incomingMsgs.length !== prev.length || 
+                          (incomingMsgs[0]?._id !== prev[0]?._id) ||
+                          (incomingMsgs[incomingMsgs.length - 1]?._id !== prev[prev.length - 1]?._id);
+            return isNew ? incomingMsgs : prev;
+          });
+        }
+      }
+    } catch (err) { console.warn("Refresh jitter fallback skipped"); }
   };
-  
-  container.addEventListener('scroll', handleScroll);
-  return () => container.removeEventListener('scroll', handleScroll);
-}, [loadOlderMessages, loadingMore, hasMore]); // Added missing deps
+
+  const interval = setInterval(refreshData, 5000);
+  return () => clearInterval(interval);
+}, [isSubscribed, selectedUser?._id, callStatus]);
 
 useEffect(() => {
   const setupNotifications = async () => {
@@ -1710,147 +1698,70 @@ useEffect(() => {
 
 useEffect(() => {
   if (!socket) return;
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
-    
+
+    // 1. Core Safeguard: Drop duplicates by tracking message ID explicitly
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
-    const currentChat = selectedUserRef.current;
-    const senderIdStr = String(data.senderId);
-    const isChattingWithSender = currentChat && (senderIdStr === String(currentChat._id));
-
+    const isChattingWithSender = selectedUser && (data.senderId === selectedUser._id || data.senderId === selectedUser.id);
+    
     if (isChattingWithSender) {
-      setMessages((prev) => prev.some(m => m._id === data._id) ? prev : [...prev, data]);
-      
-      const container = scrollRef.current;
-      if (container && (container.scrollHeight - container.scrollTop <= container.clientHeight + 150)) {
-        requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
-      }
-      
+      setMessages((prev) => {
+        if (prev.some(m => m._id === data._id)) return prev;
+        return [...prev, data];
+      });
+
+      // Mark as read immediately on backend
       const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${data.senderId}`, {
+      fetch(`/api/messages/mark-read/${selectedUser._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
-    } else {
-      setUnreadCounts(prev => ({
-        ...prev,
-        [senderIdStr]: (Number(prev[senderIdStr]) || 0) + 1
-      }));
     }
-
-    // 🚀 ROBUST UNIFIED NOTIFICATION BLOCK
-    const audio = notificationSound.current;
-    
-    // Ensure the audio is actually loaded before attempting play
-    if (audio.readyState >= 2) { // 2 = HAVE_CURRENT_DATA
-      audio.pause();
-      audio.currentTime = 0;
-      audio.play().catch(e => console.warn("Playback blocked:", e.message));
-    } else {
-      // If not loaded, force a load
-      audio.load();
-      audio.oncanplaythrough = () => {
-        audio.play().catch(e => console.warn("Delayed playback blocked:", e.message));
-        audio.oncanplaythrough = null; // Clear listener
-      };
-    }
-    
-    // Vibration
-    if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-    
-    // Desktop Notification
-    if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !document.hasFocus())) {
-      const bodyText = data.text ? data.text : (data.fileType === 'image' ? "Sent an image" : "Sent a file");
-      new Notification(`New message from ${data.senderName || 'Client'}`, {
-        body: bodyText,
-        icon: data.senderPhoto || '/favicon.ico'
-      });
-    }
-  };
-  
-  socket.on('new-message', handleIncomingMessage);
-  return () => socket.off('new-message', handleIncomingMessage);
-}, [socket]);
-
-
-useEffect(() => {
-  selectedUserRef.current = selectedUser;
-}, [selectedUser]);
-
-useEffect(() => {
-  const primeAudio = () => {
-    const audio = notificationSound.current;
-        if (audio.paused) {
-      audio.play().then(() => {
-        audio.pause();
-        audio.currentTime = 0;
-        console.log("✅ Audio engine successfully primed.");
-      }).catch(err => {
-        console.log("Audio priming deferred until first real notification.");
-      });
-    }
-  };
-
-  document.addEventListener('click', primeAudio, { once: true });
-  document.addEventListener('touchstart', primeAudio, { once: true });
-
-  return () => {
-    document.removeEventListener('click', primeAudio);
-    document.removeEventListener('touchstart', primeAudio);
-  };
-}, []);
-
-useEffect(() => {
-  // 1. Browser Support Check
-  if (!("Notification" in window)) {
-    console.warn("This browser does not support desktop notifications.");
-    return;
-  }
-
-  // 2. Request permission if not already granted
-  if (Notification.permission === "default") {
-    Notification.requestPermission();
-  }
-    const setupPush = async () => {
-    try {
-      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-      if (!publicKey) return;
-
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
-
-      const registration = await navigator.serviceWorker.ready;
-      let subscription = await registration.pushManager.getSubscription();
-      
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
-        });
+    if (data.senderModel === 'User') {
+      if (notificationSound.current) {
+        notificationSound.current.currentTime = 0;
+        notificationSound.current.play().catch((err) => 
+          console.warn("🔊 Notification audio context autoplay restricted:", err.message)
+        );
       }
-
-      const token = localStorage.getItem('agentToken');
-      if (!token) return;
-
-      await fetch('/api/save-subscription', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ subscription }) 
-      });
-      console.log("✅ Agent Mobile Push Synced to DB");
-    } catch (err) {
-      console.error("Agent Push setup failed:", err);
+      
+      if ('vibrate' in navigator) {
+        navigator.vibrate([200, 100, 200]); // Double pulse haptic alert
+      }
+      const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
+      if (Notification.permission === "granted" && shouldShowPopup) {
+        const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
+          body: data.text || "Sent a file",
+          icon: data.senderPhoto || '/favicon.ico',
+          tag: 'zing-msg',
+          renotify: true
+        });
+        popup.onclick = () => { 
+          window.focus(); 
+          popup.close(); 
+        };
+      }
     }
   };
 
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    setupPush();
+  socket.on('new-message', handleIncomingMessage);
+  return () => {
+    socket.off('new-message', handleIncomingMessage);
+  };
+}, [socket, selectedUser]); 
+
+useEffect(() => {
+  if (!("Notification" in window)) {
+    console.log("This browser does not support desktop notifications");
+  } else if (Notification.permission !== "granted") {
+    Notification.requestPermission();
   }
 }, []);
 
@@ -1868,11 +1779,14 @@ const handleResend = async (failedMsg) => {
 const handleSendMessage = async (e) => {
   e.preventDefault();
   
+  // 1. Basic validation
   if (!newMessage.trim() || !selectedUser || isUploading) return;
 
   const textToSend = newMessage;
   const tempId = Date.now().toString(); // Temporary ID for the UI key
   setNewMessage(''); // Clear input immediately for speed
+
+  // 2. Create the Optimistic Message (Shows up instantly)
   const optimisticMsg = {
     _id: tempId,
     text: textToSend,
@@ -1899,7 +1813,7 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
-console.log("Server response:", data);
+
     if (data.success) {
       setMessages(prev => 
         prev.map(msg => msg._id === tempId ? data.message : msg)
@@ -1926,6 +1840,8 @@ if (loading) return (
 return (
 <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
   <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
+
+{/* --- CALL ENGINE (FIXED POSITIONING & DESIGN STABILITY) --- */}
 
 {callStatus !== 'idle' && (
   <>
@@ -1960,6 +1876,9 @@ return (
       </LiveKitRoom>
     )}
 
+    {/* B. IN-CHAT STATUS BAR */}
+    {/* Displays mini-status controls once actively connecting or connected. */}
+    {/* ✅ FIX: Stays hidden during 'calling' and 'ringing' states to avoid overlay mismatches */}
     {!showFullScreenCall && !['calling', 'ringing'].includes(callStatus) && (
       <div className="absolute top-0 left-0 w-full z-[150] animate-in slide-in-from-top duration-300">
         <div className={`h-[55px] md:h-[65px] flex items-center justify-between px-6 shadow-lg backdrop-blur-md transition-all duration-300 ${
@@ -2002,6 +1921,9 @@ return (
       </div>
     )}
 
+
+    {/* C. FULLSCREEN OVERLAY */}
+    {/* Forces itself into view instantly if callStatus is 'ringing' or if expanded manually */}
     {(showFullScreenCall || callStatus === 'ringing') && (
       <div className="fixed inset-0 z-[40000] bg-slate-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white animate-in fade-in zoom-in duration-300">
         <div className="flex flex-col items-center space-y-10 relative w-full max-w-lg">
@@ -2252,91 +2174,67 @@ return (
   </div>
 )}
 
-{/* --- SIDEBAR --- */}
-<aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
-  <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center shrink-0">
+    {/* --- SIDEBAR --- */}
+    <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
+  <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center  shrink-0">
     <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center">
       <BsPersonCircle size={32} className="text-text-secondary" />
     </button>
     <BsThreeDotsVertical className="cursor-pointer text-text-secondary" size={18} />
   </header>
-
-  <div className="p-2 bg-card-bg">
+    <div className="p-2 bg-card-bg">
     <div className="bg-input-bg flex items-center px-3 py-1.5 rounded-lg">
       <BsSearch className="text-text-secondary mr-3" size={12} />
       <input placeholder="Search" className="bg-transparent text-xs w-full outline-none text-text-main" />
     </div>
   </div>
-
-<div className="flex-1 overflow-y-auto">
-  {users.length > 0 ? (
-    users.map((user) => {
-      const userId = String(user._id);
-      const count = unreadCounts[userId] || 0;
-
-      return (
-        <div
-          key={`${userId}-${count}`}
-          onClick={() => handleSelectUser(user)}
-          className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] ${
-            String(selectedUser?._id) === userId ? 'bg-[#ebebeb]' : ''
-          }`}
-        >
-          <div className="relative shrink-0 overflow-visible">
-            <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
-              <img
-                src={user.photoUrl}
-                alt={`${user.firstName} ${user.lastName}`}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                    user.firstName || 'U'
-                  )}&background=random&color=fff`;
-                }}
-              />
-            </div>
-
-            {/* Badge: Now guaranteed to re-render due to the parent key change */}
-            {count > 0 && (
-              <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-[100] transition-all duration-300">
-                {count > 99 ? '99+' : count}
-              </div>
-            )}
-
-            <div
-              className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full ${
-                user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'
-              }`}
-            />
-          </div>
-
-          <div className="ml-3 flex-1 min-w-0">
-            <h3 className="text-[13px] font-bold text-gray-800 truncate">
-              {user.firstName} {user.lastName}
-            </h3>
-            <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
-            {(user.city || user.state) && (
-              <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
-                <span className="opacity-70">📍</span>
-                {[user.city, user.state].filter(Boolean).join(', ')}
-              </p>
-            )}
-          </div>
-        </div>
-      );
-    })
-  ) : (
-    <p className="text-center text-gray-500 py-10 text-xs font-bold uppercase tracking-widest">
-      No users connected.
-    </p>
-  )}
-</div>
-  <div className="p-4 border-t bg-gray-50/50">
-    <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95">
-      <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
-    </button>
+      <div className="flex-1 overflow-y-auto">
+{users.length > 0 ? users.map((user) => (
+  <div
+    key={user._id}
+    onClick={() => handleSelectUser(user)}
+    className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6]  ${selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''}`}
+  >
+    <div className="relative shrink-0">
+      <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
+        <img
+          src={user.photoUrl}
+          alt={user.firstName}
+          className="w-full h-full object-cover"
+          onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
+        />
+      </div>
+      <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+    </div>
+    
+    <div className="ml-3 flex-1 min-w-0">
+      <div className="flex justify-between items-center mb-0.5">
+        <h3 className="text-[13px] font-bold text-gray-800 truncate">
+          {user.firstName} {user.lastName}
+        </h3>
+      </div>
+      
+      <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
+      
+      {/* NEW: City and State Display */}
+      {(user.city || user.state) && (
+        <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
+          <span className="opacity-70">📍</span>
+          {user.city ? user.city : ''}{user.city && user.state ? ', ' : ''}{user.state ? user.state : ''}
+        </p>
+      )}
+    </div>
   </div>
-</aside>
+)) : (
+  <p className="text-center text-gray-500 py-10 text-xs font-bold uppercase tracking-widest">No users connected.</p>
+)}
+      </div>
+      <div className="p-4 border-t bg-gray-50/50">
+        <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95">
+          <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
+        </button>
+      </div>
+    </aside>
 
     {/* --- MAIN CHAT INTERFACE --- */}
 <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden`}>
@@ -2402,17 +2300,12 @@ return (
   </div>
 </header>
 
-      <div ref={scrollRef}  onScroll={(e) => {
-    if (e.target.scrollTop <= 50 && !loadingMore && hasMore) {
-      loadOlderMessages();
-    }
-  }}
-  className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50">
-  {loadingMore && (
-    <div className="flex justify-center py-4">
-      <span className="text-[10px] font-black uppercase text-gray-400 animate-pulse">Loading older messages...</span>
-    </div>
-  )}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50">
+            {messages.length >= limit && (
+              <div className="flex justify-center py-6">
+                <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase text-gray-500 bg-white/50 px-4 py-2 rounded-full border border-gray-300 hover:bg-white transition-colors">↑ Load Older Messages</button>
+              </div>
+            )}
             {messages.map((m) => {
               const isMe = m.senderId === agentData?._id;
               const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
