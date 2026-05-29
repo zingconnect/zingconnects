@@ -1745,10 +1745,13 @@ useEffect(() => {
         [senderIdStr]: (Number(prev[senderIdStr]) || 0) + 1
       }));
     }
-
-    // 🚀 ROBUST UNIFIED NOTIFICATION BLOCK
-    // 1. Play Audio using the persistent ref
-    const audio = notificationSound.current;
+const audio = notificationSound.current;
+  
+  console.log("Audio State:", {
+    readyState: audio.readyState, // Should be 4 (HAVE_ENOUGH_DATA)
+    paused: audio.paused,
+    muted: audio.muted
+  });
     audio.currentTime = 0; // Reset sound to start immediately
     audio.play().catch(e => {
       console.warn("Audio playback deferred: waiting for user interaction.", e.message);
@@ -1782,6 +1785,26 @@ useEffect(() => {
 useEffect(() => {
   selectedUserRef.current = selectedUser;
 }, [selectedUser]);
+
+// Add this in your AgentDashboard component
+useEffect(() => {
+  const primeAudio = () => {
+    const audio = notificationSound.current;
+    audio.play().then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+      console.log("Audio engine primed.");
+    }).catch(err => console.log("Priming deferred:", err));
+  };
+
+  document.addEventListener('click', primeAudio, { once: true });
+  document.addEventListener('touchstart', primeAudio, { once: true });
+
+  return () => {
+    document.removeEventListener('click', primeAudio);
+    document.removeEventListener('touchstart', primeAudio);
+  };
+}, []);
 
 useEffect(() => {
   // 1. Browser Support Check
