@@ -1904,11 +1904,6 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </div>
 
         <div className="flex items-center gap-5 md:gap-8 text-gray-500 pr-1">
-  <BsTelephoneFill 
-    className="cursor-pointer hover:text-blue-600 transition-colors active:scale-90" 
-    size={16} 
-    onClick={handleStartCall} // <--- Added this
-  />
 <BsGearFill 
   className="cursor-pointer hover:text-gray-700 transition-colors active:scale-90" 
   size={18} 
@@ -2143,7 +2138,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   type="file" 
   ref={cameraInputRef} 
   onChange={handleFileUpload} 
-  accept="image/*,video/*" 
+  accept="image/*;capture=camera,video/*;capture=camcorder"
   capture="environment" 
   className="hidden" 
 />
