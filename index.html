@@ -18,18 +18,22 @@
     
     <link rel="apple-touch-icon" href="/icon.png">
     <link rel="apple-touch-startup-image" href="/logo-s.png">
-
-    <script>
-      (function() {
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-        const slug = localStorage.getItem('agentSlug') || localStorage.getItem('lastVisitedSlug');
-        
-        // Redirect if in PWA mode, have a slug, and are currently at root or pricing
-        if (isStandalone && slug && (window.location.pathname === '/' || window.location.pathname.includes('/pricing'))) {
-          window.location.replace('/' + slug);
-        }
-      })();
-    </script>
+<script>
+  (function() {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    const slug = localStorage.getItem('agentSlug') || localStorage.getItem('lastVisitedSlug');
+    
+    // If we are in PWA mode, and at the wrong URL, we sanitize the history
+    if (isStandalone && slug && (window.location.pathname === '/' || window.location.pathname.includes('/pricing'))) {
+      // API: history.replaceState(state, unused, newUrl)
+      // This changes the URL in the browser without reloading the page
+      window.history.replaceState(null, '', '/' + slug);
+      
+      // Then we perform a soft reload if necessary
+      window.location.replace('/' + slug);
+    }
+  })();
+</script>
   </head>
   <body>
     <div id="root"></div>
