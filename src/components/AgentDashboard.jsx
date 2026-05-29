@@ -1277,16 +1277,16 @@ if (activeStatus) {
   const usersRes = await fetch('/api/agents/my-users', {
     headers: { 'Authorization': `Bearer ${token}` }
   });
-  const userData = await usersRes.json();
-  console.log("API Response Users:", userData.users); // <--- CHECK THIS LOG!
   if (userData.success && Array.isArray(userData.users)) {
-    setUsers(userData.users);
-    const initialUnreadCounts = {};
-    userData.users.forEach(user => {
-      initialUnreadCounts[user._id] = user.unreadCount || 0;
-    });
+  setUsers(userData.users);
+  const initialUnreadCounts = {};
+  userData.users.forEach(user => {
+    const userId = String(user._id);
+    initialUnreadCounts[userId] = Number(user.unreadCount) || 0;
+  });
     setUnreadCounts(initialUnreadCounts);
-  }
+  console.log("Initialized Unread Counts State:", initialUnreadCounts); 
+}
 }
       }
     } catch (err) {
@@ -1555,11 +1555,8 @@ const handleFinalSend = async () => {
     }
   };
   const handleSelectUser = async (user) => {
-  // 1. Immediate UI update
   if (window.innerWidth < 1024) setShowSidebar(false);
-  
-  // CLEAR BADGE HERE (already in your code)
-  setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
+    setUnreadCounts(prev => ({ ...prev, [user._id]: 0 }));
   
   setMessages([]); 
   setSelectedUser(user);
@@ -1690,19 +1687,17 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
-
 useEffect(() => {
   if (!socket) return;
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
-
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
+
     const currentChat = selectedUserRef.current;
-    const isChattingWithSender = currentChat && (data.senderId === currentChat._id || data.senderId === currentChat.id);
-    
-    // A. Message Processing
+    const senderIdStr = String(data.senderId);
+    const isChattingWithSender = currentChat && (senderIdStr === String(currentChat._id));
     if (isChattingWithSender) {
       setMessages((prev) => prev.some(m => m._id === data._id) ? prev : [...prev, data]);
       
@@ -1710,29 +1705,29 @@ useEffect(() => {
       if (container && (container.scrollHeight - container.scrollTop <= container.clientHeight + 150)) {
         requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
       }
-
       const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${currentChat._id}`, {
+      fetch(`/api/messages/mark-read/${data.senderId}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
+
     } else {
       setUnreadCounts(prev => {
-      const updated = { ...prev };
-      const senderId = String(data.senderId); // Force string to match sidebar key
-      updated[senderId] = (updated[senderId] || 0) + 1;
-      return updated; 
-    });
-  }
-
+        const senderId = String(data.senderId); 
+        const currentCount = Number(prev[senderId] || 0);
+        
+        return {
+          ...prev,
+          [senderId]: currentCount + 1
+        };
+      });
+    }
     if (data.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
         notificationSound.current.play().catch(e => console.warn("Audio blocked:", e.message));
       }
       if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-
-      // Only show popup if window is not focused/visible
       if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !document.hasFocus())) {
         const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
           body: data.text || "Sent a file",
@@ -1747,7 +1742,8 @@ useEffect(() => {
 
   socket.on('new-message', handleIncomingMessage);
   return () => socket.off('new-message', handleIncomingMessage);
-}, [socket]); // Only re-bind if socket changes
+}, [socket]);
+
 
 useEffect(() => {
   selectedUserRef.current = selectedUser;
@@ -2221,27 +2217,24 @@ return (
     </div>
   </div>
 
- <div className="flex-1 overflow-y-auto">
+<div className="flex-1 overflow-y-auto">
   {users.length > 0 ? (
     users.map((user) => {
-      // 1. Ensure a string ID for reliable comparison and lookup
+      // 1. Force ID to string for consistent lookup
       const userId = String(user._id);
+      // 2. Ensure we are reading from the unreadCounts state correctly
       const count = unreadCounts[userId] || 0;
-      {(() => {
-  console.log("Current unreadCounts State:", unreadCounts);
-  console.log("Checking ID:", userId, "Value:", unreadCounts[userId]);
-  return null;
-})()}
 
       return (
         <div
           key={userId}
           onClick={() => handleSelectUser(user)}
           className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] ${
-            selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''
+            String(selectedUser?._id) === userId ? 'bg-[#ebebeb]' : ''
           }`}
         >
-          <div className="relative shrink-0">
+          {/* Container with overflow-visible to prevent badge clipping */}
+          <div className="relative shrink-0 overflow-visible">
             <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
               <img
                 src={user.photoUrl}
@@ -2249,15 +2242,15 @@ return (
                 className="w-full h-full object-cover"
                 onError={(e) => {
                   e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                    user.firstName
+                    user.firstName || 'U'
                   )}&background=random&color=fff`;
                 }}
               />
             </div>
 
-            {/* 2. Badge: Render only if count > 0, using the safe 'count' variable */}
+            {/* 3. Badge with z-[100] to ensure it renders on top */}
             {count > 0 && (
-              <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-10 transition-all duration-300 transform scale-100">
+              <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-[100] transition-all duration-300 transform scale-100">
                 {count > 99 ? '99+' : count}
               </div>
             )}
@@ -2290,7 +2283,6 @@ return (
     </p>
   )}
 </div>
-
   <div className="p-4 border-t bg-gray-50/50">
     <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95">
       <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
