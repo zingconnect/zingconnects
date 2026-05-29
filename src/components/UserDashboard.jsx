@@ -1520,19 +1520,16 @@ const handleStartCall = async () => {
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
   const token = localStorage.getItem('userToken');
-  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://zingconnect.vercel.app";
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
 
   if (!currentAgentId || !currentUserId) {
     alert("Profile data still loading. Please try again.");
     return;
   }
-
-  // UI State: Move to calling immediately
   setCallStatus('calling'); 
   setShowFullScreenCall(true);
 
   try {
-    // 2. Request a Secure LiveKit Room from Backend
     const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
       method: 'POST',
       headers: { 
@@ -2142,14 +2139,14 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
       accept="image/*,video/*" 
       className="hidden" 
     />
-    <input 
-      type="file" 
-      ref={cameraInputRef} 
-      onChange={handleFileUpload} 
-      accept="image/*,video/*" 
-      capture="environment" 
-      className="hidden" 
-    />
+   <input 
+  type="file" 
+  ref={cameraInputRef} 
+  onChange={handleFileUpload} 
+  accept="image/*,video/*" 
+  capture="environment" 
+  className="hidden" 
+/>
 
     <div className="flex gap-1 md:gap-2 text-gray-500">
       <button 
@@ -2161,14 +2158,14 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         <BsPaperclip size={22} />
       </button>
 
-      <button 
-        type="button"
-        onClick={() => cameraInputRef.current.click()} 
-        disabled={isUploading}
-        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
-      >
-        <BsCameraFill size={22} />
-      </button>
+    <button 
+  type="button"
+  onClick={() => cameraInputRef.current.click()} 
+  disabled={isUploading}
+  className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
+>
+  <BsCameraFill size={22} />
+</button>
     </div>
     
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
