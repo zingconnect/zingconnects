@@ -2138,7 +2138,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   {/* --- MAIN INPUT CONTROLS --- */}
    <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
     <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
-    <input  type="file"  id="camera-input-trigger"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden" key="camera-input-key"/>
+    <input  type="file"  ref={cameraInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  capture="environment" className="hidden" />
 
     <div className="flex gap-1 md:gap-2 text-gray-500">
       <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
