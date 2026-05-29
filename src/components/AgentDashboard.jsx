@@ -740,6 +740,7 @@ useEffect(() => {
     }
   };
 }, [socket, callStatus, isSpeakerOn]);
+
 const unlockAudio = () => {
   setAudioUnlocked(true);
   console.log("Initializing secure audio channels for Agent...");
@@ -1693,7 +1694,7 @@ useEffect(() => {
 useEffect(() => {
   if (!socket) return;
 
-  const handleIncomingMessage = (data) => {
+ const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
@@ -1701,6 +1702,7 @@ useEffect(() => {
     const currentChat = selectedUserRef.current;
     const senderIdStr = String(data.senderId);
     const isChattingWithSender = currentChat && (senderIdStr === String(currentChat._id));
+
     if (isChattingWithSender) {
       setMessages((prev) => prev.some(m => m._id === data._id) ? prev : [...prev, data]);
       
@@ -1708,42 +1710,47 @@ useEffect(() => {
       if (container && (container.scrollHeight - container.scrollTop <= container.clientHeight + 150)) {
         requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
       }
+      
       const token = localStorage.getItem('agentToken');
       fetch(`/api/messages/mark-read/${data.senderId}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
 
-  } else {
-  setUnreadCounts(prev => {
-    const senderId = String(data.senderId);
+    } else {
+      // Unread count update
+      setUnreadCounts(prev => {
+        const senderId = String(data.senderId);
         const nextState = { 
-      ...prev, 
-      [senderId]: (Number(prev[senderId]) || 0) + 1 
-    };
+          ...prev, 
+          [senderId]: (Number(prev[senderId]) || 0) + 1 
+        };
+        console.log("🛠️ New UnreadCounts State:", nextState);
+        return nextState;
+      });
+    }
+
+    // 🚀 UNIFIED NOTIFICATION BLOCK:
+    // This now runs for all messages, including images, without strict senderModel dependency.
+    if (notificationSound.current) {
+      notificationSound.current.currentTime = 0;
+      notificationSound.current.play().catch(e => console.warn("Audio blocked:", e.message));
+    }
     
-    console.log("🛠️ New UnreadCounts State:", nextState);
-    return nextState;
-  });
-}
-    if (data.senderModel === 'User') {
-      if (notificationSound.current) {
-        notificationSound.current.currentTime = 0;
-        notificationSound.current.play().catch(e => console.warn("Audio blocked:", e.message));
-      }
-      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
-      if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !document.hasFocus())) {
-        const popup = new Notification(`Message from ${data.senderName || 'Client'}`, {
-          body: data.text || "Sent a file",
-          icon: data.senderPhoto || '/favicon.ico',
-          tag: 'zing-msg',
-          renotify: true
-        });
-        popup.onclick = () => { window.focus(); popup.close(); };
-      }
+    if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+    
+    if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !document.hasFocus())) {
+      const bodyText = data.text ? data.text : (data.fileType === 'image' ? "Sent an image" : "Sent a file");
+      const popup = new Notification(`New message from ${data.senderName || 'Client'}`, {
+        body: bodyText,
+        icon: data.senderPhoto || '/favicon.ico',
+        tag: 'zing-msg',
+        renotify: true
+      });
+      popup.onclick = () => { window.focus(); popup.close(); };
     }
   };
-
+  
   socket.on('new-message', handleIncomingMessage);
   return () => socket.off('new-message', handleIncomingMessage);
 }, [socket]);
