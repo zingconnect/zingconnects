@@ -39,6 +39,24 @@ body {
   color: var(--text-primary);
   transition: background-color 0.3s ease, color 0.3s ease;
 }
+/* Ensure the scrollbar is always visible and style it */
+.scroll-manual {
+  overflow-y: auto;
+  scrollbar-width: thin; /* For Firefox */
+  scrollbar-color: #94a3b8 #f1f5f9; /* Thumb and Track */
+}
+
+/* For Chrome, Edge, Safari */
+.scroll-manual::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-manual::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.scroll-manual::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 20px;
+}
 
 /* Helper Utilities */
 @media screen and (max-width: 768px) {

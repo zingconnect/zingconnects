@@ -393,16 +393,6 @@ useEffect(() => {
 }, [socket, callStatus, isSpeakerOn, activeCall?.voiceId]);
 
 
-useEffect(() => {
-  if (!hasInteracted) {
-    document.addEventListener('click', unlockAudio);
-    document.addEventListener('touchstart', unlockAudio);
-  }
-  return () => {
-    document.removeEventListener('click', unlockAudio);
-    document.removeEventListener('touchstart', unlockAudio);
-  };
-}, [hasInteracted, agent?._id]); // Re-bind if agent loads later
 
 const handleEndCall = useCallback(async () => {
   console.log("📴 Initiating Call End Sequence...");
@@ -2215,9 +2205,11 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   {!hasInteracted && (
     <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
       <button 
-        onClick={unlockAudio} 
-        className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100 active:scale-95 transition-transform"
-      >
+      type="button" // Important for mobile browsers
+      onClick={unlockAudio} 
+      className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100 active:scale-95 transition-transform"
+      style={{ pointerEvents: 'auto' }} // Explicitly ensure it's clickable
+    >
         <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
           <BsShieldLockFill className="text-blue-600" size={28} />
         </div>
