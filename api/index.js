@@ -850,6 +850,7 @@ app.post('/api/users/handshake', async (req, res) => {
     res.status(500).json({ success: false, message: "Handshake failed" });
   }
 });
+
 app.post('/api/agents/heartbeat', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1375,7 +1376,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 const unreadCountsData = await Message.aggregate([
   { 
     $match: { 
-      receiverId: new mongoose.Types.ObjectId(agentId), 
+      receiverId: new mongoose.Types.ObjectId(String(agentId)),
       receiverModel: 'Agent', 
       status: { $in: ['sent', 'delivered'] }
     } 
@@ -1388,7 +1389,7 @@ const unreadCountsData = await Message.aggregate([
     } 
   }
 ]);
-
+console.log("SERVER-SIDE AGGREGATION RESULT:", JSON.stringify(unreadCountsData, null, 2));
 // Convert the array to an easy lookup map
 const unreadMap = unreadCountsData.reduce((acc, item) => {
   acc[item._id] = item.count;
