@@ -1353,7 +1353,6 @@ app.post('/api/subscriptions/verify', async (req, res) => {
   }
 });
 
-// --- GET AGENT'S CONNECTED USERS WITH UNREAD COUNTS ---
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -1369,35 +1368,32 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 
     const ActiveUserModel = mongoose.models.User || User;
     
-    // 1. Fetch connected users
     const users = await ActiveUserModel.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
+const unreadCountsData = await Message.aggregate([
+  { 
+    $match: { 
+      receiverId: new mongoose.Types.ObjectId(agentId), 
+      receiverModel: 'Agent', 
+      status: { $in: ['sent', 'delivered'] }
+    } 
+  },
+  { 
+    $group: { 
+      // Ensure we are grouping by the string representation of the senderId
+      _id: { $toString: "$senderId" }, 
+      count: { $sum: 1 } 
+    } 
+  }
+]);
 
-    // 2. Aggregate unread counts (status != 'seen')
-    const unreadCountsData = await Message.aggregate([
-      { 
-        $match: { 
-          receiverId: new mongoose.Types.ObjectId(agentId), 
-          receiverModel: 'Agent', 
-          status: { $ne: 'seen' } 
-        } 
-      },
-      { 
-        $group: { 
-          _id: "$senderId", 
-          count: { $sum: 1 } 
-        } 
-      }
-    ]);
-
-    // Create a lookup map
-    const unreadMap = {};
-    unreadCountsData.forEach(item => {
-      unreadMap[item._id.toString()] = item.count;
-    });
-
+// Convert the array to an easy lookup map
+const unreadMap = unreadCountsData.reduce((acc, item) => {
+  acc[item._id] = item.count;
+  return acc;
+}, {});
     // 3. Process users and attach unreadCount
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
@@ -1434,7 +1430,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
         avatar: finalPhotoUrl,    
         avatarUrl: finalPhotoUrl,  
         status: isOnline ? 'online' : 'offline',
-        // ATTACH THE DYNAMIC COUNT
         unreadCount: unreadMap[user._id.toString()] || 0 
       };
     }));
