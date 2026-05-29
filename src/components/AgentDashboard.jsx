@@ -1278,7 +1278,7 @@ if (activeStatus) {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   const userData = await usersRes.json();
-  
+
   if (userData.success && Array.isArray(userData.users)) {
   setUsers(userData.users);
   const initialUnreadCounts = {};
@@ -1689,6 +1689,7 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
+
 useEffect(() => {
   if (!socket) return;
 
@@ -1713,17 +1714,18 @@ useEffect(() => {
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read error:", err));
 
-    } else {
-      setUnreadCounts(prev => {
-        const senderId = String(data.senderId); 
-        const currentCount = Number(prev[senderId] || 0);
-        
-        return {
-          ...prev,
-          [senderId]: currentCount + 1
-        };
-      });
-    }
+  } else {
+  setUnreadCounts(prev => {
+    const senderId = String(data.senderId);
+        const nextState = { 
+      ...prev, 
+      [senderId]: (Number(prev[senderId]) || 0) + 1 
+    };
+    
+    console.log("🛠️ New UnreadCounts State:", nextState);
+    return nextState;
+  });
+}
     if (data.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
@@ -2222,20 +2224,17 @@ return (
 <div className="flex-1 overflow-y-auto">
   {users.length > 0 ? (
     users.map((user) => {
-      // 1. Force ID to string for consistent lookup
       const userId = String(user._id);
-      // 2. Ensure we are reading from the unreadCounts state correctly
       const count = unreadCounts[userId] || 0;
 
       return (
         <div
-          key={userId}
+          key={`${userId}-${count}`}
           onClick={() => handleSelectUser(user)}
           className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] ${
             String(selectedUser?._id) === userId ? 'bg-[#ebebeb]' : ''
           }`}
         >
-          {/* Container with overflow-visible to prevent badge clipping */}
           <div className="relative shrink-0 overflow-visible">
             <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
               <img
@@ -2250,9 +2249,9 @@ return (
               />
             </div>
 
-            {/* 3. Badge with z-[100] to ensure it renders on top */}
+            {/* Badge: Now guaranteed to re-render due to the parent key change */}
             {count > 0 && (
-              <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-[100] transition-all duration-300 transform scale-100">
+              <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm z-[100] transition-all duration-300">
                 {count > 99 ? '99+' : count}
               </div>
             )}
