@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BsChevronLeft, BsCameraFill, BsPencilSquare, BsCheckLg } from 'react-icons/bs';
-import PhoneInput from 'react-phone-input-2';
+import { useNavigate, Link } from 'react-router-dom';
+import { BsChevronLeft, BsCameraFill, BsPencilSquare, BsCheckLg, BsPersonBadgeFill } from 'react-icons/bs';
+// 🛠️ FIXES MINIFIED ERROR #130: Changed default import to Named Import syntax
+import { PhoneInput } from 'react-phone-input-2'; 
 import 'react-phone-input-2/lib/style.css';
 import { useGlobalCall } from '../context/UserCallContext'; 
 
@@ -66,7 +67,6 @@ export const UserProfile = () => {
       setFormData({
         firstName: userData.firstName || '',
         lastName: userData.lastName || '',
-        // Handle fallback structure gracefully if legacy plain strings exist in your database
         phone: userData.phone && typeof userData.phone === 'object' ? {
           raw: userData.phone.raw || '',
           formatted: userData.phone.formatted || '',
@@ -99,10 +99,8 @@ export const UserProfile = () => {
     const token = localStorage.getItem('userToken');
     const data = new FormData();
 
-    // Map properties cleanly to FormData multi-part specs
     Object.keys(formData).forEach(key => {
       if (key === 'phone') {
-        // Essential step: stringify the structured object so backend parsed blocks capture fields seamlessly
         data.append('phone', JSON.stringify(formData.phone));
       } else {
         data.append(key, formData[key]);
@@ -162,12 +160,10 @@ export const UserProfile = () => {
 
       {/* --- FACEBOOK STYLE HEADER HERO BANNER --- */}
       <div className="w-full max-w-4xl mx-auto bg-white shadow-sm overflow-hidden md:rounded-b-2xl border-b border-gray-200/60">
-        {/* Cover Photo Area */}
         <div className="h-36 sm:h-48 md:h-64 bg-gradient-to-r from-blue-700 via-indigo-800 to-blue-900 relative">
           <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         </div>
 
-        {/* Profile Avatar Overlay Frame */}
         <div className="px-4 pb-6 relative flex flex-col items-center md:items-start md:flex-row md:gap-6 md:px-8">
           <div className="-mt-16 sm:-mt-20 md:-mt-24 relative z-10">
             <div 
@@ -189,7 +185,6 @@ export const UserProfile = () => {
             <input type="file" ref={fileInputRef} hidden onChange={handleFileChange} accept="image/*" />
           </div>
 
-          {/* User Meta Information text column */}
           <div className="mt-3 text-center md:text-left md:mt-4 flex-1">
             <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-gray-900 leading-tight">
               {formData.firstName || '—'} {formData.lastName || ''}
@@ -201,23 +196,64 @@ export const UserProfile = () => {
         </div>
       </div>
 
-      {/* --- CENTRAL DOCK FORM ITEMS LAYOUT CONTAINER --- */}
+      {/* --- CENTRAL LAYOUT GRID CONFIGURATION --- */}
       <div className="p-4 max-w-4xl mx-auto w-full grid grid-cols-1 md:grid-cols-3 gap-6 mt-2">
         
-        {/* Left Side Info Panel Card */}
-        <div className="md:col-span-1 bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm h-fit space-y-4">
-          <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Account Badge</h3>
-          <div>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-600">
-              Role Status: {userData?.role || 'User'}
-            </span>
+        {/* --- LEFT HAND SIDE BAR INFO BLOCKS --- */}
+        <div className="md:col-span-1 space-y-6">
+          {/* Account Status Badge Card */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm h-fit space-y-4">
+            <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Account Badge</h3>
+            <div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-600">
+                Role Status: {userData?.role || 'User'}
+              </span>
+            </div>
+            <div className="text-[11px] text-gray-400 font-medium">
+              Verified Account Status active since creation lifecycle tracking pipelines.
+            </div>
           </div>
-          <div className="text-[11px] text-gray-400 font-medium">
-            Verified Account Status active since creation lifecycle tracking pipelines.
+
+          {/* 🌟 NEW: CONNECTED AGENTS SIDEBAR CARD */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm space-y-4">
+            <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Connected Agents</h3>
+            
+            {userData?.connectedAgents && userData.connectedAgents.length > 0 ? (
+              <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                {userData.connectedAgents.map((agent) => (
+                  <Link 
+                    // Redirects cleanly to the custom agent profile slug mapping
+                    to={`/${agent.slug}`} 
+                    key={agent._id || agent.id}
+                    className="flex items-center gap-3 p-2.5 rounded-xl border border-gray-50 hover:border-blue-100 hover:bg-blue-50/40 transition-all group"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-blue-900 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0">
+                      {agent.photoUrl ? (
+                        <img src={agent.photoUrl} alt={agent.name} className="w-full h-full object-cover rounded-full" />
+                      ) : (
+                        <BsPersonBadgeFill size={15} />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-gray-800 truncate group-hover:text-blue-700 transition-colors">
+                        {agent.name || `${agent.firstName || 'Agent'} ${agent.lastName || ''}`}
+                      </p>
+                      <p className="text-[10px] text-gray-400 font-medium truncate">
+                        @{agent.slug || 'no-slug'}
+                      </p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-4 text-gray-400 font-medium text-[11px] uppercase tracking-wider">
+                No Agents Connected Yet
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right Side Main Data Inputs Array Form Card */}
+        {/* --- RIGHT HAND SIDE DATA EDITABLE CARDS --- */}
         <div className="md:col-span-2 bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm space-y-5">
           <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Identity Credentials</h3>
           
@@ -226,7 +262,6 @@ export const UserProfile = () => {
             <EditableItem label="Last Name" name="lastName" value={formData.lastName} isEditing={isEditing} onChange={handleInputChange} />
           </div>
 
-          {/* Structured Phone Input Layout Component */}
           <div className="border-b border-gray-100/60 pb-4 last:border-0 last:pb-0">
             <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">Phone Number</p>
             {isEditing ? (

@@ -982,11 +982,30 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       return res.status(401).json({ success: false, message: "User identity not found in token" });
     }
 
+    // --- 🛠️ NEW: PARSE AND SAFE-GUARD PHONE SUB-OBJECT ---
+    let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
+    
+    if (phone) {
+      try {
+        // If the payload arrives as a JSON string string from Form Data, parse it
+        const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
+        parsedPhone = {
+          raw: parsed.raw ? String(parsed.raw).trim() : "",
+          formatted: parsed.formatted ? String(parsed.formatted).trim() : "",
+          countryCode: parsed.countryCode ? String(parsed.countryCode).toLowerCase().trim() : "",
+          dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
+        };
+      } catch (e) {
+        // Fallback in case raw text was pushed instead of an object
+        parsedPhone.raw = String(phone).trim();
+      }
+    }
+
     // Safety fallback parsing checks to prevent invalid schemas crashing Mongoose validation engine
     const updateData = {
       firstName: firstName ? String(firstName).trim() : "",
       lastName: lastName ? String(lastName).trim() : "",
-      phone: phone ? String(phone).trim() : "",
+      phone: parsedPhone, // 👈 Assigned your clean nested object parameters here
       dob,
       gender: gender && typeof gender === 'string' ? gender.toLowerCase().trim() : undefined,
       city: city ? String(city).trim() : "",
@@ -1043,7 +1062,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     });
   }
 });
-
 app.get('/api/agents/:slug', async (req, res) => {
   try {
     console.log("--- Profile Request Start --- for:", req.params.slug);
@@ -1212,14 +1230,41 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();
-        const userId = req.user.id;
-        const { firstName, lastName, phone, dob, gender, city, state } = req.body;
+    const userId = req.user.id;
+    const { firstName, lastName, phone, dob, gender, city, state } = req.body;
+
+    // --- 🛠️ PARSE AND SAFE-GUARD PHONE SUB-OBJECT ---
+    let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
+    
+    if (phone) {
+      try {
+        // If multipart form data submits it as a stringified JSON payload, parse it
+        const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
+        parsedPhone = {
+          raw: parsed.raw ? String(parsed.raw).trim() : "",
+          formatted: parsed.formatted ? String(parsed.formatted).trim() : "",
+          countryCode: parsed.countryCode ? String(parsed.countryCode).toLowerCase().trim() : "",
+          dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
+        };
+      } catch (e) {
+        // Fallback in case raw text was pushed instead of an object structure
+        parsedPhone.raw = String(phone).trim();
+      }
+    }
+
     let updateFields = {
-      firstName, lastName, phone, dob, gender, city, state };
+      firstName, 
+      lastName, 
+      phone: parsedPhone, // 👈 Assigned your clean nested phone object parameters here
+      dob, 
+      gender, 
+      city, 
+      state 
+    };
+
     if (req.file) {
       try {
         const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
@@ -1229,6 +1274,7 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
         return res.status(500).json({ success: false, message: "Failed to process image upload" });
       }
     }
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateFields },
@@ -1238,10 +1284,12 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
+
     let signedPhotoUrl = updatedUser.photoUrl || null;
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${updatedUser.firstName || 'User'}+${updatedUser.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
+
     res.json({
       success: true,
       message: "Profile updated successfully",
@@ -1255,7 +1303,8 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     console.error("Profile Update Error:", err);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
-}); 
+});
+
 app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
   const { planPrice } = req.params;
   const FIXED_RATE = Number(process.env.USD_TO_NGN_RATE);
@@ -1469,11 +1518,10 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     .limit(limit)
     .lean();
 
-    // 2. FETCH THE FRESH USER DATA FROM THE DATABASE (THE FIX)
-    // Adjust 'User' to match your actual mongoose model name for clients
-    const userData = await mongoose.model('User').findById(otherUserId)
-      .select('firstName lastName email status isOnline lastSeen photoUrl city state phoneNumber')
-      .lean();
+    // Find this line in your message route and update it:
+const userData = await mongoose.model('User').findById(otherUserId)
+  .select('firstName lastName email status isOnline lastActive photoUrl city state phoneNumber') // 👈 Changed lastSeen to lastActive
+  .lean();
 
     // Mapping presigned assets remains fast because it's capped at the limit size
     const signedMessages = await Promise.all(messages.map(async (m) => {

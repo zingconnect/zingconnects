@@ -147,14 +147,19 @@ const previousScrollTopRef = useRef(0);
   const API_BASE_URL = import.meta.env.VITE_API_URL
 
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    dob: '',
-    gender: '',
-    city: '',
-    state: ''
-  });
+  firstName: '',
+  lastName: '',
+  phone: {
+    raw: '',
+    formatted: '',
+    countryCode: 'us',
+    dialCode: '1'
+  },
+  dob: '',
+  gender: '',
+  city: '',
+  state: ''
+});
 
     useEffect(() => {
     callStatusRef.current = callStatus;
@@ -1820,20 +1825,30 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
           </div>
         </div>
 
-       {/* --- NEW: PHONE NUMBER FIELD --- */}
+{/* --- NEW: PHONE NUMBER FIELD --- */}
 <div className="space-y-1">
   <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">
     Phone Number
   </label>
   <PhoneInput
     country={'us'}
-    value={formData.phone || ''} 
-    onChange={phone => setFormData({ ...formData, phone })}
+    // Pass the raw string to the component so it initializes and displays correctly
+    value={formData.phone?.raw || ''} 
+    onChange={(value, countryData, event, formattedValue) => {
+      setFormData({ 
+        ...formData, 
+        phone: {
+          raw: value,                            // "13232323232"
+          formatted: formattedValue,              // "+1 (323) 232-3232"
+          countryCode: countryData.countryCode,  // "us"
+          dialCode: countryData.dialCode         // "1"
+        }
+      });
+    }}
     containerClass="phone-container"
     inputClass="phone-input-field"
     buttonClass="phone-dropdown-button"
     placeholder="Enter phone number"
-    // Use search to find specific country codes easily
     enableSearch={true} 
   />
 </div>

@@ -64,8 +64,10 @@ const userSchema = new mongoose.Schema({
     index: true // 👈 Added: Useful for filtering verified users in search
   },
   phone: {
-    type: String,
-    trim: true
+    raw: { type: String, trim: true, default: "" },         // e.g., "13232323232"
+    formatted: { type: String, trim: true, default: "" },   // e.g., "+1 (323) 232-3232"
+    countryCode: { type: String, trim: true, default: "" }, // e.g., "us"
+    dialCode: { type: String, trim: true, default: "" }     // e.g., "1"
   },
   lastActive: { 
     type: Date, 
