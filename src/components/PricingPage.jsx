@@ -27,7 +27,7 @@ const plans = [
     tier: 'GROWTH',
     term: '6 Months',
     price: '43,500', 
-    frequency: '/6 mos', // Clears up that this is a lump sum for the duration
+    frequency: '/6 mos', 
     popular: true,
     features: [
       'All Basic Tier Features', 
