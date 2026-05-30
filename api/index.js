@@ -1563,6 +1563,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
         avatar: finalPhotoUrl,    
         avatarUrl: finalPhotoUrl,  
         status: isOnline ? 'online' : 'offline',
+        gender: user.gender || "", 
         unreadCount: unreadMap[user._id.toString()] || 0 
       };
     }));

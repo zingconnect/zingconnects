@@ -2487,76 +2487,146 @@ return (
           </div>
         )}
 
-      {/* --- USER DETAILS MODAL --- */}
+  {/* --- ADVANCED HUMAN-CENTRIC USER METRIC MODAL --- */}
 {showUserModal && selectedUser && (
-  <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
-    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
-    <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
-      <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
-      <div className="px-6 pb-8 flex flex-col items-center">
-        <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-gray-100">
-          <img 
-            src={selectedUser.photoUrl} 
-            className="w-full h-full object-cover" 
-            alt="Profile" 
-            onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
-          />
-        </div>
-        <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
-        <p className="text-[10px] font-bold text-blue-600 uppercase mb-6">Verified Client</p>
+  <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-300">
+    {/* High-Fidelity Backdrop Blur */}
+    <div 
+      className="fixed inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity" 
+      onClick={() => setShowUserModal(false)} 
+    />
+
+    {/* Adaptive Layout Container */}
+    <div className="relative w-full max-w-2xl bg-slate-50/80 backdrop-blur-2xl rounded-[2.5rem] border border-white/70 shadow-2xl overflow-hidden flex flex-col md:flex-row animate-in zoom-in-95 duration-200">
+      
+      {/* =========================================================================
+          LEFT SIDEBAR: HERO DYNAMICS & IDENTITY PASS
+          ========================================================================= */}
+      <div className="relative w-full md:w-[240px] bg-gradient-to-b from-slate-900 to-slate-950 text-white p-6 flex flex-col items-center justify-between text-center border-b md:border-b-0 md:border-r border-slate-800/80">
         
-        <div className="w-full space-y-2.5">
-          {/* Email */}
-          <div className="bg-slate-50 p-3 rounded-2xl">
-            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Email Address</p>
-            <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
+        {/* Ambient Radial Spotlight Decor */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-600/15 via-transparent to-transparent opacity-70 pointer-events-none" />
+
+        <div className="relative w-full flex flex-col items-center z-10">
+          {/* Square-Circle Profile Picture Casing */}
+          <div className="relative mb-4 w-28 h-28 rounded-3xl overflow-hidden bg-slate-800 shadow-xl border border-white/10 group">
+            <img 
+              src={selectedUser.photoUrl} 
+              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
+              alt={`${selectedUser.firstName || 'User'}'s Profile`} 
+              onError={(e) => { 
+                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.firstName || 'U')}&background=0D1117&color=fff&size=128`; 
+              }}
+            />
           </div>
 
-          {/* Phone - 🛠️ CRITICAL FIX: Safe object parsing validation checks prevent error #31 crashes */}
-          <div className="bg-slate-50 p-3 rounded-2xl">
-            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Phone Number</p>
-            <p className="text-[11px] font-bold text-slate-700">
-              {(() => {
-                const p = selectedUser.phone || selectedUser.phoneNumber;
-                if (!p) return 'No Phone Registered';
-                if (typeof p === 'object') {
-                  return p.formatted || p.raw || 'No Phone Registered';
-                }
-                return String(p);
-              })()}
-            </p>
-          </div>
+          {/* Core Identification Text Headers */}
+          <h3 className="text-lg font-black tracking-tight text-slate-100 leading-tight">
+            {selectedUser.firstName || '—'} {selectedUser.lastName || ''}
+          </h3>
 
-          {/* Gender - 🛠️ NEW: Added explicit tracking element view container */}
-          <div className="bg-slate-50 p-3 rounded-2xl">
-            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Gender Identification</p>
-            <p className="text-[11px] font-bold text-slate-700 capitalize">
-              {selectedUser.gender || 'Not Specified'}
-            </p>
-          </div>
-
-          {/* Location Details */}
-          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Location Details</p>
-            <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
-              {selectedUser.address && <span>{selectedUser.address}<br /></span>}
-              <span className="text-blue-600">
-                {selectedUser.city || ''}
-                {selectedUser.city && selectedUser.state ? ', ' : ''}
-                {selectedUser.state || ''}
-              </span>
-              {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
-            </p>
-          </div>
+          {/* Dynamic Badge Engine */}
+          <span className={`inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-wider ${
+            selectedUser.isVerified 
+              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+              : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+          }`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${selectedUser.isVerified ? 'bg-emerald-400' : 'bg-blue-400'}`} />
+            {selectedUser.isVerified ? 'Verified Client' : 'Standard Client'}
+          </span>
         </div>
-        
-        <button 
-          onClick={() => setShowUserModal(false)}
-          className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
-        >
-          Close Profile
-        </button>
+
+        {/* Temporal Information Footers - Automatically hidden on tiny viewports */}
+        <div className="relative w-full mt-6 pt-4 border-t border-slate-800/60 space-y-2.5 text-left z-10 hidden md:block">
+          <div>
+            <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Lifecycle Status</p>
+            <p className="text-[10px] font-bold text-slate-300">
+              {selectedUser.isProfileComplete ? 'Profile Active' : 'Pending Lifecycle Configuration'}
+            </p>
+          </div>
+          {selectedUser.createdAt && (
+            <div>
+              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Creation Index</p>
+              <p className="text-[10px] font-bold text-slate-400">
+                {new Date(selectedUser.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+              </p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* =========================================================================
+          RIGHT COLUMN: PROFILE PARAMETERS GRID WORKSPACE
+          ========================================================================= */}
+      <div className="flex-1 p-6 md:p-8 flex flex-col justify-between">
+        <div className="space-y-5">
+          {/* Section Section Title Header */}
+          <div className="flex items-center gap-2">
+            <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">Client Profile Parameters</h4>
+            <div className="flex-1 h-px bg-slate-200/80" />
+          </div>
+
+          {/* Symmetric Grid Array */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            
+            {/* Email Field - Spans full width for copy friendliness */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between sm:col-span-2 group hover:border-slate-300 transition-colors">
+              <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Email Address</p>
+              <p className="text-xs font-bold text-slate-800 break-all select-all selection:bg-blue-100">{selectedUser.email || '—'}</p>
+            </div>
+
+            {/* Guarded Phone Field Wrapper */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between hover:border-slate-300 transition-colors">
+              <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Phone Number</p>
+              <p className="text-xs font-bold text-slate-800">
+                {(() => {
+                  const phoneData = selectedUser.phone || selectedUser.phoneNumber;
+                  if (!phoneData) return 'No Phone Registered';
+                  if (typeof phoneData === 'object') {
+                    return phoneData.formatted || phoneData.raw || 'No Phone Registered';
+                  }
+                  return String(phoneData);
+                })()}
+              </p>
+            </div>
+
+            {/* Explicit Gender Identity Data Frame */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between hover:border-slate-300 transition-colors">
+              <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender Identity</p>
+              <p className="text-xs font-bold text-slate-800 capitalize">
+                {selectedUser.gender || 'Not Specified'}
+              </p>
+            </div>
+
+            {/* Geographical Mapping Array */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between sm:col-span-2 hover:border-slate-300 transition-colors">
+              <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Geographical Parameters</p>
+              <div className="text-xs font-bold text-slate-800 leading-relaxed">
+                {selectedUser.address && <p className="text-slate-600 font-medium mb-1">{selectedUser.address}</p>}
+                {(selectedUser.city || selectedUser.state) ? (
+                  <p className="text-blue-600 font-black">
+                    {[selectedUser.city, selectedUser.state].filter(Boolean).join(', ')}
+                  </p>
+                ) : (
+                  !selectedUser.address && <p className="text-slate-400 font-medium italic">No Location Context Found</p>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Modal Dismiss Action Bar */}
+        <div className="mt-8 pt-4 border-t border-slate-200/80 flex items-center justify-end">
+          <button 
+            onClick={() => setShowUserModal(false)}
+            className="w-full sm:w-auto px-6 py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-md shadow-slate-900/10 transition-all duration-150"
+          >
+            Dismiss Profile View
+          </button>
+        </div>
+      </div>
+
     </div>
   </div>
 )}
