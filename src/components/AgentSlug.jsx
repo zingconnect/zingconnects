@@ -6,8 +6,7 @@ import {
   BsEyeFill, 
   BsEyeSlashFill, 
   BsCheckCircleFill, 
-  BsDownload,
-  BsShare // Useful for the iOS instructions
+  BsDownload
 } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 
@@ -36,7 +35,7 @@ export const AgentSlug = () => {
   const [rememberUser, setRememberUser] = useState(false);
   const [rememberAgent, setRememberAgent] = useState(false);
 
- useEffect(() => {
+  useEffect(() => {
     const handler = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -46,75 +45,81 @@ export const AgentSlug = () => {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-useEffect(() => {
-  const isAppleDevice = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-  if (isAppleDevice && !isStandalone) {
-    setIsIOS(true);
-    const hasSeenModal = sessionStorage.getItem('iosModalSeen');
-    if (!hasSeenModal) {
-      const timer = setTimeout(() => {
-        setShowIOSModal(true);
-        sessionStorage.setItem('iosModalSeen', 'true');
-      }, 5000); 
-      return () => clearTimeout(timer);
-    }
-  }
-}, []);
-
-
-useEffect(() => {
-  if (!slug) return;
-
-  // 1. Persist the slug so PWAController can pick it up on launch
-  localStorage.setItem('agentSlug', slug);
-
-  // 2. Ensure URL has the pwa parameter for tracking/context
-  const params = new URLSearchParams(window.location.search);
-  if (!params.get('pwa')) {
-    const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
-    window.history.replaceState({ path: newUrl }, '', newUrl);
-  }
-}, [slug]);
-
-// --- EFFECT 2: Data Fetching ---
-// Keep this separate to prevent interference with URL state
-useEffect(() => {
-  const fetchAgentProfile = async () => {
-    try {
-      setLoading(true);
-      setError(false);
-      
-      const response = await fetch(`/api/agents/${slug}`);
-      if (!response.ok) throw new Error("Agent not found");
-      
-      const data = await response.json();
-      setAgentData(data);
-    } catch (err) {
-      console.error("Fetch error:", err);
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (slug) fetchAgentProfile();
-}, [slug]);
-
-  // Load Remembered Credentials
   useEffect(() => {
-    const savedUserEmail = localStorage.getItem('rememberedUserEmail');
-    const savedAgentEmail = localStorage.getItem('rememberedAgentEmail');
+    const isAppleDevice = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (isAppleDevice && !isStandalone) {
+      setIsIOS(true);
+      const hasSeenModal = sessionStorage.getItem('iosModalSeen');
+      if (!hasSeenModal) {
+        const timer = setTimeout(() => {
+          setShowIOSModal(true);
+          sessionStorage.setItem('iosModalSeen', 'true');
+        }, 5000); 
+        return () => clearTimeout(timer);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!slug) return;
+
+    // 1. Persist the slug so PWAController can pick it up on launch
+    localStorage.setItem('agentSlug', slug);
+
+    // 2. Ensure URL has the pwa parameter for tracking/context
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('pwa')) {
+      const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
+      window.history.replaceState({ path: newUrl }, '', newUrl);
+    }
+  }, [slug]);
+
+  // --- Data Fetching ---
+  useEffect(() => {
+    const fetchAgentProfile = async () => {
+      try {
+        setLoading(true);
+        setError(false);
+        
+        const response = await fetch(`/api/agents/${slug}`);
+        if (!response.ok) throw new Error("Agent not found");
+        
+        const data = await response.json();
+        setAgentData(data);
+      } catch (err) {
+        console.error("Fetch error:", err);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (slug) fetchAgentProfile();
+  }, [slug]);
+
+  // Load Remembered Credentials Dynamic Context Fix
+  useEffect(() => {
+    if (!slug) return;
+    const savedUserEmail = localStorage.getItem(`rememberedUserEmail_${slug}`);
+    const savedAgentEmail = localStorage.getItem(`rememberedAgentEmail_${slug}`);
     
     if (savedUserEmail) {
       setUserEmail(savedUserEmail);
       setRememberUser(true);
+    } else {
+      setUserEmail('');
+      setRememberUser(false);
     }
+    
     if (savedAgentEmail) {
       setLoginEmail(savedAgentEmail);
       setRememberAgent(true);
+    } else {
+      setLoginEmail('');
+      setRememberAgent(false);
     }
-  }, []);
+  }, [slug]);
 
   const handleInstallApp = async () => {
     if (!deferredPrompt) return;
@@ -142,10 +147,18 @@ useEffect(() => {
       });
       const data = await response.json();
       if (response.ok) {
-        if (rememberUser) localStorage.setItem('rememberedUserEmail', userEmail);
-        else localStorage.removeItem('rememberedUserEmail');
-        localStorage.setItem('userToken', data.token);
-        localStorage.setItem('userEmail', userEmail);
+        // Handle custom dynamic identity flags
+        if (rememberUser) {
+          localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail);
+        } else {
+          localStorage.removeItem(`rememberedUserEmail_${slug}`);
+        }
+
+        // CRITICAL FIX: Explicitly scope keys by slug so agents do not overwrite each other
+        localStorage.setItem('active_session_slug', slug);
+        localStorage.setItem(`userToken_${slug}`, data.token);
+        localStorage.setItem(`userEmail_${slug}`, userEmail);
+        
         navigate('/user/dashboard');
       } else {
         alert(data.message || "Connection failed.");
@@ -156,36 +169,43 @@ useEffect(() => {
       setIsProcessing(false);
     }
   };
-const handleAgentLogin = async (e) => {
-  e.preventDefault();
-  setIsProcessing(true);
-  try {
-    const response = await fetch('/api/agents/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        email: loginEmail, 
-        password: loginPassword,
-        targetSlug: slug,
-        force: true // Added this flag
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (response.ok && data.token) {
-      localStorage.setItem('agentToken', data.token);
-      localStorage.setItem('agentSlug', data.slug);
-      window.location.href = '/agent/dashboard';
-    } else {
-      alert(data.message || "Invalid Agent Credentials");
+
+  const handleAgentLogin = async (e) => {
+    e.preventDefault();
+    setIsProcessing(true);
+    try {
+      const response = await fetch('/api/agents/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email: loginEmail, 
+          password: loginPassword,
+          targetSlug: slug,
+          force: true 
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.token) {
+        if (rememberAgent) {
+          localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail);
+        } else {
+          localStorage.removeItem(`rememberedAgentEmail_${slug}`);
+        }
+
+        localStorage.setItem('agentToken', data.token);
+        localStorage.setItem('agentSlug', data.slug);
+        window.location.href = '/agent/dashboard';
+      } else {
+        alert(data.message || "Invalid Agent Credentials");
+      }
+    } catch (err) {
+      alert("Portal connection error");
+    } finally {
+      setIsProcessing(false);
     }
-  } catch (err) {
-    alert("Portal connection error");
-  } finally {
-    setIsProcessing(false);
-  }
-};
+  };
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white">
@@ -205,30 +225,21 @@ const handleAgentLogin = async (e) => {
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-blue-950 font-sans selection:bg-blue-100 overflow-x-hidden">
       
-  <header className="py-3 px-4 md:py-4 md:px-12 flex justify-between items-center bg-white/70 backdrop-blur-xl fixed top-0 w-full z-40 border-b border-gray-100/50">
-  {/* Left Side: Increased Logo Size, Text Removed */}
-  <div 
-    className="flex items-center cursor-pointer group" 
-    onClick={() => navigate('/')}
-  >
-    <img 
-      src={ZingConnectLogo} 
-      alt="ZingConnect" 
-      className="h-8 md:h-12 w-auto transition-transform duration-300 group-hover:scale-105" 
-    />
-  </div>
+      <header className="py-3 px-4 md:py-4 md:px-12 flex justify-between items-center bg-white/70 backdrop-blur-xl fixed top-0 w-full z-40 border-b border-gray-100/50">
+        <div className="flex items-center cursor-pointer group" onClick={() => navigate('/')}>
+          <img src={ZingConnectLogo} alt="ZingConnect" className="h-8 md:h-12 w-auto transition-transform duration-300 group-hover:scale-105" />
+        </div>
 
-  {/* Right Side: Portal Access remains consistent */}
-  <button 
-    onClick={() => setIsLoginOpen(true)}
-    className="flex items-center gap-2 md:gap-3 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.2em] text-gray-500 hover:text-blue-600 transition-all group"
-  >
-    <span className="hidden sm:inline">Portal Access</span>
-    <div className="w-8 h-8 md:w-9 md:h-9 rounded-lg md:rounded-xl bg-gray-50 flex items-center justify-center border border-gray-100 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm">
-      <BsShieldLockFill size={12} className="md:size-[14px]" />
-    </div>
-  </button>
-</header>
+        <button 
+          onClick={() => setIsLoginOpen(true)}
+          className="flex items-center gap-2 md:gap-3 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.2em] text-gray-500 hover:text-blue-600 transition-all group"
+        >
+          <span className="hidden sm:inline">Portal Access</span>
+          <div className="w-8 h-8 md:w-9 md:h-9 rounded-lg md:rounded-xl bg-gray-50 flex items-center justify-center border border-gray-100 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm">
+            <BsShieldLockFill size={12} className="md:size-[14px]" />
+          </div>
+        </button>
+      </header>
 
       <main className={`transition-all duration-1000 pt-24 md:pt-40 pb-10 px-4 md:px-6 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 md:gap-16 items-start md:items-center ${isLoginOpen ? 'blur-2xl scale-[0.98] pointer-events-none' : ''}`}>
         
@@ -276,10 +287,9 @@ const handleAgentLogin = async (e) => {
                       <BsDownload size={10} /> Add ZingConnect to Home Screen
                     </button>
                   )}
-
-<p className="text-[8px] text-center text-gray-400 font-medium px-4 leading-relaxed">
-  By initializing, you agree to the <span className="text-blue-600 underline cursor-pointer">Security Terms</span>.
-</p>
+                  <p className="text-[8px] text-center text-gray-400 font-medium px-4 leading-relaxed">
+                    By initializing, you agree to the <span className="text-blue-600 underline cursor-pointer">Security Terms</span>.
+                  </p>
                 </div>
               </div>
             </form>
@@ -298,93 +308,83 @@ const handleAgentLogin = async (e) => {
             </h1>
           </div>
 
-         <div className="flex flex-col sm:flex-row items-center gap-6 md:gap-8">
-  <div className="relative">
-    <div className="w-24 h-24 md:w-44 md:h-44 rounded-[2rem] md:rounded-[3rem] bg-white border-[4px] md:border-[6px] border-white shadow-lg overflow-hidden flex items-center justify-center">
-      {agentData.photoUrl ? (
-        <img src={agentData.photoUrl} alt={fullName} className="w-full h-full object-cover" />
-      ) : (
-        <span className="text-2xl md:text-4xl font-black text-blue-100 uppercase">
-          {agentData?.firstName?.[0]}{agentData?.lastName?.[0]}
-        </span>
-      )}
-    </div>
-    <div className="absolute -bottom-1 -right-1 bg-blue-600 text-white p-1.5 rounded-full border-2 border-[#FDFDFD]">
-      <BsCheckCircleFill className="size-3 md:size-4" />
-    </div>
-  </div>
-  
-  <div className="space-y-2 md:space-y-3 max-w-sm text-center sm:text-left">
-  {/* UPDATED PROGRAM DISPLAY: NO BG, BOLDER TEXT */}
-  {agentData.program && (
-    <div className="mb-1">
-      <span className="text-[9px] md:text-[15px] font-black text-purple-950 uppercase tracking-[0.15em]">
-        {agentData.program}
-      </span>
-    </div>
-  )}
-    <h3 className="text-[9px] md:text-[11px] font-black text-blue-600 uppercase tracking-[0.2em]">
-      {agentData.occupation || "Certified Professional"}
-    </h3>
-    <p className="text-sm md:text-lg font-medium text-slate-500 italic">
-      "{agentData.bio || "Available for secure professional consultation."}"
-    </p>
-  </div>
-</div>
+          <div className="flex flex-col sm:flex-row items-center gap-6 md:gap-8">
+            <div className="relative">
+              <div className="w-24 h-24 md:w-44 md:h-44 rounded-[2rem] md:rounded-[3rem] bg-white border-[4px] md:border-[6px] border-white shadow-lg overflow-hidden flex items-center justify-center">
+                {agentData.photoUrl ? (
+                  <img src={agentData.photoUrl} alt={fullName} className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-2xl md:text-4xl font-black text-blue-100 uppercase">
+                    {agentData?.firstName?.[0]}{agentData?.lastName?.[0]}
+                  </span>
+                )}
+              </div>
+              <div className="absolute -bottom-1 -right-1 bg-blue-600 text-white p-1.5 rounded-full border-2 border-[#FDFDFD]">
+                <BsCheckCircleFill className="size-3 md:size-4" />
+              </div>
+            </div>
+            
+            <div className="space-y-2 md:space-y-3 max-w-sm text-center sm:text-left">
+              {agentData.program && (
+                <div className="mb-1">
+                  <span className="text-[9px] md:text-[15px] font-black text-purple-950 uppercase tracking-[0.15em]">
+                    {agentData.program}
+                  </span>
+                </div>
+              )}
+              <h3 className="text-[9px] md:text-[11px] font-black text-blue-600 uppercase tracking-[0.2em]">
+                {agentData.occupation || "Certified Professional"}
+              </h3>
+              <p className="text-sm md:text-lg font-medium text-slate-500 italic">
+                "{agentData.bio || "Available for secure professional consultation."}"
+              </p>
+            </div>
+          </div>
         </div>
       </main>
-<footer className="mt-20 py-12 px-6 border-t border-gray-100 bg-white">
-  <div className="max-w-7xl mx-auto">
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
-      
-    {/* Brand Section */}
-<div className="space-y-4">
-  <div className="flex items-center">
-    <img 
-      src={ZingConnectLogo} 
-      alt="ZingConnect" 
-      className="h-7 md:h-9 w-auto opacity-90 transition-opacity hover:opacity-100" 
-    />
-  </div>
-  <p className="text-[8px] md:text-[10px] text-gray-400 font-medium leading-relaxed max-w-xs">
-    Secure, bidirectional communication platform for verified agents and clients. 
-    Powered by end-to-end encryption protocols.
-  </p>
-</div>
 
-      {/* Program Affiliation Section */}
-      <div className="space-y-3">
-        <h4 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Official Program</h4>
-        <div className="inline-flex items-center px-2 py-1.5 bg-gray-50 border border-gray-100 rounded-lg">
-          <span className="text-[7px] md:text-[9px] font-bold text-blue-950 uppercase tracking-wide">
-            {agentData?.program || "Standard Verification Service"}
-          </span>
+      <footer className="mt-20 py-12 px-6 border-t border-gray-100 bg-white">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+            <div className="space-y-4">
+              <div className="flex items-center">
+                <img src={ZingConnectLogo} alt="ZingConnect" className="h-7 md:h-9 w-auto opacity-90 transition-opacity hover:opacity-100" />
+              </div>
+              <p className="text-[8px] md:text-[10px] text-gray-400 font-medium leading-relaxed max-w-xs">
+                Secure, bidirectional communication platform for verified agents and clients. Powered by end-to-end encryption protocols.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Official Program</h4>
+              <div className="inline-flex items-center px-2 py-1.5 bg-gray-50 border border-gray-100 rounded-lg">
+                <span className="text-[7px] md:text-[9px] font-bold text-blue-950 uppercase tracking-wide">
+                  {agentData?.program || "Standard Verification Service"}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3 md:text-right">
+              <h4 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Security & Privacy</h4>
+              <div className="flex flex-col md:items-end gap-1.5">
+                <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Privacy Policy</button>
+                <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Terms of Service</button>
+                <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Compliance Audit</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-10 pt-6 border-t border-gray-50 flex flex-col md:flex-row justify-between items-center gap-4">
+            <p className="text-[7px] md:text-[9px] font-bold text-gray-400 uppercase tracking-widest text-center md:text-left">
+              © 2026 ZingConnect Communications. All Rights Reserved.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              <span className="text-[7px] md:text-[9px] font-black text-gray-400 uppercase tracking-widest">System Status: Operational</span>
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* Utility Links */}
-      <div className="space-y-3 md:text-right">
-        <h4 className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Security & Privacy</h4>
-        <div className="flex flex-col md:items-end gap-1.5">
-          <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Privacy Policy</button>
-          <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Terms of Service</button>
-          <button className="text-[8px] md:text-[10px] font-bold text-gray-500 hover:text-blue-600 transition-colors uppercase tracking-widest">Compliance Audit</button>
-        </div>
-      </div>
-
-    </div>
-
-    <div className="mt-10 pt-6 border-t border-gray-50 flex flex-col md:flex-row justify-between items-center gap-4">
-      <p className="text-[7px] md:text-[9px] font-bold text-gray-400 uppercase tracking-widest text-center md:text-left">
-        © 2026 ZingConnect Communications. All Rights Reserved.
-      </p>
-      <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-        <span className="text-[7px] md:text-[9px] font-black text-gray-400 uppercase tracking-widest">System Status: Operational</span>
-      </div>
-    </div>
-  </div>
-</footer>
+      </footer>
 
       {isLoginOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-blue-950/20 backdrop-blur-2xl">
@@ -417,9 +417,7 @@ const handleAgentLogin = async (e) => {
 
               <div className="flex items-center gap-2 ml-2 mt-1">
                 <input 
-                  type="checkbox" 
-                  id="rememberAgent"
-                  checked={rememberAgent}
+                  type="checkbox" id="rememberAgent" checked={rememberAgent}
                   onChange={(e) => setRememberAgent(e.target.checked)}
                   className="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                 />
@@ -435,34 +433,25 @@ const handleAgentLogin = async (e) => {
               <div className="flex flex-col items-center pt-4">
                 {showInstallBtn && (
                   <button 
-                    type="button"
-                    onClick={handleInstallApp}
+                    type="button" onClick={handleInstallApp}
                     className="flex items-center gap-2 text-[9px] font-black text-blue-600 uppercase tracking-widest hover:opacity-70 transition-opacity mb-4"
                   >
                     <BsDownload size={10} /> Install Agent Portal App
                   </button>
                 )}
 
-               {/* iOS INSTALL BUTTON FOR AGENTS */}
-{isIOS && (
-  <div className="w-full mb-4">
-    <button 
-      type="button"
-      onClick={() => setShowIOSModal(true)}
-      className="w-full flex items-center justify-center gap-2 py-3 bg-blue-50 border border-blue-100 rounded-2xl hover:bg-blue-100 transition-colors group"
-    >
-      <BsDownload size={12} className="text-blue-600" />
-      <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">
-        Install ZingConnect Portal
-      </span>
-    </button>
-  </div>
-)}
-                <button 
-                  type="button" 
-                  onClick={() => setIsLoginOpen(false)} 
-                  className="w-full text-[9px] font-black text-gray-400 uppercase tracking-widest"
-                >
+                {isIOS && (
+                  <div className="w-full mb-4">
+                    <button 
+                      type="button" onClick={() => setShowIOSModal(true)}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-blue-50 border border-blue-100 rounded-2xl hover:bg-blue-100 transition-colors group"
+                    >
+                      <BsDownload size={12} className="text-blue-600" />
+                      <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Install ZingConnect Portal</span>
+                    </button>
+                  </div>
+                )}
+                <button type="button" onClick={() => setIsLoginOpen(false)} className="w-full text-[9px] font-black text-gray-400 uppercase tracking-widest">
                   Terminate Access
                 </button>
               </div>
@@ -470,8 +459,6 @@ const handleAgentLogin = async (e) => {
           </div>
         </div>
       )}
-    
     </div>
-
   );
 };
