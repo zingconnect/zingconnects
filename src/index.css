@@ -57,6 +57,43 @@ body {
   background-color: #94a3b8;
   border-radius: 20px;
 }
+.modern-phone-input-styles .phone-container {
+  width: 100% !important;
+  font-family: inherit;
+}
+
+.modern-phone-input-styles .phone-input-field {
+  width: 100% !important;
+  height: 44px !important;
+  background-color: rgba(248, 250, 252, 0.8) !important;
+  border: 1px solid rgba(241, 245, 249, 1) !important;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  padding-left: 48px !important;
+  transition: all 0.2s ease-in-out;
+}
+
+.modern-phone-input-styles .phone-input-field:focus {
+  background-color: #ffffff !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.05) !important;
+  outline: none !important;
+}
+
+.modern-phone-input-styles .phone-dropdown-button {
+  background-color: transparent !important;
+  border: none !important;
+  border-radius: 12px 0 0 12px !important;
+  padding-left: 6px !important;
+}
+
+.modern-phone-input-styles .phone-dropdown-button .selected-flag {
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 8px !important;
+}
 
 /* Helper Utilities */
 @media screen and (max-width: 768px) {

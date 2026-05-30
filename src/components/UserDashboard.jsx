@@ -1311,10 +1311,12 @@ const handleFileChange = (e) => {
   }
   e.target.value = ""; 
 };
-
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
-    if (!formData.phone || formData.phone.length < 10) {
+  
+  // 🛠️ FIX: Check the nested raw string property length instead of the parent object wrapper
+  const rawPhone = formData.phone?.raw || '';
+  if (!rawPhone || rawPhone.length < 10) {
     alert("Please enter a valid phone number with country code.");
     return;
   }
@@ -1322,18 +1324,27 @@ const handleProfileSubmit = async (e) => {
   setIsUploading(true); 
   const token = localStorage.getItem('userToken');
   const data = new FormData();
-    const fileToUpload = onboardingFile || previewFile;
+  
+  const fileToUpload = onboardingFile || previewFile;
   if (fileToUpload) {
     data.append('photo', fileToUpload);
   }
+
+  // 🛠️ FIX: Safely parse fields without stringifying the whole object blindly
   Object.keys(formData).forEach(key => {
     if (formData[key] !== undefined && formData[key] !== null) {
-      data.append(key, formData[key]);
+      if (key === 'phone') {
+        // Transform the nested object into a JSON string so FormData can carry it cleanly
+        data.append(key, JSON.stringify(formData[key]));
+      } else {
+        data.append(key, formData[key]);
+      }
     }
   });
 
   try {
-    const res = await fetch('/api/users/update-user-onboarding', {
+    // 💡 Double-check your endpoint route mapping names here to make sure they line up
+    const res = await fetch('/api/users/update-profile', {
       method: 'PUT',
       headers: { 
         'Authorization': `Bearer ${token}` 
@@ -1343,12 +1354,11 @@ const handleProfileSubmit = async (e) => {
 
     const result = await res.json();
 
-    if (res.ok) {
+    if (res.ok && result.success) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
       if (setUserData) setUserData(result.user);
       
-      // 3. Success Reset
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);
@@ -1793,97 +1803,186 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         </main>
       </aside>
 
+{/* --- ONBOARDING OVERLAY --- */}
+{showOnboarding && !userData?.isProfileComplete && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 overflow-y-auto bg-slate-900/40 backdrop-blur-md md:backdrop-blur-lg">
+    
+    {/* Modern Backdrop Flourish Elements for Premium UI Look */}
+    <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none hidden md:block" />
+    <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-indigo-500/10 blur-[120px] pointer-events-none hidden md:block" />
 
-    {/* --- ONBOARDING OVERLAY --- */}
-{showOnboarding && (
-  <div className="absolute inset-0 z-[100] bg-white flex flex-col items-center justify-center p-4 md:p-8 animate-in fade-in zoom-in duration-300">
-    <div className="w-full max-w-sm md:max-w-md space-y-4 md:space-y-6">
-      <div className="text-center space-y-1">
-        <h2 className="text-lg md:text-2xl font-black text-blue-900 uppercase leading-none">Initialize Profile</h2>
-        <p className="text-[9px] md:text-xs text-gray-400 font-bold uppercase tracking-[0.15em]">Secure verification required</p>
+    {/* Main Card Element */}
+    <div className="w-full max-w-md bg-white rounded-3xl p-6 md:p-8 border border-gray-100 shadow-2xl shadow-slate-900/10 relative transform animate-in fade-in zoom-in-95 duration-300 flex flex-col my-auto">
+      
+      {/* Decorative Top Accent Tag */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-b-full shadow-sm" />
+
+      {/* Typography Header Block */}
+      <div className="text-center space-y-1.5 mb-6 md:mb-8">
+        <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight leading-none uppercase">
+          Initialize Profile
+        </h2>
+        <div className="flex items-center justify-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-[0.15em]">
+            Secure Verification Required
+          </p>
+        </div>
       </div>
 
-      <form onSubmit={handleProfileSubmit} className="space-y-3 md:space-y-4">
-        {/* Profile Photo Section remains same */}
-        <div className="flex flex-col items-center mb-4">
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
-          <div onClick={handlePhotoClick} className="w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 relative cursor-pointer hover:border-blue-400 transition-colors overflow-hidden">
-            {previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <BsCameraFill size={20} />}
-            {!previewUrl && <span className="absolute -bottom-1 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded-full font-bold uppercase">Add Photo</span>}
+      <form onSubmit={handleProfileSubmit} className="space-y-4">
+        
+        {/* Dynamic Avatar Picker Slot */}
+        <div className="flex flex-col items-center mb-2">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept="image/*" 
+            className="hidden" 
+          />
+          <div 
+            onClick={handlePhotoClick} 
+            className="w-20 h-20 bg-slate-50 rounded-full border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 relative cursor-pointer hover:border-blue-500 hover:bg-blue-50/20 transition-all duration-200 group overflow-hidden shadow-inner"
+          >
+            {previewUrl ? (
+              <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+            ) : (
+              <BsCameraFill size={22} className="group-hover:text-blue-500 group-hover:scale-110 transition-transform" />
+            )}
+            {!previewUrl && (
+              <span className="absolute bottom-1 bg-slate-900 text-white text-[7px] px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider scale-90 group-hover:bg-blue-600 transition-colors">
+                Add Photo
+              </span>
+            )}
           </div>
         </div>
 
-        {/* First & Last Name */}
-        <div className="grid grid-cols-2 gap-2 md:gap-4">
+        {/* First & Last Name Grid */}
+        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">First Name</label>
-            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="First" onChange={e => setFormData({...formData, firstName: e.target.value})} />
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">First Name</label>
+            <input 
+              required 
+              type="text"
+              placeholder="John" 
+              value={formData.firstName || ''}
+              className="w-full bg-slate-50/80 border border-slate-100 p-3 h-11 rounded-xl text-xs md:text-sm font-semibold text-slate-800 placeholder:text-slate-300 outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all" 
+              onChange={e => setFormData(prev => ({ ...prev, firstName: e.target.value }))} 
+            />
           </div>
           <div className="space-y-1">
-            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Last Name</label>
-            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="Last" onChange={e => setFormData({...formData, lastName: e.target.value})} />
-          </div>
-        </div>
-
-{/* --- NEW: PHONE NUMBER FIELD --- */}
-<div className="space-y-1">
-  <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">
-    Phone Number
-  </label>
-  <PhoneInput
-    country={'us'}
-    // Pass the raw string to the component so it initializes and displays correctly
-    value={formData.phone?.raw || ''} 
-    onChange={(value, countryData, event, formattedValue) => {
-      setFormData({ 
-        ...formData, 
-        phone: {
-          raw: value,                            // "13232323232"
-          formatted: formattedValue,              // "+1 (323) 232-3232"
-          countryCode: countryData.countryCode,  // "us"
-          dialCode: countryData.dialCode         // "1"
-        }
-      });
-    }}
-    containerClass="phone-container"
-    inputClass="phone-input-field"
-    buttonClass="phone-dropdown-button"
-    placeholder="Enter phone number"
-    enableSearch={true} 
-  />
-</div>
-
-        {/* Date of Birth & Gender */}
-        <div className="grid grid-cols-2 gap-2 md:gap-4">
-          <div className="space-y-1">
-            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Date of Birth</label>
-            <input required type="date" className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" onChange={e => setFormData({...formData, dob: e.target.value})} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">Gender</label>
-            <select required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none appearance-none" onChange={e => setFormData({...formData, gender: e.target.value})} value={formData.gender}>
-              <option value="" disabled>Select</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="other">Other</option>
-            </select>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Last Name</label>
+            <input 
+              required 
+              type="text"
+              placeholder="Doe" 
+              value={formData.lastName || ''}
+              className="w-full bg-slate-50/80 border border-slate-100 p-3 h-11 rounded-xl text-xs md:text-sm font-semibold text-slate-800 placeholder:text-slate-300 outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all" 
+              onChange={e => setFormData(prev => ({ ...prev, lastName: e.target.value }))} 
+            />
           </div>
         </div>
 
-        {/* City & State */}
-        <div className="grid grid-cols-2 gap-2 md:gap-4">
-          <div className="space-y-1">
-            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">City</label>
-            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="City" onChange={e => setFormData({...formData, city: e.target.value})} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-bold text-gray-400 uppercase ml-1">State</label>
-            <input required className="w-full bg-gray-50 border border-gray-100 p-3 md:p-4 rounded-xl text-xs md:text-sm outline-none" placeholder="State" onChange={e => setFormData({...formData, state: e.target.value})} />
+        {/* Phone Number Wrapper */}
+        <div className="space-y-1">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">
+            Phone Number
+          </label>
+          <div className="modern-phone-input-styles">
+            <PhoneInput
+              country={'us'}
+              value={formData.phone?.raw || ''} 
+              onChange={(value, countryData, event, formattedValue) => {
+                setFormData(prev => ({ 
+                  ...prev, 
+                  phone: {
+                    raw: value,
+                    formatted: formattedValue,
+                    countryCode: countryData.countryCode || 'us',
+                    dialCode: countryData.dialCode || '1'
+                  }
+                }));
+              }}
+              containerClass="phone-container"
+              inputClass="phone-input-field"
+              buttonClass="phone-dropdown-button"
+              placeholder="Enter phone number"
+              enableSearch={true} 
+            />
           </div>
         </div>
 
-        <button type="submit" className="w-full bg-blue-600 text-white p-3 md:p-4 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-100 mt-2">
-          Launch Dashboard
+        {/* Date of Birth & Gender Selection */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Date of Birth</label>
+            <input 
+              required 
+              type="date" 
+              value={formData.dob || ''}
+              className="w-full bg-slate-50/80 border border-slate-100 px-3 h-11 rounded-xl text-xs md:text-sm font-semibold text-slate-800 outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all" 
+              onChange={e => setFormData(prev => ({ ...prev, dob: e.target.value }))} 
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Gender</label>
+            <div className="relative">
+              <select 
+                required 
+                className="w-full bg-slate-50/80 border border-slate-100 px-3 h-11 rounded-xl text-xs md:text-sm font-semibold text-slate-800 outline-none appearance-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all" 
+                onChange={e => setFormData(prev => ({ ...prev, gender: e.target.value }))} 
+                value={formData.gender || ''}
+              >
+                <option value="" disabled>Select</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+              <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400 text-xxs">
+                ▼
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* City & State Grid */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">City</label>
+            <input 
+              required 
+              type="text"
+              placeholder="Los Angeles" 
+              value={formData.city || ''}
+              className="w-full bg-slate-50/80 border border-slate-100 p-3 h-11 rounded-xl text-xs md:text-sm font-semibold text-slate-800 placeholder:text-slate-300 outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all" 
+              onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))} 
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">State</label>
+            <input 
+              required 
+              type="text"
+              placeholder="California" 
+              value={formData.state || ''}
+              className="w-full bg-slate-50/80 border border-slate-100 p-3 h-11 rounded-xl text-xs md:text-sm font-semibold text-slate-800 placeholder:text-slate-300 outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 transition-all" 
+              onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))} 
+            />
+          </div>
+        </div>
+
+        {/* Premium Launch Action Button */}
+        <button 
+          type="submit" 
+          disabled={isUploading}
+          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white h-12 rounded-xl font-black text-[11px] md:text-xs uppercase tracking-widest hover:from-blue-700 hover:to-indigo-700 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition-all shadow-lg shadow-blue-500/20 mt-4 flex items-center justify-center gap-2"
+        >
+          {isUploading ? (
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : (
+            "Launch Dashboard"
+          )}
         </button>
       </form>
     </div>
