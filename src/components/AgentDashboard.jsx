@@ -2294,7 +2294,6 @@ return (
         </span>
       </div>
       
-      {/* Show Email when Online, Last Seen when Offline */}
       {selectedUser.status === 'online' || selectedUser.isOnline ? (
         <p className="text-[11px] font-medium text-gray-500 lowercase leading-tight">
           {selectedUser.email}
