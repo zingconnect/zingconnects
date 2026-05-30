@@ -58,54 +58,51 @@ export const AgentSlug = () => {
       return () => clearTimeout(timer);
     }
   }, []);
+
 useEffect(() => {
-  // 1. Guard clause: Don't execute if slug is missing
-  if (!slug) return;
-
-  // 2. Handle URL PWA state
-  localStorage.setItem('agentSlug', slug);
-  const params = new URLSearchParams(window.location.search);
-  
-  if (!params.has('pwa')) {
-    const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
-    window.history.replaceState({ path: newUrl }, '', newUrl);
-  }
-
-  // 3. Define the fetcher inside to ensure it uses fresh variables
-  let isCancelled = false; // Prevents race conditions
-
-  const fetchAgentProfile = async () => {
-    try {
-      setLoading(true);
-      setError(false);
-      
-      const response = await fetch(`/api/agents/${slug}`);
-      
-      if (!response.ok) {
-        throw new Error("Failed to fetch agent profile");
-      }
-      
-      const data = await response.json();
-      
-      // Only update state if component is still mounted
-      if (!isCancelled) {
-        setAgentData(data);
-      }
-    } catch (err) {
-      console.error("System connection error:", err);
-      if (!isCancelled) setError(true);
-    } finally {
-      if (!isCancelled) setLoading(false);
+  if (slug) {
+    localStorage.setItem('agentSlug', slug); 
+    
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('pwa')) {
+       console.log("Launched from Home Screen for:", params.get('pwa'));
     }
-  };
+
+    if (!window.location.search.includes('pwa=')) {
+      const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
+      window.history.replaceState({ path: newUrl }, '', newUrl);
+    }
+  }
+  
+ const fetchAgentProfile = async () => {
+  try {
+    setLoading(true);
+    setError(false); // Reset error state before fetching
+    
+    const response = await fetch(`/api/agents/${slug}`);
+    
+    // Check for 404 or other non-ok responses
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.warn("Fetch failed:", errorData.message);
+      setError(true);
+      return;
+    }
+    
+    const data = await response.json();
+    setAgentData(data);
+  } catch (err) {
+    console.error("System connection error:", err);
+    setError(true);
+  } finally {
+    setLoading(false);
+  }
+};
 
   fetchAgentProfile();
-
-  // 4. Cleanup function to cancel the request if slug changes or component unmounts
-  return () => {
-    isCancelled = true;
-  };
 }, [slug]);
+
+  
 
   // Load Remembered Credentials
   useEffect(() => {
@@ -166,15 +163,13 @@ const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);
   try {
-    // Ensure this path is correct for your backend. 
-    // If your backend is hosted separately, you need the full URL.
     const response = await fetch('/api/agents/login', {
-      method: 'POST', // CRITICAL: This was likely defaulting to GET
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         email: loginEmail, 
         password: loginPassword,
-        force: true 
+        force: true // Added this flag
       })
     });
     
@@ -183,15 +178,11 @@ const handleAgentLogin = async (e) => {
     if (response.ok && data.token) {
       localStorage.setItem('agentToken', data.token);
       localStorage.setItem('agentSlug', data.slug);
-      
-      // Use template literals to include the slug in the URL
-      window.location.href = `/agent/${data.slug}/dashboard`; 
+      window.location.href = '/agent/dashboard';
     } else {
-      // Use the message from the server if available
       alert(data.message || "Invalid Agent Credentials");
     }
   } catch (err) {
-    console.error("Login Error:", err);
     alert("Portal connection error");
   } finally {
     setIsProcessing(false);
