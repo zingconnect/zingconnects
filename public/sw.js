@@ -1,35 +1,26 @@
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. NAVIGATION: Always Network-First to trigger our Index.html redirect script
+  // 1. FORCE NETWORK FOR NAVIGATION (Ensures correct routing on iOS PWA)
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
-        .catch(() => caches.match('/'))
+      fetch(event.request).catch(() => caches.match(event.request))
     );
     return;
   }
 
-  // 2. AUDIO: Bypass cache (Handle via network)
+  // 2. BYPASS SERVICE WORKER FOR AUDIO
   if (
     event.request.destination === 'audio' || 
     url.pathname.endsWith('.mp3') || 
     url.pathname.endsWith('.wav') ||
     event.request.headers.get('range')
   ) {
-    return; // Pass through to network
+    return; // Let browser handle via network
   }
-
-  // 3. STATIC ASSETS: Stale-While-Revalidate (Performance boost)
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        // Optional: Open cache and update it here if needed
-        return networkResponse;
-      });
-      return cachedResponse || fetchPromise;
-    })
-  );
+  
+  // 3. (Optional) Add your Cache-First strategy here for other assets
+  // event.respondWith(caches.match(event.request).then(response => response || fetch(event.request)));
 });
 // 2. LIFECYCLE HANDLERS (Ensures quick updates)
 self.addEventListener('install', (event) => {
