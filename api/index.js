@@ -1609,6 +1609,9 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
 const userData = await mongoose.model('User').findById(otherUserId)
   .select('firstName lastName email gender status isOnline lastActive photoUrl city state phoneNumber') // 👈 Changed lastSeen to lastActive
   .lean();
+if (userData) {
+  userData.gender = userData.gender || ""; // Fallback consistency
+}
 
     // Mapping presigned assets remains fast because it's capped at the limit size
     const signedMessages = await Promise.all(messages.map(async (m) => {

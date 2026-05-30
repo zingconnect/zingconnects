@@ -1567,7 +1567,8 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
-  const handleSelectUser = async (user) => {
+  
+ const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
   // 1. Set the initial user immediately (contains full data from sidebar)
@@ -1593,14 +1594,25 @@ const handleFinalSend = async () => {
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
         
-        // ✨ THE FIX: Merge incoming data with existing state
+        // ✨ THE FIX: Safely merge incoming data with existing state without blanking out fields
         if (data.user || data.clientDetails) {
           const freshData = data.user || data.clientDetails;
           
-          setSelectedUser(prev => ({
-            ...prev,        // Retains everything currently in state (like gender)
-            ...freshData    // Only overwrites with fields present in the API response
-          }));
+          setSelectedUser(prev => {
+            if (!prev) return freshData;
+
+            const updatedUser = { ...prev };
+
+            // Only overwrite if incoming value is valid and populated
+            Object.keys(freshData).forEach(key => {
+              const incomingValue = freshData[key];
+              if (incomingValue !== undefined && incomingValue !== null && incomingValue !== "") {
+                updatedUser[key] = incomingValue;
+              }
+            });
+
+            return updatedUser;
+          });
         }
       }
       
@@ -1614,7 +1626,7 @@ const handleFinalSend = async () => {
     console.error("Failed to load chat history:", err);
   }
 };
-// Add this inside the AgentDashboard component
+
 useEffect(() => {
   const params = new URLSearchParams(window.location.search);
   const userIdFromUrl = params.get('userId');
