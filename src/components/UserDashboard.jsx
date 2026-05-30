@@ -2298,29 +2298,32 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   </div>
 </footer>
       </div>
-
-    {/* --- 3. SECURITY ONBOARDING --- */}
-  {!hasInteracted && (
-    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
-      <button 
-      type="button" // Important for mobile browsers
+{/* --- 3. SECURITY ONBOARDING --- */}
+{!hasInteracted && (
+  <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 touch-none">
+    <button 
+      type="button" 
       onClick={unlockAudio} 
-      className="bg-white p-8 rounded-3xl shadow-2xl text-center space-y-4 max-w-xs border border-blue-100 active:scale-95 transition-transform"
-      style={{ pointerEvents: 'auto' }} // Explicitly ensure it's clickable
+      className="bg-white p-5 md:p-8 rounded-[2rem] shadow-2xl text-center space-y-3 max-w-[280px] md:max-w-xs border border-blue-100 cursor-pointer select-none active:bg-slate-50 transition-colors w-full focus:outline-none"
+      style={{ pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
     >
-        <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
-          <BsShieldLockFill className="text-blue-600" size={28} />
-        </div>
-        <h2 className="text-xl font-black text-blue-950">Security Sync</h2>
-        <p className="text-gray-500 text-sm font-semibold leading-relaxed">
+      <div className="bg-blue-50 w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center mx-auto shrink-0">
+        <BsShieldLockFill className="text-blue-600 w-5 h-5 md:w-7 md:h-7" />
+      </div>
+      
+      <div className="space-y-1">
+        <h2 className="text-lg md:text-xl font-black text-blue-950 tracking-tight">Security Sync</h2>
+        <p className="text-gray-500 text-[11px] md:text-sm font-semibold leading-snug md:leading-relaxed px-1">
           Tap to authenticate your session and enable secure message alerts.
         </p>
-        <div className="bg-blue-600 text-white py-3 px-8 rounded-xl font-bold text-sm tracking-wide shadow-lg">
-          SYNC & ENTER
-        </div>
-      </button>
-    </div>
-  )}
+      </div>
+
+      <div className="bg-blue-600 text-white py-2.5 md:py-3 px-6 md:px-8 rounded-xl font-black text-[11px] md:text-sm tracking-widest uppercase shadow-md shadow-blue-600/20 pointer-events-none mt-2">
+        SYNC & ENTER
+      </div>
+    </button>
+  </div>
+)}
 
     {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
 {fullscreenImage && (
