@@ -45,16 +45,21 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// --- 3. AUDIO PRIMING ---
-window.notificationSound = new Audio('/sound/notification.mp3');
-const primeAudio = () => {
-  window.notificationSound.play().then(() => {
-    window.notificationSound.pause();
-    window.notificationSound.currentTime = 0;
-  }).catch(() => {});
-  document.removeEventListener('click', primeAudio);
+const setupAudio = () => {
+  const sound = new Audio('/sound/notification.mp3');
+  window.notificationSound = sound;
+  
+  const primeAudio = () => {
+    sound.play().then(() => {
+      sound.pause();
+      sound.currentTime = 0;
+    }).catch(() => {});
+    document.removeEventListener('click', primeAudio);
+  };
+  document.addEventListener('click', primeAudio, { once: true, capture: true });
 };
-document.addEventListener('click', primeAudio, { once: true, capture: true });
+
+setupAudio();
 
 // --- 4. RENDER SYSTEM ---
 ReactDOM.createRoot(document.getElementById('root')).render(

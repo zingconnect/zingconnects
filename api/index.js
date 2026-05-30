@@ -1782,8 +1782,10 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
           title: `New ${detectedType} from ${sender.firstName || 'Zing'}`,
           body: text || (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
           data: {
-            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}`
-          }
+           url: isAgent 
+          ? `/agent/${slug}/user/dashboard` 
+          : `/agent/${slug}/dashboard?userId=${req.user.id}` 
+      }
         });
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
@@ -1944,8 +1946,10 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
           title: `New ${fileType} from ${sender.firstName || 'Zing'}`,
           body: text || `Sent an attachment`,
           data: { 
-            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}` 
-          }
+          url: isAgent 
+          ? `/agent/${slug}/user/dashboard` 
+          : `/agent/${slug}/dashboard?userId=${req.user.id}` 
+      }
         });
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
