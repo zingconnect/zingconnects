@@ -61,50 +61,45 @@ useEffect(() => {
     }
   }
 }, []);
+
+
 useEffect(() => {
-  if (slug) {
-    localStorage.setItem('agentSlug', slug); 
-    
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('pwa')) {
-       console.log("Launched from Home Screen for:", params.get('pwa'));
-    }
+  if (!slug) return;
 
-    if (!window.location.search.includes('pwa=')) {
-      const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
-      window.history.replaceState({ path: newUrl }, '', newUrl);
-    }
-  }
-  
- const fetchAgentProfile = async () => {
-  try {
-    setLoading(true);
-    setError(false); // Reset error state before fetching
-    
-    const response = await fetch(`/api/agents/${slug}`);
-    
-    // Check for 404 or other non-ok responses
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.warn("Fetch failed:", errorData.message);
-      setError(true);
-      return;
-    }
-    
-    const data = await response.json();
-    setAgentData(data);
-  } catch (err) {
-    console.error("System connection error:", err);
-    setError(true);
-  } finally {
-    setLoading(false);
-  }
-};
+  // 1. Persist the slug so PWAController can pick it up on launch
+  localStorage.setItem('agentSlug', slug);
 
-  fetchAgentProfile();
+  // 2. Ensure URL has the pwa parameter for tracking/context
+  const params = new URLSearchParams(window.location.search);
+  if (!params.get('pwa')) {
+    const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
+    window.history.replaceState({ path: newUrl }, '', newUrl);
+  }
 }, [slug]);
 
-  
+// --- EFFECT 2: Data Fetching ---
+// Keep this separate to prevent interference with URL state
+useEffect(() => {
+  const fetchAgentProfile = async () => {
+    try {
+      setLoading(true);
+      setError(false);
+      
+      const response = await fetch(`/api/agents/${slug}`);
+      if (!response.ok) throw new Error("Agent not found");
+      
+      const data = await response.json();
+      setAgentData(data);
+    } catch (err) {
+      console.error("Fetch error:", err);
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (slug) fetchAgentProfile();
+}, [slug]);
 
   // Load Remembered Credentials
   useEffect(() => {

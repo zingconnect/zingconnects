@@ -36,28 +36,28 @@ const PWAController = ({ children }) => {
     const isStandalone = !!window.navigator.standalone || 
                          window.matchMedia('(display-mode: standalone)').matches;
 
-    // Only perform logic if in PWA mode
-    if (isStandalone) {
-      const storageSlug = localStorage.getItem('agentSlug');
-      
-      // If we are at root and have a slug, push them to it
-      if ((location.pathname === '/' || location.pathname === '/pricing') && storageSlug) {
-        navigate(`/${storageSlug}`, { replace: true });
-        return; // Don't set ready to true yet, wait for navigation
-      }
+    // 1. If not standalone, we are ready immediately
+    if (!isStandalone) {
+      setIsReady(true);
+      return;
     }
-    
-    // Otherwise, let the app load normally
-    setIsReady(true);
-  }, [navigate, location.pathname]);
 
-  // Prevent flash of content if we are redirecting
-  if (!isReady && (location.pathname === '/' || location.pathname === '/pricing')) {
+    const storageSlug = localStorage.getItem('agentSlug');
+        const shouldRedirect = (location.pathname === '/' || location.pathname === '/pricing') && storageSlug;
+
+    if (shouldRedirect) {
+      navigate(`/${storageSlug}`, { replace: true });
+    } else {
+      setIsReady(true);
+    }
+  }, [navigate, location.pathname]);
+  if (!isReady) {
     return <div className="min-h-screen bg-white" />; 
   }
 
   return children;
 };
+
 const ThemeInitializer = () => {
   React.useLayoutEffect(() => {
     const applyTheme = () => {
