@@ -149,7 +149,7 @@ useEffect(() => {
         else localStorage.removeItem('rememberedUserEmail');
         localStorage.setItem('userToken', data.token);
         localStorage.setItem('userEmail', userEmail);
-navigate(`/agent/${slug}/user/dashboard`);
+        navigate('/user/dashboard');
       } else {
         alert(data.message || "Connection failed.");
       }
@@ -186,7 +186,7 @@ const handleAgentLogin = async (e) => {
       // 3. Store new credentials
       localStorage.setItem('agentToken', data.token);
       localStorage.setItem('agentSlug', data.slug);
-window.location.href = `/agent/${data.slug}/dashboard`;
+      window.location.href = '/agent/dashboard';
 
     } else if (response.status === 403) {
       // 5. Explicit check for Dual Login if the API blocks the login attempt
