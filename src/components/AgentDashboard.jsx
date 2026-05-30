@@ -94,33 +94,32 @@ export const AgentDashboard = () => {
   const [caption, setCaption] = useState("");          
 
   let isFetching = false;
-  const plans = [
-    {
-      tier: 'BASIC',
-      term: '1 Month',
-      price: '10,500', 
-      frequency: '/mo',
-      popular: false,
-      features: ['Instant Link', 'Unlimited Chats', '24/7 Support'],
-    },
-    {
-      tier: 'GROWTH',
-      term: '6 Months',
-      price: '55,500', 
-      frequency: '',
-      popular: true,
-      features: ['All Basic', 'Priority Routing', '24/7 Support'],
-    },
-    {
-      tier: 'PROFESSIONAL',
-      term: '1 Year',
-      price: '120,000', 
-      frequency: '',
-      popular: false,
-      features: ['All Growth', 'Voice Changer', 'Analytics'],
-    },
-  ];
-
+const plans = [
+  {
+    tier: 'BASIC',
+    term: '1 Month',
+    price: '8,500', 
+    frequency: '/mo',
+    popular: false,
+    features: ['Instant Link', 'Unlimited Chats', '24/7 Support'],
+  },
+  {
+    tier: 'GROWTH',
+    term: '6 Months',
+    price: '43,500', 
+    frequency: '/6 mos',
+    popular: true,
+    features: ['All Basic', 'Priority Routing', 'Enhanced Support'],
+  },
+  {
+    tier: 'PROFESSIONAL',
+    term: '1 Year',
+    price: '88,500', 
+    frequency: '/yr',
+    popular: false,
+    features: ['All Growth', 'Deep Analytics', 'Dedicated Priority Support'],
+  },
+];
   const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':

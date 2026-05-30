@@ -14,7 +14,7 @@ const plans = [
   {
     tier: 'BASIC',
     term: '1 Month',
-    price: '10,500', 
+    price: '8,500', 
     frequency: '/mo',
     popular: false,
     features: [
@@ -26,7 +26,7 @@ const plans = [
   {
     tier: 'GROWTH',
     term: '6 Months',
-    price: '55,500', 
+    price: '43,500', 
     frequency: '/6 mos', // Clears up that this is a lump sum for the duration
     popular: true,
     features: [
@@ -38,7 +38,7 @@ const plans = [
   {
     tier: 'PROFESSIONAL',
     term: '1 Year',
-    price: '120,000', 
+    price: '88,500', 
     frequency: '/yr',
     popular: false,
     features: [
