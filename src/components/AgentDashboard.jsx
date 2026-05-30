@@ -2314,9 +2314,6 @@ return (
   </div>
 
   <div className="flex items-center gap-6 text-gray-500 mr-2">
-    <button onClick={() => handleStartCall(selectedUser._id)} className="hover:text-green-600 transition-colors active:scale-90 p-2" title="Start Secure Call">
-      <BsTelephoneFill size={18} /> 
-    </button>
     <button onClick={() => navigate('/agent/call-settings')} className="hover:text-blue-600 transition-colors active:scale-90 p-2" title="Call Settings"> 
       <BsGearFill size={20} />
     </button>
