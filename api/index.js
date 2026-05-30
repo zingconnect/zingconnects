@@ -1482,6 +1482,9 @@ app.post('/api/subscriptions/verify', async (req, res) => {
   }
 });
 
+// =========================================================================
+// AGENT USERS MANAGEMENT ENDPOINT (FETCHES HYDRATED PORTFOLIO ASSIGNMENTS)
+// =========================================================================
 app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -1497,51 +1500,52 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 
     const ActiveUserModel = mongoose.models.User || User;
     
+    // 🛠️ FIX: Added 'gender' explicitly into the document selection fields string
     const users = await ActiveUserModel.find({ connectedAgents: agentId })
-      .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
+      .select('firstName lastName email phone photoUrl gender city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
       .lean();
-const unreadCountsData = await Message.aggregate([
-  { 
-    $match: { 
-      receiverId: new mongoose.Types.ObjectId(String(agentId)),
-      receiverModel: 'Agent', 
-      status: { $in: ['sent', 'delivered'] }
-    } 
-  },
-  { 
-    $group: { 
-      // Ensure we are grouping by the string representation of the senderId
-      _id: { $toString: "$senderId" }, 
-      count: { $sum: 1 } 
-    } 
-  }
-]);
-console.log("SERVER-SIDE AGGREGATION RESULT:", JSON.stringify(unreadCountsData, null, 2));
-// Convert the array to an easy lookup map
-const unreadMap = unreadCountsData.reduce((acc, item) => {
-  acc[item._id] = item.count;
-  return acc;
-}, {});
-    // 3. Process users and attach unreadCount
+
+    const unreadCountsData = await Message.aggregate([
+      { 
+        $match: { 
+          receiverId: new mongoose.Types.ObjectId(String(agentId)),
+          receiverModel: 'Agent', 
+          status: { $in: ['sent', 'delivered'] }
+        } 
+      },
+      { 
+        $group: { 
+          _id: { $toString: "$senderId" }, 
+          count: { $sum: 1 } 
+        } 
+      }
+    ]);
+
+    const unreadMap = unreadCountsData.reduce((acc, item) => {
+      acc[item._id] = item.count;
+      return acc;
+    }, {});
+
+    // Process users and securely map cloud storage identifiers
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // ... [Keep your existing photo logic here] ...
       if (user.photoUrl && typeof user.photoUrl === 'string') {
-        try {
-          let fileKey = user.photoUrl;
-          if (fileKey.includes('.com/')) fileKey = fileKey.split('.com/')[1].split('?')[0];
-          let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
-          
-          const client = getS3Client(); 
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: cleanKey, 
-          });
-          finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
-        } catch (s3Err) {
-          console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
+        // 🛠️ FIX: Guard added to bypass signing strings that are raw Base64 data lines or absolute hyper-links
+        if (user.photoUrl.startsWith('data:') || user.photoUrl.startsWith('http')) {
+          finalPhotoUrl = user.photoUrl;
+        } else {
+          try {
+            let fileKey = user.photoUrl;
+            if (fileKey.includes('.com/')) fileKey = fileKey.split('.com/')[1].split('?')[0];
+            let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
+            
+            finalPhotoUrl = await getPrivateUrl(cleanKey);
+          } catch (s3Err) {
+            console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
+            finalPhotoUrl = user.photoUrl;
+          }
         }
       }
 

@@ -2487,65 +2487,79 @@ return (
           </div>
         )}
 
-        {/* --- USER DETAILS MODAL --- */}
-        {showUserModal && selectedUser && (
-          <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
-            <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
-              <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
-              <div className="px-6 pb-8 flex flex-col items-center">
-                <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-gray-100">
-                  <img 
-                    src={selectedUser.photoUrl} 
-                    className="w-full h-full object-cover" 
-                    alt="Profile" 
-                    onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
-                  />
-                </div>
-                <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
-                <p className="text-[10px] font-bold text-blue-600 uppercase mb-6">Verified Client</p>
-                
-                <div className="w-full space-y-2.5">
-                  {/* Email */}
-                  <div className="bg-slate-50 p-3 rounded-2xl">
-                    <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Email Address</p>
-                    <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
-                  </div>
-
-                  {/* Phone */}
-                  <div className="bg-slate-50 p-3 rounded-2xl">
-                    <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Phone Number</p>
-                    <p className="text-[11px] font-bold text-slate-700">
-                      {selectedUser.phoneNumber || selectedUser.phone || 'No Phone Registered'}
-                    </p>
-                  </div>
-
-                  {/* Location Details */}
-                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                    <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Location Details</p>
-                    <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
-                      {selectedUser.address && <span>{selectedUser.address}<br /></span>}
-                      <span className="text-blue-600">
-                        {selectedUser.city || ''}
-                        {selectedUser.city && selectedUser.state ? ', ' : ''}
-                        {selectedUser.state || ''}
-                      </span>
-                      {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
-                    </p>
-                  </div>
-                </div>
-                
-                <button 
-                  onClick={() => setShowUserModal(false)}
-                  className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
-                >
-                  Close Profile
-                </button>
-              </div>
-            </div>
+      {/* --- USER DETAILS MODAL --- */}
+{showUserModal && selectedUser && (
+  <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowUserModal(false)} />
+    <div className="relative w-full max-w-[340px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
+      <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700 w-full" />
+      <div className="px-6 pb-8 flex flex-col items-center">
+        <div className="relative -mt-12 mb-4 w-24 h-24 rounded-[2rem] overflow-hidden bg-gray-100">
+          <img 
+            src={selectedUser.photoUrl} 
+            className="w-full h-full object-cover" 
+            alt="Profile" 
+            onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
+          />
+        </div>
+        <h3 className="text-base font-black text-slate-800">{selectedUser.firstName} {selectedUser.lastName}</h3>
+        <p className="text-[10px] font-bold text-blue-600 uppercase mb-6">Verified Client</p>
+        
+        <div className="w-full space-y-2.5">
+          {/* Email */}
+          <div className="bg-slate-50 p-3 rounded-2xl">
+            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Email Address</p>
+            <p className="text-[11px] font-bold text-slate-700 break-all">{selectedUser.email}</p>
           </div>
-        )}
 
+          {/* Phone - 🛠️ CRITICAL FIX: Safe object parsing validation checks prevent error #31 crashes */}
+          <div className="bg-slate-50 p-3 rounded-2xl">
+            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Phone Number</p>
+            <p className="text-[11px] font-bold text-slate-700">
+              {(() => {
+                const p = selectedUser.phone || selectedUser.phoneNumber;
+                if (!p) return 'No Phone Registered';
+                if (typeof p === 'object') {
+                  return p.formatted || p.raw || 'No Phone Registered';
+                }
+                return String(p);
+              })()}
+            </p>
+          </div>
+
+          {/* Gender - 🛠️ NEW: Added explicit tracking element view container */}
+          <div className="bg-slate-50 p-3 rounded-2xl">
+            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Gender Identification</p>
+            <p className="text-[11px] font-bold text-slate-700 capitalize">
+              {selectedUser.gender || 'Not Specified'}
+            </p>
+          </div>
+
+          {/* Location Details */}
+          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+            <p className="text-[8px] font-black uppercase text-slate-400 mb-1">Location Details</p>
+            <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
+              {selectedUser.address && <span>{selectedUser.address}<br /></span>}
+              <span className="text-blue-600">
+                {selectedUser.city || ''}
+                {selectedUser.city && selectedUser.state ? ', ' : ''}
+                {selectedUser.state || ''}
+              </span>
+              {!selectedUser.address && !selectedUser.city && !selectedUser.state && 'Information Not Provided'}
+            </p>
+          </div>
+        </div>
+        
+        <button 
+          onClick={() => setShowUserModal(false)}
+          className="mt-6 w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-colors"
+        >
+          Close Profile
+        </button>
+      </div>
+    </div>
+  </div>
+)}
         {previewUrl && (
           <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col">
             <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white">
