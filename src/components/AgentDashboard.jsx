@@ -14,14 +14,18 @@ import {
   BsCameraFill  
 } from 'react-icons/bs';
 
-// Add ticker as a second parameter to track reactivity dependencies
 const formatLastSeen = (lastSeenDate, ticker) => {
   if (!lastSeenDate) return 'Recently';
-  const now = new Date(); // Or use new Date(ticker)
+  const now = ticker ? new Date(ticker) : new Date();
   const lastSeen = new Date(lastSeenDate);
+    if (isNaN(lastSeen.getTime())) {
+    return 'Recently';
+  }
   const diffInSeconds = Math.floor((now - lastSeen) / 1000);
+    if (diffInSeconds < 0) return 'Just now';
   
   if (diffInSeconds < 60) return 'Just now';
+  
   const diffInMinutes = Math.floor(diffInSeconds / 60);
   if (diffInMinutes < 60) {
     return `${diffInMinutes} ${diffInMinutes === 1 ? 'minute' : 'minutes'} ago`;
@@ -35,6 +39,7 @@ const formatLastSeen = (lastSeenDate, ticker) => {
   if (diffInDays < 7) {
     return `${diffInDays} days ago`;
   }
+  
   return lastSeen.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 function urlBase64ToUint8Array(base64String) {
@@ -865,23 +870,26 @@ useEffect(() => {
 useEffect(() => {
   if (!socket) return;
   
-  const handleStatusUpdate = ({ userId, isOnline, lastSeen }) => {
+  const handleStatusUpdate = ({ userId, isOnline, lastSeen, lastActive }) => {
+    const activeTimestamp = lastActive || lastSeen;
+
     setUsers(prevUsers => prevUsers.map(u => 
-      u._id === userId ? { ...u, isOnline, lastSeen } : u
+      u._id === userId ? { ...u, isOnline, lastActive: activeTimestamp } : u
     ));
-        setSelectedUser(prev => {
+    
+    setSelectedUser(prev => {
       if (prev?._id === userId) {
-        return { ...prev, isOnline, lastSeen };
+        return { ...prev, isOnline, lastActive: activeTimestamp }; // ✨ Fixed state key mutation
       }
       return prev;
     });
   };
+
   socket.on('user_status_update', handleStatusUpdate);
   return () => {
     socket.off('user_status_update', handleStatusUpdate);
   };
-}, [socket]); // Only depend on socket
-
+}, [socket]);
 useEffect(() => {
   let timer;
 
@@ -1563,7 +1571,7 @@ const handleFinalSend = async () => {
   // 1. Prepare the UI for a fresh jump
   setMessages([]); 
   setIsInitialLoad(true); // <--- CRITICAL: Reset this so the scroll logic triggers
-  setSelectedUser(user);
+  setSelectedUser(user); // Set the sidebar data immediately to prevent layout flickers
   setLimit(30);
   if (socket) socket.emit('join-chat', user._id); 
 
@@ -1581,8 +1589,18 @@ const handleFinalSend = async () => {
       
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
+        
+        // ✨ THE FIX: Update selectedUser with any fresh metadata coming from the backend API
+        // If your endpoint returns client details (e.g., data.user), merge them here:
+        if (data.user) {
+          setSelectedUser(data.user);
+        } else if (data.clientDetails) {
+          setSelectedUser(data.clientDetails);
+        }
       }
-            fetch(`/api/messages/mark-read/${user._id}`, {
+      
+      // Fire-and-forget background read sync
+      fetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(err => console.error("Mark read background error:", err));
@@ -1595,7 +1613,6 @@ const handleFinalSend = async () => {
     console.error("Failed to load chat history:", err);
   }
 };
-
 // Add this inside the AgentDashboard component
 useEffect(() => {
   const params = new URLSearchParams(window.location.search);
@@ -2326,16 +2343,14 @@ return (
           {selectedUser.status === 'online' || selectedUser.isOnline ? 'Online' : 'Offline'}
         </span>
       </div>
-      
-      {/* Show Email when Online, Last Seen when Offline */}
-{selectedUser.status === 'online' || selectedUser.isOnline ? (
+     {selectedUser.status === 'online' || selectedUser.isOnline ? (
   <p className="text-[11px] font-medium text-gray-500 lowercase leading-tight">
     {selectedUser.email}
   </p>
 ) : (
   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">
-    {/* Pass timeTicker here to force clean re-evaluations every minute */}
-    Last seen: {formatLastSeen(selectedUser.lastSeen, timeTicker)}
+    {/* Updated to use selectedUser.lastActive and timeTicker */}
+    Last seen: {formatLastSeen(selectedUser.lastActive || selectedUser.updatedAt, timeTicker)}
   </p>
 )}
       {(selectedUser.city || selectedUser.state) && (
