@@ -130,32 +130,55 @@ const [guestId] = React.useState(() => {
     return newId;
   });
 
+// --- UNIFIED SINGLE SOCKET MANAGEMENT HOOK ---
 React.useEffect(() => {
-const newSocket = io("https://zingconnect.vercel.app", {
-  path: '/api/socket.io', 
-  transports: ['polling'], // CRITICAL: Serverless environments usually require polling first
-  reconnection: true,
-  reconnectionAttempts: 5,
-  timeout: 10000,
-});
+  // 1. Initialize connection targeting the correct endpoint path matching your server configuration
+  const newSocket = io("https://zingconnect.vercel.app", {
+    path: '/socket.io/', // Fixed to match standard root configuration
+    transports: ['polling', 'websocket'], // Allow graceful upgrade flows
+    reconnection: true,
+    reconnectionAttempts: 10,
+    timeout: 10000,
+  });
+
   newSocket.on("connect", () => {
-    console.log("✅ Socket Connected successfully:", newSocket.id);
-    newSocket.emit("guest_online", { guestId });
+    console.log("✅ Guest Socket Connected successfully:", newSocket.id);
+    // Explicitly join the support room identifier right on connection handshake
+    newSocket.emit("join-support-as-guest", guestId);
   });
+
+  // 2. Clear out duplicate listeners and attach the incoming support message reader
+  newSocket.off("guest_receive_admin_message");
   newSocket.on("guest_receive_admin_message", (data) => {
-    setChatHistory(prev => [...prev, {
-      text: data.text,
-      isBot: true, 
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }]);
+    console.log("📥 Real-Time Message Received from Admin Support:", data);
+    setChatHistory(prev => {
+      // Prevent duplicate layout parsing elements in case polling double-fires
+      const isDuplicate = prev.some(msg => msg._id === data._id);
+      if (isDuplicate && data._id) return prev;
+
+      return [...prev, {
+        _id: data._id,
+        text: data.text,
+        isBot: true, 
+        timestamp: new Date(data.timestamp || Date.now()).toLocaleTimeString([], { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        })
+      }];
+    });
   });
+
   newSocket.on("connect_error", (err) => {
-    console.error("❌ Socket Connection Error:", err.message);
+    console.error("❌ Guest Socket Connection Error:", err.message);
   });
+
   newSocket.on("disconnect", (reason) => {
-    console.warn("⚠️ Socket Disconnected:", reason);
+    console.warn("⚠️ Guest Socket Disconnected:", reason);
   });
+
   setSocket(newSocket);
+
+  // Clean layout tracking memory footprints on module unmount
   return () => {
     if (newSocket) {
       newSocket.off("connect");
