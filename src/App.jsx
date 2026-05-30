@@ -27,37 +27,37 @@ const AgentLayoutWrapper = () => {
     </AgentCallProvider>
   );
 };
-
 const PWAController = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [isChecking, setIsChecking] = React.useState(true);
+  const [isReady, setIsReady] = React.useState(false);
 
   React.useLayoutEffect(() => {
     const isStandalone = !!window.navigator.standalone || 
                          window.matchMedia('(display-mode: standalone)').matches;
 
-    const params = new URLSearchParams(window.location.search);
-    const urlSlug = params.get('pwa');
-    const storageSlug = localStorage.getItem('agentSlug');
-    const target = urlSlug || storageSlug;
-
-    const isAtRoot = location.pathname === '/' || location.pathname === '/pricing';
-
-    if (isStandalone && isAtRoot && target) {
-      navigate(`/${target}`, { replace: true });
-    } else {
-      setIsChecking(false);
+    // Only perform logic if in PWA mode
+    if (isStandalone) {
+      const storageSlug = localStorage.getItem('agentSlug');
+      
+      // If we are at root and have a slug, push them to it
+      if ((location.pathname === '/' || location.pathname === '/pricing') && storageSlug) {
+        navigate(`/${storageSlug}`, { replace: true });
+        return; // Don't set ready to true yet, wait for navigation
+      }
     }
+    
+    // Otherwise, let the app load normally
+    setIsReady(true);
   }, [navigate, location.pathname]);
 
-  if (isChecking && (window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
+  // Prevent flash of content if we are redirecting
+  if (!isReady && (location.pathname === '/' || location.pathname === '/pricing')) {
     return <div className="min-h-screen bg-white" />; 
   }
 
   return children;
 };
-
 const ThemeInitializer = () => {
   React.useLayoutEffect(() => {
     const applyTheme = () => {
