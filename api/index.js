@@ -1447,7 +1447,6 @@ const unreadMap = unreadCountsData.reduce((acc, item) => {
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1458,6 +1457,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     const limit = parseInt(req.query.limit) || 30;
     const skip = parseInt(req.query.skip) || 0;
 
+    // 1. Fetch messages
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
@@ -1468,6 +1468,12 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     .skip(skip)
     .limit(limit)
     .lean();
+
+    // 2. FETCH THE FRESH USER DATA FROM THE DATABASE (THE FIX)
+    // Adjust 'User' to match your actual mongoose model name for clients
+    const userData = await mongoose.model('User').findById(otherUserId)
+      .select('firstName lastName email status isOnline lastSeen photoUrl city state phoneNumber')
+      .lean();
 
     // Mapping presigned assets remains fast because it's capped at the limit size
     const signedMessages = await Promise.all(messages.map(async (m) => {
@@ -1484,8 +1490,12 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
       return m;
     }));
 
-    // Reverse back to chronological order for UI insertion
-    res.json({ success: true, messages: signedMessages.reverse() });
+    // 3. Return both the messages AND the updated user data to the frontend
+    res.json({ 
+      success: true, 
+      messages: signedMessages.reverse(),
+      user: userData // 👈 Sent back dynamically on every room switch
+    });
   } catch (err) {
     console.error("Chat Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error loading chat" });
