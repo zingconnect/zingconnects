@@ -1565,6 +1565,7 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
+  
   const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   

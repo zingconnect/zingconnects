@@ -1603,7 +1603,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
 
     // Find this line in your message route and update it:
 const userData = await mongoose.model('User').findById(otherUserId)
-  .select('firstName lastName email status isOnline lastActive photoUrl city state phoneNumber') // 👈 Changed lastSeen to lastActive
+  .select('firstName lastName email gender status isOnline lastActive photoUrl city state phoneNumber') // 👈 Changed lastSeen to lastActive
   .lean();
 
     // Mapping presigned assets remains fast because it's capped at the limit size
