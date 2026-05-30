@@ -13,6 +13,7 @@ export const Registration = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [agreeTerms, setAgreeTerms] = useState(false); // State for Terms and Conditions checkbox
   
   const [formData, setFormData] = useState({
     firstName: '', 
@@ -47,6 +48,13 @@ export const Registration = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Prevent submission if the agent hasn't accepted the terms
+    if (!agreeTerms) {
+      alert("Please check the box to agree to the Terms and Conditions to proceed.");
+      return;
+    }
+    
     setIsSubmitting(true);
     
     try {
@@ -191,16 +199,34 @@ export const Registration = () => {
                 <textarea name="bio" value={formData.bio} onChange={handleInputChange} rows="2" className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 bg-transparent resize-none" placeholder="Brief professional summary..." />
               </div>
 
-              <div className="md:col-span-2 space-y-1 relative">
+              <div className="md:col-span-2 space-y-1 relative mb-2">
                 <label className="text-[10px] font-bold text-gray-400 uppercase">Secure Password</label>
                 <input required name="password" value={formData.password} onChange={handleInputChange} type={showPassword ? "text" : "password"} className="w-full border-b border-gray-200 py-2 text-sm outline-none focus:border-blue-600 bg-transparent" placeholder="••••••••" />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-0 bottom-2 text-gray-400 hover:text-blue-600 transition-all">
                   {showPassword ? <BsEyeSlashFill size={14} /> : <BsEyeFill size={14} />}
                 </button>
               </div>
+
+              {/* AGREE TERMS & CONDITIONS CHECKBOX */}
+              <div className="md:col-span-2 flex items-start gap-3 pt-3">
+                <input 
+                  required
+                  type="checkbox" 
+                  id="agreeTerms" 
+                  checked={agreeTerms}
+                  onChange={(e) => setAgreeTerms(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+                />
+                <label htmlFor="agreeTerms" className="text-xs font-semibold text-gray-500 select-none cursor-pointer leading-tight">
+                  I agree to the{' '}
+                  <span className="text-blue-600 hover:underline cursor-pointer">Terms of Service</span>
+                  {' '}and{' '}
+                  <span className="text-blue-600 hover:underline cursor-pointer">Privacy Policy</span>.
+                </label>
+              </div>
             </div>
 
-            <div className="pt-6">
+            <div className="pt-4">
               <button 
                 disabled={isSubmitting}
                 type="submit"
