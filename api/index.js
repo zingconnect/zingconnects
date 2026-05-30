@@ -1261,7 +1261,6 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 // =========================================================================
 // 2. UPDATE PROFILE ENDPOINT (SAVES SUB-OBJECTS & SYNCS DATA IMMEDIATELY)
 // =========================================================================
@@ -1275,24 +1274,26 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
     
     if (phone) {
-  try {
-    const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
-    parsedPhone = {
-      raw: parsed.raw ? String(parsed.raw).trim() : "",
-      formatted: parsed.formatted ? String(parsed.formatted).trim() : "",
-      countryCode: parsed.countryCode ? String(parsed.countryCode).toLowerCase().trim() : "",
-      dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
-    };
-  } catch (e) {
-    // 🛠️ SAFETIED: If parsing fails because 'phone' equals "[object Object]", do not write it!
-    if (typeof phone === 'string' && phone.includes('[object Object]')) {
-      parsedPhone.raw = "";
-    } else {
-      parsedPhone.raw = String(phone).trim();
+      try {
+        const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
+        parsedPhone = {
+          raw: parsed.raw ? String(parsed.raw).trim() : "",
+          formatted: parsed.formatted ? String(parsed.formatted).trim() : "",
+          countryCode: parsed.countryCode ? String(parsed.countryCode).toLowerCase().trim() : "",
+          dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
+        };
+      } catch (e) {
+        // 🛠️ SAFETIED: If parsing fails because 'phone' equals "[object Object]", do not write it!
+        if (typeof phone === 'string' && phone.includes('[object Object]')) {
+          parsedPhone.raw = "";
+        } else {
+          parsedPhone.raw = String(phone).trim();
+        }
+      }
     }
-  }
-}
 
+    // 🛠️ FIX 1: Explicitly include 'isProfileComplete: true' here so that the 
+    // frontend unmounts onboarding and commits the user session properly on reload.
     let updateFields = {
       firstName, 
       lastName, 
@@ -1300,7 +1301,8 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       dob, 
       gender, 
       city, 
-      state 
+      state,
+      isProfileComplete: true 
     };
 
     if (req.file) {
@@ -1312,32 +1314,43 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
         return res.status(500).json({ success: false, message: "Failed to process image upload" });
       }
     }
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateFields },
       { new: true, runValidators: true } 
     ).populate({
       path: 'connectedAgents',
-select: '_id id name firstName lastName slug photoUrl' 
-   });
+      select: '_id id name firstName lastName slug photoUrl avatarUrl profileImage' 
+    });
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    // 🛠️ FIX 2: Check to ensure user photoUrl is not a base64 string or absolute URL 
+    // before passing it to getPrivateUrl signature generator middleware.
     let signedPhotoUrl = updatedUser.photoUrl || null;
+    if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
+      try {
+        signedPhotoUrl = await getPrivateUrl(signedPhotoUrl);
+      } catch (err) {
+        console.error("Failed to sign user avatar private URL:", err.message);
+      }
+    }
+
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${updatedUser.firstName || 'User'}+${updatedUser.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
 
     const updatedUserObj = updatedUser.toObject();
-    if (updatedUserObj.connectedAgents && updatedUserObj.connectedAgents.length > 0) {
+        if (updatedUserObj.connectedAgents && updatedUserObj.connectedAgents.length > 0) {
       updatedUserObj.connectedAgents = await Promise.all(
         updatedUserObj.connectedAgents.map(async (agent) => {
-          // 🛠️ FIX: Identical fallback layout checking logic added here to maintain consistency post-update
           const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
 
-          if (rawAgentImage && !rawAgentImage.startsWith('http')) {
+          // Added strict tracking guard to avoid processing string keys if they are direct base64 strings or external links
+          if (rawAgentImage && !rawAgentImage.startsWith('http') && !rawAgentImage.startsWith('data:')) {
             try {
               agent.photoUrl = await getPrivateUrl(rawAgentImage);
             } catch (err) {
@@ -1366,6 +1379,7 @@ select: '_id id name firstName lastName slug photoUrl'
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
+
 app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
   const { planPrice } = req.params;
   const FIXED_RATE = Number(process.env.USD_TO_NGN_RATE);
