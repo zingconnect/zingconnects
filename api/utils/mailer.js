@@ -20,11 +20,23 @@ export const transporter = nodemailer.createTransport({
  * @param {String} receiverType - 'Agent' or 'User'
  * @param {String} fileUrl - The S3 Key/Url of the file
  * @param {String} fileType - 'image' or 'video'
+ * @param {String} agentSlug - The unique URL identifier for the agent
  */
-export const sendOfflineNotification = async (receiver, sender, text, receiverType, fileUrl = null, fileType = null) => {
+export const sendOfflineNotification = async (
+  receiver, 
+  sender, 
+  text, 
+  receiverType, 
+  fileUrl = null, 
+  fileType = null, 
+  agentSlug = null
+) => {
   try {
     const baseUrl = "https://zingconnect.vercel.app";
     const brandColor = "#007bff"; 
+    
+    // Fallback to a default slug if none provided, though it should be passed
+    const slug = agentSlug || 'dashboard';
     
     // 🚀 Dynamically label who the notification is coming from
     const senderName = sender.firstName ? `${sender.firstName} ${sender.lastName || ''}`.trim() : "Someone";
@@ -67,14 +79,14 @@ export const sendOfflineNotification = async (receiver, sender, text, receiverTy
        `;
     }
 
-    // Determine dashboard deep linking targets
+   // 🚀 UPDATED: Dynamic Path Construction using agentSlug
     const path = receiverType === 'Agent' 
-      ? `/agent/dashboard?userId=${sender._id}` 
-      : `/user/dashboard?agentId=${sender._id}`;
+      ? `/agent/${slug}/dashboard?userId=${sender._id}` 
+      : `/agent/${slug}/chat/${sender._id}`; 
     
     const callbackUrl = `${baseUrl}${path}`;
     const mediaSubjectNotification = fileType === 'image' ? 'photo' : (fileType === 'video' ? 'video' : 'message');
-
+    
     const mailOptions = {
       from: `"ZingConnect" <${process.env.EMAIL_USER}>`,
       to: receiver.email,
