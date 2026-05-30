@@ -628,10 +628,11 @@ app.post('/api/agents/verify-otp', async (req, res) => {
   }
 });
 
+// --- Updated Login Route ---
 app.post('/api/agents/login', async (req, res) => {
   try {
     await connectToDatabase();
-    const { email, password, targetSlug } = req.body;
+    const { email, password } = req.body;
 
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
@@ -640,17 +641,8 @@ app.post('/api/agents/login', async (req, res) => {
     if (!agent || !(await bcrypt.compare(password, agent.password))) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
-
-    // 👈 STRICT SLUG CHECK
-    if (agent.slug !== targetSlug) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Unauthorized: You must log in via your assigned agent URL." 
-      });
-    }
-
     const newSessionId = crypto.randomBytes(16).toString('hex');
-    agent.currentSessionId = newSessionId;
+        agent.currentSessionId = newSessionId;
     await agent.save();
 
     const token = jwt.sign(
@@ -658,13 +650,19 @@ app.post('/api/agents/login', async (req, res) => {
         id: agent._id, 
         slug: agent.slug, 
         role: 'agent',
-        sessionId: newSessionId
+        sessionId: newSessionId // 👈 Embed this in the token
       }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
-    res.json({ success: true, token, slug: agent.slug });
+    res.json({ 
+      success: true, 
+      token, 
+      slug: agent.slug,
+      message: "Agent Verified" 
+    });
+
   } catch (err) {
     res.status(500).json({ success: false, message: "Server login error" });
   }
