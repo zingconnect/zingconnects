@@ -1,7 +1,7 @@
 {
   "name": "ZingConnect",
   "short_name": "Zing",
-"start_url": "/?mode=standalone",
+"start_url": ".",
   "display": "standalone",
   "background_color": "#f0f2f5",
   "theme_color": "#000000",

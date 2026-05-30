@@ -277,22 +277,6 @@ const handleAgentLogin = async (e) => {
                     </button>
                   )}
 
-                {/* UPDATED: iOS INSTALL BUTTON FOR USERS */}
-{isIOS && (
-  <div className="w-full">
-    <button 
-      type="button"
-      onClick={() => setShowIOSModal(true)}
-      className="flex items-center justify-center gap-2 w-full py-3 bg-blue-50/50 border border-blue-100 rounded-2xl hover:bg-blue-100/50 transition-all group"
-    >
-      <BsDownload size={10} className="text-blue-600" />
-      <span className="text-[8px] md:text-[9px] font-black text-blue-600 uppercase tracking-widest">
-        Add ZingConnect to Home Screen
-      </span>
-    </button>
-  </div>
-)}
-
 <p className="text-[8px] text-center text-gray-400 font-medium px-4 leading-relaxed">
   By initializing, you agree to the <span className="text-blue-600 underline cursor-pointer">Security Terms</span>.
 </p>
@@ -486,52 +470,7 @@ const handleAgentLogin = async (e) => {
           </div>
         </div>
       )}
-    {showIOSModal && (
-  <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-blue-950/40 backdrop-blur-md">
-    <div className="w-full max-w-xs bg-white rounded-[2.5rem] p-8 shadow-2xl text-center border border-gray-100 animate-in fade-in zoom-in duration-300">
-      <div className="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-200">
-        <BsDownload size={24} />
-      </div>
-      
-      <h3 className="text-sm font-black text-blue-950 uppercase tracking-tight mb-6">
-        Install on iPhone
-      </h3>
-      
-      <div className="space-y-6 text-left mb-8">
-        <div className="flex items-center gap-4">
-          <div className="bg-blue-50 text-blue-600 rounded-full h-6 w-6 flex items-center justify-center text-[10px] font-bold shrink-0">1</div>
-          <p className="text-[11px] text-gray-600 leading-tight">
-            Tap the <span className="font-bold text-blue-950">Share icon</span> 
-            {/* Added visual reference for the icon */}
-            <BsShare className="inline mx-1.5 text-blue-600" size={12} /> 
-            at the bottom of your screen.
-          </p>
-        </div>
-        
-        <div className="flex items-center gap-4">
-          <div className="bg-blue-50 text-blue-600 rounded-full h-6 w-6 flex items-center justify-center text-[10px] font-bold shrink-0">2</div>
-          <p className="text-[11px] text-gray-600 leading-tight">
-            Scroll down and tap <span className="font-bold text-blue-950">"Add to Home Screen"</span>.
-          </p>
-        </div>
-        
-        <div className="flex items-center gap-4">
-          <div className="bg-blue-50 text-blue-600 rounded-full h-6 w-6 flex items-center justify-center text-[10px] font-bold shrink-0">3</div>
-          <p className="text-[11px] text-gray-600 leading-tight">
-            Tap <span className="font-bold text-blue-950">"Add"</span> in the top right corner.
-          </p>
-        </div>
-      </div>
-
-      <button 
-        onClick={() => setShowIOSModal(false)}
-        className="w-full py-4 bg-blue-950 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-transform"
-      >
-        Got it
-      </button>
-    </div>
-  </div>
-)}
+    
     </div>
 
   );
