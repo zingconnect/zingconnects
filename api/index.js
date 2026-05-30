@@ -694,6 +694,8 @@ app.get('/api/agents/profile', authenticateToken, async (req, res) => {
       agent.isSubscribed = false;
       await agent.save();
     }
+    // Add this right before your if (agent.slug !== targetSlug) check
+console.log(`DEBUG: Agent Slug in DB is "${agent.slug}", but targetSlug sent is "${targetSlug}"`);
 
     res.json(agent); 
   } catch (err) {
