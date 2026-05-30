@@ -18,7 +18,21 @@
     
     <link rel="apple-touch-icon" href="/icon.png">
     <link rel="apple-touch-startup-image" href="/logo-s.png">
-
+<script>
+    (function() {
+      // Only run this logic if the app is launched in standalone mode
+      const isStandalone = window.navigator.standalone || 
+                           window.matchMedia('(display-mode: standalone)').matches;
+      
+      if (isStandalone) {
+        const savedSlug = localStorage.getItem('agentSlug');
+        // If we have a saved slug and we are at the root, force navigation
+        if (savedSlug && (window.location.pathname === '/' || window.location.pathname === '/index.html')) {
+          window.location.replace('/' + savedSlug);
+        }
+      }
+    })();
+  </script>
   </head>
   <body>
     <div id="root"></div>
