@@ -2,8 +2,6 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage"; 
 
-
-
 let _s3Client;
 
 export const getS3Client = () => {
@@ -29,8 +27,6 @@ export const getPrivateUrl = async (fileKey) => {
   try {
     const client = getS3Client(); 
     
-    // Extract only the part after .com/ (e.g., profiles/filename.png)
-    // Also strips any existing query parameters to avoid double-signing
     const actualKey = fileKey.includes('.com/') 
       ? fileKey.split('.com/')[1].split('?')[0] 
       : fileKey;
@@ -40,10 +36,30 @@ export const getPrivateUrl = async (fileKey) => {
       Key: decodeURIComponent(actualKey),
     });
 
-    // Returns the temporary signed URL
     return await getSignedUrl(client, command, { expiresIn: 3600 });
   } catch (err) {
     console.error("Signing Error:", err.message);
-    return fileKey; // Fallback to original if signing fails
+    return fileKey; 
   }
+};
+
+// 🛠️ NEW EXPORT: Handles your clean file uploads safely
+export const uploadToS3 = async (file, folder = 'users') => {
+  const client = getS3Client();
+  const fileExtension = file.originalname.split('.').pop() || 'jpg';
+  const uniqueFileName = `${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}.${fileExtension}`;
+  const storageKey = `${folder}/${uniqueFileName}`;
+
+  const uploadWorker = new Upload({
+    client,
+    params: {
+      Bucket: process.env.IDRIVE_BUCKET_NAME,
+      Key: storageKey,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    },
+  });
+
+  await uploadWorker.done();
+  return storageKey; // Returns "users/filename.jpg"
 };

@@ -43,7 +43,7 @@ redisClient.on('connect', () => console.log('⚡ Connected to Redis Cache Cloud 
 
 // 3. Database & Shared Configurations
 import { connectToDatabase } from './config/db.js';
-import { getS3Client, getPrivateUrl, PutObjectCommand, GetObjectCommand } from './config/s3.js'; 
+import { getS3Client, getPrivateUrl, uploadToS3, PutObjectCommand, GetObjectCommand } from './config/s3.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // 4. Local Utility Framework Helpers (Now fully hydrated with process.env keys)
@@ -1207,7 +1207,6 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // 🛠️ FIX: Added fallback fields 'profileImage' and 'avatarUrl' to the select string
     const user = await User.findById(req.user.id).populate({
       path: 'connectedAgents',
       select: '_id id name firstName lastName slug photoUrl avatarUrl profileImage'  
@@ -1219,14 +1218,12 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
 
     let signedPhotoUrl = user.photoUrl || null;
 
-    // 🛠️ CRITICAL FIX: Only run getPrivateUrl if it is a raw file storage path (e.g., "users/...")
-    // Bypasses IDrive signing if it's already an absolute link or a base64 string layout
     if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
       try {
         signedPhotoUrl = await getPrivateUrl(signedPhotoUrl);
       } catch (err) {
         console.error("Failed to sign user photo URL:", err.message);
-        signedPhotoUrl = user.photoUrl; // Raw key fallback
+        signedPhotoUrl = user.photoUrl; 
       }
     }
 
@@ -1236,11 +1233,9 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
 
     const userObj = user.toObject();
 
-    // Sign profile images for any nested connected agents if applicable
     if (userObj.connectedAgents && userObj.connectedAgents.length > 0) {
       userObj.connectedAgents = await Promise.all(
         userObj.connectedAgents.map(async (agent) => {
-          // 🛠️ FIX: Fallback sequence extracts image regardless of variable naming conventions
           const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
 
           if (rawAgentImage && !rawAgentImage.startsWith('http') && !rawAgentImage.startsWith('data:')) {
@@ -1248,10 +1243,10 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
               agent.photoUrl = await getPrivateUrl(rawAgentImage);
             } catch (err) {
               console.error(`Failed to sign URL for agent ${agent._id}:`, err.message);
-              agent.photoUrl = rawAgentImage; // Raw key fallback
+              agent.photoUrl = rawAgentImage; 
             }
           } else {
-            agent.photoUrl = rawAgentImage; // Assign direct string URL/Base64 or fallback empty string
+            agent.photoUrl = rawAgentImage; 
           }
           return agent;
         })
@@ -1280,7 +1275,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     const userId = req.user.id;
     const { firstName, lastName, phone, dob, gender, city, state } = req.body;
 
-    // --- 🛠️ PARSE AND SAFE-GUARD PHONE SUB-OBJECT ---
     let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
     
     if (phone) {
@@ -1293,7 +1287,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
           dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
         };
       } catch (e) {
-        // 🛠️ SAFETIED: If parsing fails because 'phone' equals "[object Object]", do not write it!
         if (typeof phone === 'string' && phone.includes('[object Object]')) {
           parsedPhone.raw = "";
         } else {
@@ -1313,10 +1306,12 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       isProfileComplete: true 
     };
 
+    // 🛠️ CALL NEW S3 UPLOAD UTILITY FUNCTION HERE
     if (req.file) {
       try {
-        const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        updateFields.photoUrl = base64Image; 
+        // Appends custom user context to folder naming rules directly
+        const storageKey = await uploadToS3(req.file, `users/${userId}`);
+        updateFields.photoUrl = storageKey; 
       } catch (uploadErr) {
         console.error("Storage upload failed:", uploadErr);
         return res.status(500).json({ success: false, message: "Failed to process image upload" });
@@ -1338,7 +1333,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
 
     let signedPhotoUrl = updatedUser.photoUrl || null;
     
-    // 🛠️ CRITICAL FIX: Match the exact verification check here during update submissions as well
     if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
       try {
         signedPhotoUrl = await getPrivateUrl(signedPhotoUrl);
@@ -1359,7 +1353,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
         updatedUserObj.connectedAgents.map(async (agent) => {
           const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
 
-          // Added strict tracking guard to avoid processing string keys if they are direct base64 strings or external links
           if (rawAgentImage && !rawAgentImage.startsWith('http') && !rawAgentImage.startsWith('data:')) {
             try {
               agent.photoUrl = await getPrivateUrl(rawAgentImage);
