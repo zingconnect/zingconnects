@@ -169,6 +169,7 @@ const handleAgentLogin = async (e) => {
       body: JSON.stringify({ 
         email: loginEmail, 
         password: loginPassword,
+        targetSlug: slug,
         force: true // Added this flag
       })
     });
