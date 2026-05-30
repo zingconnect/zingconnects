@@ -14,11 +14,13 @@ import {
   BsCameraFill  
 } from 'react-icons/bs';
 
-const formatLastSeen = (lastSeenDate) => {
+// Add ticker as a second parameter to track reactivity dependencies
+const formatLastSeen = (lastSeenDate, ticker) => {
   if (!lastSeenDate) return 'Recently';
-  const now = new Date();
+  const now = new Date(); // Or use new Date(ticker)
   const lastSeen = new Date(lastSeenDate);
   const diffInSeconds = Math.floor((now - lastSeen) / 1000);
+  
   if (diffInSeconds < 60) return 'Just now';
   const diffInMinutes = Math.floor(diffInSeconds / 60);
   if (diffInMinutes < 60) {
@@ -2326,15 +2328,16 @@ return (
       </div>
       
       {/* Show Email when Online, Last Seen when Offline */}
-      {selectedUser.status === 'online' || selectedUser.isOnline ? (
-        <p className="text-[11px] font-medium text-gray-500 lowercase leading-tight">
-          {selectedUser.email}
-        </p>
-      ) : (
-       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">
-                      Last seen: {formatLastSeen(selectedUser.lastSeen)}
-                    </p>
-      )}
+{selectedUser.status === 'online' || selectedUser.isOnline ? (
+  <p className="text-[11px] font-medium text-gray-500 lowercase leading-tight">
+    {selectedUser.email}
+  </p>
+) : (
+  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">
+    {/* Pass timeTicker here to force clean re-evaluations every minute */}
+    Last seen: {formatLastSeen(selectedUser.lastSeen, timeTicker)}
+  </p>
+)}
       {(selectedUser.city || selectedUser.state) && (
         <p className="text-[9px] font-bold text-blue-600 truncate max-w-[180px] mt-0.5">
           📍 {selectedUser.city}{selectedUser.city && selectedUser.state ? ', ' : ''}{selectedUser.state}
