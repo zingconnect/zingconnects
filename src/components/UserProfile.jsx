@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { BsChevronLeft, BsCameraFill, BsPencilSquare, BsCheckLg, BsPersonBadgeFill } from 'react-icons/bs';
-// 🛠️ FIXES MINIFIED ERROR #130: Changed default import to Named Import syntax
+// 🛠️ Named Import syntax preserved for minification stability
 import { PhoneInput } from 'react-phone-input-2'; 
 import 'react-phone-input-2/lib/style.css';
 import { useGlobalCall } from '../context/UserCallContext'; 
@@ -12,7 +12,8 @@ export const UserProfile = () => {
   
   const { userData, setUserData } = useGlobalCall(); 
   
-  const [loading, setLoading] = useState(!userData);
+  // 🛠️ CHANGED: Set initial loading state to true to let the un-cached network fetch handle initialization cleanly
+  const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -29,6 +30,7 @@ export const UserProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
+  // 🛠️ FIX: Force a fresh database fetch on mount to bypass old cached context data
   useEffect(() => {
     const fetchUserData = async () => {
       const token = localStorage.getItem('userToken');
@@ -39,7 +41,12 @@ export const UserProfile = () => {
       }
       try {
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          method: 'GET',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Cache-Control': 'no-cache', // Bypass local edge-network caches
+            'Pragma': 'no-cache'
+          }
         });
         const result = await res.json();
         
@@ -55,12 +62,9 @@ export const UserProfile = () => {
       }
     };
 
-    if (!userData || !userData._id) {
-      fetchUserData();
-    } else {
-      setLoading(false);
-    }
-  }, [userData, setUserData]); 
+    // Always fetch on mount to ensure deep fields (like agent photos) are up-to-date
+    fetchUserData();
+  }, [setUserData]); // Removed userData dependency to prevent loop cascades
   
   useEffect(() => {
     if (userData) {
@@ -214,7 +218,7 @@ export const UserProfile = () => {
             </div>
           </div>
 
-          {/* 🌟 NEW: CONNECTED AGENTS SIDEBAR CARD */}
+          {/* CONNECTED AGENTS SIDEBAR CARD */}
           <div className="bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm space-y-4">
             <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Connected Agents</h3>
             
@@ -222,12 +226,11 @@ export const UserProfile = () => {
               <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                 {userData.connectedAgents.map((agent) => (
                   <Link 
-                    // Redirects cleanly to the custom agent profile slug mapping
                     to={`/${agent.slug}`} 
                     key={agent._id || agent.id}
                     className="flex items-center gap-3 p-2.5 rounded-xl border border-gray-50 hover:border-blue-100 hover:bg-blue-50/40 transition-all group"
                   >
-                    <div className="w-9 h-9 rounded-full bg-blue-900 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-blue-900 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0 overflow-hidden">
                       {agent.photoUrl ? (
                         <img src={agent.photoUrl} alt={agent.name} className="w-full h-full object-cover rounded-full" />
                       ) : (
