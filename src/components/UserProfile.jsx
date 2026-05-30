@@ -157,7 +157,6 @@ export const UserProfile = () => {
               : 'bg-white hover:bg-gray-50 text-blue-600 border border-gray-200'
           }`}
         >
-          {isUpdating ? "Saving..." : isEditing ? <><BsCheckLg size={13}/> Save Profile</> : <><BsPencilSquare size={13}/> Edit Profile</>}
         </button>
       </div>
 
