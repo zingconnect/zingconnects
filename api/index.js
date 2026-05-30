@@ -1292,8 +1292,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       }
     }
 
-    // 🛠️ FIX 1: Explicitly include 'isProfileComplete: true' here so that the 
-    // frontend unmounts onboarding and commits the user session properly on reload.
     let updateFields = {
       firstName, 
       lastName, 
@@ -1328,17 +1326,7 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // 🛠️ FIX 2: Check to ensure user photoUrl is not a base64 string or absolute URL 
-    // before passing it to getPrivateUrl signature generator middleware.
-    let signedPhotoUrl = updatedUser.photoUrl || null;
-    if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
-      try {
-        signedPhotoUrl = await getPrivateUrl(signedPhotoUrl);
-      } catch (err) {
-        console.error("Failed to sign user avatar private URL:", err.message);
-      }
-    }
-
+   let signedPhotoUrl = updatedUser.photoUrl || null;
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${updatedUser.firstName || 'User'}+${updatedUser.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
