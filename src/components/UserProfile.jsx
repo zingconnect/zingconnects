@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { BsChevronLeft, BsCameraFill, BsPencilSquare, BsCheckLg, BsPersonBadgeFill } from 'react-icons/bs';
-// 🛠️ Named Import syntax preserved for minification stability
-import { PhoneInput } from 'react-phone-input-2'; 
+import PhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import { useGlobalCall } from '../context/UserCallContext'; 
 
