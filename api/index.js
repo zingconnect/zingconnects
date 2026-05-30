@@ -1210,8 +1210,8 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
     // 🛠️ FIX: Added fallback fields 'profileImage' and 'avatarUrl' to the select string
     const user = await User.findById(req.user.id).populate({
       path: 'connectedAgents',
-      select: 'name firstName lastName slug photoUrl profileImage avatarUrl' 
-    });
+      select: '_id id name firstName lastName slug photoUrl'  
+      });
     
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -1307,16 +1307,14 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
         return res.status(500).json({ success: false, message: "Failed to process image upload" });
       }
     }
-
-    // 🛠️ FIX: Appended fallback fields 'profileImage' and 'avatarUrl' to update selector 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateFields },
       { new: true, runValidators: true } 
     ).populate({
       path: 'connectedAgents',
-      select: 'name firstName lastName slug photoUrl profileImage avatarUrl'
-    });
+select: '_id id name firstName lastName slug photoUrl' 
+   });
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -1328,8 +1326,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     }
 
     const updatedUserObj = updatedUser.toObject();
-
-    // Sign nested connected agents photos post-update to stay uniformly integrated
     if (updatedUserObj.connectedAgents && updatedUserObj.connectedAgents.length > 0) {
       updatedUserObj.connectedAgents = await Promise.all(
         updatedUserObj.connectedAgents.map(async (agent) => {
