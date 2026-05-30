@@ -18,21 +18,25 @@
     
     <link rel="apple-touch-icon" href="/icon.png">
     <link rel="apple-touch-startup-image" href="/logo-s.png">
-<script>
+<head>
+  <script>
     (function() {
-      // Only run this logic if the app is launched in standalone mode
+      // 1. Check if we are running in standalone (Home Screen) mode
       const isStandalone = window.navigator.standalone || 
                            window.matchMedia('(display-mode: standalone)').matches;
       
       if (isStandalone) {
-        const savedSlug = localStorage.getItem('agentSlug');
-        // If we have a saved slug and we are at the root, force navigation
-        if (savedSlug && (window.location.pathname === '/' || window.location.pathname === '/index.html')) {
-          window.location.replace('/' + savedSlug);
+        // 2. Retrieve the last agent visited from local storage
+        const lastAgent = localStorage.getItem('agentSlug');
+        
+        // 3. If we are currently at the root and have a known agent, redirect immediately
+        if (lastAgent && (window.location.pathname === '/' || window.location.pathname === '/index.html')) {
+          window.location.replace('/' + lastAgent);
         }
       }
     })();
   </script>
+  </head>
   </head>
   <body>
     <div id="root"></div>

@@ -1,22 +1,35 @@
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-if (event.request.mode === 'navigate') {
-  event.respondWith(
-    fetch(event.request) // Always hit the network for navigation
-      .catch(() => caches.match('/')) // Fallback to index if truly offline
-  );
-  return;
-}
+  // 1. NAVIGATION: Always Network-First to trigger our Index.html redirect script
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  // 2. AUDIO: Bypass cache (Handle via network)
   if (
     event.request.destination === 'audio' || 
     url.pathname.endsWith('.mp3') || 
     url.pathname.endsWith('.wav') ||
     event.request.headers.get('range')
   ) {
-    return; // Let browser handle via network
+    return; // Pass through to network
   }
-  
+
+  // 3. STATIC ASSETS: Stale-While-Revalidate (Performance boost)
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      const fetchPromise = fetch(event.request).then((networkResponse) => {
+        // Optional: Open cache and update it here if needed
+        return networkResponse;
+      });
+      return cachedResponse || fetchPromise;
+    })
+  );
 });
 // 2. LIFECYCLE HANDLERS (Ensures quick updates)
 self.addEventListener('install', (event) => {
