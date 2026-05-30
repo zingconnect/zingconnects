@@ -658,36 +658,48 @@ const handleToggleVerification = async (agentId) => {
 
           <div className="flex-1 p-8 overflow-y-auto space-y-6">
             {/* DYNAMIC MESSAGE HISTORY */}
-            {activeChat.messages && activeChat.messages.length > 0 ? (
-              activeChat.messages.map((msg, index) => (
-                <div key={index} className={`flex w-full ${msg.isAdmin ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[75%] flex flex-col ${msg.isAdmin ? 'items-end' : 'items-start'}`}>
-                    
-                    {/* Message Bubble */}
-                    <div className={`p-4 rounded-[1.5rem] shadow-sm border text-[11px] font-medium leading-relaxed ${
-                      msg.isAdmin 
-                        ? 'bg-blue-600 text-white rounded-tr-none border-blue-700' 
-                        : 'bg-emerald-50 text-slate-800 rounded-tl-none border-emerald-100'
-                    }`}>
-                      {msg.text}
-                    </div>
-                    
-                    {/* Meta Status Row */}
-                    <p className={`text-[8px] mt-1.5 font-black uppercase tracking-tighter flex items-center gap-1.5 ${
-                      msg.isAdmin ? 'text-blue-500' : 'text-emerald-600'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${msg.isAdmin ? 'bg-blue-400' : 'bg-emerald-400'}`}></span>
-                      {msg.isAdmin ? 'System Admin' : (activeChat.isGuest ? 'Guest User' : 'Agent Profile')} • {msg.timestamp}
-                    </p>
+{activeChat.messages && activeChat.messages.length > 0 ? (
+  activeChat.messages.map((msg, index) => {
+    // 1. Normalize the sender type to lowercase to safely catch both 'Admin' and 'admin'
+    const normalizedSender = msg.senderType ? msg.senderType.toLowerCase() : '';
+    
+    // 2. Determine if the message came from an admin or a guest
+    const isMessageFromAdmin = normalizedSender === 'admin' || msg.isAdmin === true;
 
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="h-full flex items-center justify-center">
-                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No conversation history</p>
-              </div>
-            )}
+    return (
+      <div key={index} className={`flex w-full ${isMessageFromAdmin ? 'justify-end' : 'justify-start'}`}>
+        <div className={`max-w-[75%] flex flex-col ${isMessageFromAdmin ? 'items-end' : 'items-start'}`}>
+          
+          {/* Message Bubble Container */}
+          <div className={`p-4 rounded-[1.5rem] shadow-sm border text-[11px] font-medium leading-relaxed ${
+            isMessageFromAdmin 
+              ? 'bg-blue-600 text-white rounded-tr-none border-blue-700' 
+              : 'bg-emerald-50 text-slate-800 rounded-tl-none border-emerald-100'
+          }`}>
+            {msg.text}
+          </div>
+          
+          {/* Bottom Metadata Info Row */}
+          <p className={`text-[8px] mt-1.5 font-black uppercase tracking-tighter flex items-center gap-1.5 ${
+            isMessageFromAdmin ? 'text-blue-500' : 'text-emerald-600'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isMessageFromAdmin ? 'bg-blue-400' : 'bg-emerald-400'}`}></span>
+            {isMessageFromAdmin ? 'System Admin' : (activeChat.isGuest ? 'Guest User' : 'Agent Profile')} • {
+              msg.createdAt 
+                ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                : (msg.timestamp || 'Just Now')
+            }
+          </p>
+
+        </div>
+      </div>
+    );
+  })
+) : (
+  <div className="h-full flex items-center justify-center">
+    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No conversation history</p>
+  </div>
+)}
           </div>
 
           {/* INPUT AREA */}
