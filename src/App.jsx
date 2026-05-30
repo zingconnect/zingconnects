@@ -97,33 +97,36 @@ const ThemeInitializer = () => {
 };
 
 const RootGate = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const slug = localStorage.getItem('agentSlug');
 
-  return (
-    <div
-      style={{
-        padding: '40px',
-        fontFamily: 'monospace',
-        fontSize: '14px'
-      }}
-    >
-      <h2>DEBUG MODE</h2>
+  useEffect(() => {
+    // 1. Allow access to public pages (e.g., /pricing, /about)
+    const publicPaths = ['/pricing', '/about', '/registration'];
+    if (publicPaths.includes(location.pathname)) {
+      return; // Do nothing, let the router render the page
+    }
 
-      <p>Path: {window.location.pathname}</p>
-      <p>Search: {window.location.search}</p>
-      <p>Stored Slug: {slug || 'NULL'}</p>
+    // 2. If no slug, send to a general landing/registration page
+    if (!slug) {
+      navigate('/registration', { replace: true });
+      return;
+    }
 
-      <button
-        onClick={() => {
-          if (slug) {
-            window.location.href = '/' + slug;
-          }
-        }}
-      >
-        Continue
-      </button>
-    </div>
-  );
+    // 3. If we have a slug, redirect to the new hierarchical dashboard
+    // We check the user role to decide which dashboard to show
+    const userType = localStorage.getItem('userType'); 
+    const target = userType === 'user' 
+      ? `/agent/${slug}/user/dashboard` 
+      : `/agent/${slug}/dashboard`;
+
+    navigate(target, { replace: true });
+  }, [slug, location, navigate]);
+
+  // Return null or a subtle loader since this component 
+  // now acts as a silent traffic controller
+  return null; 
 };
 
 function App() {
