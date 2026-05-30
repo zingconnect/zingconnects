@@ -1,4 +1,5 @@
-import React, { useLayoutEffect, useEffect } from 'react'; // Ensure useEffect is here
+import React, { useLayoutEffect } from 'react'; 
+// Imported 'Outlet' so the layout can render child components
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 
 // Component Imports
@@ -36,29 +37,20 @@ const PWAController = ({ children }) => {
     const isStandalone = !!window.navigator.standalone || 
                          window.matchMedia('(display-mode: standalone)').matches;
 
-    // 1. Identify if we are at a "default" landing state
-    const isAtRoot = location.pathname === '/' || location.pathname === '/pricing' || location.pathname === '/registration';
-    
-    // 2. Define routes we SHOULD NOT interrupt
-    // If the URL is already something specific, don't redirect to the "target"
-    const isAlreadyDeepLinked = location.pathname.split('/').length > 2 || 
-                               (location.pathname !== '/' && location.pathname !== '/pricing');
-
     const params = new URLSearchParams(window.location.search);
     const urlSlug = params.get('pwa');
     const storageSlug = localStorage.getItem('agentSlug');
     const target = urlSlug || storageSlug;
 
-    // 3. Only redirect if we are standalone, at root, have a target, 
-    // AND are not already navigating somewhere specific
-    if (isStandalone && isAtRoot && target && !isAlreadyDeepLinked) {
+    const isAtRoot = location.pathname === '/' || location.pathname === '/pricing';
+
+    if (isStandalone && isAtRoot && target) {
       navigate(`/${target}`, { replace: true });
     } else {
       setIsChecking(false);
     }
   }, [navigate, location.pathname]);
 
-  // Only show the loading screen if we are actually doing the check
   if (isChecking && (window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
     return <div className="min-h-screen bg-white" />; 
   }
@@ -96,49 +88,14 @@ const ThemeInitializer = () => {
   return null;
 };
 
-const RootGate = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const slug = localStorage.getItem('agentSlug');
-
-  useEffect(() => {
-    // 1. Allow access to public pages (e.g., /pricing, /about)
-    const publicPaths = ['/pricing', '/about', '/registration'];
-    if (publicPaths.includes(location.pathname)) {
-      return; // Do nothing, let the router render the page
-    }
-
-    // 2. If no slug, send to a general landing/registration page
-    if (!slug) {
-      navigate('/registration', { replace: true });
-      return;
-    }
-
-    // 3. If we have a slug, redirect to the new hierarchical dashboard
-    // We check the user role to decide which dashboard to show
-    const userType = localStorage.getItem('userType'); 
-    const target = userType === 'user' 
-      ? `/agent/${slug}/user/dashboard` 
-      : `/agent/${slug}/dashboard`;
-
-    navigate(target, { replace: true });
-  }, [slug, location, navigate]);
-
-  // Return null or a subtle loader since this component 
-  // now acts as a silent traffic controller
-  return null; 
-};
-
 function App() {
   return (
     <Router>
       <PWAController>
         <ThemeInitializer />
         <Routes>
-          {/* --- 1. UPDATED PUBLIC ROUTE --- */}
-          {/* Replace your old path="/" with the RootGate */}
-          <Route path="/" element={<RootGate />} />
-          
+          {/* --- 1. PUBLIC & AUTH ROUTES --- */}
+          <Route path="/" element={<PricingPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/registration" element={<Registration />} />
           <Route path="/verify-otp" element={<VerifyOTP />} />
@@ -150,7 +107,7 @@ function App() {
             <Route path="/agent/call-settings" element={<CallSetting />} />
           </Route>
 
-          {/* --- 3. PROTECTED USER ROUTES --- */}
+          {/* --- 3. PROTECTED USER ROUTES (Wrapped in UserCallProvider) --- */}
           <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
             <Route path="/user/dashboard" element={<UserDashboard />} />
             <Route path="/user/profile" element={<UserProfile />} />
@@ -162,8 +119,7 @@ function App() {
           
           {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
           <Route path="/:slug" element={<AgentSlug />} />
-        
-
+          
           {/* --- 6. GLOBAL FALLBACK --- */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
