@@ -74,7 +74,7 @@ export const AgentDashboard = () => {
   const [localStream, setLocalStream] = useState(null);
   const [lkToken, setLkToken] = useState(null);
   const [isEnding, setIsEnding] = useState(false);
-
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [activeCall, setActiveCall] = useState(null);
   const [callStatus, setCallStatus] = useState('idle'); 
   const [isIncomingCall, setIsIncomingCall] = useState(false);
@@ -93,6 +93,7 @@ export const AgentDashboard = () => {
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");          
 
+  let isFetching = false;
   const plans = [
     {
       tier: 'BASIC',
@@ -234,6 +235,41 @@ export const AgentDashboard = () => {
     
     if (pollingIntervalRef) pollingIntervalRef.current = pollInterval;
   };
+
+  const handleScroll = async (e) => {
+  const container = e.target;
+    if (container.scrollTop < 50 && !isFetchingMore && messages.length >= limit) {
+    setIsFetchingMore(true);
+    const oldScrollHeight = container.scrollHeight;
+        setLimit(prev => prev + 30);
+    setTimeout(() => {
+      setIsFetchingMore(false);
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight - oldScrollHeight;
+      });
+    }, 500);
+  }
+};
+
+const fetchMessages = async (userId, limit = 30) => {
+  if (isFetching) return null; // Prevent stacking requests
+  isFetching = true;
+  
+  const token = localStorage.getItem('agentToken');
+  try {
+    const res = await fetch(`/api/messages/${userId}?limit=${limit}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    return data.success ? data.messages : null;
+  } catch (err) {
+    console.error("Fetch error:", err);
+    return null;
+  } finally {
+    isFetching = false; // Always unlock
+  }
+};
+
 const handleAcceptCall = async () => {
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
@@ -1574,52 +1610,56 @@ useEffect(() => {
   }
 }, [messages, isInitialLoad]);
 
+// 1. Polling for the User List (Global, doesn't need to restart on every click)
 useEffect(() => {
   if (!isSubscribed || !agentData?._id) return;
 
-  const refreshData = async () => {
-    // Don't poll if we are busy in a call
-    if (['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
-    
+  const refreshUserList = async () => {
     const token = localStorage.getItem('agentToken');
     try {
-      const userRes = await fetch('/api/agents/my-users', {
+      const res = await fetch('/api/agents/my-users', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const userData = await userRes.json();
-      if (userData.success) setUsers(userData.users);
-      if (selectedUser?._id && document.visibilityState === 'visible') {
-        const msgRes = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const msgData = await msgRes.json();
-        
-        if (msgData.success && Array.isArray(msgData.messages)) {
-          const incomingMsgs = msgData.messages;
-          const targetLatestMsg = incomingMsgs[incomingMsgs.length - 1];
-          if (targetLatestMsg && targetLatestMsg.senderModel === 'User' && targetLatestMsg._id !== lastNotifiedId.current) {
-            lastNotifiedId.current = targetLatestMsg._id;
-            
-            if (notificationSound.current) {
-              notificationSound.current.currentTime = 0;
-              notificationSound.current.play().catch(() => {});
-            }
-          }
-
-          setMessages(prev => {
-            const isNew = incomingMsgs.length !== prev.length || 
-                          (incomingMsgs[0]?._id !== prev[0]?._id) ||
-                          (incomingMsgs[incomingMsgs.length - 1]?._id !== prev[prev.length - 1]?._id);
-            return isNew ? incomingMsgs : prev;
-          });
-        }
-      }
-    } catch (err) { console.warn("Refresh jitter fallback skipped"); }
+      const data = await res.json();
+      if (data.success) setUsers(data.users);
+    } catch (err) { console.warn("User list refresh failed"); }
   };
 
-  const interval = setInterval(refreshData, 5000);
+  const interval = setInterval(refreshUserList, 15000); // 15s is plenty for a user list
   return () => clearInterval(interval);
-}, [isSubscribed, selectedUser?._id, callStatus]);
+}, [isSubscribed, agentData?._id]);
+
+// 2. Polling for the Active Chat (Contextual)
+useEffect(() => {
+  if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
+
+  const refreshMessages = async () => {
+    if (document.visibilityState !== 'visible') return;
+
+    const incomingMsgs = await fetchMessages(selectedUser._id, limit);
+    if (!incomingMsgs) return;
+
+    // Only update if there is a real change
+    setMessages(prev => {
+      const isNew = incomingMsgs.length !== prev.length || 
+                    incomingMsgs[incomingMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
+      
+      if (isNew) {
+        // Notification logic
+        const latest = incomingMsgs[incomingMsgs.length - 1];
+        if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
+          lastNotifiedId.current = latest._id;
+          notificationSound.current?.play().catch(() => {});
+        }
+        return incomingMsgs;
+      }
+      return prev;
+    });
+  };
+
+  const interval = setInterval(refreshMessages, 5000); // 5s is good for active chat
+  return () => clearInterval(interval);
+}, [selectedUser?._id, callStatus, limit]); // Only re-run if chat or status changes
 
 useEffect(() => {
   const setupNotifications = async () => {
@@ -2284,7 +2324,10 @@ return (
 </header>
 
 <div 
-    ref={scrollRef}     className="flex-1 overflow-y-auto scroll-manual p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50"  >    
+  ref={scrollRef} 
+  onScroll={handleScroll} 
+  className="flex-1 overflow-y-auto scroll-manual p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50"
+>
             {messages.length >= limit && (
               <div className="flex justify-center py-6">
                 <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase text-gray-500 bg-white/50 px-4 py-2 rounded-full border border-gray-300 hover:bg-white transition-colors">↑ Load Older Messages</button>

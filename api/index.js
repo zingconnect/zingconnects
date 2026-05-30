@@ -1043,6 +1043,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     });
   }
 });
+
 app.get('/api/agents/:slug', async (req, res) => {
   try {
     console.log("--- Profile Request Start --- for:", req.params.slug);
