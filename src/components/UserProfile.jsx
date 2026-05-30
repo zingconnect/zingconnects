@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BsChevronLeft, BsCameraFill, BsShieldCheck, BsPencilSquare, BsCheckLg } from 'react-icons/bs';
+import { BsChevronLeft, BsCameraFill, BsPencilSquare, BsCheckLg } from 'react-icons/bs';
+import PhoneInput from 'react-phone-input-2';
+import 'react-phone-input-2/lib/style.css';
 import { useGlobalCall } from '../context/UserCallContext'; 
 
 export const UserProfile = () => {
@@ -16,7 +18,7 @@ export const UserProfile = () => {
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    phone: '',
+    phone: { raw: '', formatted: '', countryCode: 'us', dialCode: '1' },
     dob: '',
     gender: '',
     city: '',
@@ -26,45 +28,51 @@ export const UserProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-useEffect(() => {
-  const fetchUserData = async () => {
-    const token = localStorage.getItem('userToken');
-    if (!token) {
-      console.error("No token found. User might not be logged in.");
-      setLoading(false);
-      return;
-    }
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await res.json();
-      
-      if (res.ok && result.success) {
-        setUserData(result.user);
-      } else {
-        console.error("API Error:", result.message || "Failed to fetch user");
+  useEffect(() => {
+    const fetchUserData = async () => {
+      const token = localStorage.getItem('userToken');
+      if (!token) {
+        console.error("No token found. User might not be logged in.");
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      console.error("Network or parsing error:", err);
-    } finally {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const result = await res.json();
+        
+        if (res.ok && result.success) {
+          setUserData(result.user);
+        } else {
+          console.error("API Error:", result.message || "Failed to fetch user");
+        }
+      } catch (err) {
+        console.error("Network or parsing error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (!userData || !userData._id) {
+      fetchUserData();
+    } else {
       setLoading(false);
     }
-  };
-
-  if (!userData || !userData._id) {
-    fetchUserData();
-  } else {
-    setLoading(false);
-  }
-}, [userData, setUserData]); // Added setUserData to dependencies to fulfill standard hooks rules safely
+  }, [userData, setUserData]); 
   
   useEffect(() => {
     if (userData) {
       setFormData({
         firstName: userData.firstName || '',
         lastName: userData.lastName || '',
-        phone: userData.phone || '',
+        // Handle fallback structure gracefully if legacy plain strings exist in your database
+        phone: userData.phone && typeof userData.phone === 'object' ? {
+          raw: userData.phone.raw || '',
+          formatted: userData.phone.formatted || '',
+          countryCode: userData.phone.countryCode || 'us',
+          dialCode: userData.phone.dialCode || '1'
+        } : { raw: userData.phone || '', formatted: userData.phone || '', countryCode: 'us', dialCode: '1' },
         dob: userData.dob || '',
         gender: userData.gender || '',
         city: userData.city || '',
@@ -91,7 +99,16 @@ useEffect(() => {
     const token = localStorage.getItem('userToken');
     const data = new FormData();
 
-    Object.keys(formData).forEach(key => data.append(key, formData[key]));
+    // Map properties cleanly to FormData multi-part specs
+    Object.keys(formData).forEach(key => {
+      if (key === 'phone') {
+        // Essential step: stringify the structured object so backend parsed blocks capture fields seamlessly
+        data.append('phone', JSON.stringify(formData.phone));
+      } else {
+        data.append(key, formData[key]);
+      }
+    });
+    
     if (selectedFile) data.append('photo', selectedFile);
 
     try {
@@ -115,64 +132,175 @@ useEffect(() => {
     }
   };
 
-  if (loading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
+  if (loading) return <div className="flex h-screen items-center justify-center font-bold tracking-wider text-gray-400 uppercase text-xs">Loading profile...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
-        <div className="flex items-center gap-4">
-          <BsChevronLeft className="cursor-pointer text-gray-600" size={20} onClick={() => navigate('/user/dashboard')} />
-          <h1 className="text-lg font-black text-blue-900 uppercase">My Profile</h1>
+    <div className="min-h-screen bg-gray-100 flex flex-col pb-12">
+      {/* --- FLOATING ACTION NAVIGATION HEADER --- */}
+      <div className="bg-white/80 backdrop-blur-md sticky top-0 z-50 p-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => navigate('/user/dashboard')} 
+            className="p-2 hover:bg-gray-50 rounded-full transition-colors group"
+          >
+            <BsChevronLeft className="text-gray-600 group-hover:text-blue-600 transition-colors" size={18} />
+          </button>
+          <h1 className="text-sm md:text-base font-black text-blue-900 uppercase tracking-wider">Profile Workspace</h1>
         </div>
         <button 
           onClick={() => isEditing ? handleUpdate() : setIsEditing(true)}
           disabled={isUpdating}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${isEditing ? 'bg-green-600 text-white' : 'bg-blue-50 text-blue-600'}`}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest shadow-md transition-all active:scale-95 ${
+            isEditing 
+              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-100' 
+              : 'bg-white hover:bg-gray-50 text-blue-600 border border-gray-200'
+          }`}
         >
-          {isUpdating ? "Updating..." : isEditing ? <><BsCheckLg/> Save</> : <><BsPencilSquare/> Edit</>}
+          {isUpdating ? "Saving..." : isEditing ? <><BsCheckLg size={13}/> Save Profile</> : <><BsPencilSquare size={13}/> Edit Profile</>}
         </button>
       </div>
 
-      <div className="p-4 max-w-md mx-auto w-full space-y-6">
-        <div className="flex flex-col items-center py-6">
-          <div className="w-28 h-28 rounded-full border-4 border-white shadow-md overflow-hidden relative group" onClick={() => isEditing && fileInputRef.current.click()}>
-            <img src={previewUrl || userData?.photoUrl || '/default-avatar.png'} alt="User" className="w-full h-full object-cover" />
-          </div>
-          <input type="file" ref={fileInputRef} hidden onChange={handleFileChange} accept="image/*" />
-          {!isEditing && <h2 className="mt-3 text-xl font-bold text-gray-800">{formData.firstName} {formData.lastName}</h2>}
+      {/* --- FACEBOOK STYLE HEADER HERO BANNER --- */}
+      <div className="w-full max-w-4xl mx-auto bg-white shadow-sm overflow-hidden md:rounded-b-2xl border-b border-gray-200/60">
+        {/* Cover Photo Area */}
+        <div className="h-36 sm:h-48 md:h-64 bg-gradient-to-r from-blue-700 via-indigo-800 to-blue-900 relative">
+          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]"></div>
         </div>
 
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
-          <EditableItem label="First Name" name="firstName" value={formData.firstName} isEditing={isEditing} onChange={handleInputChange} />
-          <EditableItem label="Last Name" name="lastName" value={formData.lastName} isEditing={isEditing} onChange={handleInputChange} />
-          <EditableItem label="Phone Number" name="phone" value={formData.phone} isEditing={isEditing} onChange={handleInputChange} />
-          <EditableItem label="Date of Birth" name="dob" type="date" value={formData.dob} isEditing={isEditing} onChange={handleInputChange} />
-          <EditableItem label="Gender" name="gender" value={formData.gender} isEditing={isEditing} onChange={handleInputChange} isSelect />
-          <div className="grid grid-cols-2 gap-4">
+        {/* Profile Avatar Overlay Frame */}
+        <div className="px-4 pb-6 relative flex flex-col items-center md:items-start md:flex-row md:gap-6 md:px-8">
+          <div className="-mt-16 sm:-mt-20 md:-mt-24 relative z-10">
+            <div 
+              onClick={() => isEditing && fileInputRef.current.click()}
+              className={`w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-full border-4 border-white bg-gray-100 shadow-xl overflow-hidden relative group ${isEditing ? 'cursor-pointer ring-4 ring-blue-500/20' : ''}`}
+            >
+              <img 
+                src={previewUrl || userData?.photoUrl || `https://ui-avatars.com/api/?name=${formData.firstName || 'User'}&background=0D1117&color=fff&size=256`} 
+                alt="Avatar" 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+              />
+              {isEditing && (
+                <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                  <BsCameraFill size={22} />
+                  <span className="text-[9px] font-bold uppercase mt-1 tracking-wider">Change</span>
+                </div>
+              )}
+            </div>
+            <input type="file" ref={fileInputRef} hidden onChange={handleFileChange} accept="image/*" />
+          </div>
+
+          {/* User Meta Information text column */}
+          <div className="mt-3 text-center md:text-left md:mt-4 flex-1">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-gray-900 leading-tight">
+              {formData.firstName || '—'} {formData.lastName || ''}
+            </h2>
+            <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">
+              {userData?.email}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* --- CENTRAL DOCK FORM ITEMS LAYOUT CONTAINER --- */}
+      <div className="p-4 max-w-4xl mx-auto w-full grid grid-cols-1 md:grid-cols-3 gap-6 mt-2">
+        
+        {/* Left Side Info Panel Card */}
+        <div className="md:col-span-1 bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm h-fit space-y-4">
+          <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Account Badge</h3>
+          <div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-600">
+              Role Status: {userData?.role || 'User'}
+            </span>
+          </div>
+          <div className="text-[11px] text-gray-400 font-medium">
+            Verified Account Status active since creation lifecycle tracking pipelines.
+          </div>
+        </div>
+
+        {/* Right Side Main Data Inputs Array Form Card */}
+        <div className="md:col-span-2 bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm space-y-5">
+          <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Identity Credentials</h3>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <EditableItem label="First Name" name="firstName" value={formData.firstName} isEditing={isEditing} onChange={handleInputChange} />
+            <EditableItem label="Last Name" name="lastName" value={formData.lastName} isEditing={isEditing} onChange={handleInputChange} />
+          </div>
+
+          {/* Structured Phone Input Layout Component */}
+          <div className="border-b border-gray-100/60 pb-4 last:border-0 last:pb-0">
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">Phone Number</p>
+            {isEditing ? (
+              <div className="phone-input-custom-wrapper">
+                <PhoneInput
+                  country={formData.phone?.countryCode || 'us'}
+                  value={formData.phone?.raw || ''}
+                  onChange={(value, countryData, event, formattedValue) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      phone: {
+                        raw: value,
+                        formatted: formattedValue,
+                        countryCode: countryData.countryCode,
+                        dialCode: countryData.dialCode
+                      }
+                    }));
+                  }}
+                  containerClass="w-full"
+                  inputClass="!w-full !h-11 !text-sm !font-semibold !bg-gray-50 !border-0 !rounded-xl"
+                  buttonClass="!bg-gray-50 !border-0 !rounded-l-xl"
+                  enableSearch={true}
+                />
+              </div>
+            ) : (
+              <p className="text-sm font-semibold text-gray-800">
+                {formData.phone?.formatted || formData.phone?.raw || '—'}
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <EditableItem label="Date of Birth" name="dob" type="date" value={formData.dob} isEditing={isEditing} onChange={handleInputChange} />
+            <EditableItem label="Gender" name="gender" value={formData.gender} isEditing={isEditing} onChange={handleInputChange} isSelect />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <EditableItem label="City" name="city" value={formData.city} isEditing={isEditing} onChange={handleInputChange} />
             <EditableItem label="State" name="state" value={formData.state} isEditing={isEditing} onChange={handleInputChange} />
           </div>
         </div>
+
       </div>
     </div>
   );
 };
 
 const EditableItem = ({ label, name, value, isEditing, onChange, type = "text", isSelect = false }) => (
-  <div className="border-b border-gray-50 pb-3 last:border-0 last:pb-0">
-    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter mb-1">{label}</p>
+  <div className="border-b border-gray-100/60 pb-4 last:border-0 last:pb-0 w-full">
+    <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">{label}</p>
     {isEditing ? (
       isSelect ? (
-        <select name={name} value={value} onChange={onChange} className="w-full text-sm font-semibold bg-gray-50 p-2 rounded-lg">
+        <select 
+          name={name} 
+          value={value} 
+          onChange={onChange} 
+          className="w-full text-sm font-semibold bg-gray-50 p-3 h-11 rounded-xl outline-none border border-transparent focus:border-gray-200 transition-colors appearance-none"
+        >
           <option value="">Select</option>
           <option value="male">Male</option>
           <option value="female">Female</option>
+          <option value="other">Other</option>
         </select>
       ) : (
-        <input type={type} name={name} value={value} onChange={onChange} className="w-full text-sm font-semibold bg-gray-50 p-2 rounded-lg" />
+        <input 
+          type={type} 
+          name={name} 
+          value={value} 
+          onChange={onChange} 
+          className="w-full text-sm font-semibold bg-gray-50 p-3 h-11 rounded-xl outline-none border border-transparent focus:border-gray-200 transition-colors" 
+        />
       )
     ) : (
-      <p className="text-sm font-semibold text-gray-700">{value && value.length > 0 ? value : '—'}</p>
+      <p className="text-sm font-semibold text-gray-800 h-6 flex items-center">{value && value.length > 0 ? value : '—'}</p>
     )}
   </div>
 );
