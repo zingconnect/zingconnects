@@ -277,7 +277,7 @@ React.useEffect(() => {
 
         <section className="grid grid-cols-3 gap-2 border-y border-gray-100 py-8 md:py-16 mb-16 md:mb-32 text-center">
           <div>
-            <p className="text-xl md:text-5xl font-black text-blue-600 mb-1">50k+</p>
+            <p className="text-xl md:text-5xl font-black text-blue-600 mb-1">1k+</p>
             <p className="text-gray-400 font-bold uppercase tracking-tighter text-[8px] md:text-xs">Active Users</p>
           </div>
           <div>
@@ -290,41 +290,57 @@ React.useEffect(() => {
           </div>
         </section>
 
-        <section className="pb-16 md:pb-32 px-2">
-          <div className="text-center mb-8 md:mb-16">
-            <h2 className="text-xl md:text-5xl font-black mb-2 text-blue-950 uppercase tracking-tight">Powerful Widget</h2>
-            <div className="w-12 h-1 bg-blue-600 mx-auto rounded-full"></div>
-          </div>
+    <section className="pb-16 md:pb-32 px-4">
+  <div className="text-center mb-8 md:mb-16">
+    <h2 className="text-xl md:text-5xl font-black mb-2 text-blue-950 uppercase tracking-tight">
+      Powerful Widget
+    </h2>
+    <div className="w-12 h-1 bg-blue-600 mx-auto rounded-full"></div>
+  </div>
 
-          <div className="flex flex-col lg:flex-row items-center justify-center gap-6 md:gap-12 bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-6 md:p-16 overflow-hidden relative shadow-xl">
-            <div className="absolute top-0 right-0 w-32 h-32 md:w-64 md:h-64 bg-white/10 rounded-full -mr-16 -mt-16"></div>
-            <div className="w-full max-w-[240px] md:max-w-[290px] bg-white rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-blue-950 relative z-10">
-              <div className="bg-blue-600 h-8 rounded-t-[1rem] -mx-3 -mt-3 mb-3 flex items-center px-3 justify-between">
-                <img src={ZingConnectLogo} className="h-3 brightness-0 invert" alt="logo" />
-                <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
-              </div>
-              <div className="space-y-3 h-[200px] md:h-[320px] overflow-hidden">
-                <div className="bg-gray-100 p-2 rounded-xl rounded-tl-none text-[9px] md:text-[11px] font-bold text-gray-600">Hi! How can I help?</div>
-                <div className="bg-blue-600 text-white p-2 rounded-xl rounded-tr-none text-[9px] md:text-[11px] font-bold w-4/5 ml-auto text-right">I'd like to start.</div>
-              </div>
-            </div>
-            <div className="hidden lg:block">
-              <BsLightningChargeFill className="text-white text-5xl animate-pulse" />
-            </div>
-            <div className="w-full max-w-[240px] md:max-w-[290px] bg-blue-950 rounded-[1.5rem] md:rounded-[2.5rem] shadow-2xl p-3 border-[6px] border-white relative z-10">
-              <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-2">
-                <div className="w-5 h-5 bg-blue-600 rounded-full"></div>
-                <span className="text-white font-bold text-[8px] uppercase">Console</span>
-              </div>
-              <div className="space-y-3">
-                <div className="bg-white/5 p-2 rounded-lg border border-white/10">
-                  <p className="text-[10px] text-white font-bold leading-tight text-center">New User Online</p>
-                </div>
-                <div className="bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black text-center shadow-lg uppercase">Join</div>
-              </div>
-            </div>
-          </div>
-        </section>
+  {/* Outer Blue Card Container */}
+  <div className="max-w-6xl mx-auto bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-8 md:p-16 overflow-hidden relative shadow-xl">
+    {/* Decorative Background Circle */}
+    <div className="absolute top-0 right-0 w-32 h-32 md:w-64 md:h-64 bg-white/10 rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+    
+    {/* Product Images Showcase Layout */}
+    <div className="relative z-10 flex flex-col items-center justify-center gap-8 lg:gap-12">
+      
+      {/* Top / Main Banner: Desktop view */}
+      <div className="w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl border-4 border-blue-950 transition-transform duration-300 hover:scale-[1.01]">
+        <img 
+          src="/AdsDesktop.png" 
+          alt="ZingConnect Desktop Dashboard View" 
+          className="w-full h-auto object-cover block"
+        />
+      </div>
+
+      {/* Side-by-Side Supporting Product Images (Mobile & Extra Views) */}
+      <div className="w-full max-w-4xl flex flex-col md:flex-row items-center justify-center gap-6 md:gap-10">
+        
+        {/* Mobile View Mockup */}
+        <div className="w-full max-w-[260px] rounded-[2rem] overflow-hidden shadow-2xl border-[6px] border-blue-950 bg-blue-950 transition-transform duration-300 hover:scale-105">
+          <img 
+            src="/AdsMobile.png" 
+            alt="ZingConnect Mobile App View" 
+            className="w-full h-auto block"
+          />
+        </div>
+
+        {/* Alternate Desktop/Feature View */}
+        <div className="w-full md:flex-1 max-w-[500px] rounded-xl overflow-hidden shadow-2xl border-4 border-white transition-transform duration-300 hover:scale-[1.02]">
+          <img 
+            src="/desktopAds.png" 
+            alt="ZingConnect Features Overview" 
+            className="w-full h-auto block"
+          />
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</section>
       </main>
 
       <footer className="bg-blue-950 text-white py-12 md:py-20 px-6">
