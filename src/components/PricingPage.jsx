@@ -17,23 +17,35 @@ const plans = [
     price: '10,500', 
     frequency: '/mo',
     popular: false,
-    features: ['Instant Link', 'Unlimited Chats', '24/7 Support'],
+    features: [
+      'Instant Link Delivery', 
+      'Unlimited Active Chats', 
+      'Standard Support'
+    ],
   },
   {
     tier: 'GROWTH',
     term: '6 Months',
     price: '55,500', 
-    frequency: '',
+    frequency: '/6 mos', // Clears up that this is a lump sum for the duration
     popular: true,
-    features: ['All Basic', 'Priority Routing', '24/7 Support'],
+    features: [
+      'All Basic Tier Features', 
+      'Priority Connection Routing', 
+      'Enhanced Support Access'
+    ],
   },
   {
     tier: 'PROFESSIONAL',
     term: '1 Year',
     price: '120,000', 
-    frequency: '',
+    frequency: '/yr',
     popular: false,
-    features: ['All Growth', 'Voice Changer', 'Analytics'],
+    features: [
+      'All Growth Tier Features', 
+      'Comprehensive Engagement Analytics', 
+      'Dedicated 24/7 Priority Support'
+    ],
   },
 ];
 
@@ -262,7 +274,7 @@ React.useEffect(() => {
       <main className="container mx-auto px-4 md:px-6 pt-10 md:pt-24 max-w-7xl">
         <div className="text-center max-w-3xl mx-auto mb-10 md:mb-16">
           <h1 className="text-3xl md:text-6xl font-black mb-4 md:mb-6 leading-tight px-2">
-            Start Your <span className="text-blue-600">Live Journey</span>
+            Start Your <span className="text-blue-600">Live Chat Journey</span>
           </h1>
           <p className="text-sm md:text-xl text-gray-500 font-bold leading-relaxed px-4">
             Select a plan that fits your business. Agent Live Links are generated instantly.
