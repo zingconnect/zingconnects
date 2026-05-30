@@ -217,53 +217,56 @@ export const UserProfile = () => {
               Verified Account Status active since creation lifecycle tracking pipelines.
             </div>
           </div>
+{/* CONNECTED AGENTS SIDEBAR CARD */}
+<div className="bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm space-y-4">
+  <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Connected Agents</h3>
+  
+  {userData?.connectedAgents && userData.connectedAgents.length > 0 ? (
+    <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+      {userData.connectedAgents.map((agent) => {
+        // 🛠️ FIX: Assemble agent display name safely
+        const agentDisplayName = agent.name || `${agent.firstName || 'Agent'} ${agent.lastName || ''}`.trim();
+        
+        // 🛠️ FIX: If photoUrl is empty or missing, auto-generate a fallback initial avatar string 
+        const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(agentDisplayName)}&background=0D1117&color=fff&size=128`;
+        const finalPhotoUrl = agent.photoUrl && agent.photoUrl.trim() !== "" ? agent.photoUrl : fallbackAvatar;
 
-          {/* CONNECTED AGENTS SIDEBAR CARD */}
-          <div className="bg-white rounded-2xl p-6 border border-gray-200/60 shadow-sm space-y-4">
-            <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest border-b border-gray-100 pb-2">Connected Agents</h3>
-            
-{userData?.connectedAgents && userData.connectedAgents.length > 0 ? (
-  <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-    {userData.connectedAgents.map((agent) => {
-      // Create a deterministic avatar fallback if photoUrl is missing or blank
-      const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(agent.name || agent.firstName || 'Agent')}&background=0D1117&color=fff&size=128`;
-      const finalPhotoUrl = agent.photoUrl && agent.photoUrl.trim() !== "" ? agent.photoUrl : fallbackAvatar;
-
-      return (
-        <Link 
-          to={`/${agent.slug}`} 
-          key={agent._id || agent.id || Math.random().toString()} 
-          className="flex items-center gap-3 p-2.5 rounded-xl border border-gray-50 hover:border-blue-100 hover:bg-blue-50/40 transition-all group"
-        >
-          <div className="w-9 h-9 rounded-full bg-blue-900 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0 overflow-hidden">
-            <img 
-              src={finalPhotoUrl} 
-              alt={agent.name || "Agent"} 
-              className="w-full h-full object-cover rounded-full"
-              onError={(e) => { 
-                // In case the cloud link itself is broken/expired, inject fallback immediately
-                e.target.src = fallbackAvatar; 
-              }}
-            />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold text-gray-800 truncate group-hover:text-blue-700 transition-colors">
-              {agent.name || `${agent.firstName || 'Agent'} ${agent.lastName || ''}`}
-            </p>
-            <p className="text-[10px] text-gray-400 font-medium truncate">
-              @{agent.slug || 'no-slug'}
-            </p>
-          </div>
-        </Link>
-      );
-    })}
-  </div>
-) : (
-  <div className="text-center py-4 text-gray-400 font-medium text-[11px] uppercase tracking-wider">
-    No Agents Connected Yet
-  </div>
-)}
-          </div>
+        return (
+          <Link 
+            to={`/${agent.slug}`} 
+            key={agent._id || agent.id || Math.random().toString()} 
+            className="flex items-center gap-3 p-2.5 rounded-xl border border-gray-50 hover:border-blue-100 hover:bg-blue-50/40 transition-all group"
+          >
+            <div className="w-9 h-9 rounded-full bg-blue-900 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0 overflow-hidden">
+              <img 
+                src={finalPhotoUrl} 
+                alt={agentDisplayName} 
+                className="w-full h-full object-cover rounded-full"
+                onError={(e) => { 
+                  // 🛠️ SAFETIED: In case a signed URL expires or breaks mid-session, intercept and swap image safely
+                  e.target.onerror = null; 
+                  e.target.src = fallbackAvatar; 
+                }} 
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-gray-800 truncate group-hover:text-blue-700 transition-colors">
+                {agentDisplayName}
+              </p>
+              <p className="text-[10px] text-gray-400 font-medium truncate">
+                @{agent.slug || 'no-slug'}
+              </p>
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  ) : (
+    <div className="text-center py-4 text-gray-400 font-medium text-[11px] uppercase tracking-wider">
+      No Agents Connected Yet
+    </div>
+  )}
+</div>
         </div>
 
         {/* --- RIGHT HAND SIDE DATA EDITABLE CARDS --- */}
