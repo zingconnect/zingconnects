@@ -1311,10 +1311,12 @@ const handleFileChange = (e) => {
   }
   e.target.value = ""; 
 };
-
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
-    if (!formData.phone || formData.phone.length < 10) {
+  
+  // 🛠️ FIX: Check the nested raw string property length instead of the parent object wrapper
+  const rawPhone = formData.phone?.raw || '';
+  if (!rawPhone || rawPhone.length < 10) {
     alert("Please enter a valid phone number with country code.");
     return;
   }
@@ -1322,18 +1324,27 @@ const handleProfileSubmit = async (e) => {
   setIsUploading(true); 
   const token = localStorage.getItem('userToken');
   const data = new FormData();
-    const fileToUpload = onboardingFile || previewFile;
+  
+  const fileToUpload = onboardingFile || previewFile;
   if (fileToUpload) {
     data.append('photo', fileToUpload);
   }
+
+  // 🛠️ FIX: Safely parse fields without stringifying the whole object blindly
   Object.keys(formData).forEach(key => {
     if (formData[key] !== undefined && formData[key] !== null) {
-      data.append(key, formData[key]);
+      if (key === 'phone') {
+        // Transform the nested object into a JSON string so FormData can carry it cleanly
+        data.append(key, JSON.stringify(formData[key]));
+      } else {
+        data.append(key, formData[key]);
+      }
     }
   });
 
   try {
-    const res = await fetch('/api/users/update-user-onboarding', {
+    // 💡 Double-check your endpoint route mapping names here to make sure they line up
+    const res = await fetch('/api/users/update-profile', {
       method: 'PUT',
       headers: { 
         'Authorization': `Bearer ${token}` 
@@ -1343,12 +1354,11 @@ const handleProfileSubmit = async (e) => {
 
     const result = await res.json();
 
-    if (res.ok) {
+    if (res.ok && result.success) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
       if (setUserData) setUserData(result.user);
       
-      // 3. Success Reset
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);

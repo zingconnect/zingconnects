@@ -1275,18 +1275,23 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
     
     if (phone) {
-      try {
-        const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
-        parsedPhone = {
-          raw: parsed.raw ? String(parsed.raw).trim() : "",
-          formatted: parsed.formatted ? String(parsed.formatted).trim() : "",
-          countryCode: parsed.countryCode ? String(parsed.countryCode).toLowerCase().trim() : "",
-          dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
-        };
-      } catch (e) {
-        parsedPhone.raw = String(phone).trim();
-      }
+  try {
+    const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
+    parsedPhone = {
+      raw: parsed.raw ? String(parsed.raw).trim() : "",
+      formatted: parsed.formatted ? String(parsed.formatted).trim() : "",
+      countryCode: parsed.countryCode ? String(parsed.countryCode).toLowerCase().trim() : "",
+      dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
+    };
+  } catch (e) {
+    // 🛠️ SAFETIED: If parsing fails because 'phone' equals "[object Object]", do not write it!
+    if (typeof phone === 'string' && phone.includes('[object Object]')) {
+      parsedPhone.raw = "";
+    } else {
+      parsedPhone.raw = String(phone).trim();
     }
+  }
+}
 
     let updateFields = {
       firstName, 
