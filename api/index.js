@@ -1200,16 +1200,23 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res) => {
     });
   }
 });
-
+// =========================================================================
+// 1. GET PROFILE ENDPOINT (FETCHES LOGGED-IN USER & HYDRATES AGENT RELATIONSHIPS)
+// =========================================================================
 app.get('/api/users/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    const user = await User.findById(req.user.id);
+    // Populate the connectedAgents array with specific fields from the Agent collection
+    const user = await User.findById(req.user.id).populate({
+      path: 'connectedAgents',
+      select: 'name firstName lastName slug photoUrl' // Required by frontend mapping layers
+    });
     
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
+
     let signedPhotoUrl = null;
     if (user.photoUrl) {
       signedPhotoUrl = await getPrivateUrl(user.photoUrl);
@@ -1218,10 +1225,29 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName || 'User'}+${user.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
 
+    // Convert to a clean object so we can append our mapped fields safely
+    const userObj = user.toObject();
+
+    // Sign profile images for any nested connected agents if applicable
+    if (userObj.connectedAgents && userObj.connectedAgents.length > 0) {
+      userObj.connectedAgents = await Promise.all(
+        userObj.connectedAgents.map(async (agent) => {
+          if (agent.photoUrl && !agent.photoUrl.startsWith('http')) {
+            try {
+              agent.photoUrl = await getPrivateUrl(agent.photoUrl);
+            } catch (err) {
+              console.error(`Failed to sign URL for agent ${agent._id}:`, err.message);
+            }
+          }
+          return agent;
+        })
+      );
+    }
+
     res.json({ 
       success: true, 
       user: {
-        ...user.toObject(),
+        ...userObj,
         photoUrl: signedPhotoUrl
       } 
     });
@@ -1230,6 +1256,10 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
+
+// =========================================================================
+// 2. UPDATE PROFILE ENDPOINT (SAVES SUB-OBJECTS & SYNCS DATA IMMEDIATELY)
+// =========================================================================
 app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();
@@ -1258,7 +1288,7 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     let updateFields = {
       firstName, 
       lastName, 
-      phone: parsedPhone, // 👈 Assigned your clean nested phone object parameters here
+      phone: parsedPhone, // Assigned your clean nested phone object parameters here
       dob, 
       gender, 
       city, 
@@ -1275,11 +1305,16 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       }
     }
 
+    // 🛠️ FIX: Added .populate() to ensure the freshly modified response payload 
+    // contains full agent object metrics rather than raw object IDs.
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateFields },
-      { new: true, runValidators: true } // Returns the newly modified document
-    );
+      { new: true, runValidators: true } 
+    ).populate({
+      path: 'connectedAgents',
+      select: 'name firstName lastName slug photoUrl'
+    });
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -1290,11 +1325,30 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${updatedUser.firstName || 'User'}+${updatedUser.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
 
+    // Convert updated model instance to clean object mapping
+    const updatedUserObj = updatedUser.toObject();
+
+    // Sign nested connected agents photos post-update to stay uniformly integrated
+    if (updatedUserObj.connectedAgents && updatedUserObj.connectedAgents.length > 0) {
+      updatedUserObj.connectedAgents = await Promise.all(
+        updatedUserObj.connectedAgents.map(async (agent) => {
+          if (agent.photoUrl && !agent.photoUrl.startsWith('http')) {
+            try {
+              agent.photoUrl = await getPrivateUrl(agent.photoUrl);
+            } catch (err) {
+              console.error(`Failed to sign URL for agent ${agent._id}:`, err.message);
+            }
+          }
+          return agent;
+        })
+      );
+    }
+
     res.json({
       success: true,
       message: "Profile updated successfully",
       user: {
-        ...updatedUser.toObject(),
+        ...updatedUserObj,
         photoUrl: signedPhotoUrl
       }
     });
