@@ -2565,13 +2565,19 @@ return (
               </p>
             </div>
 
-            {/* Explicit Gender Identity Data Frame */}
-            <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between hover:border-slate-300 transition-colors">
-              <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender Identity</p>
-              <p className="text-xs font-bold text-slate-800 capitalize">
-                {selectedUser.gender || 'Not Specified'}
-              </p>
-            </div>
+           {/* Explicit Gender Identity Data Frame */}
+<div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between hover:border-slate-300 transition-colors">
+  <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender Identity</p>
+  <p className={`text-xs font-bold capitalize ${
+    !selectedUser.gender || selectedUser.gender.toLowerCase() === 'not specified' 
+      ? 'text-slate-400 italic font-medium' 
+      : 'text-slate-800'
+  }`}>
+    {selectedUser.gender && selectedUser.gender.toLowerCase() !== 'not specified' 
+      ? selectedUser.gender 
+      : 'Not Specified'}
+  </p>
+</div>
 
             {/* Geographical Mapping Array */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between sm:col-span-2 hover:border-slate-300 transition-colors">

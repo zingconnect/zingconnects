@@ -1503,7 +1503,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
 
     const ActiveUserModel = mongoose.models.User || User;
     
-    // 🛠️ FIX: Added 'gender' explicitly into the document selection fields string
+    // Fetch users with lean execution
     const users = await ActiveUserModel.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl gender city state isVerified isProfileComplete lastLogin lastActive createdAt')
       .sort({ lastActive: -1 })
@@ -1535,7 +1535,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
       let finalPhotoUrl = null;
 
       if (user.photoUrl && typeof user.photoUrl === 'string') {
-        // 🛠️ FIX: Guard added to bypass signing strings that are raw Base64 data lines or absolute hyper-links
         if (user.photoUrl.startsWith('data:') || user.photoUrl.startsWith('http')) {
           finalPhotoUrl = user.photoUrl;
         } else {
@@ -1566,7 +1565,8 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
         avatar: finalPhotoUrl,    
         avatarUrl: finalPhotoUrl,  
         status: isOnline ? 'online' : 'offline',
-        gender: user.gender || "", 
+        gender: user.gender || "Not Specified", 
+        
         unreadCount: unreadMap[user._id.toString()] || 0 
       };
     }));
