@@ -1551,9 +1551,9 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
           data: { 
             // Fixed variable from finalReceiverModel to receiverModel
             url: receiverModel === 'Agent' 
-              ? `/agent/dashboard?userId=${myId}` 
-              : `/user/dashboard?agentId=${myId}` 
-          }
+      ? `/agent/${receiver.slug}/dashboard?userId=${myId}` 
+      : `/agent/${sender.slug}/user/dashboard` // 🚀 Corrected Path
+  }
         });
 
         await webpush.sendNotification(receiver.pushSubscription, payload);
@@ -1571,7 +1571,7 @@ if (!isOnline && receiver) {
 
     if (now - lastEmailTime > COOLDOWN) {
       // await sendWithSES(receiver, sender, text, receiverModel); 
-      await sendOfflineNotification(receiver, sender, text, receiverModel);
+      await sendOfflineNotification(receiver, sender, text, receiverModel, agentSlug);
       
       // 3. Immediately update the database to prevent "race condition" double-sends
       await TargetModel.findByIdAndUpdate(receiverId, { 
@@ -1801,7 +1801,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
         const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmail > COOLDOWN) {
-          await sendOfflineNotification(receiver, sender, text, fileName, detectedType, receiverModel);
+          await sendOfflineNotification(receiver, sender, text, fileName, detectedType, receiverModel, agentSlug);
           
           const TargetModel = receiverModel === 'Agent' ? Agent : User;
           await TargetModel.findByIdAndUpdate(receiverId, { 

@@ -1,6 +1,5 @@
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
-// 🚀 FIXED PATH: Jump up one directory level to 'api', then down into 'config'
 import { getPrivateUrl } from '../config/s3.js'; 
 
 dotenv.config();
@@ -35,10 +34,9 @@ export const sendOfflineNotification = async (
     const baseUrl = "https://zingconnect.vercel.app";
     const brandColor = "#007bff"; 
     
-    // Fallback to a default slug if none provided, though it should be passed
-    const slug = agentSlug || 'dashboard';
+    // Ensure slug is never undefined to prevent malformed URLs
+    const slug = agentSlug || 'default';
     
-    // 🚀 Dynamically label who the notification is coming from
     const senderName = sender.firstName ? `${sender.firstName} ${sender.lastName || ''}`.trim() : "Someone";
     const senderLabel = receiverType === 'Agent' ? `User (${senderName})` : `Agent (${senderName})`;
         
@@ -54,21 +52,17 @@ export const sendOfflineNotification = async (
 
     if (fileUrl && fileType === 'image') {
        const signedViewUrl = await getPrivateUrl(fileUrl);
-       
-       // Embedded layout pointing to our reliable CID attachment token
        embeddedVisual = `
          <div style="margin-top: 20px; border-radius: 8px; overflow: hidden; border: 1px solid #eee; background-color: #f9f9f9; padding: 10px;">
            <p style="margin: 0 0 10px; color: #666; font-size: 13px; font-weight: bold; text-align: center;">📷 Image Attachment:</p>
            <img src="cid:attached-photo" alt="Attachment" style="width: 100%; max-width: 400px; display: block; margin: auto; border-radius: 4px;">
          </div>
        `;
-
        mailAttachments.push({
          filename: 'attachment.png',
          path: signedViewUrl, 
          cid: 'attached-photo' 
        });
-
     } else if (fileUrl && fileType === 'video') {
        embeddedVisual = `
          <div style="margin-top: 20px; padding: 20px; background: #f0f0f0; border-radius: 8px; text-align: center; border: 1px dashed #ccc;">
@@ -79,14 +73,15 @@ export const sendOfflineNotification = async (
        `;
     }
 
-   // 🚀 UPDATED: Dynamic Path Construction using agentSlug
+    // 🚀 STRICT AGENT-SLUG ROUTING
+    // This forces the User back into the Agent's scoped portal correctly
     const path = receiverType === 'Agent' 
-      ? `/agent/${slug}/dashboard?userId=${sender._id}` 
-      : `/agent/${slug}/chat/${sender._id}`; 
+      ? `/agent/${slug}/Agentdashboard?userId=${sender._id}` 
+      : `/agent/${slug}/user/dashboard`; // Explicitly land users on their dashboard
     
     const callbackUrl = `${baseUrl}${path}`;
     const mediaSubjectNotification = fileType === 'image' ? 'photo' : (fileType === 'video' ? 'video' : 'message');
-    
+
     const mailOptions = {
       from: `"ZingConnect" <${process.env.EMAIL_USER}>`,
       to: receiver.email,
@@ -95,7 +90,7 @@ export const sendOfflineNotification = async (
       html: `
         <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;">
           <div style="padding: 20px; text-align: center; background-color: #ffffff; border-bottom: 1px solid #eee;">
-             <h1 style="font-size: 24px; color: ${brandColor}; margin: 0;">ZingConnect</h1>
+              <h1 style="font-size: 24px; color: ${brandColor}; margin: 0;">ZingConnect</h1>
           </div>
           
           <div style="padding: 30px;">
@@ -122,7 +117,7 @@ export const sendOfflineNotification = async (
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`[Mailer] Offline message notification successfully delivered to: ${receiver.email}`);
+    console.log(`[Mailer] Notification delivered to: ${receiver.email} via agent slug: ${slug}`);
   } catch (err) {
     console.error("🔴 OFFLINE NOTIFICATION ERROR:", err.message);
   }
