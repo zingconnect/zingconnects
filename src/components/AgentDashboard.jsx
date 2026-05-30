@@ -2313,10 +2313,8 @@ return (
   </div>
 
  <div className="flex items-center gap-6 text-gray-500 mr-2">
-  <button 
-    onClick={() => toast.error('This feature is not available yet.')} 
-    className="hover:text-blue-600 transition-colors active:scale-90 p-2" 
-    title="Call Settings"
+  <button  onClick={() => alert('Feature not available yet')} 
+    className="hover:text-blue-600 transition-colors active:scale-90 p-2" title="Call Settings"
   > 
     <BsGearFill size={20} />
   </button>
