@@ -290,55 +290,50 @@ React.useEffect(() => {
           </div>
         </section>
 
-    <section className="pb-16 md:pb-32 px-4">
-  <div className="text-center mb-8 md:mb-16">
+<section className="pb-16 md:pb-32 px-4 max-w-6xl mx-auto">
+  {/* Section Header */}
+  <div className="text-center mb-10 md:mb-16">
     <h2 className="text-xl md:text-5xl font-black mb-2 text-blue-950 uppercase tracking-tight">
-      Powerful Widget
+      ZingConnect Widget
     </h2>
     <div className="w-12 h-1 bg-blue-600 mx-auto rounded-full"></div>
   </div>
 
-  {/* Outer Blue Card Container */}
-  <div className="max-w-6xl mx-auto bg-blue-600 rounded-[2rem] md:rounded-[3rem] p-8 md:p-16 overflow-hidden relative shadow-xl">
-    {/* Decorative Background Circle */}
-    <div className="absolute top-0 right-0 w-32 h-32 md:w-64 md:h-64 bg-white/10 rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+  {/* Product Images Showcase Layout */}
+  <div className="flex flex-col items-center justify-center gap-8 md:gap-12">
     
-    {/* Product Images Showcase Layout */}
-    <div className="relative z-10 flex flex-col items-center justify-center gap-8 lg:gap-12">
+    {/* Main Banner: Desktop view */}
+    <div className="w-full max-w-5xl rounded-2xl overflow-hidden shadow-xl border border-gray-100 transition-transform duration-300 hover:scale-[1.01]">
+      <img 
+        src="/AdsDesktop.png" 
+        alt="ZingConnect Desktop Dashboard View" 
+        className="w-full h-auto object-cover block"
+      />
+    </div>
+
+    {/* Side-by-Side Supporting Product Images (Mobile & Extra Views) */}
+    <div className="w-full max-w-5xl flex flex-col md:flex-row items-center justify-center gap-6 md:gap-10">
       
-      {/* Top / Main Banner: Desktop view */}
-      <div className="w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl border-4 border-blue-950 transition-transform duration-300 hover:scale-[1.01]">
+      {/* Mobile View Mockup */}
+      <div className="w-full max-w-[240px] sm:max-w-[260px] rounded-[2rem] overflow-hidden shadow-xl border-[6px] border-blue-950 bg-blue-950 transition-transform duration-300 hover:scale-105">
         <img 
-          src="/AdsDesktop.png" 
-          alt="ZingConnect Desktop Dashboard View" 
-          className="w-full h-auto object-cover block"
+          src="/AdsMobile.png" 
+          alt="ZingConnect Mobile App View" 
+          className="w-full h-auto block"
         />
       </div>
 
-      {/* Side-by-Side Supporting Product Images (Mobile & Extra Views) */}
-      <div className="w-full max-w-4xl flex flex-col md:flex-row items-center justify-center gap-6 md:gap-10">
-        
-        {/* Mobile View Mockup */}
-        <div className="w-full max-w-[260px] rounded-[2rem] overflow-hidden shadow-2xl border-[6px] border-blue-950 bg-blue-950 transition-transform duration-300 hover:scale-105">
-          <img 
-            src="/AdsMobile.png" 
-            alt="ZingConnect Mobile App View" 
-            className="w-full h-auto block"
-          />
-        </div>
-
-        {/* Alternate Desktop/Feature View */}
-        <div className="w-full md:flex-1 max-w-[500px] rounded-xl overflow-hidden shadow-2xl border-4 border-white transition-transform duration-300 hover:scale-[1.02]">
-          <img 
-            src="/desktopAds.png" 
-            alt="ZingConnect Features Overview" 
-            className="w-full h-auto block"
-          />
-        </div>
-
+      {/* Alternate Desktop/Feature View */}
+      <div className="w-full md:flex-1 max-w-[540px] rounded-2xl overflow-hidden shadow-xl border border-gray-100 transition-transform duration-300 hover:scale-[1.01]">
+        <img 
+          src="/desktopAds.png" 
+          alt="ZingConnect Features Overview" 
+          className="w-full h-auto block"
+        />
       </div>
 
     </div>
+
   </div>
 </section>
       </main>
