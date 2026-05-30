@@ -63,9 +63,13 @@ const toggleEmailSelection = (email) => {
     prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]
   );
 };
-// --- ADD THIS TO ZINGDASHBOARD ---
 useEffect(() => {
-  const newSocket = io("https://zingconnect.vercel.app"); // Your backend URL
+  const newSocket = io("https://zingconnect.vercel.app", {
+    path: "/socket.io/", // Ensures it bypasses any automated /api prefixes
+    transports: ["websocket"], // Forces direct WebSockets, bypassing xhr polling
+    upgrade: false
+  });
+
   setSocket(newSocket);
 
   return () => newSocket.close();
