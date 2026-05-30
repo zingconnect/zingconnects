@@ -1207,10 +1207,10 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
     
-    // Populate the connectedAgents array with specific fields from the Agent collection
+    // 🛠️ FIX: Added fallback fields 'profileImage' and 'avatarUrl' to the select string
     const user = await User.findById(req.user.id).populate({
       path: 'connectedAgents',
-      select: 'name firstName lastName slug photoUrl' // Required by frontend mapping layers
+      select: 'name firstName lastName slug photoUrl profileImage avatarUrl' 
     });
     
     if (!user) {
@@ -1225,19 +1225,24 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName || 'User'}+${user.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
 
-    // Convert to a clean object so we can append our mapped fields safely
     const userObj = user.toObject();
 
     // Sign profile images for any nested connected agents if applicable
     if (userObj.connectedAgents && userObj.connectedAgents.length > 0) {
       userObj.connectedAgents = await Promise.all(
         userObj.connectedAgents.map(async (agent) => {
-          if (agent.photoUrl && !agent.photoUrl.startsWith('http')) {
+          // 🛠️ FIX: Fallback sequence extracts image regardless of variable naming conventions
+          const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
+
+          if (rawAgentImage && !rawAgentImage.startsWith('http')) {
             try {
-              agent.photoUrl = await getPrivateUrl(agent.photoUrl);
+              agent.photoUrl = await getPrivateUrl(rawAgentImage);
             } catch (err) {
               console.error(`Failed to sign URL for agent ${agent._id}:`, err.message);
+              agent.photoUrl = rawAgentImage; // Raw key fallback
             }
+          } else {
+            agent.photoUrl = rawAgentImage; // Assign direct string URL/Base64 or fallback empty string
           }
           return agent;
         })
@@ -1271,7 +1276,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     
     if (phone) {
       try {
-        // If multipart form data submits it as a stringified JSON payload, parse it
         const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
         parsedPhone = {
           raw: parsed.raw ? String(parsed.raw).trim() : "",
@@ -1280,7 +1284,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
           dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
         };
       } catch (e) {
-        // Fallback in case raw text was pushed instead of an object structure
         parsedPhone.raw = String(phone).trim();
       }
     }
@@ -1288,7 +1291,7 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     let updateFields = {
       firstName, 
       lastName, 
-      phone: parsedPhone, // Assigned your clean nested phone object parameters here
+      phone: parsedPhone, 
       dob, 
       gender, 
       city, 
@@ -1305,15 +1308,14 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       }
     }
 
-    // 🛠️ FIX: Added .populate() to ensure the freshly modified response payload 
-    // contains full agent object metrics rather than raw object IDs.
+    // 🛠️ FIX: Appended fallback fields 'profileImage' and 'avatarUrl' to update selector 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateFields },
       { new: true, runValidators: true } 
     ).populate({
       path: 'connectedAgents',
-      select: 'name firstName lastName slug photoUrl'
+      select: 'name firstName lastName slug photoUrl profileImage avatarUrl'
     });
 
     if (!updatedUser) {
@@ -1325,19 +1327,24 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${updatedUser.firstName || 'User'}+${updatedUser.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
 
-    // Convert updated model instance to clean object mapping
     const updatedUserObj = updatedUser.toObject();
 
     // Sign nested connected agents photos post-update to stay uniformly integrated
     if (updatedUserObj.connectedAgents && updatedUserObj.connectedAgents.length > 0) {
       updatedUserObj.connectedAgents = await Promise.all(
         updatedUserObj.connectedAgents.map(async (agent) => {
-          if (agent.photoUrl && !agent.photoUrl.startsWith('http')) {
+          // 🛠️ FIX: Identical fallback layout checking logic added here to maintain consistency post-update
+          const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
+
+          if (rawAgentImage && !rawAgentImage.startsWith('http')) {
             try {
-              agent.photoUrl = await getPrivateUrl(agent.photoUrl);
+              agent.photoUrl = await getPrivateUrl(rawAgentImage);
             } catch (err) {
               console.error(`Failed to sign URL for agent ${agent._id}:`, err.message);
+              agent.photoUrl = rawAgentImage;
             }
+          } else {
+            agent.photoUrl = rawAgentImage;
           }
           return agent;
         })
@@ -1358,7 +1365,6 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 app.get('/api/subscriptions/rate/:planPrice', async (req, res) => {
   const { planPrice } = req.params;
   const FIXED_RATE = Number(process.env.USD_TO_NGN_RATE);
