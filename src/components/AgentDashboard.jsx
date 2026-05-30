@@ -1565,18 +1565,16 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
-const handleSelectUser = async (user) => {
+  const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
-  // 1. Prepare UI
-  setMessages([]); 
+  // 1. Set the initial user immediately (contains full data from sidebar)
+  setSelectedUser(user);
+  setMessages([]);
   setIsInitialLoad(true);
-  
-  // 2. Set the initial user from the sidebar (already has 'gender' from sidebar map)
-  setSelectedUser(user); 
-  
   setLimit(30);
-  if (socket) socket.emit('join-chat', user._id); 
+  
+  if (socket) socket.emit('join-chat', user._id);
 
   try {
     const token = localStorage.getItem('agentToken');
@@ -1593,15 +1591,13 @@ const handleSelectUser = async (user) => {
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
         
-        // ✨ THE FIX: Merge instead of replace
-        // This keeps the original 'gender' from the sidebar and 
-        // updates only the fields that the API returns.
+        // ✨ THE FIX: Merge incoming data with existing state
         if (data.user || data.clientDetails) {
-          const freshUserData = data.user || data.clientDetails;
+          const freshData = data.user || data.clientDetails;
           
-          setSelectedUser(prevUser => ({
-            ...prevUser,        // Retains everything (including gender)
-            ...freshUserData    // Applies only the new fields from the API
+          setSelectedUser(prev => ({
+            ...prev,        // Retains everything currently in state (like gender)
+            ...freshData    // Only overwrites with fields present in the API response
           }));
         }
       }
@@ -1609,10 +1605,7 @@ const handleSelectUser = async (user) => {
       fetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.error("Mark read background error:", err));
-      
-    } else {
-      setConnectionStatus('connecting');
+      }).catch(err => console.error("Mark read error:", err));
     }
   } catch (err) {
     setConnectionStatus('connecting');
@@ -2500,10 +2493,6 @@ return (
 
     {/* Adaptive Layout Container */}
     <div className="relative w-full max-w-2xl bg-slate-50/80 backdrop-blur-2xl rounded-[2.5rem] border border-white/70 shadow-2xl overflow-hidden flex flex-col md:flex-row animate-in zoom-in-95 duration-200">
-      
-      {/* =========================================================================
-          LEFT SIDEBAR: HERO DYNAMICS & IDENTITY PASS
-          ========================================================================= */}
       <div className="relative w-full md:w-[240px] bg-gradient-to-b from-slate-900 to-slate-950 text-white p-6 flex flex-col items-center justify-between text-center border-b md:border-b-0 md:border-r border-slate-800/80">
         
         {/* Ambient Radial Spotlight Decor */}
