@@ -570,7 +570,7 @@ const handleToggleVerification = async (agentId) => {
             </div>
           )}
 
-      {/* --- CHAT SUPPORT TAB --- */}
+  {/* --- CHAT SUPPORT TAB --- */}
 {activeTab === 'Chat Support' && (
   <div className="flex h-[calc(100vh-250px)] bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-slate-100">
     
@@ -583,36 +583,36 @@ const handleToggleVerification = async (agentId) => {
       
       <div className="flex-1 overflow-y-auto">
         {guestsOnlyThreads.map((user) => (
-        <div 
-  key={user._id}
-  onClick={async () => {
-    const chatIdentifier = user.guestId || user._id;     
-    setActiveChat(user);
-    const token = localStorage.getItem('adminToken');
-    try {
-      const response = await fetch(`https://zingconnect.vercel.app/api/admin/support/messages/${chatIdentifier}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();      
-      if (data.success) {
-        setActiveChat(prev => ({ 
-          ...prev, 
-          messages: data.messages 
-        }));
-        setGuests(prev => prev.map(g => 
-          (g.guestId === chatIdentifier || g._id === user._id) 
-            ? { ...g, messages: data.messages } 
-            : g
-        ));
-      }
-    } catch (err) {
-      console.error("Critical: Failed to sync support history", err);
-    }
-  }}
-  className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
-    activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
-  }`}
->
+          <div 
+            key={user._id}
+            onClick={async () => {
+              const chatIdentifier = user.guestId || user._id;     
+              setActiveChat(user);
+              const token = localStorage.getItem('adminToken');
+              try {
+                const response = await fetch(`https://zingconnect.vercel.app/api/admin/support/messages/${chatIdentifier}`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();      
+                if (data.success) {
+                  setActiveChat(prev => ({ 
+                    ...prev, 
+                    messages: data.messages 
+                  }));
+                  setGuests(prev => prev.map(g => 
+                    (g.guestId === chatIdentifier || g._id === user._id) 
+                      ? { ...g, messages: data.messages } 
+                      : g
+                  ));
+                }
+              } catch (err) {
+                console.error("Critical: Failed to sync support history", err);
+              }
+            }}
+            className={`p-4 flex items-center gap-4 cursor-pointer transition-all border-b border-slate-50/50 ${
+              activeChat?._id === user._id ? 'bg-blue-50' : 'hover:bg-slate-50'
+            }`}
+          >
             <div className="relative shrink-0">
               <div className="w-10 h-10 rounded-2xl bg-slate-900 flex items-center justify-center text-white border border-slate-100 shadow-sm">
                 <BsPeopleFill size={18} />
@@ -635,75 +635,82 @@ const handleToggleVerification = async (agentId) => {
       </div>
     </div>
 
-  <div className="hidden md:flex flex-1 flex-col bg-slate-50/30">
-  {activeChat ? (
-    <>
-      {/* Header adaptation based on User Type */}
-      <div className="p-5 bg-white border-b border-slate-100 flex justify-between items-center px-8">
-        <div>
-          <p className="text-xs font-black text-slate-900 leading-none">
-            {activeChat.isGuest ? `Anonymous Guest (${activeChat._id.slice(-4)})` : `${activeChat.firstName} ${activeChat.lastName}`}
-          </p>
-          <p className="text-[9px] font-bold text-blue-600 uppercase mt-1 tracking-tighter">
-            {activeChat.isGuest ? 'Inbound Pricing Inquiry' : `${activeChat.program} Support Session`}
-          </p>
-        </div>
-        {!activeChat.isGuest && (
-          <button onClick={() => handleViewAgent(activeChat._id)} className="text-[9px] font-black uppercase text-slate-400 hover:text-blue-600 transition-colors">
-            View Profile
-          </button>
-        )}
-      </div>
-
-      <div className="flex-1 p-8 overflow-y-auto space-y-6">
-        {/* DYNAMIC MESSAGE HISTORY */}
-        {activeChat.messages && activeChat.messages.length > 0 ? (
-          activeChat.messages.map((msg, index) => (
-            <div key={index} className={`flex ${msg.isAdmin ? 'justify-end' : 'justify-start'}`}>
-              <div className="max-w-[80%]">
-                <div className={`p-4 rounded-[1.5rem] shadow-sm border text-[11px] font-medium leading-relaxed ${
-                  msg.isAdmin 
-                    ? 'bg-blue-600 text-white rounded-tr-none border-blue-700' 
-                    : 'bg-white text-slate-700 rounded-tl-none border-slate-100'
-                }`}>
-                  {msg.text}
-                </div>
-                <p className={`text-[8px] mt-2 font-black uppercase tracking-tighter ${
-                  msg.isAdmin ? 'text-right mr-1 text-blue-400' : 'ml-1 text-slate-400'
-                }`}>
-                  {msg.isAdmin ? 'System Admin' : (activeChat.isGuest ? 'Guest' : 'Agent')} • {msg.timestamp}
-                </p>
-              </div>
+    {/* Chat Space Terminal */}
+    <div className="hidden md:flex flex-1 flex-col bg-slate-50/30">
+      {activeChat ? (
+        <>
+          {/* Header adaptation based on User Type */}
+          <div className="p-5 bg-white border-b border-slate-100 flex justify-between items-center px-8">
+            <div>
+              <p className="text-xs font-black text-slate-900 leading-none">
+                {activeChat.isGuest ? `Anonymous Guest (${activeChat._id.slice(-4)})` : `${activeChat.firstName} ${activeChat.lastName}`}
+              </p>
+              <p className="text-[9px] font-bold text-blue-600 uppercase mt-1 tracking-tighter">
+                {activeChat.isGuest ? 'Inbound Pricing Inquiry' : `${activeChat.program} Support Session`}
+              </p>
             </div>
-          ))
-        ) : (
-          <div className="h-full flex items-center justify-center">
-            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No conversation history</p>
+            {!activeChat.isGuest && (
+              <button onClick={() => handleViewAgent(activeChat._id)} className="text-[9px] font-black uppercase text-slate-400 hover:text-blue-600 transition-colors">
+                View Profile
+              </button>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* INPUT AREA */}
-      <div className="p-6 bg-white border-t border-slate-100">
-        <form 
-          onSubmit={(e) => { e.preventDefault(); handleAdminReply(); }}
-          className="flex gap-3 bg-slate-100 p-2 rounded-[1.5rem]"
-        >
-          <input 
-            value={supportMessage}
-            onChange={(e) => setSupportMessage(e.target.value)}
-            placeholder={`Reply to ${activeChat.isGuest ? 'Guest' : activeChat.firstName}...`} 
-            className="flex-1 bg-transparent border-none px-4 text-[11px] font-bold focus:ring-0"
-          />
-          <button 
-            type="submit"
-            disabled={!supportMessage.trim()}
-            className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-slate-900 transition-all shadow-md"
-          >
-            <BsSendFill size={16} />
-          </button>
-        </form>
-      </div>
+          <div className="flex-1 p-8 overflow-y-auto space-y-6">
+            {/* DYNAMIC MESSAGE HISTORY */}
+            {activeChat.messages && activeChat.messages.length > 0 ? (
+              activeChat.messages.map((msg, index) => (
+                <div key={index} className={`flex w-full ${msg.isAdmin ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[75%] flex flex-col ${msg.isAdmin ? 'items-end' : 'items-start'}`}>
+                    
+                    {/* Message Bubble */}
+                    <div className={`p-4 rounded-[1.5rem] shadow-sm border text-[11px] font-medium leading-relaxed ${
+                      msg.isAdmin 
+                        ? 'bg-blue-600 text-white rounded-tr-none border-blue-700' 
+                        : 'bg-emerald-50 text-slate-800 rounded-tl-none border-emerald-100'
+                    }`}>
+                      {msg.text}
+                    </div>
+                    
+                    {/* Meta Status Row */}
+                    <p className={`text-[8px] mt-1.5 font-black uppercase tracking-tighter flex items-center gap-1.5 ${
+                      msg.isAdmin ? 'text-blue-500' : 'text-emerald-600'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${msg.isAdmin ? 'bg-blue-400' : 'bg-emerald-400'}`}></span>
+                      {msg.isAdmin ? 'System Admin' : (activeChat.isGuest ? 'Guest User' : 'Agent Profile')} • {msg.timestamp}
+                    </p>
+
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="h-full flex items-center justify-center">
+                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No conversation history</p>
+              </div>
+            )}
+          </div>
+
+          {/* INPUT AREA */}
+          <div className="p-6 bg-white border-t border-slate-100">
+            <form 
+              onSubmit={(e) => { e.preventDefault(); handleAdminReply(); }}
+              className="flex gap-3 bg-slate-100 p-2 rounded-[1.5rem]"
+            >
+              <input 
+                value={supportMessage}
+                onChange={(e) => setSupportMessage(e.target.value)}
+                placeholder={`Reply to ${activeChat.isGuest ? 'Guest' : activeChat.firstName}...`} 
+                className="flex-1 bg-transparent border-none px-4 text-[11px] font-bold focus:ring-0"
+              />
+              <button 
+                type="submit"
+                disabled={!supportMessage.trim()}
+                className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-slate-900 transition-all shadow-md"
+              >
+                <BsSendFill size={16} />
+              </button>
+            </form>
+          </div>
         </>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
