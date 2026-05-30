@@ -114,7 +114,7 @@ export const AgentDashboard = () => {
   const [timeTicker, setTimeTicker] = useState(Date.now());
 
   // Subscription States
-  const [isSubscribed, setIsSubscribed] = useState(false);
+const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of false
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);  
@@ -1292,7 +1292,6 @@ useEffect(() => {
     script.async = true;
     document.body.appendChild(script);
   }
-// 2. Data Initialization Logic
 const fetchInitialData = async () => {
   const token = localStorage.getItem('agentToken');
   if (!token) return navigate('/');
@@ -1302,19 +1301,21 @@ const fetchInitialData = async () => {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
-    // CRITICAL: Handle Dual Login Security FIRST
+    // 1. DUAL LOGIN (Force immediate stop)
     if (profileRes.status === 403) {
       const errorData = await profileRes.json();
-      if (errorData.reason === 'dual_login') {
+      if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
         setIsDualLoginConflict(true);
-        setLoading(false); // Stop loading, show the overlay
-        return; // EXIT: Do not proceed to load profile or subscription check
+        // Do NOT set isSubscribed here; keep it null so the Modal doesn't show
+        setLoading(false);
+        return; 
       }
     }
 
+    // 2. AUTH ERRORS
     if (profileRes.status === 401) {
       localStorage.removeItem('agentToken');
-      return navigate('/');
+      return navigate('/login');
     }
 
     if (!profileRes.ok) throw new Error("Failed to load profile");
@@ -1324,13 +1325,12 @@ const fetchInitialData = async () => {
     
     if (agent) {
       setAgentData(agent);
-      const activeStatus = !!agent.isSubscribed;
-      setIsSubscribed(activeStatus);
+      // Now set the boolean correctly
+      setIsSubscribed(!!agent.isSubscribed); 
 
       if (agent.plan) setSelectedPlan(agent.plan);
 
-      // Only fetch users if NOT in conflict (implicitly handled by early return above)
-      if (activeStatus) {
+      if (agent.isSubscribed) {
         const usersRes = await fetch('/api/agents/my-users', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -1346,6 +1346,7 @@ const fetchInitialData = async () => {
     setLoading(false);
   }
 };
+
   fetchInitialData();
   return () => {
     if (script && document.body.contains(script)) {
@@ -1659,9 +1660,8 @@ useEffect(() => {
   }
 }, [messages, isInitialLoad]);
 
-// 1. Polling for the User List (Global, doesn't need to restart on every click)
 useEffect(() => {
-  if (!isSubscribed || !agentData?._id) return;
+  if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
 
   const refreshUserList = async () => {
     const token = localStorage.getItem('agentToken');
@@ -1669,14 +1669,21 @@ useEffect(() => {
       const res = await fetch('/api/agents/my-users', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      if (res.status === 403) {
+        setIsDualLoginConflict(true);
+        return;
+      }
+
       const data = await res.json();
       if (data.success) setUsers(data.users);
-    } catch (err) { console.warn("User list refresh failed"); }
+    } catch (err) { 
+      console.warn("User list refresh failed"); 
+    }
   };
 
-  const interval = setInterval(refreshUserList, 15000); // 15s is plenty for a user list
+  const interval = setInterval(refreshUserList, 15000);
   return () => clearInterval(interval);
-}, [isSubscribed, agentData?._id]);
+}, [isSubscribed, agentData?._id, isDualLoginConflict]);
 
 // 2. Polling for the Active Chat (Contextual)
 useEffect(() => {
