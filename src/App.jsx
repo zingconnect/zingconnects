@@ -95,29 +95,33 @@ const ThemeInitializer = () => {
 
   return null;
 };
+
 const RootGate = () => {
-  const navigate = useNavigate();
   const slug = localStorage.getItem('agentSlug');
-  const userType = localStorage.getItem('userType'); // Assuming you store this
 
-  useEffect(() => {
-    if (slug) {
-      // Determine if we should send them to Agent or User dashboard
-      const dashboardPath = userType === 'user' 
-        ? `/agent/${slug}/user/dashboard` 
-        : `/agent/${slug}/dashboard`;
-      
-      navigate(dashboardPath, { replace: true });
-    } else {
-      // If no slug/info, go to landing/registration
-      navigate('/registration', { replace: true });
-    }
-  }, [slug, userType, navigate]);
-
-  // Optionally show a small loader while it redirects
   return (
-    <div style={{ padding: '40px', fontFamily: 'monospace' }}>
-      <h2>Initializing ZingConnect...</h2>
+    <div
+      style={{
+        padding: '40px',
+        fontFamily: 'monospace',
+        fontSize: '14px'
+      }}
+    >
+      <h2>DEBUG MODE</h2>
+
+      <p>Path: {window.location.pathname}</p>
+      <p>Search: {window.location.search}</p>
+      <p>Stored Slug: {slug || 'NULL'}</p>
+
+      <button
+        onClick={() => {
+          if (slug) {
+            window.location.href = '/' + slug;
+          }
+        }}
+      >
+        Continue
+      </button>
     </div>
   );
 };
@@ -136,20 +140,18 @@ function App() {
           <Route path="/registration" element={<Registration />} />
           <Route path="/verify-otp" element={<VerifyOTP />} />
 
-         {/* --- 2. PROTECTED AGENT ROUTES --- */}
-<Route element={<AgentLayoutWrapper />}>
-  {/* Add :slug to the path */}
-  <Route path="/agent/:slug/dashboard" element={<AgentDashboard />} />
-  <Route path="/agent/:slug/profile" element={<AgentProfile />} />
-  <Route path="/agent/:slug/call-settings" element={<CallSetting />} />
-</Route>
+          {/* --- 2. PROTECTED AGENT ROUTES --- */}
+          <Route element={<AgentLayoutWrapper />}>
+            <Route path="/agent/dashboard" element={<AgentDashboard />} />
+            <Route path="/agent/profile" element={<AgentProfile />} />
+            <Route path="/agent/call-settings" element={<CallSetting />} />
+          </Route>
 
-         {/* --- 3. PROTECTED USER ROUTES --- */}
-<Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
-  {/* Now users are also scoped to the agent they are interacting with */}
-  <Route path="/agent/:slug/user/dashboard" element={<UserDashboard />} />
-  <Route path="/agent/:slug/user/profile" element={<UserProfile />} />
-</Route>
+          {/* --- 3. PROTECTED USER ROUTES --- */}
+          <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
+            <Route path="/user/dashboard" element={<UserDashboard />} />
+            <Route path="/user/profile" element={<UserProfile />} />
+          </Route>
 
           {/* --- 4. ADMINISTRATOR ROUTES --- */}
           <Route path="/admin/terminal" element={<ZingAdmin />} /> 

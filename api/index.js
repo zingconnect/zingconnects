@@ -1551,9 +1551,9 @@ app.post('/api/messages/send', authenticateToken, async (req, res) => {
           data: { 
             // Fixed variable from finalReceiverModel to receiverModel
             url: receiverModel === 'Agent' 
-      ? `/agent/${receiver.slug}/dashboard?userId=${myId}` 
-      : `/agent/${sender.slug}/user/dashboard` // 🚀 Corrected Path
-  }
+              ? `/agent/dashboard?userId=${myId}` 
+              : `/user/dashboard?agentId=${myId}` 
+          }
         });
 
         await webpush.sendNotification(receiver.pushSubscription, payload);
@@ -1571,7 +1571,7 @@ if (!isOnline && receiver) {
 
     if (now - lastEmailTime > COOLDOWN) {
       // await sendWithSES(receiver, sender, text, receiverModel); 
-      await sendOfflineNotification(receiver, sender, text, receiverModel, agentSlug);
+      await sendOfflineNotification(receiver, sender, text, receiverModel);
       
       // 3. Immediately update the database to prevent "race condition" double-sends
       await TargetModel.findByIdAndUpdate(receiverId, { 
@@ -1782,10 +1782,8 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
           title: `New ${detectedType} from ${sender.firstName || 'Zing'}`,
           body: text || (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
           data: {
-           url: isAgent 
-          ? `/agent/${slug}/user/dashboard` 
-          : `/agent/${slug}/dashboard?userId=${req.user.id}` 
-      }
+            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}`
+          }
         });
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
@@ -1801,7 +1799,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
         const lastEmail = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
 
         if (now - lastEmail > COOLDOWN) {
-          await sendOfflineNotification(receiver, sender, text, fileName, detectedType, receiverModel, agentSlug);
+          await sendOfflineNotification(receiver, sender, text, fileName, detectedType, receiverModel);
           
           const TargetModel = receiverModel === 'Agent' ? Agent : User;
           await TargetModel.findByIdAndUpdate(receiverId, { 
@@ -1946,10 +1944,8 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res) => 
           title: `New ${fileType} from ${sender.firstName || 'Zing'}`,
           body: text || `Sent an attachment`,
           data: { 
-          url: isAgent 
-          ? `/agent/${slug}/user/dashboard` 
-          : `/agent/${slug}/dashboard?userId=${req.user.id}` 
-      }
+            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}` 
+          }
         });
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
