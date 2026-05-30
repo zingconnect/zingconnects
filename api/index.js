@@ -1210,17 +1210,26 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
     // 🛠️ FIX: Added fallback fields 'profileImage' and 'avatarUrl' to the select string
     const user = await User.findById(req.user.id).populate({
       path: 'connectedAgents',
-      select: '_id id name firstName lastName slug photoUrl'  
-      });
+      select: '_id id name firstName lastName slug photoUrl avatarUrl profileImage'  
+    });
     
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    let signedPhotoUrl = null;
-    if (user.photoUrl) {
-      signedPhotoUrl = await getPrivateUrl(user.photoUrl);
+    let signedPhotoUrl = user.photoUrl || null;
+
+    // 🛠️ CRITICAL FIX: Only run getPrivateUrl if it is a raw file storage path (e.g., "users/...")
+    // Bypasses IDrive signing if it's already an absolute link or a base64 string layout
+    if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
+      try {
+        signedPhotoUrl = await getPrivateUrl(signedPhotoUrl);
+      } catch (err) {
+        console.error("Failed to sign user photo URL:", err.message);
+        signedPhotoUrl = user.photoUrl; // Raw key fallback
+      }
     }
+
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName || 'User'}+${user.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
@@ -1234,7 +1243,7 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
           // 🛠️ FIX: Fallback sequence extracts image regardless of variable naming conventions
           const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
 
-          if (rawAgentImage && !rawAgentImage.startsWith('http')) {
+          if (rawAgentImage && !rawAgentImage.startsWith('http') && !rawAgentImage.startsWith('data:')) {
             try {
               agent.photoUrl = await getPrivateUrl(rawAgentImage);
             } catch (err) {
@@ -1261,6 +1270,7 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
+
 // =========================================================================
 // 2. UPDATE PROFILE ENDPOINT (SAVES SUB-OBJECTS & SYNCS DATA IMMEDIATELY)
 // =========================================================================
@@ -1326,13 +1336,25 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-   let signedPhotoUrl = updatedUser.photoUrl || null;
+    let signedPhotoUrl = updatedUser.photoUrl || null;
+    
+    // 🛠️ CRITICAL FIX: Match the exact verification check here during update submissions as well
+    if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
+      try {
+        signedPhotoUrl = await getPrivateUrl(signedPhotoUrl);
+      } catch (err) {
+        console.error("Failed to sign user avatar private URL:", err.message);
+        signedPhotoUrl = updatedUser.photoUrl;
+      }
+    }
+
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${updatedUser.firstName || 'User'}+${updatedUser.lastName || ''}&background=0D1117&color=fff&size=128`;
     }
 
     const updatedUserObj = updatedUser.toObject();
-        if (updatedUserObj.connectedAgents && updatedUserObj.connectedAgents.length > 0) {
+    
+    if (updatedUserObj.connectedAgents && updatedUserObj.connectedAgents.length > 0) {
       updatedUserObj.connectedAgents = await Promise.all(
         updatedUserObj.connectedAgents.map(async (agent) => {
           const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
