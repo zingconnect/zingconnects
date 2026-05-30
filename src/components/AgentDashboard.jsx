@@ -1565,16 +1565,14 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
+  
   const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
-  // 1. Prepare UI
+  // 1. Prepare the UI for a fresh jump
   setMessages([]); 
-  setIsInitialLoad(true);
-  
-  // 2. Set the initial user from the sidebar (has full data including gender)
-  setSelectedUser(user); 
-  
+  setIsInitialLoad(true); // <--- CRITICAL: Reset this so the scroll logic triggers
+  setSelectedUser(user); // Set the sidebar data immediately to prevent layout flickers
   setLimit(30);
   if (socket) socket.emit('join-chat', user._id); 
 
@@ -1593,16 +1591,12 @@ const handleFinalSend = async () => {
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
         
-        // ✨ UPDATED MERGE LOGIC
-        // We use a functional update to merge new API metadata 
-        // with the existing sidebar data, preserving 'gender' and other fields.
-        if (data.user || data.clientDetails) {
-          const freshUserData = data.user || data.clientDetails;
-          
-          setSelectedUser(prevUser => ({
-            ...prevUser,        // Retain existing fields (gender, etc.)
-            ...freshUserData    // Apply updates from the API response
-          }));
+        // ✨ THE FIX: Update selectedUser with any fresh metadata coming from the backend API
+        // If your endpoint returns client details (e.g., data.user), merge them here:
+        if (data.user) {
+          setSelectedUser(data.user);
+        } else if (data.clientDetails) {
+          setSelectedUser(data.clientDetails);
         }
       }
       
