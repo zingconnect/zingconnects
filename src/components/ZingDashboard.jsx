@@ -220,35 +220,98 @@ useEffect(() => {
   }
 }, [activeChat, socket]);
 
-const handleAdminReply = () => {
-  if (!supportMessage.trim() || !activeChat || !socket) return;
+const handleAdminReply = async () => {
+  if (!supportMessage.trim() || !activeChat) return;
+
   const chatIdentifier = activeChat.guestId || activeChat._id;
-  const replyData = {
-    guestId: String(chatIdentifier),
-    text: supportMessage,
-    senderType: "Admin" // Ensure this matches your Backend case-sensitivity
-  };
-  socket.emit("admin_to_guest_message", replyData);
-  const localFormattedMsg = {
-    _id: `temp-${Date.now()}`, // Prefix with temp to avoid key collisions
-    text: supportMessage,
+  const token = localStorage.getItem('adminToken');
+  const typedMessage = supportMessage;
+
+  // 1. Create a local temporary layout object for Optimistic UI responsiveness
+  const temporaryUIElement = {
+    _id: `temp-id-${Date.now()}`,
+    text: typedMessage,
     isAdmin: true,
     timestamp: new Date().toLocaleTimeString([], { 
       hour: '2-digit', 
       minute: '2-digit' 
     })
   };
+
+  // Append locally instantly so the user experience doesn't lag
   setActiveChat(prev => ({
     ...prev,
-    messages: [...(prev.messages || []), localFormattedMsg]
+    messages: [...(prev.messages || []), temporaryUIElement]
   }));
-  setGuests(prev => prev.map(g => {
-    const isTarget = g.guestId === chatIdentifier || g._id === activeChat._id;
-    return isTarget 
-      ? { ...g, messages: [...(g.messages || []), localFormattedMsg] } 
-      : g;
+
+  setGuests(prev => prev.map(currentGuest => {
+    const matchesTarget = currentGuest.guestId === chatIdentifier || currentGuest._id === activeChat._id;
+    return matchesTarget 
+      ? { ...currentGuest, messages: [...(currentGuest.messages || []), temporaryUIElement] }
+      : currentGuest;
   }));
+
+  // Clear out the text message input container layout immediately
   setSupportMessage("");
+
+  // 2. Direct Fallback Safe HTTP Network Post 
+  try {
+    const targetUrl = 'https://zingconnect.vercel.app/api/admin/support/reply';
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        guestId: String(chatIdentifier),
+        text: typedMessage,
+        senderType: 'Admin'
+      })
+    });
+
+    const payloadResult = await response.json();
+
+    if (payloadResult.success) {
+      const liveSavedData = payloadResult.messageData;
+
+      // Map the returned database values cleanly to match dashboard UI fields
+      const validatedMessage = {
+        _id: liveSavedData._id,
+        text: liveSavedData.text,
+        isAdmin: true,
+        timestamp: liveSavedData.timestamp || temporaryUIElement.timestamp
+      };
+
+      // Swap out the temporary object properties with database-validated values
+      setActiveChat(prev => ({
+        ...prev,
+        messages: (prev.messages || []).map(item => 
+          item._id === temporaryUIElement._id ? validatedMessage : item
+        )
+      }));
+
+      // Also sync it inside the main list history track so moving tabs preserves it
+      setGuests(prev => prev.map(currentGuest => {
+        const matchesTarget = currentGuest.guestId === chatIdentifier || currentGuest._id === activeChat._id;
+        return matchesTarget
+          ? {
+              ...currentGuest,
+              lastMessage: validatedMessage.text,
+              messages: (currentGuest.messages || []).map(item => 
+                item._id === temporaryUIElement._id ? validatedMessage : item
+              )
+            }
+          : currentGuest;
+      }));
+
+    } else {
+      console.error("❌ Server Rejected Target Write Event:", payloadResult.message);
+    }
+
+  } catch (err) {
+    console.error("❌ Critical Network Request Boundary Outage:", err);
+  }
 };
 
 const handleSendBroadcast = async () => {

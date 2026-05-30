@@ -3125,6 +3125,60 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
   }
 });
 
+// --- BACKEND REST API FALLBACK FOR ADMIN REPLIES ---
+app.post('/api/admin/support/reply', async (req, res) => {
+  try {
+    await connectToDatabase(); 
+    const { guestId, text, senderType } = req.body;
+
+    if (!guestId || !text) {
+      return res.status(400).json({ success: false, message: "Missing required guestId or message body context." });
+    }
+
+    // 1. Persist directly to MongoDB via HTTP POST
+    const savedMsg = await SupportMessage.create({
+      guestId: String(guestId),
+      text: text,
+      senderType: senderType || 'Admin', 
+      isAdminRead: true
+    });
+
+    console.log("✅ Database Save Successful via REST Route:", savedMsg._id);
+
+    // 2. Fetch the current socket.io server instance to notify active clients
+    const socketIo = req.app.get('socketio') || req.io;
+    if (socketIo) {
+      // Broadcast live to the guest room channel if their connection is online
+      socketIo.to(String(guestId)).emit("guest_receive_admin_message", {
+        _id: savedMsg._id,
+        text: savedMsg.text,
+        isAdmin: true,
+        timestamp: savedMsg.createdAt
+      });
+      
+      // Notify the active admin client to append the verified database entry
+      socketIo.emit("admin_message_stored", savedMsg);
+    } else {
+      console.warn("⚠️ Serverless Context Note: Active Socket.io instance unavailable for real-time relay.");
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Admin Reply Stored Authentically", 
+      messageData: {
+        _id: savedMsg._id,
+        text: savedMsg.text,
+        isAdmin: true,
+        timestamp: new Date(savedMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      } 
+    });
+
+  } catch (err) {
+    console.error("❌ Admin Route Critical Failure:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/health', async (req, res) => {
   try {
     await connectToDatabase();
