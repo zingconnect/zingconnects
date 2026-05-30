@@ -94,32 +94,33 @@ export const AgentDashboard = () => {
   const [caption, setCaption] = useState("");          
 
   let isFetching = false;
-const plans = [
-  {
-    tier: 'BASIC',
-    term: '1 Month',
-    price: '8,500', 
-    frequency: '/mo',
-    popular: false,
-    features: ['Instant Link', 'Unlimited Chats', '24/7 Support'],
-  },
-  {
-    tier: 'GROWTH',
-    term: '6 Months',
-    price: '43,500', 
-    frequency: '/6 mos',
-    popular: true,
-    features: ['All Basic', 'Priority Routing', 'Enhanced Support'],
-  },
-  {
-    tier: 'PROFESSIONAL',
-    term: '1 Year',
-    price: '88,500', 
-    frequency: '/yr',
-    popular: false,
-    features: ['All Growth', 'Deep Analytics', 'Dedicated Priority Support'],
-  },
-];
+  const plans = [
+    {
+      tier: 'BASIC',
+      term: '1 Month',
+      price: '8,500', 
+      frequency: '/mo',
+      popular: false,
+      features: ['Instant Link', 'Unlimited Chats', '24/7 Support'],
+    },
+    {
+      tier: 'GROWTH',
+      term: '6 Months',
+      price: '43,500', 
+      frequency: '/6mo',
+      popular: true,
+      features: ['All Basic', 'Priority Routing', 'Enhanced Support'],
+    },
+    {
+      tier: 'PROFESSIONAL',
+      term: '1 Year',
+      price: '76,500', 
+      frequency: '1yr',
+      popular: false,
+      features: ['All Growth', 'Deep Analytics', 'Dedicated Priority Support'],
+    },
+  ];
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
@@ -2294,6 +2295,7 @@ return (
         </span>
       </div>
       
+      {/* Show Email when Online, Last Seen when Offline */}
       {selectedUser.status === 'online' || selectedUser.isOnline ? (
         <p className="text-[11px] font-medium text-gray-500 lowercase leading-tight">
           {selectedUser.email}
@@ -2310,10 +2312,11 @@ return (
       )}
     </div>
   </div>
-
- <div className="flex items-center gap-6 text-gray-500 mr-2">
-  <button  onClick={() => alert('Feature not available yet')} 
-    className="hover:text-blue-600 transition-colors active:scale-90 p-2" title="Call Settings"
+<div className="flex items-center gap-6 text-gray-500 mr-2">
+  <button 
+    onClick={() => alert('Feature not available yet')} 
+    className="hover:text-blue-600 transition-colors active:scale-90 p-2" 
+    title="Call Settings"
   > 
     <BsGearFill size={20} />
   </button>
