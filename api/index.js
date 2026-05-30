@@ -1582,7 +1582,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
@@ -1605,13 +1604,15 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
     .limit(limit)
     .lean();
 
-    // Find this line in your message route and update it:
-const userData = await mongoose.model('User').findById(otherUserId)
-  .select('firstName lastName email gender status isOnline lastActive photoUrl city state phoneNumber') // 👈 Changed lastSeen to lastActive
-  .lean();
-if (userData) {
-  userData.gender = userData.gender || ""; // Fallback consistency
-}
+    // 2. Fetch user data safely
+    const userData = await mongoose.model('User').findById(otherUserId)
+      .select('firstName lastName email gender status isOnline lastActive photoUrl city state phoneNumber')
+      .lean();
+
+    // 🛠️ THE DEFINITIVE BACKEND FIX: Default to "Not Specified" instead of an empty string ""
+    if (userData) {
+      userData.gender = userData.gender || "Not Specified";
+    }
 
     // Mapping presigned assets remains fast because it's capped at the limit size
     const signedMessages = await Promise.all(messages.map(async (m) => {
@@ -1632,13 +1633,14 @@ if (userData) {
     res.json({ 
       success: true, 
       messages: signedMessages.reverse(),
-      user: userData // 👈 Sent back dynamically on every room switch
+      user: userData 
     });
   } catch (err) {
     console.error("Chat Fetch Error:", err);
     res.status(500).json({ success: false, message: "Error loading chat" });
   }
 });
+
 // --- NEW: SAVE PUSH SUBSCRIPTION ---
 app.post('/api/save-subscription', authenticateToken, async (req, res) => {
   try {
