@@ -159,43 +159,30 @@ useEffect(() => {
       setIsProcessing(false);
     }
   };
-
 const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);
   try {
-    // 1. CLEAR old agent session data to prevent "Inactive" screen flashes
-    localStorage.removeItem('agentToken'); 
-    localStorage.removeItem('agentSlug');
-    
     const response = await fetch('/api/agents/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      body: JSON.stringify({ 
+        email: loginEmail, 
+        password: loginPassword,
+        force: true // Added this flag
+      })
     });
     
     const data = await response.json();
     
     if (response.ok && data.token) {
-      if (rememberAgent) {
-        localStorage.setItem('rememberedAgentEmail', loginEmail);
-      } else {
-        localStorage.removeItem('rememberedAgentEmail');
-      }
-
-      // 3. Store new credentials
       localStorage.setItem('agentToken', data.token);
       localStorage.setItem('agentSlug', data.slug);
       window.location.href = '/agent/dashboard';
-
-    } else if (response.status === 403) {
-      // 5. Explicit check for Dual Login if the API blocks the login attempt
-      alert(data.message || "Account already active on another device.");
     } else {
       alert(data.message || "Invalid Agent Credentials");
     }
   } catch (err) {
-    console.error("Login Error:", err);
     alert("Portal connection error");
   } finally {
     setIsProcessing(false);

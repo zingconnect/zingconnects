@@ -128,13 +128,13 @@ const authenticateToken = (req, res, next) => {
         if (!agent) {
           return res.status(404).json({ message: "Agent not found" });
         }
-        if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-          return res.status(401).json({ 
-            success: false, 
-            message: "Session Mismatch", 
-            forceLogout: true 
-          });
-        }
+if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+  return res.status(403).json({ // Changed to 403 to match your fetch check
+    success: false, 
+    message: "Dual login detected.", 
+    reason: "dual_login" // Ensure this matches your frontend check
+  });
+}
         await AgentModel.findByIdAndUpdate(req.user.id, {
           $set: { lastActive: new Date() }
         });

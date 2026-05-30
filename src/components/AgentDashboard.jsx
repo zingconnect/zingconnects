@@ -1292,59 +1292,60 @@ useEffect(() => {
     script.async = true;
     document.body.appendChild(script);
   }
+// 2. Data Initialization Logic
+const fetchInitialData = async () => {
+  const token = localStorage.getItem('agentToken');
+  if (!token) return navigate('/');
 
-  // 2. Data Initialization Logic
-  const fetchInitialData = async () => {
-    const token = localStorage.getItem('agentToken');
-    if (!token) return navigate('/');
+  try {
+    const profileRes = await fetch('/api/agents/profile/me', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
 
-    try {
-      const profileRes = await fetch('/api/agents/profile/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      // Handle Authentication Errors
-      if (profileRes.status === 401) {
-        localStorage.removeItem('agentToken');
-        return navigate('/');
+    // CRITICAL: Handle Dual Login Security FIRST
+    if (profileRes.status === 403) {
+      const errorData = await profileRes.json();
+      if (errorData.reason === 'dual_login') {
+        setIsDualLoginConflict(true);
+        setLoading(false); // Stop loading, show the overlay
+        return; // EXIT: Do not proceed to load profile or subscription check
       }
-
-      // Handle Dual Login Security
-      if (profileRes.status === 403) {
-        const errorData = await profileRes.json();
-        if (errorData.reason === 'dual_login') {
-          setIsDualLoginConflict(true);
-          setLoading(false);
-          return;
-        }
-      }
-      if (!profileRes.ok) throw new Error("Failed to load profile");
-      const profileData = await profileRes.json();
-      const agent = profileData.agent;
-      if (agent) {
-        setAgentData(agent);
-        const activeStatus = !!agent.isSubscribed;
-        setIsSubscribed(activeStatus);
-
-        if (agent.plan) setSelectedPlan(agent.plan);
-
-        // 3. Conditional Data Loading (Only for active subscribers)
-        if (activeStatus) {
-          const usersRes = await fetch('/api/agents/my-users', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          const userData = await usersRes.json();
-          if (userData.success && Array.isArray(userData.users)) {
-            setUsers(userData.users);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Initialization error:", err);
-    } finally {
-      setLoading(false);
     }
-  };
+
+    if (profileRes.status === 401) {
+      localStorage.removeItem('agentToken');
+      return navigate('/');
+    }
+
+    if (!profileRes.ok) throw new Error("Failed to load profile");
+    
+    const profileData = await profileRes.json();
+    const agent = profileData.agent;
+    
+    if (agent) {
+      setAgentData(agent);
+      const activeStatus = !!agent.isSubscribed;
+      setIsSubscribed(activeStatus);
+
+      if (agent.plan) setSelectedPlan(agent.plan);
+
+      // Only fetch users if NOT in conflict (implicitly handled by early return above)
+      if (activeStatus) {
+        const usersRes = await fetch('/api/agents/my-users', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const userData = await usersRes.json();
+        if (userData.success && Array.isArray(userData.users)) {
+          setUsers(userData.users);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Initialization error:", err);
+  } finally {
+    setLoading(false);
+  }
+};
   fetchInitialData();
   return () => {
     if (script && document.body.contains(script)) {
@@ -2141,90 +2142,55 @@ return (
       </div>
     )}
 
-    {/* --- DUAL LOGIN CONFLICT OVERLAY --- */}
-    {isDualLoginConflict && (
-      <div className="fixed inset-0 z-[60000] bg-slate-900/98 backdrop-blur-xl flex items-center justify-center p-6">
-        <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-12 text-center animate-in zoom-in duration-300">
-          <div className="w-20 h-20 bg-red-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
-            <BsShieldFillExclamation size={40} className="text-red-500 animate-pulse" />
-          </div>
-          <h2 className="text-2xl font-black uppercase tracking-tighter text-slate-900 mb-4">Security Alert</h2>
-          <p className="text-slate-500 text-sm mb-8">Your account is active on another device.</p>
-          <div className="space-y-4">
-            <button onClick={() => { localStorage.removeItem('agentToken'); window.location.reload(); }} className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]">Disconnect Other Device</button>
-            <button onClick={() => navigate('/login')} className="w-full bg-slate-100 text-slate-600 font-bold py-4 rounded-2xl uppercase tracking-widest text-[11px]">Cancel</button>
-          </div>
-        </div>
+    {/* --- 1. GLOBAL LOADING STATE --- */}
+{loading ? (
+  <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-white">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  </div>
+) : isDualLoginConflict ? (
+  /* --- 2. PRIORITY: SECURITY ALERT --- */
+  <div className="fixed inset-0 z-[60000] bg-slate-900/98 backdrop-blur-xl flex items-center justify-center p-6">
+    <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-12 text-center animate-in zoom-in duration-300">
+      <div className="w-20 h-20 bg-red-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
+        <BsShieldFillExclamation size={40} className="text-red-500 animate-pulse" />
       </div>
-    )}
-
-   {/* --- SUBSCRIPTION MODAL --- */}
-{!loading && !isSubscribed && !isDualLoginConflict && !showSuccessOverlay && (
+      <h2 className="text-2xl font-black uppercase tracking-tighter text-slate-900 mb-4">Security Alert</h2>
+      <p className="text-slate-500 text-sm mb-8">Your account is active on another device.</p>
+      <button 
+        onClick={() => { localStorage.removeItem('agentToken'); window.location.href = '/login'; }} 
+        className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]"
+      >
+        Disconnect Other Device
+      </button>
+    </div>
+  </div>
+) : !isSubscribed && !showSuccessOverlay ? (
+  /* --- 3. SECONDARY: SUBSCRIPTION MODAL --- */
   <div className="absolute inset-0 z-[10000] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-6">
     <div className="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
-      
-      {/* Left Accent Banner */}
       <div className="bg-blue-600 p-10 text-white md:w-1/3 flex flex-col justify-between">
         <div>
           <BsShieldLockFill size={32} className="mb-4 opacity-90" />
           <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">Account Inactive</h2>
           <p className="text-blue-100 text-sm opacity-90">Subscription required for dashboard access.</p>
         </div>
-        <div className="mt-8 pt-8 border-t border-blue-500/50">
-          <p className="text-[10px] uppercase font-bold tracking-widest opacity-60">Current Selection</p>
-          <p className="text-3xl font-black">{selectedPlan}</p>
-          {/* Added the selected plan's duration here for confirmation */}
-          <p className="text-xs text-blue-200 mt-1 font-medium">
-            Valid for {plans.find(p => p.tier === selectedPlan)?.term}
-          </p>
-        </div>
       </div>
-
-      {/* Right Pricing Plan Selection */}
       <div className="p-12 md:w-2/3 bg-gray-50 flex flex-col overflow-y-auto">
         <h3 className="text-xl font-bold text-gray-800 mb-6">Choose Your Access Tier</h3>
-        
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {plans.map((plan) => (
             <div
               key={plan.tier}
               onClick={() => setSelectedPlan(plan.tier)}
               className={`cursor-pointer p-5 rounded-2xl border-2 transition-all relative flex flex-col justify-between h-36 ${
-                selectedPlan === plan.tier 
-                  ? 'border-blue-600 bg-white shadow-xl scale-[1.03]' 
-                  : 'border-gray-200 bg-white opacity-80 hover:opacity-100'
+                selectedPlan === plan.tier ? 'border-blue-600 bg-white shadow-xl scale-[1.03]' : 'border-gray-200 bg-white opacity-80 hover:opacity-100'
               }`}
             >
-              {/* Popular Badge indicator if applicable */}
-              {plan.popular && (
-                <span className="absolute -top-2.5 left-4 bg-orange-500 text-white text-[8px] font-black tracking-widest px-2 py-0.5 rounded-full uppercase">
-                  Popular
-                </span>
-              )}
-
-              <div>
-                {/* Tier Label */}
-                <span className={`text-[9px] font-black uppercase tracking-widest block ${selectedPlan === plan.tier ? 'text-blue-600' : 'text-gray-400'}`}>
-                  {plan.tier}
-                </span>
-                {/* CHANGED: Added the missing Term/Duration explicitly here */}
-                <span className="text-xs font-bold text-gray-500 block mt-0.5">
-                  {plan.term} Access
-                </span>
-              </div>
-
-              <div>
-                {/* Price Label */}
-                <div className="text-2xl font-black text-gray-900 leading-none">
-                  ₦{plan.price}
-                </div>
-                {/* Frequency Context Subtitle */}
-                <span className="text-[10px] text-gray-400 font-medium mt-1 block">
-                  {plan.tier === 'BASIC' && 'billed monthly'}
-                  {plan.tier === 'GROWTH' && 'billed every 6 months'}
-                  {plan.tier === 'PROFESSIONAL' && 'billed annually'}
-                </span>
-              </div>
+              <span className={`text-[9px] font-black uppercase tracking-widest block ${selectedPlan === plan.tier ? 'text-blue-600' : 'text-gray-400'}`}>
+                {plan.tier}
+              </span>
+              <span className="text-xs font-bold text-gray-500 block mt-0.5">{plan.term} Access</span>
+              <div className="text-2xl font-black text-gray-900 leading-none">₦{plan.price}</div>
             </div>
           ))}
         </div>
@@ -2236,10 +2202,9 @@ return (
           {paymentProcessing ? "Processing..." : `Activate ${selectedPlan} Access`}
         </button>
       </div>
-
     </div>
   </div>
-)}
+) : null}
 
     {/* --- SIDEBAR --- */}
     <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
