@@ -131,8 +131,8 @@ agentSchema.virtual('isVoicePackageExpired').get(function() {
   return new Date() > this.voicePackageExpiry;
 });
 
-// ✨ Added: Auto-generate unique slug hook before validation runs
-agentSchema.pre('validate', async function(next) {
+// ✨ FIXED: Removed 'next' parameter since this is an async function
+agentSchema.pre('validate', async function() {
   if (this.isModified('firstName') || this.isModified('lastName') || !this.slug) {
     // 1. Create baseline slug string format (e.g., "john-doe")
     const baseSlug = `${this.firstName}-${this.lastName}`
@@ -161,7 +161,7 @@ agentSchema.pre('validate', async function(next) {
 
     this.slug = generatedSlug;
   }
-  next();
+  // No next() call here. Returning or resolving the async function tells Mongoose to proceed.
 });
 
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
