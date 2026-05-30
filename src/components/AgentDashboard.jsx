@@ -1565,14 +1565,16 @@ const handleFinalSend = async () => {
       window.location.href = '/';
     }
   };
-  
-  const handleSelectUser = async (user) => {
+const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
-  // 1. Prepare the UI for a fresh jump
+  // 1. Prepare UI
   setMessages([]); 
-  setIsInitialLoad(true); // <--- CRITICAL: Reset this so the scroll logic triggers
-  setSelectedUser(user); // Set the sidebar data immediately to prevent layout flickers
+  setIsInitialLoad(true);
+  
+  // 2. Set the initial user from the sidebar (already has 'gender' from sidebar map)
+  setSelectedUser(user); 
+  
   setLimit(30);
   if (socket) socket.emit('join-chat', user._id); 
 
@@ -1591,16 +1593,19 @@ const handleFinalSend = async () => {
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
         
-        // ✨ THE FIX: Update selectedUser with any fresh metadata coming from the backend API
-        // If your endpoint returns client details (e.g., data.user), merge them here:
-        if (data.user) {
-          setSelectedUser(data.user);
-        } else if (data.clientDetails) {
-          setSelectedUser(data.clientDetails);
+        // ✨ THE FIX: Merge instead of replace
+        // This keeps the original 'gender' from the sidebar and 
+        // updates only the fields that the API returns.
+        if (data.user || data.clientDetails) {
+          const freshUserData = data.user || data.clientDetails;
+          
+          setSelectedUser(prevUser => ({
+            ...prevUser,        // Retains everything (including gender)
+            ...freshUserData    // Applies only the new fields from the API
+          }));
         }
       }
       
-      // Fire-and-forget background read sync
       fetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -1851,15 +1856,11 @@ const handleResend = async (failedMsg) => {
 
 const handleSendMessage = async (e) => {
   e.preventDefault();
-  
-  // 1. Basic validation
-  if (!newMessage.trim() || !selectedUser || isUploading) return;
+    if (!newMessage.trim() || !selectedUser || isUploading) return;
 
   const textToSend = newMessage;
   const tempId = Date.now().toString(); // Temporary ID for the UI key
   setNewMessage(''); // Clear input immediately for speed
-
-  // 2. Create the Optimistic Message (Shows up instantly)
   const optimisticMsg = {
     _id: tempId,
     text: textToSend,
