@@ -25,7 +25,7 @@ export const agentSchema = new mongoose.Schema({
     type: String, 
     required: true, 
     unique: true,
-    index: true // 👈 Added for fast profile lookups
+    index: true 
   },
   address: String,
   occupation: String,
@@ -37,7 +37,7 @@ export const agentSchema = new mongoose.Schema({
   photoUrl: { type: String, default: '' },
 
   // --- VERIFICATION FIELDS ---
-  isVerified: { type: Boolean, default: false, index: true }, // 👈 Indexed for cleanup logic
+  isVerified: { type: Boolean, default: false, index: true }, 
   otp: { type: String },
   otpExpires: { type: Date },
 
@@ -85,7 +85,6 @@ export const agentSchema = new mongoose.Schema({
     type: [String], 
     default: [] 
   },
-  // Added: Master UI toggle for the masking feature
   voiceMaskingEnabled: {
     type: Boolean,
     default: false
@@ -127,11 +126,42 @@ agentSchema.virtual('isExpired').get(function() {
 
 // Virtual for Voice Package Logic
 agentSchema.virtual('isVoicePackageExpired').get(function() {
-  // If they are using natural voice, it never expires
   if (!this.voiceId) return false;
-  
   if (!this.voicePackageExpiry) return true; 
   return new Date() > this.voicePackageExpiry;
+});
+
+// ✨ Added: Auto-generate unique slug hook before validation runs
+agentSchema.pre('validate', async function(next) {
+  if (this.isModified('firstName') || this.isModified('lastName') || !this.slug) {
+    // 1. Create baseline slug string format (e.g., "john-doe")
+    const baseSlug = `${this.firstName}-${this.lastName}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-') // replace spaces/special characters with hyphens
+      .replace(/(^-|-$)+/g, '');   // trim trailing hyphens
+
+    let generatedSlug = baseSlug;
+    let counter = 1;
+
+    // 2. Loop check to guarantee absolute uniqueness in database collection
+    while (true) {
+      const existingAgent = await mongoose.models.Agent.findOne({ 
+        slug: generatedSlug, 
+        _id: { $ne: this._id } 
+      });
+
+      if (!existingAgent) {
+        break; // Found an available slug!
+      }
+
+      // If slug exists, attach index counter (e.g., "john-doe-1", "john-doe-2")
+      generatedSlug = `${baseSlug}-${counter}`;
+      counter++;
+    }
+
+    this.slug = generatedSlug;
+  }
+  next();
 });
 
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
