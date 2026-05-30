@@ -14,6 +14,27 @@ import {
   BsCameraFill  
 } from 'react-icons/bs';
 
+const formatLastSeen = (lastSeenDate) => {
+  if (!lastSeenDate) return 'Recently';
+  const now = new Date();
+  const lastSeen = new Date(lastSeenDate);
+  const diffInSeconds = Math.floor((now - lastSeen) / 1000);
+  if (diffInSeconds < 60) return 'Just now';
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes} ${diffInMinutes === 1 ? 'minute' : 'minutes'} ago`;
+  }
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) {
+    return `${diffInHours} ${diffInHours === 1 ? 'hour' : 'hours'} ago`;
+  }
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays === 1) return 'Yesterday';
+  if (diffInDays < 7) {
+    return `${diffInDays} days ago`;
+  }
+  return lastSeen.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -83,6 +104,8 @@ export const AgentDashboard = () => {
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [callTime, setCallTime] = useState(0);
 
+  const [timeTicker, setTimeTicker] = useState(Date.now());
+
   // Subscription States
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
@@ -121,6 +144,13 @@ export const AgentDashboard = () => {
     },
   ];
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimeTicker(Date.now());
+    }, 60000); 
+    return () => clearInterval(interval);
+  }, []);
+  
   const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
@@ -2301,9 +2331,9 @@ return (
           {selectedUser.email}
         </p>
       ) : (
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">
-          Last seen: {selectedUser.lastSeen ? new Date(selectedUser.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently'}
-        </p>
+       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">
+                      Last seen: {formatLastSeen(selectedUser.lastSeen)}
+                    </p>
       )}
       {(selectedUser.city || selectedUser.state) && (
         <p className="text-[9px] font-bold text-blue-600 truncate max-w-[180px] mt-0.5">
@@ -2314,7 +2344,7 @@ return (
   </div>
 <div className="flex items-center gap-6 text-gray-500 mr-2">
   <button 
-    onClick={() => toast.error('This feature is not available yet.')} 
+    onClick={() => alert('This feature is not available yet.')} 
     className="hover:text-blue-600 transition-colors active:scale-90 p-2" 
     title="Call Settings"
   > 
