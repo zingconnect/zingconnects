@@ -27,31 +27,31 @@ const AgentLayoutWrapper = () => {
     </AgentCallProvider>
   );
 };
+
 const PWAController = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [isReady, setIsReady] = React.useState(false);
+  const [isChecking, setIsChecking] = React.useState(true);
 
   React.useLayoutEffect(() => {
     const isStandalone = !!window.navigator.standalone || 
                          window.matchMedia('(display-mode: standalone)').matches;
 
-    // 1. If not standalone, we are ready immediately
-    if (!isStandalone) {
-      setIsReady(true);
-      return;
-    }
-
+    const params = new URLSearchParams(window.location.search);
+    const urlSlug = params.get('pwa');
     const storageSlug = localStorage.getItem('agentSlug');
-        const shouldRedirect = (location.pathname === '/' || location.pathname === '/pricing') && storageSlug;
+    const target = urlSlug || storageSlug;
 
-    if (shouldRedirect) {
-      navigate(`/${storageSlug}`, { replace: true });
+    const isAtRoot = location.pathname === '/' || location.pathname === '/pricing';
+
+    if (isStandalone && isAtRoot && target) {
+      navigate(`/${target}`, { replace: true });
     } else {
-      setIsReady(true);
+      setIsChecking(false);
     }
   }, [navigate, location.pathname]);
-  if (!isReady) {
+
+  if (isChecking && (window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches)) {
     return <div className="min-h-screen bg-white" />; 
   }
 
