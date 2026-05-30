@@ -1579,6 +1579,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res) => {
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
+
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res) => {
   try {
     await connectToDatabase();
