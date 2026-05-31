@@ -29,6 +29,7 @@ export const AgentSlug = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [rememberUser, setRememberUser] = useState(false);
   const [rememberAgent, setRememberAgent] = useState(false);
+const fullName = agentData ? `${agentData.firstName || ''} ${agentData.lastName || ''}`.trim() : '';
 
   useEffect(() => {
     const handler = (e) => {
@@ -237,7 +238,7 @@ useEffect(() => {
             </div>
             <h1 className="text-3xl md:text-6xl lg:text-8xl font-normal tracking-tighter leading-[1] md:leading-[0.9] text-slate-400 text-center lg:text-left">
               Connect with <br />
-            <span className="font-black text-blue-950">{displayName}</span>
+              <span className="font-black text-blue-950">{fullName}</span>
             </h1>
           </div>
 
