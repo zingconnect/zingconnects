@@ -104,21 +104,18 @@ const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
 const authenticateToken = async (req, res, next) => {
-  // 1. Extract token from Header or Cookie (Manual fallback for serverless)
+  // 1. Attempt Authorization header first (Industry Standard)
   const authHeader = req.headers['authorization'];
   let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
+  // 2. Fallback: Parse cookies manually if Header is missing
   if (!token && req.headers.cookie) {
-    const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
-      const [key, value] = cookie.trim().split('=');
-      acc[key] = value;
-      return acc;
-    }, {});
+    const cookies = Object.fromEntries(req.headers.cookie.split('; ').map(c => c.split('=')));
     token = cookies['token'];
   }
 
   if (!token) {
-    console.log("DEBUG: Auth failed, no token found in headers or cookies.");
+    console.warn("DEBUG: Auth failed, no token found in headers or cookies.");
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
 
@@ -127,12 +124,33 @@ const authenticateToken = async (req, res, next) => {
     req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    // ... (Keep your existing Agent/Admin logic here)
+    // Agent Logic
+    if (decoded.role === 'agent') {
+      const AgentModel = mongoose.models.Agent || Agent;
+      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+      
+      if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
+
+      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+        return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
+      }
+      
+      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
+    }
+
+    // Admin Logic
+    if (decoded.role === 'admin') {
+      const AdminModel = mongoose.models.Admin || Admin;
+      await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
+    }
 
     next();
   } catch (err) {
     console.error("DEBUG: Token verification failed:", err.message);
-    return res.status(403).json({ success: false, message: "Invalid or expired token" });
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: "Token expired" });
+    }
+    return res.status(403).json({ success: false, message: "Invalid Token" });
   }
 };
 
@@ -842,7 +860,8 @@ res.cookie('token', token, {
     return res.json({ 
       success: true, 
       isNewUser, 
-      isProfileComplete: user.isProfileComplete 
+      isProfileComplete: user.isProfileComplete,
+      token: token
     });
     
   } catch (err) {

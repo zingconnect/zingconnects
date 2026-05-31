@@ -12,10 +12,12 @@ import { UserDashboard } from './components/UserDashboard';
 import { AgentProfile } from './components/AgentProfile'; 
 import { UserProfile } from './components/UserProfile'; 
 import { CallSetting } from './components/CallSetting'; 
+import { ProtectedRoute } from './components/ProtectedRoute';
 import ZingAdmin from './components/ZingAdmin'; 
 import ZingDashboard from './components/ZingDashboard'; 
 
-// Context Providers
+
+import { AuthProvider } from './context/AuthContext'; // NEW
 import { UserCallProvider } from './context/UserCallContext';
 import { AgentCallProvider } from './context/AgentCallContext';
 
@@ -90,41 +92,44 @@ const ThemeInitializer = () => {
 
 function App() {
   return (
-    <Router>
-      <PWAController>
-        <ThemeInitializer />
-        <Routes>
-          {/* --- 1. PUBLIC & AUTH ROUTES --- */}
-          <Route path="/" element={<PricingPage />} />
-          <Route path="/pricing" element={<PricingPage />} />
-          <Route path="/registration" element={<Registration />} />
-          <Route path="/verify-otp" element={<VerifyOTP />} />
+    <AuthProvider>
+      <Router>
+        <PWAController>
+          <ThemeInitializer />
+          <Routes>
+            {/* --- 1. PUBLIC & AUTH ROUTES --- */}
+            <Route path="/" element={<PricingPage />} />
+            <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/registration" element={<Registration />} />
+            <Route path="/verify-otp" element={<VerifyOTP />} />
+            <Route path="/:slug" element={<AgentSlug />} />
 
-          {/* --- 2. PROTECTED AGENT ROUTES --- */}
-          <Route element={<AgentLayoutWrapper />}>
-            <Route path="/agent/dashboard" element={<AgentDashboard />} />
-            <Route path="/agent/profile" element={<AgentProfile />} />
-            <Route path="/agent/call-settings" element={<CallSetting />} />
-          </Route>
+            {/* --- 2. PROTECTED ROUTES (Requires Token) --- */}
+            <Route element={<ProtectedRoute />}>
+              {/* Agent Routes */}
+              <Route element={<AgentLayoutWrapper />}>
+                <Route path="/agent/dashboard" element={<AgentDashboard />} />
+                <Route path="/agent/profile" element={<AgentProfile />} />
+                <Route path="/agent/call-settings" element={<CallSetting />} />
+              </Route>
 
-     {/* --- 3. PROTECTED USER ROUTES (Wrapped in UserCallProvider) --- */}
-<Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
-  <Route path="/user/dashboard/:agentId" element={<UserDashboard />} />
-    <Route path="/user/profile/:agentId" element={<UserProfile />} />
-</Route>
+              {/* User Routes */}
+              <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
+                <Route path="/user/dashboard/:agentId" element={<UserDashboard />} />
+                <Route path="/user/profile/:agentId" element={<UserProfile />} />
+              </Route>
+            </Route>
 
-          {/* --- 4. ADMINISTRATOR ROUTES --- */}
-          <Route path="/admin/terminal" element={<ZingAdmin />} /> 
-          <Route path="/admin/dashboard" element={<ZingDashboard />} />
-          
-          {/* --- 5. DYNAMIC PUBLIC PROFILES --- */}
-          <Route path="/:slug" element={<AgentSlug />} />
-          
-          {/* --- 6. GLOBAL FALLBACK --- */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </PWAController>
-    </Router>
+            {/* --- 3. ADMINISTRATOR ROUTES --- */}
+            <Route path="/admin/terminal" element={<ZingAdmin />} /> 
+            <Route path="/admin/dashboard" element={<ZingDashboard />} />
+            
+            {/* --- 4. GLOBAL FALLBACK --- */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </PWAController>
+      </Router>
+    </AuthProvider>
   );
 }
 

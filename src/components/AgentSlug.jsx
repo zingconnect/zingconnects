@@ -9,10 +9,12 @@ import {
   BsDownload
 } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
+import { useAuth } from '../context/AuthContext'; // Import your hook
 
 export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const { setToken } = useAuth();
   
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -122,6 +124,7 @@ useEffect(() => {
     setShowInstallBtn(false);
   }
 };
+
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -134,8 +137,7 @@ const handleUserInquiry = async (e) => {
     const response = await fetch('/api/users/handshake', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include', 
-      // Only send what is absolutely necessary
+      // Note: 'include' is no longer required if you use Authorization headers
       body: JSON.stringify({ 
         email: userEmail.trim(), 
         agentSlug: slug 
@@ -144,13 +146,20 @@ const handleUserInquiry = async (e) => {
 
     const data = await response.json();
 
-    if (response.ok) {
-      if (rememberUser) localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+    if (response.ok && data.token) {
+      setAuthToken(data.token); 
+      
+      if (rememberUser) {
+        localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+      }
+      
+      // 2. Navigate to dashboard
       navigate(`/user/dashboard/${slug}`);
     } else {
-      alert(`Connection failed: ${data.message}`);
+      alert(`Connection failed: ${data.message || "Unknown error"}`);
     }
   } catch (err) { 
+    console.error("Handshake error:", err);
     alert("System error. Please try again."); 
   } finally { 
     setIsProcessing(false); 

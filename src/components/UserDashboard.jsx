@@ -28,6 +28,8 @@ import {
   BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
+import { useAuth } from '../../context/AuthContext';
+import { secureFetch } from '../../utils/api';
 
 
 function urlBase64ToUint8Array(base64String) {
@@ -103,6 +105,7 @@ const isFirstLoad = useRef(true);
   const audioCtxRef = useRef(null);
 const nextStartTimeRef = useRef(0);
 const chatContainerRef = useRef(null);
+const { token } = useAuth();
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -120,6 +123,7 @@ const [isFetchingOlder, setIsFetchingOlder] = useState(false);
 const isAdjustingScrollRef = useRef(false); 
 const previousScrollHeightRef = useRef(0);
 const previousScrollTopRef = useRef(0);
+
 
   const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
