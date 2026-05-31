@@ -14,7 +14,7 @@ export const ProtectedRoute = () => {
   if (!token) {
     return (
       <Navigate 
-        to="/pricing" 
+        to="/" 
         state={{ from: location.pathname + location.search }} 
         replace 
       />

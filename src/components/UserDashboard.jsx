@@ -83,6 +83,7 @@ const CallStatusMessage = ({ status, time }) => {
 };
 
 export const UserDashboard = () => {
+  const { token, isLoading } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -1106,8 +1107,9 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
+
+
 useEffect(() => {
-  // If we are still loading, don't trigger the fetch yet
   if (isLoading) return;
 
   let isMounted = true;
