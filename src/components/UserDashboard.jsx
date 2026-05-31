@@ -1071,10 +1071,20 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
-
-// 2. Guarded Session Fetching
 useEffect(() => {
   if (slugFromUrl === undefined || !hasInteracted) return;
+
+  let isMounted = true;
+  setLoading(true);
+
+  // 🛡️ FAIL-SAFE: If the API hangs for > 10s, hide the loader to allow manual debug
+  const timeout = setTimeout(() => {
+    if (isMounted) {
+      console.warn("⚠️ API fetch timed out, forcing load completion.");
+      setLoading(false);
+    }
+  }, 10000);
+
   const fetchUserSession = async () => {
     try {
       const url = slugFromUrl 
@@ -1084,39 +1094,40 @@ useEffect(() => {
       const response = await fetch(url, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include' // Required for HttpOnly cookie
+        credentials: 'include'
       });
+
       if (response.status === 401 || response.status === 403) {
-        console.warn("Auth failed, redirecting...");
         navigate('/');
         return;
       }
+
       const data = await response.json();
-      if (response.ok) {
-        const loadedAgentSlug = data.agent?.slug;
-        if (slugFromUrl && String(loadedAgentSlug || '').toLowerCase() !== String(slugFromUrl).toLowerCase()) {
-          console.error("⛔ [Security Violation]: Mismatched context.");
-          navigate('/');
-          return;
-        }
+      
+      if (isMounted && response.ok) {
         setAgent(data.agent);
         setUserData(data.user);
-        if (!data.user.isProfileComplete) {
-          setShowOnboarding(true);
-        }
+        if (!data.user.isProfileComplete) setShowOnboarding(true);
       }
     } catch (err) {
       console.error("Session fetch error:", err);
     } finally {
-      setLoading(false);
+      if (isMounted) {
+        clearTimeout(timeout); // Cancel the fail-safe
+        setLoading(false);
+      }
     }
   };
 
   fetchUserSession();
   const interval = setInterval(fetchUserSession, 30000);
-  return () => clearInterval(interval);
-}, [hasInteracted, navigate, slugFromUrl]);
 
+  return () => {
+    isMounted = false;
+    clearInterval(interval);
+    clearTimeout(timeout);
+  };
+}, [hasInteracted, navigate, slugFromUrl]);
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
