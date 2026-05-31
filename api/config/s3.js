@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"; 
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"; 
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage"; 
 
@@ -19,7 +19,7 @@ export const getS3Client = () => {
 };
 
 // Re-export this for your auth.js registration logic
-export { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+export { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export const getPrivateUrl = async (fileKey) => {
   if (!fileKey) return fileKey;
