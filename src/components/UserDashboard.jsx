@@ -28,8 +28,8 @@ import {
   BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
-import { useAuth } from '../../context/AuthContext';
-import { secureFetch } from '../../utils/api';
+import { useAuth } from "../context/AuthContext";
+import { secureFetch } from "../../api/utils/api";
 
 
 function urlBase64ToUint8Array(base64String) {
