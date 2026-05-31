@@ -819,7 +819,9 @@ app.post('/api/users/handshake', async (req, res) => {
   try {
     await connectToDatabase();
     const { email, agentId, agentSlug } = req.body;
-    if (!email) return res.status(400).json({ message: "Email required" });
+    
+    if (!email) return res.status(400).json({ success: false, message: "Email required" });
+    if (!agentId || !agentSlug) return res.status(400).json({ success: false, message: "Agent context is required" });
 
     const normalizedEmail = email.toLowerCase().trim();
     let user = await User.findOne({ email: normalizedEmail });
@@ -830,7 +832,7 @@ app.post('/api/users/handshake', async (req, res) => {
         email: normalizedEmail,
         connectedAgents: [agentId],
         lastLogin: new Date(),
-        isProfileComplete: false // Ensure this starts as false
+        isProfileComplete: false
       });
       await user.save();
       isNewUser = true;
@@ -842,15 +844,27 @@ app.post('/api/users/handshake', async (req, res) => {
       await user.save();
     }
 
+    // 🚀 CRITICAL FIX: Encode the current active agentSlug into the payload!
+    // This stops this token from being used on an unassigned dashboard slug.
     const token = jwt.sign(
-      { id: user._id, role: 'user' },
+      { 
+        id: user._id, 
+        role: 'user',
+        activeAgentSlug: agentSlug.toLowerCase().trim() 
+      },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    res.json({ success: true, token, isNewUser, isProfileComplete: user.isProfileComplete });
+    return res.json({ 
+      success: true, 
+      token, 
+      isNewUser, 
+      isProfileComplete: user.isProfileComplete 
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Handshake failed" });
+    console.error("🔴 USER HANDSHAKE CRASH:", err);
+    return res.status(500).json({ success: false, message: "Handshake failed" });
   }
 });
 
@@ -890,7 +904,6 @@ app.post('/api/agents/heartbeat', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
-
 app.get('/api/users/my-session', async (req, res) => {
   try {
     await connectToDatabase();
@@ -901,6 +914,9 @@ app.get('/api/users/my-session', async (req, res) => {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
+    // 🔍 1. Capture target agent criteria from query parameters
+    const { agentId, slug } = req.query;
+
     const user = await User.findByIdAndUpdate(
       decoded.id, 
       { lastActive: new Date() },
@@ -912,9 +928,23 @@ app.get('/api/users/my-session', async (req, res) => {
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    let activeAgent = user.connectedAgents && user.connectedAgents.length > 0 
-      ? user.connectedAgents[user.connectedAgents.length - 1] 
-      : null;
+    // 🔍 2. Resolve Active Agent based on slug context or fallback array
+    let activeAgent = null;
+
+    if (user.connectedAgents && user.connectedAgents.length > 0) {
+      if (agentId) {
+        // Find by specific _id
+        activeAgent = user.connectedAgents.find(a => a._id.toString() === agentId.toString()) || null;
+      } else if (slug) {
+        // Find by URL slug
+        activeAgent = user.connectedAgents.find(a => a.slug === slug) || null;
+      }
+      
+      // Fallback: If parameters weren't sent or agent wasn't found in user's list, grab the latest one
+      if (!activeAgent) {
+        activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
+      }
+    }
     
     let isOnline = false;
     let lastSeenDisplay = "Offline";
@@ -974,6 +1004,7 @@ app.get('/api/users/my-session', async (req, res) => {
     res.status(500).json({ message: "Session Error", error: err.message });
   }
 });
+
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();

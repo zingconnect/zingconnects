@@ -63,11 +63,8 @@ export const AgentSlug = () => {
 
   useEffect(() => {
     if (!slug) return;
-
-    // 1. Persist the slug so PWAController can pick it up on launch
     localStorage.setItem('agentSlug', slug);
 
-    // 2. Ensure URL has the pwa parameter for tracking/context
     const params = new URLSearchParams(window.location.search);
     if (!params.get('pwa')) {
       const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
@@ -147,19 +144,19 @@ export const AgentSlug = () => {
       });
       const data = await response.json();
       if (response.ok) {
-        // Handle custom dynamic identity flags
         if (rememberUser) {
           localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail);
         } else {
           localStorage.removeItem(`rememberedUserEmail_${slug}`);
         }
 
-        // CRITICAL FIX: Explicitly scope keys by slug so agents do not overwrite each other
+        // 🚀 SCANDAL PREVENTION: Save tokens and identifiers explicitly isolated by slug
         localStorage.setItem('active_session_slug', slug);
         localStorage.setItem(`userToken_${slug}`, data.token);
         localStorage.setItem(`userEmail_${slug}`, userEmail);
         
-        navigate('/user/dashboard');
+        // 🚀 DYNAMIC ROUTE REDIRECT: Append the current slug to your dashboard routing architecture
+        navigate(`/user/dashboard/${slug}`);
       } else {
         alert(data.message || "Connection failed.");
       }
@@ -196,7 +193,7 @@ export const AgentSlug = () => {
 
         localStorage.setItem('agentToken', data.token);
         localStorage.setItem('agentSlug', data.slug);
-        window.location.href = '/agent/dashboard';
+        window.location.href = `/agent/dashboard/${data.slug}`;
       } else {
         alert(data.message || "Invalid Agent Credentials");
       }

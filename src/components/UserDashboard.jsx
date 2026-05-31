@@ -1086,36 +1086,48 @@ useEffect(() => {
 
 
 
-  useEffect(() => {
-    const token = localStorage.getItem('userToken');
-    if (!token) return navigate('/');
+ useEffect(() => {
+  const token = localStorage.getItem('userToken');
+  if (!token) return navigate('/');
 
-    const fetchUserSession = async () => {
-  try {
-    const response = await fetch('/api/users/my-session', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await response.json();
-    
-    if (response.ok) {
-      setAgent(data.agent); 
-      setUserData(data.user); 
+  const fetchUserSession = async () => {
+    try {
+      // 🛠️ FIX: Append slugAgentId query param so server fetches the right agent context
+      const url = slugAgentId 
+        ? `/api/users/my-session?agentId=${slugAgentId}` 
+        : '/api/users/my-session';
+
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
       
-      if (!data.user.isProfileComplete) {
-        setShowOnboarding(true);
-      }
-    }
-  } catch (err) {
-    console.error("Session fetch error:", err);
-  } finally {
-    setLoading(false);
-  }
-};
+      if (response.ok) {
+        const loadedAgentId = data.agent?._id || data.agent?.id;
+        if (slugAgentId && String(loadedAgentId) !== String(slugAgentId)) {
+          console.error("⛔ [Security Violation]: Mismatched route context detected. Forcing fallback isolation logic.");
+          navigate('/dashboard'); 
+          return;
+        }
 
-    fetchUserSession();
-    const interval = setInterval(fetchUserSession, 30000); 
-    return () => clearInterval(interval);
-  }, [navigate]);
+        setAgent(data.agent); 
+        setUserData(data.user); 
+        
+        if (!data.user.isProfileComplete) {
+          setShowOnboarding(true);
+        }
+      }
+    } catch (err) {
+      console.error("Session fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchUserSession();
+  const interval = setInterval(fetchUserSession, 30000); 
+  return () => clearInterval(interval);
+}, [navigate, slugAgentId]);
 
 useEffect(() => {
   const token = localStorage.getItem('userToken');
