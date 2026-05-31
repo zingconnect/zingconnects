@@ -255,20 +255,34 @@ const AudioSession = ({ isMuted, isMasked }) => {
     </>
   );
 };
-
-
-const handleSyncAndEnter = async (e) => {
-  if (e) e.stopPropagation();
-  
-  console.log("🚀 Starting Security Sync...");
-  
-  await unlockAudio();
-    if (token) {
-    console.log("🔑 Session verified, proceeding to dashboard...");
-  } else {
-    console.warn("⚠️ Token missing, check authentication state.");
+const handleSyncAndEnter = useCallback(async (e) => {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
   }
-};
+  if (hasInteracted) {
+    console.log("⚠️ SYNC IGNORED: User has already interacted.");
+    return;
+  }
+  console.log("🚀 [1/3] Starting Security Sync initiated by user...");
+
+  try {
+    console.log("🔊 [2/3] Attempting to unlock audio channels...");
+    await unlockAudio();
+    console.log("✅ Audio channels unlocked successfully.");
+    if (token) {
+      console.log("🔑 [3/3] Session verified. Token detected:", token.substring(0, 10) + "...");
+    } else {
+      console.warn("⚠️ [3/3] Session warning: Token missing or empty.");
+    }
+    console.log("🏁 Triggering application transition (setHasInteracted: true)");
+    setHasInteracted(true);
+    
+  } catch (err) {
+    console.error("❌ CRITICAL SYNC ERROR:", err);
+    setHasInteracted(true);
+  }
+}, [hasInteracted, unlockAudio, token]);
 
 useEffect(() => {
   let remoteAudio = document.getElementById('remoteAudio');
