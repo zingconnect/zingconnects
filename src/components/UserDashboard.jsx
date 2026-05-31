@@ -16,7 +16,7 @@ if (typeof window !== 'undefined') {
   };
 }
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { motion, useAnimation } from "framer-motion";
 import Peer from 'simple-peer';
