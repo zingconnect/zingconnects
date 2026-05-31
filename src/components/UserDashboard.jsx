@@ -193,39 +193,39 @@ const previousScrollTopRef = useRef(0);
     }
   };
   
-const unlockAudio = useCallback(async () => {
+  const unlockAudio = useCallback(async () => {
   if (hasInteracted) return;
   
   console.log("🔓 Unlocking secure audio channels...");
   
   try {
-    // Check if we already have a context or create one
     if (!audioCtxRef.current) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       audioCtxRef.current = new AudioContext();
     }
-    
-    if (audioCtxRef.current.state === 'suspended') {
+        if (audioCtxRef.current.state === 'suspended') {
       await audioCtxRef.current.resume();
       console.log("✅ AudioContext resumed.");
     }
-
-    // Prime audio elements
     const remoteAudio = document.getElementById('remoteAudio');
     if (remoteAudio) {
-      // Play and pause immediately to satisfy browser requirements
-      await remoteAudio.play().catch(e => console.warn("Priming failed, waiting for stream."));
-      remoteAudio.pause();
-      remoteAudio.currentTime = 0;
-      console.log("✅ Remote audio element primed.");
+      try {
+        await remoteAudio.play();
+        remoteAudio.pause();
+        remoteAudio.currentTime = 0;
+        console.log("✅ Remote audio element primed.");
+      } catch (playErr) {
+        console.warn("⚠️ Audio element play() call failed (likely no stream source yet).", playErr);
+      }
     }
     
+    // 4. Final State Update
     setHasInteracted(true);
   } catch (err) {
-    console.warn("⚠️ Audio priming error:", err);
+    console.error("❌ Critical audio priming error:", err);
     setHasInteracted(true); 
   }
-}, [hasInteracted]);
+}, [hasInteracted]); 
 
 const LocalUserMuteController = ({ isMuted, isMasked }) => {
   const { localParticipant } = useLocalParticipant();
