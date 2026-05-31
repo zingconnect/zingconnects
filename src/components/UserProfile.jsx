@@ -29,43 +29,61 @@ export const UserProfile = () => {
   
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+useEffect(() => {
+  // 🛠️ Guard: Don't run the fetch until React Router has finished parsing the URL param
+  if (slugFromUrl === undefined) return;
 
-  // 🛠️ FIX: Force a fresh database fetch on mount to bypass old cached context data
-  useEffect(() => {
-    const fetchUserData = async () => {
+  const fetchUserData = async () => {
+    // 🛠️ Look up the dynamic, isolated token first
     const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-      if (!token) {
-        console.error("No token found. User might not be logged in.");
-        setLoading(false);
-        return;
-      }
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
-          method: 'GET',
-          headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Cache-Control': 'no-cache', // Bypass local edge-network caches
-            'Pragma': 'no-cache'
-          }
-        });
-        const result = await res.json();
-        
-        if (res.ok && result.success) {
-          setUserData(result.user);
-        } else {
-          console.error("API Error:", result.message || "Failed to fetch user");
-        }
-      } catch (err) {
-        console.error("Network or parsing error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
+    
+    if (!token) {
+      console.error("No token found. User might not be logged in.");
+      setLoading(false);
+      return;
+    }
 
-    // Always fetch on mount to ensure deep fields (like agent photos) are up-to-date
-    fetchUserData();
-  }, [setUserData]); // Removed userData dependency to prevent loop cascades
-  
+    try {
+      // 🛠️ FIX: Dynamic URL context pairing. Use my-session with slug param to sync up perfectly with the dashboard
+      const url = slugFromUrl 
+        ? `${import.meta.env.VITE_API_URL}/api/users/my-session?slug=${slugFromUrl}` 
+        : `${import.meta.env.VITE_API_URL}/api/users/me`;
+
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      const result = await res.json();
+      
+      if (res.ok && result.success) {
+        setUserData(result.user);
+      } else {
+        console.error("API Error:", result.message || "Failed to fetch user");
+
+        // 🛡️ SECURITY FALLBACK: If the backend says the user doesn't exist (404),
+        // wipe the invalid tokens and safely route them back to registration.
+        if (res.status === 404) {
+          console.warn("Purging stale local user tokens...");
+          localStorage.removeItem(`userToken_${slugFromUrl}`);
+          localStorage.removeItem('userToken');
+          navigate('/');
+        }
+      }
+    } catch (err) {
+      console.error("Network or parsing error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchUserData();
+  // 🛠️ Include dependencies to keep the component reactive to URL path changes
+}, [setUserData, slugFromUrl, navigate]);
+
   useEffect(() => {
     if (userData) {
       setFormData({
@@ -142,7 +160,7 @@ export const UserProfile = () => {
       <div className="bg-white/80 backdrop-blur-md sticky top-0 z-50 p-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => navigate('/user/dashboard')} 
+          onClick={() => navigate(`/user/dashboard/${slugFromUrl}`)}
             className="p-2 hover:bg-gray-50 rounded-full transition-colors group"
           >
             <BsChevronLeft className="text-gray-600 group-hover:text-blue-600 transition-colors" size={18} />
