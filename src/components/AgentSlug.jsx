@@ -101,14 +101,27 @@ useEffect(() => {
     if (savedAgentEmail) { setLoginEmail(savedAgentEmail); setRememberAgent(true); }
   }, [slug]);
 
-  const handleInstallApp = async () => {
-    if (!deferredPrompt) return;
+  useEffect(() => {
+  window.addEventListener('appinstalled', (evt) => {
+    console.log('ZingConnect installed successfully!');
+    setShowInstallBtn(false);
+  });
+}, []);
+
+ const handleInstallApp = async () => {
+  if (!deferredPrompt) {
+    console.log("Install prompt not available.");
+    return;
+  }
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') setShowInstallBtn(false);
+  
+  console.log(`User choice: ${outcome}`);
     setDeferredPrompt(null);
-  };
-
+    if (outcome === 'accepted') {
+    setShowInstallBtn(false);
+  }
+};
   const handleUserInquiry = async (e) => {
     e.preventDefault();
     if (!userEmail) return alert("Please enter your email.");

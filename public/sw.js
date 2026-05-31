@@ -18,6 +18,20 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
 });
 
+// Add this to your sw.js to ensure the browser sees it as 'controlling' the page
+self.addEventListener('fetch', (event) => {
+  // Your existing audio check
+  const url = new URL(event.request.url);
+  if (event.request.destination === 'audio' || url.pathname.endsWith('.mp3')) return;
+
+  // Handle standard requests
+  event.respondWith(
+    caches.match(event.request).then((response) => {
+      return response || fetch(event.request);
+    })
+  );
+});
+
 // 3. PUSH NOTIFICATION LOGIC
 self.addEventListener('push', function(event) {
   if (!event.data) return;
