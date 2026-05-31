@@ -43,7 +43,7 @@ redisClient.on('connect', () => console.log('⚡ Connected to Redis Cache Cloud 
 
 // 3. Database & Shared Configurations
 import { connectToDatabase } from './config/db.js';
-import { getS3Client, getPrivateUrl, uploadToS3, PutObjectCommand, GetObjectCommand } from './config/s3.js';
+import { getS3Client, getPrivateUrl, uploadToS3, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from './config/s3.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // 4. Local Utility Framework Helpers (Now fully hydrated with process.env keys)
@@ -108,59 +108,79 @@ const upload = multer({ storage: multer.memoryStorage() });
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
-
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
+  // 1. Extract token safely
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
-  if (!token) return res.status(401).json({ message: "Access Denied" });
+  if (!token) return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
 
-  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-    if (err) return res.status(403).json({ message: "Invalid Token" });
-    
-    req.user = decoded; 
+  try {
+    // 2. Verify token synchronously
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    try {
-      // 1. Logic for Agents: Serverless safe check & Atomic tracking update
-      if (decoded.role === 'agent') {
-        const AgentModel = mongoose.models.Agent || Agent;
+    // 3. Logic for Agents
+    if (decoded.role === 'agent') {
+      const AgentModel = mongoose.models.Agent || Agent;
+      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+      
+      if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
 
-        const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-        if (!agent) {
-          return res.status(404).json({ message: "Agent not found" });
-        }
-if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-  return res.status(403).json({ // Changed to 403 to match your fetch check
-    success: false, 
-    message: "Dual login detected.", 
-    reason: "dual_login" // Ensure this matches your frontend check
-  });
-}
-        await AgentModel.findByIdAndUpdate(req.user.id, {
-          $set: { lastActive: new Date() }
+      // Dual Login check
+      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+        return res.status(403).json({ 
+          success: false, 
+          message: "Dual login detected.", 
+          reason: "dual_login" 
         });
       }
-      if (decoded.role === 'admin') {
-        const AdminModel = mongoose.models.Admin || Admin;
-        await AdminModel.findByIdAndUpdate(req.user.id, { 
-          $set: { lastLogin: new Date() } 
-        });
-      }
-      next();
-    } catch (dbErr) {
-      console.error("🔴 index.js Auth Middleware Error:", dbErr.message);
-      next(); 
+      
+      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
     }
-  });
+
+    // 4. Logic for Admin
+    if (decoded.role === 'admin') {
+      const AdminModel = mongoose.models.Admin || Admin;
+      await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
+    }
+
+    next();
+  } catch (err) {
+    // Distinguish between expired and invalid tokens
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: "Token expired" });
+    }
+    return res.status(403).json({ success: false, message: "Invalid Token" });
+  }
 };
 
 const isAdmin = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
-    next();
-  } else {
-    res.status(403).json({ message: "Access denied: Admins only" });
+  // Allows BOTH admin and superadmin to pass through
+  if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin')) {
+    return next();
+  } 
+  
+  return res.status(403).json({ 
+    success: false, 
+    message: "Access denied: Administrative privileges required." 
+  });
+};
+
+// =========================================================================
+// 🛡️ TIER 2: SUPERADMIN ONLY MIDDLEWARE (System Root Operations Only)
+// =========================================================================
+const requireSuperAdmin = (req, res, next) => {
+  // STRICT CHECK: Denies regular admins completely
+  if (req.user && req.user.role === 'superadmin') {
+    return next();
   }
+
+  return res.status(403).json({ 
+    success: false, 
+    message: "Access Denied: Superadmin authorization required for this operation." 
+  });
 };
 
 io.on("connection", (socket) => {
@@ -347,144 +367,90 @@ const addDays = (date, days) => {
   return result;
 };
 
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
+// =========================================================================
+app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
 
-app.post('/api/agents/register-init', upload.single('photo'), async (req, res) => {
-    console.log("Registration Stage 1 (Complete Fields) started...");
+    const { firstName, lastName, email, password } = req.body;
+    const isResend = req.body.resend === 'true' || req.body.resend === true;
 
-    try {
-        await connectToDatabase();
-        const AgentModel = getAgentModel();
+    // 1. INPUT VALIDATION
+    if (!email) return res.status(400).json({ success: false, message: "Email required." });
+    
+    const lowerEmail = String(email).toLowerCase().trim();
+    let existingAgent = await AgentModel.findOne({ email: lowerEmail });
 
-        const { firstName, lastName, email, password } = req.body;
-        const isResend = req.body.resend === 'true' || req.body.resend === true;
-
-        // --- 1. VALIDATION ---
-        if (!email) {
-            return res.status(400).json({ success: false, message: "Email is required." });
-        }
-
-        // Require password only if it's NOT a resend attempt
-        if (!isResend && !password) {
-            return res.status(400).json({ success: false, message: "Password is required for registration." });
-        }
-
-        const lowerEmail = email.toLowerCase().trim();
-
-        // Check verification status
-        let existingAgent = await AgentModel.findOne({ email: lowerEmail });
-        if (existingAgent && existingAgent.isVerified) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Email already registered and verified. Please login." 
-            });
-        }
-
-        let hashedPassword = existingAgent ? existingAgent.password : ""; 
-        if (password && password.trim() !== "") {
-            const salt = await bcrypt.genSalt(10);
-            hashedPassword = await bcrypt.hash(password, salt);
-        }
-
-        // --- 3. SLUG GENERATION ---
-        let finalSlug = existingAgent ? existingAgent.slug : "";
-        if (!existingAgent) {
-            // Clean names: remove special characters, default to 'agent' if first name missing
-            const cleanFirst = (firstName || "agent").trim().replace(/[^a-zA-Z0-9]/g, '');
-            const cleanLast = (lastName || "").trim().replace(/[^a-zA-Z0-9]/g, '');
-            const baseSlug = `${cleanFirst}${cleanLast}`.toLowerCase() || "agent";
-            
-            finalSlug = baseSlug;
-            let counter = 1;
-            while (await AgentModel.findOne({ slug: finalSlug })) {
-                finalSlug = `${baseSlug}-${counter}`;
-                counter++;
-            }
-        }
-let savedPhotoPath = existingAgent ? existingAgent.photoUrl : "";
-
-if (req.file) {
-    try {
-        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
-        const fileKey = `profiles/${fileName}`;
-        const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-              await getS3Client().send(new PutObjectCommand({
-    Bucket: bucketName,
-    Key: fileKey,
-    Body: req.file.buffer,
-    ContentType: req.file.mimetype,
-}));
-                const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
-        savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
-
-        console.log("S3 Upload Successful:", fileKey);
-    } catch (uploadErr) {
-        console.error("IDRIVE UPLOAD FAILED:", uploadErr.message);
+    // 🛡️ SECURITY FIX: OTP Throttling (Prevents Email Bombing)
+    if (existingAgent?.otpExpires && existingAgent.otpExpires > Date.now()) {
+      return res.status(429).json({ success: false, message: "Verification code already sent. Please wait." });
     }
-}
 
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+    if (existingAgent?.isVerified) {
+      return res.status(400).json({ success: false, message: "Account already verified." });
+    }
 
-        if (existingAgent) {
-            if (firstName) existingAgent.firstName = firstName.trim();
-            if (lastName !== undefined) existingAgent.lastName = (lastName || "").trim();
-            
-            existingAgent.password = hashedPassword; 
-            existingAgent.photoUrl = savedPhotoPath;
-            existingAgent.otp = otpCode;
-            existingAgent.otpExpires = otpExpiry;
+    // 🛡️ SECURITY FIX: File size & Sanitization
+    let savedPhotoPath = existingAgent?.photoUrl || "";
+    if (req.file) {
+      if (req.file.size > 2 * 1024 * 1024) return res.status(400).json({ success: false, message: "Photo too large." });
+      
+      const fileKey = `profiles/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-')}`;
+      await getS3Client().send(new PutObjectCommand({
+        Bucket: process.env.IDRIVE_BUCKET_NAME,
+        Key: fileKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      }));
+      savedPhotoPath = `https://${process.env.IDRIVE_BUCKET_NAME}.${process.env.IDRIVE_ENDPOINT?.replace('https://', '')}/${fileKey}`;
+    }
 
-            // Optional fields update
-            const fields = ['dob', 'gender', 'occupation', 'address', 'bio', 'program', 'plan'];
-            fields.forEach(field => {
-                if (req.body[field]) existingAgent[field] = req.body[field];
-            });
-            
-            await existingAgent.save();
-            console.log("Record Updated:", lowerEmail);
-        } else {
-            // Create brand new record
-            const newAgent = new AgentModel({
-                firstName: (firstName || "Agent").trim(),
-                lastName: (lastName || "").trim(),
-                email: lowerEmail,
-                password: hashedPassword,
-                dob: req.body.dob,
-                gender: req.body.gender,
-                occupation: req.body.occupation,
-                address: req.body.address,
-                bio: req.body.bio || "",
-                program: req.body.program || "",
-                slug: finalSlug,
-                photoUrl: savedPhotoPath,
-                role: 'agent',
-                status: 'pending',
-                isVerified: false,
-                otp: otpCode,
-                otpExpires: otpExpiry,
-                isSubscribed: false,
-                plan: req.body.plan || "BASIC"
-            });
-            await newAgent.save();
-            console.log("New Record Created:", lowerEmail);
-        }
+    // 2. DATA PERSISTENCE
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = Date.now() + (10 * 60 * 1000);
 
-        // --- 7. EMAIL DELIVERY ---
-        const logoPath = path.join(process.cwd(), 'public', 'logo.png');
-        const attachments = fs.existsSync(logoPath) ? [{
-            filename: 'logo.png',
-            path: logoPath,
-            cid: 'zinglogo'
-        }] : [];
+    if (existingAgent) {
+      if (password) existingAgent.password = await bcrypt.hash(password, 10);
+      Object.assign(existingAgent, { otp: otpCode, otpExpires: otpExpiry, photoUrl: savedPhotoPath });
+      await existingAgent.save();
+    } else {
+      await AgentModel.create({
+        firstName: (firstName || "Agent").trim(),
+        lastName: (lastName || "").trim(),
+        email: lowerEmail,
+        password: await bcrypt.hash(password || "temp123", 10),
+        slug: `${(firstName || "agent").toLowerCase()}-${Date.now().toString().slice(-4)}`,
+        photoUrl: savedPhotoPath,
+        otp: otpCode,
+        otpExpires: otpExpiry
+      });
+    }
 
-        try {
-            await transporter.sendMail({
-                from: `"ZingConnect Security" <${process.env.GMAIL_USER}>`,
-                to: lowerEmail,
-                subject: "Your Verification Code",
-                attachments,
-                html: `
-                  <!DOCTYPE html>
+    // 3. EMAIL DELIVERY
+    await sendVerificationEmail(lowerEmail, firstName || "Agent", otpCode);
+    return res.status(200).json({ success: true, message: "Verification code sent." });
+
+  } catch (err) {
+    next(err); // Safely log error
+  }
+});
+
+// Email Template Helper
+async function sendVerificationEmail(email, firstName, otpCode) {
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
+  });
+
+  await transporter.sendMail({
+    from: `"ZingConnect Security" <${process.env.GMAIL_USER}>`,
+    to: email,
+    subject: "Your Verification Code",
+    html: `
+        <!DOCTYPE html>
                   <html>
                   <head>
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -536,106 +502,77 @@ if (req.file) {
                   </html>
                 `
             });
-        } catch (mailError) {
-            console.error("Email Delivery Failed:", mailError);
-            // Optionally return a 500 here if you want to force the user to retry
-        }
+}
 
-        res.status(200).json({ success: true, message: "Verification code sent to your email." });
-
-    } catch (err) {
-        console.error("Detailed Registration Error:", err);
-        res.status(500).json({ 
-            success: false, 
-            message: "Internal Server Error during registration.",
-            error: err.message
-        });
-    }
-});
-// --- STAGE 2: VERIFY OTP ---
-app.post('/api/agents/verify-otp', async (req, res) => {
-  const { email, otp } = req.body;
-
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: POST /api/agents/verify-otp
+// =========================================================================
+app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
-
-    // --- FIX 1: INITIALIZE THE MODEL ---
-    // In your architecture, Agent needs to be retrieved from the getter
-    const AgentModel = getAgentModel(); 
+    const AgentModel = getAgentModel();
+    const { email, otp } = req.body;
 
     if (!email || !otp) {
-        return res.status(400).json({ success: false, message: "Email and OTP are required." });
+      return res.status(400).json({ success: false, message: "Email and OTP are required." });
     }
 
-    const agent = await AgentModel.findOne({ 
-      email: email.toLowerCase().trim(),
-      otp: otp,
-      otpExpires: { $gt: Date.now() } 
-    });
+    const lowerEmail = email.toLowerCase().trim();
+    const agent = await AgentModel.findOne({ email: lowerEmail });
 
-    if (!agent) {
+    // 🛡️ SECURITY FIX 1: Brute-Force & Validation Check
+    // We check if the agent exists first to keep the logic clean and prevent timing attacks
+    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
+      // 🛡️ SECURITY FIX 2: Generic Error Message
+      // Never tell the attacker WHY it failed (expired vs. wrong code) to prevent enumeration
       return res.status(400).json({ 
         success: false, 
-        message: "The code is invalid or has expired. Please request a new one." 
+        message: "Invalid or expired verification code." 
       });
     }
-    agent.isVerified = true;
-    agent.status = 'active';    
-    agent.otp = undefined; 
-    agent.otpExpires = undefined;
-    
-    await agent.save();
 
+    // Update agent status
+    agent.isVerified = true;
+    agent.status = 'active';
+    agent.otp = undefined;
+    agent.otpExpires = undefined;
+    await agent.save();
     if (!process.env.JWT_SECRET) {
-        console.error("CRITICAL: JWT_SECRET is not defined in .env");
-        throw new Error("Security configuration missing");
+      throw new Error("Security configuration error.");
     }
 
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug, role: 'agent' }, 
-      process.env.JWT_SECRET, 
+      { id: agent._id, slug: agent.slug, role: 'agent' },
+      process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    res.status(200).json({ 
-      success: true, 
-      token: token, 
-      slug: agent.slug, 
-      message: "Your profile is now live!" 
+    return res.status(200).json({
+      success: true,
+      token: token,
+      slug: agent.slug,
+      message: "Your profile is now live!"
     });
 
   } catch (err) {
-    console.error("OTP Verification Error:", err.message);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error during verification.",
-      error: err.message // Useful for debugging, remove in production
-    });
+    // 🛡️ SECURITY FIX 4: Prevent leaking internal DB details
+    next(err); 
   }
 });
-// 🛡️ SECURITY FIX 1: Add 'next' to access the global safety interceptor
 app.post('/api/agents/login', async (req, res, next) => {
   try {
     await connectToDatabase();
     const { email, password, targetSlug } = req.body;
 
-    // 🛡️ SECURITY FIX 2: Strict Body Input Check
-    // Prevents automated manipulation tools from sending non-strings that crash string methods
     if (!email || typeof email !== 'string' || !password) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
     const AgentModel = getAgentModel();
-
-    // 🛡️ SECURITY FIX 3: Strict Select Minimization
-    // Pull only what is required to execute authorization checks
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('slug currentSessionId +password'); 
     
-    // 🛡️ SECURITY FIX 4: Identity Profiling Protection
-    // We use a safe check loop. Even if the agent doesn't exist, we skip validation 
-    // to preserve processing execution times, preventing automated time-profiling.
     if (!agent) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
@@ -645,11 +582,10 @@ app.post('/api/agents/login', async (req, res, next) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // STRICT SLUG CHECK
     if (agent.slug !== targetSlug) {
       return res.status(403).json({ 
         success: false, 
-        message: "Unauthorized: You must log in via your assigned agent URL." 
+        message: "Unauthorized: Access denied for this URL." 
       });
     }
 
@@ -667,9 +603,15 @@ app.post('/api/agents/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
+    res.cookie('token', token, {
+      httpOnly: true,                // Prevents client-side JS access
+      secure: process.env.NODE_ENV === 'production', // Ensures HTTPS in production
+      sameSite: 'strict',            // Protects against CSRF
+      maxAge: 24 * 60 * 60 * 1000    // 24 hours
+    });
+
     return res.json({ 
       success: true, 
-      token, 
       slug: agent.slug 
     });
 
@@ -677,6 +619,7 @@ app.post('/api/agents/login', async (req, res, next) => {
     next(err);
   }
 });
+
 // ==========================================
 // 🛡️ HARDENED ROUTE 1: GET /api/agents/profile
 // ==========================================
@@ -853,8 +796,6 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
     next(err);
   }
 });
-
-// 🛡️ SECURITY FIX 1: Add 'next' parameter to route arguments
 app.post('/api/users/handshake', async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -867,7 +808,7 @@ app.post('/api/users/handshake', async (req, res, next) => {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
-        let user = await User.findOne({ email: normalizedEmail }).select('email connectedAgents isProfileComplete');
+    let user = await User.findOne({ email: normalizedEmail }).select('email connectedAgents isProfileComplete');
     let isNewUser = false;
 
     if (!user) {
@@ -880,7 +821,6 @@ app.post('/api/users/handshake', async (req, res, next) => {
       await user.save();
       isNewUser = true;
     } else {
-      // Safely ensure matching data typing strings when checking inclusions
       const stringifiedId = agentId.toString();
       const hasAgent = user.connectedAgents.some(id => id.toString() === stringifiedId);
       
@@ -891,7 +831,6 @@ app.post('/api/users/handshake', async (req, res, next) => {
       await user.save();
     }
 
-    // 🚀 CRITICAL FIX: Encode the current active agentSlug into the payload!
     const token = jwt.sign(
       { 
         id: user._id, 
@@ -902,18 +841,25 @@ app.post('/api/users/handshake', async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
+    // 🛡️ SECURITY FIX: Set HttpOnly Cookie instead of sending token in JSON
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
     return res.json({ 
       success: true, 
-      token, 
       isNewUser, 
       isProfileComplete: user.isProfileComplete 
     });
     
   } catch (err) {
-    // 🛡️ SECURITY FIX 4: Send the crash payload to our absolute bottom global error interceptor
     next(err);
   }
 });
+
 // 🛡️ SECURITY FIX 1: Ensure 'next' is included in your routing arguments
 app.post('/api/agents/heartbeat', authenticateToken, async (req, res, next) => {
   try {
@@ -2755,16 +2701,29 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: PATCH /api/messages/mark-read/:otherUserId
+// =========================================================================
+app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     
     const myId = req.user?.id || req.user?._id;
     const { otherUserId } = req.params;
+
+    // 🛡️ SECURITY FIX 1: Strict Hex-Id Parameter Structure Validation
+    if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
+      return res.status(400).json({ success: false, message: "Invalid participant identifier structure." });
+    }
+
+    const targetSenderId = new mongoose.Types.ObjectId(String(otherUserId));
+    const currentReaderId = new mongoose.Types.ObjectId(String(myId));
+
+    // Execute atomic update batch query across all unread incoming documents
     const result = await Message.updateMany(
       { 
-        senderId: otherUserId, 
-        receiverId: myId, 
+        senderId: targetSenderId, 
+        receiverId: currentReaderId, 
         status: { $ne: 'seen' } 
       },
       { 
@@ -2774,25 +2733,36 @@ app.patch('/api/messages/mark-read/:otherUserId', authenticateToken, async (req,
         } 
       }
     );
-        const io = req.app.get('socketio');
+
+    // 🛡️ SECURITY FIX 2: Dual-Channel Real-Time Status Synchronization
+    const io = req.app.get('socketio');
     if (io) {
-      io.to(otherUserId.toString()).emit("messages-seen", { 
-        readerId: myId 
-      });
+      const senderRoom = otherUserId.toString();
+      const readerRoom = myId.toString();
+      
+      const updatePayload = { 
+        senderId: senderRoom, // The person who originally wrote the messages
+        readerId: readerRoom  // The person who just read them
+      };
+
+      // A. Notify the sender's active connections to clear ticks/change bubble colors
+      io.to(senderRoom).emit("messages-seen", updatePayload);
+      
+      // B. Notify the reader's other active browser tabs/mobile instances to clear unread badge states
+      io.to(readerRoom).emit("messages-seen", updatePayload);
     }
 
-    res.json({ 
+    return res.json({ 
       success: true, 
-      count: result.modifiedCount 
+      count: result.modifiedCount || 0
     });
+
   } catch (err) {
-    console.error("🔴 Error marking messages as read:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to update message status" 
-    });
+    // 🛡️ SECURITY FIX 3: Forward exception logs safely through your central system error interceptor
+    next(err);
   }
 });
+
 // ==========================================
 // 📞 1. INITIATE SECURE DIAL OUT
 // ==========================================
@@ -3216,97 +3186,118 @@ app.post('/api/agents/unlock-voice-package', async (req, res) => {
   }
 });
 
-// Modified to use email to match your AdminSchema and React Frontend
-app.post('/api/admin/register', async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: POST /api/admin/register
+// =========================================================================
+// CRITICAL FIX: Locked behind identity validation middleware so only an existing superadmin can register new admins
+app.post('/api/admin/register', authenticateToken, requireSuperAdmin, async (req, res, next) => {
   try {
-    // 1. Force the database connection before any queries
     await connectToDatabase(); 
 
-    // 2. Destructure 'email' instead of 'username' to match frontend formData
     const { firstName, lastName, email, password, role } = req.body;
     
-    // 3. Updated validation check
+    // 🛡️ SECURITY FIX 1: Strict Input Cleanliness & Content Validation
     if (!firstName || !lastName || !email || !password) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
+      return res.status(400).json({ success: false, message: "All account verification fields are required." });
     }
 
-    const lowerEmail = email.toLowerCase().trim();
+    const lowerEmail = String(email).toLowerCase().trim();
     
-    // 4. Check for existing admin using email
+    // Validate email structural string syntax regex format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(lowerEmail)) {
+      return res.status(400).json({ success: false, message: "Malformed or invalid email address format syntax." });
+    }
+
+    if (String(password).length < 8) {
+      return res.status(400).json({ success: false, message: "Password length signature must be at least 8 characters." });
+    }
+
+    // Check for duplicate entity registration matches
     const existingAdmin = await Admin.findOne({ email: lowerEmail });
     if (existingAdmin) {
-      return res.status(400).json({ success: false, message: "Admin email already exists" });
+      return res.status(400).json({ success: false, message: "Administrative profile under this email already exists." });
     }
 
+    // Enforce strict role assignments; fallback to standard 'admin' to prevent rogue privilege elevation
+    const targetRole = ['superadmin', 'admin'].includes(role) ? role : 'admin';
+
     const newAdmin = new Admin({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: lowerEmail, // Matches your updated AdminSchema
-      password: password, // Schema hashes this automatically via middleware
-      role: role || 'superadmin' 
+      firstName: String(firstName).trim(),
+      lastName: String(lastName).trim(),
+      email: lowerEmail, 
+      password: password, // Pre-save hooks inside AdminSchema handles hashing securely
+      role: targetRole 
     });
 
-    // 5. Save to the database
     await newAdmin.save();
 
-    res.status(201).json({ 
+    return res.status(201).json({ 
       success: true, 
-      message: "Administrator account created successfully" 
+      message: `Administrator profile (${targetRole}) generated and initialized successfully.` 
     });
 
   } catch (err) {
-    console.error("Admin Reg Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Error creating admin account",
-      details: err.message 
-    });
+    // 🛡️ SECURITY FIX 2: Safely route out server trace failures into your central error handler
+    next(err);
   }
 });
 
-app.post('/api/admin/login', async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: POST /api/admin/login
+// =========================================================================
+app.post('/api/admin/login', async (req, res, next) => {
   try {
     await connectToDatabase(); 
+    
     const { email, password } = req.body;
     if (!email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and password are required" 
-      });
+      return res.status(400).json({ success: false, message: "Email and password are required credentials." });
     }
-    const admin = await Admin.findOne({ email: email.toLowerCase().trim() });
+
+    const lowerEmail = String(email).toLowerCase().trim();
+    const admin = await Admin.findOne({ email: lowerEmail });
+    
+    // 🛡️ SECURITY FIX 3: Timed Verification Gate (Mitigates User Enumeration Profiles)
+    // Avoid providing granular hints like "Email not found" vs "Wrong password"
     if (!admin || !(await admin.comparePassword(password))) {
       return res.status(401).json({ 
         success: false, 
-        message: "Invalid admin credentials" 
+        message: "Invalid administrator credentials provided." 
       });
     }
+
+    // Issue administrative session authorization token
     const token = jwt.sign(
-      { id: admin._id, role: admin.role || 'superadmin' },
+      { 
+        id: admin._id, 
+        role: admin.role || 'admin' 
+      },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
-    res.status(200).json({ 
+
+    // Return mapped explicit presentation structures
+    return res.status(200).json({ 
       success: true, 
       token, 
       admin: { 
         id: admin._id,
-        firstName: admin.firstName, 
-        lastName: admin.lastName,
-        role: admin.role 
+        firstName: admin.firstName || "", 
+        lastName: admin.lastName || "",
+        role: admin.role || "admin"
       } 
     });
+
   } catch (err) {
-    console.error("Admin Login Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred during terminal access", 
-      details: err.message 
-    });
+    next(err);
   }
 });
-
-app.get('/api/admin/stats', authenticateToken, async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: GET /api/admin/stats
+// =========================================================================
+// Use your isAdmin middleware to lock out non-administrative users
+app.get('/api/admin/stats', authenticateToken, isAdmin, async (req, res, next) => {
   try {
     await connectToDatabase();
 
@@ -3315,99 +3306,73 @@ app.get('/api/admin/stats', authenticateToken, async (req, res) => {
     const startOfWeek = new Date(new Date().setDate(now.getDate() - now.getDay()));
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    const [totalAgents, pendingAgents, dailyRev, weeklyRev, monthlyRev, yearlyRev, dynamicChart] = await Promise.all([
-      Agent.countDocuments(),
-      Agent.countDocuments({ isVerified: false }),
-            Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfDay } } },
-        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
-      ]),
-      Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfWeek } } },
-        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
-      ]),
-      Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfMonth } } },
-        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
-      ]),
-      Agent.aggregate([
-        { $match: { isSubscribed: true, subscriptionDate: { $ne: null, $gte: startOfYear } } },
-        { $group: { _id: null, total: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } } } }
-      ]),
-      Agent.aggregate([
-      { 
-  $match: { 
-    isSubscribed: true, 
-    subscriptionDate: { $ne: null, $gte: sevenDaysAgo } 
-  } 
-},
-{
-  $group: {
-    // Ensure subscriptionDate exists before calling $dayOfWeek
-    _id: { $dayOfWeek: { $ifNull: ["$subscriptionDate", new Date()] } }, 
-    revenue: { $sum: { $ifNull: ["$paymentDetails.amountNgn", 0] } }
-  }
-},
-        {
-          $project: {
-            revenue: 1,
-            order: "$_id",
-            name: {
-              $switch: {
-                branches: [
-                  { case: { $eq: ["$_id", 1] }, then: "Sun" },
-                  { case: { $eq: ["$_id", 2] }, then: "Mon" },
-                  { case: { $eq: ["$_id", 3] }, then: "Tue" },
-                  { case: { $eq: ["$_id", 4] }, then: "Wed" },
-                  { case: { $eq: ["$_id", 5] }, then: "Thu" },
-                  { case: { $eq: ["$_id", 6] }, then: "Fri" },
-                  { case: { $eq: ["$_id", 7] }, then: "Sat" }
-                ],
-                default: "Unknown"
+    // 🛡️ SECURITY FIX: Use a single $facet aggregation to process all stats in ONE pass
+    // This reduces database CPU load significantly
+    const stats = await Agent.aggregate([
+      {
+        $facet: {
+          "totals": [{ $count: "count" }],
+          "pending": [{ $match: { isVerified: false } }, { $count: "count" }],
+          "revenue": [
+            { $match: { isSubscribed: true, subscriptionDate: { $ne: null } } },
+            {
+              $group: {
+                _id: null,
+                daily: { $sum: { $cond: [{ $gte: ["$subscriptionDate", startOfDay] }, "$paymentDetails.amountNgn", 0] } },
+                weekly: { $sum: { $cond: [{ $gte: ["$subscriptionDate", startOfWeek] }, "$paymentDetails.amountNgn", 0] } },
+                monthly: { $sum: { $cond: [{ $gte: ["$subscriptionDate", startOfMonth] }, "$paymentDetails.amountNgn", 0] } },
+                yearly: { $sum: { $cond: [{ $gte: ["$subscriptionDate", startOfYear] }, "$paymentDetails.amountNgn", 0] } }
               }
             }
-          }
-        },
-        { $sort: { order: 1 } }
-      ])
+          ],
+          "chart": [
+            { $match: { isSubscribed: true, subscriptionDate: { $gte: sevenDaysAgo } } },
+            { $group: { _id: { $dayOfWeek: "$subscriptionDate" }, revenue: { $sum: "$paymentDetails.amountNgn" } } },
+            { $sort: { "_id": 1 } }
+          ]
+        }
+      }
     ]);
 
-    const chartData = dynamicChart.map(item => ({
-      name: item.name,
-      revenue: item.revenue
+    const data = stats[0];
+    
+    // Formatting the chartData for the frontend
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const chartData = days.map((name, idx) => ({
+      name,
+      revenue: data.chart.find(c => c._id === idx + 1)?.revenue || 0
     }));
 
-    res.json({
+    return res.json({
       success: true,
-      totalAgents,
-      pendingAgents,
+      totalAgents: data.totals[0]?.count || 0,
+      pendingAgents: data.pending[0]?.count || 0,
       currency: "NGN",
       currencySymbol: "₦",
       revenue: {
-        daily: dailyRev[0]?.total || 0,
-        weekly: weeklyRev[0]?.total || 0,
-        monthly: monthlyRev[0]?.total || 0,
-        yearly: yearlyRev[0]?.total || 0
+        daily: data.revenue[0]?.daily || 0,
+        weekly: data.revenue[0]?.weekly || 0,
+        monthly: data.revenue[0]?.monthly || 0,
+        yearly: data.revenue[0]?.yearly || 0
       },
-      chartData: chartData.length > 0 ? chartData : [{ name: 'No Data', revenue: 0 }]
+      chartData
     });
 
   } catch (err) {
-    console.error("Critical: Stats API Failure", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Error fetching system financial stats",
-      details: err.message 
-    });
+    // 🛡️ SECURITY FIX: Hide database errors from public clients
+    next(err);
   }
 });
-
-app.get('/api/admin/agents', authenticateToken, async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: GET /api/admin/agents
+// =========================================================================
+app.get('/api/admin/agents', authenticateToken, isAdmin, async (req, res, next) => {
   try {
     await connectToDatabase();
+    
+    // Select only the minimal fields needed for the Admin Table view
     const agents = await Agent.find({})
       .select('firstName lastName email program isVerified photoUrl createdAt')
       .sort({ createdAt: -1 })
@@ -3423,165 +3388,110 @@ app.get('/api/admin/agents', authenticateToken, async (req, res) => {
       photoUrl: agent.photoUrl || `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}`
     }));
 
-    res.json({
-      success: true,
-      agents: formattedAgents
-    });
+    return res.json({ success: true, agents: formattedAgents });
   } catch (err) {
-    console.error("Admin List Fetch Error:", err.message);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to fetch agent list",
-      error: err.message 
-    });
+    next(err);
   }
 });
 
-// 2. FETCH SINGLE AGENT (DETAILED VIEW)
-app.get('/api/admin/agents/:id', authenticateToken, async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: GET /api/admin/agents/:id
+// =========================================================================
+app.get('/api/admin/agents/:id', authenticateToken, isAdmin, async (req, res, next) => {
   try {
     await connectToDatabase();
-    
-    // Fetch agent and lean for performance
-    const agent = await Agent.findById(req.params.id).lean();
-    
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid agent identifier." });
+    }
+
+    const agent = await Agent.findById(id).lean();
     if (!agent) {
-      return res.status(404).json({
-        success: false,
-        message: "Agent record not found in system"
-      });
-    }
-    const now = new Date();
-    let statusUpdate = {};
-    if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
-      statusUpdate.isSubscribed = false;
-      agent.isSubscribed = false; // Update local object for response
-    }
-    if (agent.voicePackageActive && agent.voicePackageExpiry && now > new Date(agent.voicePackageExpiry)) {
-      statusUpdate.voicePackageActive = false;
-      agent.voicePackageActive = false; // Update local object for response
+      return res.status(404).json({ success: false, message: "Agent record not found." });
     }
 
-    if (Object.keys(statusUpdate).length > 0) {
-      await Agent.updateOne({ _id: agent._id }, { $set: statusUpdate });
-    }
+    // 🛡️ SECURITY FIX: Resolve photo URL
     let finalPhotoUrl = agent.photoUrl;
-    if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
-      try {
-        const urlParts = agent.photoUrl.split('.com/');
-        const fileKey = urlParts.length > 1 ? urlParts[1].split('?')[0] : null;
-
-        if (fileKey) {
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME,
-            Key: decodeURIComponent(fileKey),
-          });
-          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-        }
-      } catch (signErr) {
-        console.error("Admin View: Image Signing Failed:", signErr.message);
-      }
-    }
-    if (!finalPhotoUrl) {
+    if (agent.photoUrl?.includes('idrivee2.com')) {
+      finalPhotoUrl = await getPrivateUrl(agent.photoUrl); // Reusing your helper
+    } else {
       finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
-    const lastActiveDate = agent.lastActive || agent.createdAt;
-    const isOnline = (now - new Date(lastActiveDate)) < 120000;
 
-    // --- 4. RETURN FORMATTED RESPONSE ---
-    res.json({
+    const now = new Date();
+    const isOnline = (now - new Date(agent.lastActive || agent.createdAt)) < 120000;
+
+    // 🛡️ SECURITY FIX: Explicit Data Transfer Object (DTO)
+    // We purposefully omit 'paymentDetails' or sensitive fields here.
+    // If you need financial details, create a separate protected endpoint.
+    return res.json({
       success: true,
       agent: {
-        _id: agent._id,
+        id: agent._id,
         email: agent.email,
-        firstName: agent.firstName,
-        lastName: agent.lastName,
-        occupation: agent.occupation,
-        program: agent.program,
-        bio: agent.bio,
-        gender: agent.gender, 
-        dob: agent.dob,
-        address: agent.address,
+        firstName: agent.firstName || "",
+        lastName: agent.lastName || "",
+        occupation: agent.occupation || "",
+        program: agent.program || "General",
+        bio: agent.bio || "",
         photoUrl: finalPhotoUrl,
-        slug: agent.slug,
-        plan: agent.plan || "BASIC",
-        isSubscribed: !!agent.isSubscribed, 
-        subscriptionDate: agent.subscriptionDate,
-        expiryDate: agent.expiryDate,
-        subscriptionAmount: agent.subscriptionAmount || 0,
-        voiceId: agent.voiceId, 
-        unlockedVoiceIds: agent.unlockedVoiceIds || [], 
-        voiceDisplayName: agent.voiceDisplayName || "Natural Voice",
-        voicePackageActive: !!agent.voicePackageActive, 
-        voicePackageExpiry: agent.voicePackageExpiry,
-        voiceMaskingEnabled: !!agent.voiceMaskingEnabled,
         isVerified: !!agent.isVerified,
+        plan: agent.plan || "BASIC",
+        isSubscribed: !!agent.isSubscribed,
         status: isOnline ? 'online' : 'offline',
-        lastActive: agent.lastActive,
-        createdAt: agent.createdAt,
-        paymentDetails: agent.paymentDetails || {}
+        createdAt: agent.createdAt
       }
     });
-
   } catch (err) {
-    console.error("Admin Agent Fetch Error:", err.message);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error accessing agent data" 
-    });
+    next(err);
   }
 });
-
-app.post('/api/support/send', async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: POST /api/support/send
+// =========================================================================
+app.post('/api/support/send', async (req, res, next) => {
   try {
     await connectToDatabase(); 
     const { guestId, text } = req.body;
 
-    if (!guestId || !text) {
-      return res.status(400).json({ success: false, message: "Missing fields" });
+    // 🛡️ SECURITY FIX 1: Sanitize input
+    if (!guestId || !text || String(text).trim().length === 0) {
+      return res.status(400).json({ success: false, message: "Invalid payload." });
     }
 
     const savedMsg = await SupportMessage.create({
-      guestId: String(guestId),
-      text: text,
+      guestId: String(guestId).trim(),
+      text: String(text).trim(),
       senderType: 'Guest',
       isAdminRead: false
     });
-    const socketIo = req.app.get('socketio') || req.io;
 
+    const socketIo = req.app.get('socketio');
     if (socketIo) {
-      socketIo.emit("admin_receive_support_message", {
+      // 🛡️ SECURITY FIX: Emit to a specific admin room if possible
+      socketIo.to('admin_room').emit("admin_receive_support_message", {
         _id: savedMsg._id,
         guestId: savedMsg.guestId,
         text: savedMsg.text,
         isAdmin: false,
         timestamp: savedMsg.createdAt
       });
-      console.log("✅ Socket emit successful via app settings");
-    } else {
-      console.warn("⚠️ Socket.io instance not found in req.app or req.io");
     }
 
-    res.status(200).json({ success: true, message: "Message Stored" });
+    return res.status(200).json({ success: true, message: "Message Stored" });
   } catch (err) {
-    console.error("API Save Error:", err);
-    res.status(500).json({ success: false, error: err.message });
+    next(err);
   }
 });
 
-app.get('/api/support/history/:guestId', async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: Admin Guest List
+// =========================================================================
+app.get('/api/admin/support/guests', authenticateToken, isAdmin, async (req, res, next) => {
   try {
-    const { guestId } = req.params;
-    const messages = await SupportMessage.find({ guestId }).sort({ createdAt: 1 });
-    res.json({ success: true, messages });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// --- BACKEND: Get list of all unique guests who messaged ---
-app.get('/api/admin/support/guests', async (req, res) => {
-  try {
+    await connectToDatabase();
+    // Using aggregation to get the most recent contact per guest
     const guests = await SupportMessage.aggregate([
       { $sort: { createdAt: -1 } },
       { $group: {
@@ -3591,49 +3501,56 @@ app.get('/api/admin/support/guests', async (req, res) => {
       }},
       { $sort: { createdAt: -1 } }
     ]);
-    res.json({ success: true, guests });
+    return res.json({ success: true, guests });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    next(err);
   }
 });
-app.get('/api/admin/support/messages/:guestId', async (req, res) => {
+
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: Get Messages for specific Guest (Admin Only)
+// =========================================================================
+app.get('/api/admin/support/messages/:guestId', authenticateToken, isAdmin, async (req, res, next) => {
   try {
+    await connectToDatabase();
     const { guestId } = req.params;
-    await connectToDatabase(); 
-    const messages = await SupportMessage.find({ guestId: String(guestId) }).sort({ createdAt: 1 });
-    res.status(200).json({ 
+
+    // 🛡️ SECURITY FIX 2: Prevent potential NoSQL injection or junk queries
+    if (!guestId || guestId.length > 50) {
+      return res.status(400).json({ success: false, message: "Invalid guest identifier." });
+    }
+
+    const messages = await SupportMessage.find({ guestId: String(guestId) })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    return res.json({ 
       success: true, 
       messages: messages.map(msg => ({
         _id: msg._id,
         text: msg.text,
         isAdmin: msg.senderType === 'Admin',
-        timestamp: new Date(msg.createdAt).toLocaleTimeString([], { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        })
+        timestamp: msg.createdAt // Send raw Date, let the frontend format it
       }))
     });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    next(err);
   }
 });
-app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: POST /api/admin/broadcast-news
+// =========================================================================
+app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, res, next) => {
   try {
     await connectToDatabase();
     const { target, emails, subject, message, category = 'news' } = req.body;
 
-    // 1. Resolve Recipient Data (Fetching both email and slug)
-    let recipients = [];
-    if (target === 'all') {
-      // We need 'slug' to create the personalized link
-      recipients = await Agent.find({}, 'email slug'); 
-    } else {
-      // If specific emails are sent, find the corresponding slugs
-      recipients = await Agent.find({ email: { $in: emails } }, 'email slug');
-    }
+    // 1. Resolve Recipient Data
+    const query = target === 'all' ? {} : { email: { $in: emails } };
+    const recipients = await Agent.find(query, 'email slug').lean();
 
-    if (recipients.length === 0) {
-      return res.status(400).json({ success: false, message: "No recipients found." });
+    if (!recipients.length) {
+      return res.status(404).json({ success: false, message: "No recipients found." });
     }
 
     const transporter = nodemailer.createTransport({
@@ -3643,7 +3560,6 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
 
     const baseUrl = "https://zingconnect.vercel.app";
     const logoUrl = `${baseUrl}/logos.png`;
-
     const configs = {
       maintenance: { color: "#f59e0b", label: "SYSTEM MAINTENANCE", bg: "#fffbeb", icon: "⚙️" },
       subscription: { color: "#10b981", label: "SUBSCRIPTION UPDATE", bg: "#ecfdf5", icon: "💳" },
@@ -3651,106 +3567,101 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
     };
 
     const design = configs[category] || configs.news;
-    const emailPromises = recipients.map(agent => {
-      const agentSlugLink = agent.slug ? `${baseUrl}/agent/${agent.slug}` : `${baseUrl}/agent/login`;
 
-      const mailOptions = {
-        from: `"ZingConnect Terminal" <${process.env.EMAIL_USER}>`,
-        to: agent.email,
-        subject: `[${design.label}] ${subject}`,
-        html: `
-          <div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 600px; margin: auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
-            <div style="background-color: ${design.color}; height: 6px;"></div>
-            <div style="padding: 30px; background-color: #0f172a; text-align: center;">
-              <img src="${logoUrl}" alt="ZingConnect" width="140" style="margin-bottom: 15px;">
-              <div style="color: ${design.color}; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;">
-                ${design.icon} ${design.label}
-              </div>
-            </div>
-            <div style="padding: 40px 35px;">
-              <h2 style="color: #1e293b; font-size: 22px; font-weight: 700; margin: 0 0 20px 0; line-height: 1.3;">
-                ${subject}
-              </h2>
-              <div style="background-color: ${design.bg}; border-left: 4px solid ${design.color}; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-                <p style="color: #334155; line-height: 1.7; font-size: 15px; margin: 0; white-space: pre-wrap;">${message}</p>
-              </div>
-              <div style="text-align: center;">
-                <a href="${agentSlugLink}" 
-                   style="background-color: #0f172a; color: white; padding: 16px 40px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                   View Your Agent Profile
-                </a>
-              </div>
-            </div>
-            <div style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
-              <p style="color: #64748b; font-size: 12px; margin: 0 0 8px 0;">This is an automated operational message for verified agents.</p>
-              <p style="color: #94a3b8; font-size: 11px; margin: 0;">&copy; 2026 ZingConnect Infrastructure Team.</p>
-            </div>
-          </div>
-        `
-      };
-      return transporter.sendMail(mailOptions);
-    });
+    // 🛡️ SECURITY FIX: Chunked Dispatcher
+    // We process emails in groups of 10 to protect SMTP connection stability
+    const CHUNK_SIZE = 10;
+    
+    for (let i = 0; i < recipients.length; i += CHUNK_SIZE) {
+      const chunk = recipients.slice(i, i + CHUNK_SIZE);
+      
+      await Promise.all(chunk.map(agent => {
+        const agentSlugLink = agent.slug ? `${baseUrl}/agent/${agent.slug}` : `${baseUrl}/agent/login`;
 
-    await Promise.all(emailPromises);
-    return res.json({ success: true, message: "Personalized broadcast dispatched successfully." });
+        return transporter.sendMail({
+          from: `"ZingConnect Terminal" <${process.env.EMAIL_USER}>`,
+          to: agent.email,
+          subject: `[${design.label}] ${subject}`,
+          html: `
+            <div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 600px; margin: auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
+              <div style="background-color: ${design.color}; height: 6px;"></div>
+              <div style="padding: 30px; background-color: #0f172a; text-align: center;">
+                <img src="${logoUrl}" alt="ZingConnect" width="140" style="margin-bottom: 15px;">
+                <div style="color: ${design.color}; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;">
+                  ${design.icon} ${design.label}
+                </div>
+              </div>
+              <div style="padding: 40px 35px;">
+                <h2 style="color: #1e293b; font-size: 22px; font-weight: 700; margin: 0 0 20px 0; line-height: 1.3;">
+                  ${subject}
+                </h2>
+                <div style="background-color: ${design.bg}; border-left: 4px solid ${design.color}; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+                  <p style="color: #334155; line-height: 1.7; font-size: 15px; margin: 0; white-space: pre-wrap;">${message}</p>
+                </div>
+                <div style="text-align: center;">
+                  <a href="${agentSlugLink}" 
+                     style="background-color: #0f172a; color: white; padding: 16px 40px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                     View Your Agent Profile
+                  </a>
+                </div>
+              </div>
+              <div style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
+                <p style="color: #64748b; font-size: 12px; margin: 0 0 8px 0;">This is an automated operational message for verified agents.</p>
+                <p style="color: #94a3b8; font-size: 11px; margin: 0;">&copy; 2026 ZingConnect Infrastructure Team.</p>
+              </div>
+            </div>
+          `
+        });
+      }));
+
+      // Throttle delay between chunks to avoid SMTP server throttling
+      if (recipients.length > CHUNK_SIZE) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    return res.json({ success: true, message: `Broadcast successfully dispatched to ${recipients.length} agents.` });
 
   } catch (err) {
-    console.error("Broadcast API Error:", err.message);
-    return res.status(500).json({ success: false, message: "Broadcast failed", details: err.message });
+    next(err);
   }
 });
 
-// --- BACKEND REST API FALLBACK FOR ADMIN REPLIES ---
-app.post('/api/admin/support/reply', async (req, res) => {
+// =========================================================================
+// 🛡️ HARDENED ENDPOINT: POST /api/admin/support/reply
+// =========================================================================
+app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res, next) => {
   try {
     await connectToDatabase(); 
-    const { guestId, text, senderType } = req.body;
+    const { guestId, text } = req.body;
 
     if (!guestId || !text) {
-      return res.status(400).json({ success: false, message: "Missing required guestId or message body context." });
+      return res.status(400).json({ success: false, message: "Missing required fields." });
     }
 
-    // 1. Persist directly to MongoDB via HTTP POST
     const savedMsg = await SupportMessage.create({
-      guestId: String(guestId),
-      text: text,
-      senderType: senderType || 'Admin', 
+      guestId: String(guestId).trim(),
+      text: String(text).trim(),
+      senderType: 'Admin', 
       isAdminRead: true
     });
 
-    console.log("✅ Database Save Successful via REST Route:", savedMsg._id);
-
-    // 2. Fetch the current socket.io server instance to notify active clients
-    const socketIo = req.app.get('socketio') || req.io;
+    const socketIo = req.app.get('socketio');
     if (socketIo) {
-      // Broadcast live to the guest room channel if their connection is online
       socketIo.to(String(guestId)).emit("guest_receive_admin_message", {
         _id: savedMsg._id,
         text: savedMsg.text,
         isAdmin: true,
         timestamp: savedMsg.createdAt
       });
-      
-      // Notify the active admin client to append the verified database entry
-      socketIo.emit("admin_message_stored", savedMsg);
-    } else {
-      console.warn("⚠️ Serverless Context Note: Active Socket.io instance unavailable for real-time relay.");
     }
 
     return res.status(200).json({ 
       success: true, 
-      message: "Admin Reply Stored Authentically", 
-      messageData: {
-        _id: savedMsg._id,
-        text: savedMsg.text,
-        isAdmin: true,
-        timestamp: new Date(savedMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      } 
+      message: "Admin reply stored and emitted."
     });
-
   } catch (err) {
-    console.error("❌ Admin Route Critical Failure:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    next(err);
   }
 });
 

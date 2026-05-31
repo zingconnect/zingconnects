@@ -404,13 +404,9 @@ useEffect(() => {
   socket.on("ai-audio-chunk", handleAiAudioChunk);
   return () => socket.off("ai-audio-chunk", handleAiAudioChunk);
 }, [socket, callStatus, isSpeakerOn, activeCall?.voiceId]);
-
-
-
 const handleEndCall = useCallback(async () => {
   console.log("📴 Initiating Call End Sequence...");
   
-  // 1. Clear Timeouts and Pollers
   if (connectionTimeoutRef.current) {
     clearTimeout(connectionTimeoutRef.current);
     connectionTimeoutRef.current = null;
@@ -420,20 +416,20 @@ const handleEndCall = useCallback(async () => {
     clearInterval(pollingRef.current);
     pollingRef.current = null;
   }
+
   const myId = userData?._id || userData?.id;
   const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const targetId = activeCall?.fromId === myId 
     ? activeCall?.toId 
     : activeCall?.fromId;
+
   try {
-    if (currentCallId && token) {
+    if (currentCallId) {
+      // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
       await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
       });
       console.log("✅ Server notified: Call marked as inactive.");
     }
@@ -451,14 +447,13 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
   }
 }, [socket, userData, activeCall, terminateLocalSession]);
 
+
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
   const myId = userData._id.toString();
   socket.emit("join-main-room", myId);
-
   const handleIncomingCall = (data) => {
-    // 🔥 RESET GATES for the new call
     peerConnectedRef.current = false;
     setPeerConnected(false);
 
@@ -467,9 +462,7 @@ useEffect(() => {
       socket.emit("user-busy", { to: data.fromId, callId: data.callId });
       return; 
     }
-
     console.log("📥 Incoming Secure Call detected:", data.callId);
-
     const ringTimeout = setTimeout(() => {
       if (callStatusRef.current === 'ringing') {
         console.log("⏰ Call timed out: No answer after 45s.");
@@ -621,19 +614,23 @@ const formatTime = (seconds) => {
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
 useEffect(() => {
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const currentCallId = activeCall?.callId || activeCall?._id;
-    if (!token || !currentCallId || callStatus === 'idle' || callStatus === 'connected' || isEnding) return;
+  
+  if (!currentCallId || callStatus === 'idle' || callStatus === 'connected' || isEnding) return;
+  
   const syncSessionStart = Date.now();
+  
   const syncStatus = async () => {
     if (isEnding || callStatus === 'connected') return;
+    
     try {
+      // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache' 
-        }
-      });      
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache' },
+        credentials: 'include'
+      });
+      
       if (res.status === 404) {
         if (Date.now() - syncSessionStart > 15000) {
           console.log("⚠️ Call record missing after long grace period.");
@@ -646,13 +643,14 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
       const terminalStates = ['ended', 'declined', 'missed', 'rejected'];
       if (terminalStates.includes(data.status) || data.active === false) {
         const timeElapsed = Date.now() - syncSessionStart;
-                if (timeElapsed < 30000 && callStatus === 'ringing') {
+        if (timeElapsed < 30000 && callStatus === 'ringing') {
           return;
         }
         console.log("🔴 DB Sync: Server confirmed call is truly over.");
         handleEndCall();
         return;
       }
+      
       if (data.status === 'connected' && callStatus === 'ringing') {
         console.log("📡 DB Sync: Agent connected.");
         setCallStatus('connected');
@@ -661,9 +659,10 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
       console.warn("Sync Polling jitter:", e);
     }
   };
+  
   const interval = setInterval(syncStatus, 5000); 
   return () => clearInterval(interval);
-}, [callStatus, activeCall?.callId, activeCall?._id, isEnding]); 
+}, [callStatus, activeCall?.callId, activeCall?._id, isEnding]);
 
 useEffect(() => {
   if (!socket) return;
@@ -708,13 +707,8 @@ useEffect(() => {
     }
   }
 }, [isSpeakerOn, activeCall?.voiceId, callStatus]);
-
 useEffect(() => {
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-  if (!token) return;
-
   const checkCalls = async () => {
-    
     if (
       callStatusRef.current !== 'idle' || 
       isEnding || 
@@ -725,25 +719,23 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
 
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Cache-Control': 'no-cache' 
-        }
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache' },
+        credentials: 'include'
       });
       if (!response.ok) return;
-
       const data = await response.json();
 
       if (data && data.hasIncomingCall) {
         if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
 
         console.log("📡 Poller found incoming call, triggering UI...");
-                setActiveCall({
+        setActiveCall({
           callId: data.callId,
           fromId: data.callerData?.callerId || data.fromId,
           roomName: data.roomName || data.callId,
           callerData: data.callerData,
-          voiceId: data.voiceId // Ensure voice identity carries over
+          voiceId: data.voiceId
         });
         
         setIsIncomingCall(true); 
@@ -753,6 +745,7 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
       console.warn("User Polling error:", err);
     }
   };
+  
   const interval = setInterval(checkCalls, 4000); 
   return () => clearInterval(interval);
 }, [userData?._id, isEnding]);
@@ -823,7 +816,6 @@ const toggleMute = () => {
     return newState;
   });
 };
-
 const handleAcceptCall = async () => {
   // 1. Audio Pipeline Wake-up
   const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -840,32 +832,29 @@ const handleAcceptCall = async () => {
     ringtoneAudio.current.currentTime = 0;
   }
 
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
 
   if (!callId) {
-    console.error("❌ ZingConnect: No valid Call ID found for acceptance.");
+    console.error("No valid Call ID found for acceptance.");
     return;
   }
+  
   try {
     setIsEnding(false); 
     isTransitioningRef.current = true;
-        setCallStatus('connecting');
+    setCallStatus('connecting');
     setShowFullScreenCall(true);
 
-    console.log(`📡 Sending acceptance to server engine for room/call: ${callId}...`);
+    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
     const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include'
     });
 
     const data = await response.json();    
     if (data.success && data.lkToken) {
-      console.log("✅ Secure LiveKit token verified and cached locally.");
-            const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
+      const agentId = (activeCall?.fromId || activeCall?.callerData?.callerId || activeCall?.from?._id)?.toString();
       
       if (socket && agentId) {
         socket.emit("answer-call", { 
@@ -874,90 +863,89 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
           myId: userData?._id?.toString() 
         });
       }
+      
       peerConnectedRef.current = true; 
       setPeerConnected(true);
-            setLiveKitToken(data.lkToken); 
-            isTransitioningRef.current = false;
-      setIsIncomingCall(false); // Move incoming flag change here post-auth verification
+      setLiveKitToken(data.lkToken); 
+      isTransitioningRef.current = false;
+      setIsIncomingCall(false);
       
     } else {
-      throw new Error(data.message || "LiveKit RTC token missing from server engine");
+      throw new Error(data.message || "LiveKit RTC token missing");
     }
-
   } catch (err) {
-    console.error("❌ ZingConnect acceptance runtime exception:", err);
+    console.error("Acceptance runtime exception:", err);
     setIsEnding(false); 
     isTransitioningRef.current = false;
-    handleEndCall(); // Safely fall back to structural teardown logic
+    handleEndCall();
   }
 };
-
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
   const myId = userData._id.toString();
   socket.emit("join-main-room", myId);
 
- const onIncoming = async (data) => {
-  if (callStatusRef.current !== 'idle' || isEnding) return;
+  const onIncoming = async (data) => {
+    if (callStatusRef.current !== 'idle' || isEnding) return;
 
-  const roomName = data.callId || data.roomName;
+    const roomName = data.callId || data.roomName;
     setActiveCall({
-    ...data,
-    roomName: roomName,
-    fromId: data.fromId || data.callerData?.callerId
-  });
-  setIsIncomingCall(true);
-  setCallStatus('ringing');
-  if (socket) {
-    socket.emit("confirm-ringing", { to: data.fromId || data.callerData?.callerId });
-  }
-  try {
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      ...data,
+      roomName: roomName,
+      fromId: data.fromId || data.callerData?.callerId
     });
-    const statusData = await res.json();
+    setIsIncomingCall(true);
+    setCallStatus('ringing');
     
-    if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
-      handleEndCall(); 
+    if (socket) {
+      socket.emit("confirm-ringing", { to: data.fromId || data.callerData?.callerId });
     }
-  } catch (err) {
-    console.warn("Incoming check jitter ignored.");
-  }
-};
 
-const onRemoteEnd = (data) => {
-  const currentId = activeCallRef.current?.roomName || 
-                    activeCallRef.current?.callId || 
-                    activeCallRef.current?._id;
-  const incomingId = data?.callId || data?.roomName || data?._id;
-
-  console.log("📴 Signal Received:", { incomingId, currentId });
-  if (!currentId) {
-    if (callStatus !== 'idle') {
-       console.log("Cleaning up zombie UI session");
-       handleEndCall();
+    try {
+      // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
+        method: 'GET',
+        credentials: 'include'
+      });
+      const statusData = await res.json();
+      
+      if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
+        handleEndCall(); 
+      }
+    } catch (err) {
+      console.warn("Incoming check jitter ignored.");
     }
-    return;
-  }
-  if (incomingId && currentId && String(incomingId) !== String(currentId)) {
-    console.warn("⏭️ Ignoring end signal: Session mismatch", { incomingId, currentId });
-    return;
-  }
+  };
 
-  // 5. Final Execution
-  console.log("✅ Call termination confirmed via Socket.");
-  handleEndCall();
-};
+  const onRemoteEnd = (data) => {
+    const currentId = activeCallRef.current?.roomName || 
+                      activeCallRef.current?.callId || 
+                      activeCallRef.current?._id;
+    const incomingId = data?.callId || data?.roomName || data?._id;
+
+    console.log("📴 Signal Received:", { incomingId, currentId });
+    if (!currentId) {
+      if (callStatus !== 'idle') {
+        console.log("Cleaning up zombie UI session");
+        handleEndCall();
+      }
+      return;
+    }
+    if (incomingId && currentId && String(incomingId) !== String(currentId)) {
+      console.warn("⏭️ Ignoring end signal: Session mismatch", { incomingId, currentId });
+      return;
+    }
+
+    console.log("✅ Call termination confirmed via Socket.");
+    handleEndCall();
+  };
+
   socket.on("incoming-call", onIncoming);
   socket.on("call-ended", onRemoteEnd);
   socket.on("end-call", onRemoteEnd);
   socket.on("call-rejected", onRemoteEnd);
-  socket.on("call-accepted", (data) => {
-     if (data.signal || data.answerSignal) {
-     }
-  });
+  socket.on("call-accepted", (data) => {});
 
   return () => {
     socket.off("incoming-call", onIncoming);
@@ -967,7 +955,6 @@ const onRemoteEnd = (data) => {
     socket.off("call-accepted");
   };
 }, [socket, userData?._id, handleEndCall]);
-
 
 async function handleRejectCall() {
   console.log("🚫 User rejecting Agent call...");
@@ -1020,7 +1007,6 @@ useEffect(() => {
     socket.off("message-deleted");
   };
 }, [socket]);
-
 useEffect(() => {
   const setupNotifications = async () => {
     try {
@@ -1032,7 +1018,6 @@ useEffect(() => {
 
       const registration = await navigator.serviceWorker.ready;
       
-      // Get existing or create new
       let subscription = await registration.pushManager.getSubscription();
       
       if (!subscription) {
@@ -1041,14 +1026,10 @@ useEffect(() => {
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-      if (!token) return;
       const response = await fetch('/api/save-subscription', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ subscription }) 
       });
 
@@ -1086,36 +1067,31 @@ useEffect(() => {
 }, [socket, isSpeakerOn]);
 
 useEffect(() => {
-  // 🛠️ FIX 1: If the page route is designed to have a slug parameter, 
-  // wait for React Router to finish parsing it before triggering network requests.
   if (slugFromUrl === undefined) return;
-
-  const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-  if (!token) return navigate('/');
-
   const fetchUserSession = async () => {
     try {
       const url = slugFromUrl 
         ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
-
       const response = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        method: 'GET',
+        credentials: 'include' 
       });
+
+      if (response.status === 401 || response.status === 403) {
+        navigate('/'); // Redirect on auth failure
+        return;
+      }
       const data = await response.json();
-      
       if (response.ok) {
         const loadedAgentSlug = data.agent?.slug;
-
         if (slugFromUrl && String(loadedAgentSlug).toLowerCase() !== String(slugFromUrl).toLowerCase()) {
-          console.error("⛔ [Security Violation]: Mismatched route context detected. Forcing fallback isolation logic.");
+          console.error("⛔ [Security Violation]: Mismatched context.");
           navigate('/'); 
           return;
         }
-
         setAgent(data.agent); 
         setUserData(data.user); 
-        
         if (!data.user.isProfileComplete) {
           setShowOnboarding(true);
         }
@@ -1126,26 +1102,23 @@ useEffect(() => {
       setLoading(false);
     }
   };
-
   fetchUserSession();
   const interval = setInterval(fetchUserSession, 30000); 
   return () => clearInterval(interval);
 }, [navigate, slugFromUrl]);
 
+
 useEffect(() => {
-  // 🛠️ FIX 1: Dynamically look up the slug-isolated token variable first
-  const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL;
-  
-  // Exit gracefully if authentication context isn't ready yet
-  if (!token || !targetAgentId) return;
-
+    if (!targetAgentId) return;
   const fetchMessages = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
-        headers: { 'Authorization': `Bearer ${token}` } // Now cleanly authorized!
+        method: 'GET',
+        credentials: 'include' 
       });
+      
       const data = await response.json();
       
       if (response.ok && data.success) {
@@ -1171,14 +1144,11 @@ useEffect(() => {
               tag: 'zing-msg'
             });
           }
-
           fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
             method: 'PATCH',
-            headers: { 'Authorization': `Bearer ${token}` }
+            credentials: 'include' 
           }).catch(err => console.error("Mark read failed:", err));
         }
-
-        // 2. State Sync
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
           const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
@@ -1190,8 +1160,6 @@ useEffect(() => {
           }
           return newCombined;
         });
-
-        // 3. Smart Viewport Anchoring (Only on Initial Load)
         if (isFirstLoad.current) {
           setTimeout(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -1205,14 +1173,10 @@ useEffect(() => {
       if (isFirstLoad.current) setLoading(false);
     }
   };
-
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
-  
   return () => clearInterval(interval);
-  // 🛠️ FIX 2: Add slugFromUrl to the dependency array so changing profiles reinstantiates the poll cleanly
 }, [agent?._id, agent?.id, slugFromUrl]);
-
   const agentStatus = getStatusInfo(agent);
 
   const handlePhotoClick = () => fileInputRef.current.click();
@@ -1222,7 +1186,6 @@ useEffect(() => {
   if (!container) return;
 
   const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-  // Only scroll if we are already at the bottom and a new message exists
   if (isNearBottom) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }
@@ -1252,52 +1215,54 @@ useEffect(() => {
   };
 }, [loadingMore, hasMore]);
 
+const fetchOlderMessages = async () => {
+  if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
+  
+  const targetAgentId = agent._id || agent.id;
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
+  const oldestMessage = messages.find(m => m._id && !m.isTemp);
+  
+  if (!oldestMessage) return;
 
-  const fetchOlderMessages = async () => {
-    if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
+  setIsFetchingOlder(true);
+  isAdjustingScrollRef.current = true;
+  const container = chatContainerRef.current;
+  const prevScrollHeight = container?.scrollHeight || 0;
+
+  try {
+    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
+    // Authorization header removed to prevent token exposure
+    const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
+      method: 'GET',
+      credentials: 'include'
+    });
     
-    const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-    const targetAgentId = agent._id || agent.id;
-    const API_BASE_URL = import.meta.env.VITE_API_URL;
-    const oldestMessage = messages.find(m => m._id && !m.isTemp);
+    const data = await response.json();
     
-    if (!oldestMessage) return;
-
-    setIsFetchingOlder(true);
-    isAdjustingScrollRef.current = true;
-    const container = chatContainerRef.current;
-    const prevScrollHeight = container?.scrollHeight || 0;
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await response.json();
+    if (response.ok && data.success) {
+      if (data.messages.length < 30) setHasMore(false);
       
-      if (response.ok && data.success) {
-        if (data.messages.length < 30) setHasMore(false);
-        
-        if (data.messages.length > 0) {
-          setMessages(prev => {
-            const existingIds = new Set(prev.map(m => m._id));
-            const uniqueHistorical = data.messages.filter(m => !existingIds.has(m._id));
-            return [...uniqueHistorical, ...prev];
-          });
-          requestAnimationFrame(() => {
-            if (container) {
-              const newHeight = container.scrollHeight;
-              container.scrollTop = newHeight - prevScrollHeight;
-            }
-          });
-        }
+      if (data.messages.length > 0) {
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m._id));
+          const uniqueHistorical = data.messages.filter(m => !existingIds.has(m._id));
+          return [...uniqueHistorical, ...prev];
+        });
+        requestAnimationFrame(() => {
+          if (container) {
+            const newHeight = container.scrollHeight;
+            container.scrollTop = newHeight - prevScrollHeight;
+          }
+        });
       }
-    } catch (err) {
-      console.error("Failed to load history:", err);
-    } finally {
-      setIsFetchingOlder(false);
-      isAdjustingScrollRef.current = false;
     }
-  };
+  } catch (err) {
+    console.error("Failed to load history:", err);
+  } finally {
+    setIsFetchingOlder(false);
+    isAdjustingScrollRef.current = false;
+  }
+};
 
 const handleChatScroll = (e) => {
   const container = e.currentTarget;
@@ -1332,7 +1297,6 @@ const handleFileChange = (e) => {
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
   
-  // 🛠️ FIX: Check the nested raw string property length instead of the parent object wrapper
   const rawPhone = formData.phone?.raw || '';
   if (!rawPhone || rawPhone.length < 10) {
     alert("Please enter a valid phone number with country code.");
@@ -1340,7 +1304,6 @@ const handleProfileSubmit = async (e) => {
   }
 
   setIsUploading(true); 
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const data = new FormData();
   
   const fileToUpload = onboardingFile || previewFile;
@@ -1348,11 +1311,9 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
     data.append('photo', fileToUpload);
   }
 
-  // 🛠️ FIX: Safely parse fields without stringifying the whole object blindly
   Object.keys(formData).forEach(key => {
     if (formData[key] !== undefined && formData[key] !== null) {
       if (key === 'phone') {
-        // Transform the nested object into a JSON string so FormData can carry it cleanly
         data.append(key, JSON.stringify(formData[key]));
       } else {
         data.append(key, formData[key]);
@@ -1361,12 +1322,11 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
   });
 
   try {
-    // 💡 Double-check your endpoint route mapping names here to make sure they line up
+    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
+    // Authorization header removed to prevent token exposure
     const res = await fetch('/api/users/update-profile', {
       method: 'PUT',
-      headers: { 
-        'Authorization': `Bearer ${token}` 
-      },
+      credentials: 'include',
       body: data
     });
 
@@ -1382,7 +1342,7 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
       setPreviewFile(null);
       setPreviewUrl(null);
       
-      console.log("Profile updated successfully. Phone saved:", result.user.phone);
+      console.log("Profile updated successfully.");
     } else {
       alert(result.message || "Initialization failed. Please check the form.");
     }
@@ -1421,44 +1381,39 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
     if (e.target) e.target.value = null; 
   };
 
-
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
 
   const tempId = Date.now().toString();
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-  const savedFile = previewFile; // Keep a reference for resending
+  const savedFile = previewFile;
   const savedCaption = caption;
 
-  // Optimistic UI for Media
   const pendingMedia = {
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
     senderModel: 'User',
     text: savedCaption,
-    fileUrl: previewUrl, // Use the local blob URL for preview
+    fileUrl: previewUrl,
     fileType: detectedType,
     status: 'sending',
     createdAt: new Date().toISOString(),
     isTemp: true,
-    originalFile: savedFile // Store file in object for resending
+    originalFile: savedFile
   };
 
   setMessages(prev => [...prev, pendingMedia]);
-  setPreviewUrl(null); // Close the preview overlay
+  setPreviewUrl(null);
   setPreviewFile(null);
 
   setIsUploading(true);
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
 
   try {
     const urlResponse = await fetch('/api/messages/get-upload-url', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}` 
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
     });
 
@@ -1473,14 +1428,12 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
 
     const confirmResponse = await fetch('/api/messages/confirm-upload', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}` 
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         receiverId: agent._id,
         text: savedCaption.trim(),
-        fileUrl: urlData.key, 
+        fileUrl: urlData.key,
         fileType: detectedType
       })
     });
@@ -1515,10 +1468,8 @@ const handleDownload = async (url, type) => {
     console.error("Download failed:", err);
   }
 };
-
 const startStatusPolling = (roomName) => {
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-  const startTime = Date.now(); // Mark when polling started
+  const startTime = Date.now();
 
   if (pollingRef.current) clearInterval(pollingRef.current);
 
@@ -1527,22 +1478,24 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
 
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        method: 'GET',
+        credentials: 'include'
       });
 
       if (res.status === 404) {
         if (Date.now() - startTime > 8000) {
-          console.warn("🏳️ Polling: Call record missing.");
+          console.warn("Polling: Call record missing.");
           handleEndCall();
         }
         return;
       }
+
       const data = await res.json();
       const terminalStates = ['ended', 'rejected', 'missed', 'declined'];
 
       if (terminalStates.includes(data.status) || data.active === false) {
         if (Date.now() - startTime > 5000) {
-          console.log("🏳️ Polling: Remote side terminated call.");
+          console.log("Polling: Remote side terminated call.");
           handleEndCall();
         }
       }
@@ -1554,26 +1507,23 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
   pollingRef.current = pollInterval;
 };
 const handleStartCall = async () => {
-  // 1. Validation and Setup
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const API_BASE_URL = import.meta.env.VITE_API_URL;
 
   if (!currentAgentId || !currentUserId) {
     alert("Profile data still loading. Please try again.");
     return;
   }
+  
   setCallStatus('calling'); 
   setShowFullScreenCall(true);
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${token}` 
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ 
         receiverId: currentAgentId, 
         receiverModel: 'Agent',
@@ -1587,13 +1537,11 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
       throw new Error(data.message || "Agent unavailable");
     }
 
-    // 3. Resolve Photo URL
     const photoPath = userData?.photoUrl;
     const fullPhotoUrl = photoPath?.startsWith('http') 
       ? photoPath 
       : `${API_BASE_URL}/${photoPath?.replace(/^\//, '') || 'default-avatar.png'}`;
 
-    // 4. Set Active Call Metadata IMMEDIATELY (Updates UI)
     setActiveCall({ 
       callId: data.roomName, 
       roomName: data.roomName,
@@ -1606,6 +1554,7 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
         callerId: currentUserId
       }
     });
+
     socket.emit("call-agent", { 
       agentToCall: currentAgentId.toString(),
       fromId: currentUserId,
@@ -1613,24 +1562,23 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
       photoUrl: fullPhotoUrl,
       callId: data.roomName
     });
+
     setCallStatus('ringing'); 
+    
     setTimeout(() => {
       if (data.lkToken) {
-        console.log("🚀 ZingConnect: Initializing Secure Media Handshake...");
         setLiveKitToken(data.lkToken); 
       }
     }, 500);
 
-    // 7. Start the Safety Poller
     startStatusPolling(data.roomName);
 
   } catch (err) {
-    console.error("❌ ZingConnect: Call initialization failed:", err);
+    console.error("Call initialization failed:", err);
     handleEndCall();
   }
 };
-
- const handleSendMessage = async (e) => {
+const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!newMessage.trim() || !agent?._id) return;
   
@@ -1642,23 +1590,21 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
-    senderModel: 'User', // Ensure this matches your CSS logic
+    senderModel: 'User',
     text: textToSend,
     status: 'sending',
     createdAt: new Date().toISOString(),
     isTemp: true
   };
+
   setMessages(prev => [...prev, pendingMessage]);
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
 
   try {
-const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
     const response = await fetch('/api/messages/send', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         receiverId: agent._id,
         text: textToSend,
@@ -1671,7 +1617,6 @@ const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.g
     if (data.success) {
       setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
       socket.emit("sendMessage", data.message); 
-      
       setReplyingTo(null);
     } else {
       throw new Error();
