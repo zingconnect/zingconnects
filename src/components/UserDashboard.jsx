@@ -1106,9 +1106,9 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
-
 useEffect(() => {
-  if (!slugFromUrl || !token) return; // Only fetch if we have a token
+  // If we are still loading, don't trigger the fetch yet
+  if (isLoading) return;
 
   let isMounted = true;
   setLoading(true);
@@ -1119,17 +1119,18 @@ useEffect(() => {
         ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
       
-      // Use secureFetch instead of standard fetch
       const response = await secureFetch(endpoint, token);
 
-      if (response.status === 401 || response.status === 403) {
-        navigate('/'); 
+      // If session is invalid, let the AuthProvider or the parent Route 
+      // handle the redirect. Don't navigate here to avoid race conditions.
+      if (!response.ok) {
+        console.warn("Session expired or invalid. Status:", response.status);
         return;
       }
 
       const data = await response.json();
       
-      if (isMounted && response.ok) {
+      if (isMounted) {
         setAgent(data.agent);
         setUserData(data.user);
         if (!data.user?.isProfileComplete) setShowOnboarding(true);
@@ -1150,7 +1151,8 @@ useEffect(() => {
     isMounted = false;
     clearInterval(interval);
   };
-}, [navigate, slugFromUrl, token]);
+// Keep dependencies clean: we only care about slug and token changes
+}, [slugFromUrl, token, isLoading]);
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;

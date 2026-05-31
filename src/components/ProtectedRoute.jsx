@@ -1,14 +1,25 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export const ProtectedRoute = () => {
-  const { token } = useAuth();
+  const { token, isLoading } = useAuth();
+  const location = useLocation();
 
-  // If there is no token, redirect immediately to /pricing
-  if (!token) {
-    return <Navigate to="/pricing" replace />;
+  // If we are still loading the Auth state, show a loader
+  if (isLoading) {
+    return <div>Authenticating...</div>;
   }
 
-  // Otherwise, render the child route (Outlet)
+  // If no token, redirect to /pricing, but pass the current path as state
+  if (!token) {
+    return (
+      <Navigate 
+        to="/pricing" 
+        state={{ from: location.pathname + location.search }} 
+        replace 
+      />
+    );
+  }
+
   return <Outlet />;
 };
