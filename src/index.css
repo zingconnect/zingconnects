@@ -4,7 +4,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", "sans-serif";
+--font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --color-zing-blue: #266cee;
   --color-zing-dark: #0f172a;
   

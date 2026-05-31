@@ -27,8 +27,10 @@
     { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
 {
   "key": "Content-Security-Policy",
-  "value": "default-src 'self'; script-src 'self' https://checkout.flutterwave.com; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; object-src 'none';"
-}  ]
+  "value": "default-src 'self'; script-src 'self' https://checkout.flutterwave.com; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.flutterwave.com; connect-src 'self' https://zingconnect.vercel.app https://api.flutterwave.com wss://*.livekit.cloud; object-src 'none';"
+}
+
+  ]
 },
     {
       "source": "/sounds/(.*)",
