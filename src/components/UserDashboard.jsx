@@ -106,7 +106,6 @@ const isFirstLoad = useRef(true);
   const audioCtxRef = useRef(null);
 const nextStartTimeRef = useRef(0);
 const chatContainerRef = useRef(null);
-const { token } = useAuth();
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
