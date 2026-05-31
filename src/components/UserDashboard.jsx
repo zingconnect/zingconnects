@@ -195,21 +195,31 @@ const previousScrollTopRef = useRef(0);
   
 const unlockAudio = useCallback(async () => {
   if (hasInteracted) return;
+  
   console.log("🔓 Unlocking secure audio channels...");
+  
   try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (AudioContext) {
-      const ctx = new AudioContext();
-      await ctx.resume();
+    // Check if we already have a context or create one
+    if (!audioCtxRef.current) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      audioCtxRef.current = new AudioContext();
+    }
+    
+    if (audioCtxRef.current.state === 'suspended') {
+      await audioCtxRef.current.resume();
       console.log("✅ AudioContext resumed.");
     }
+
+    // Prime audio elements
     const remoteAudio = document.getElementById('remoteAudio');
     if (remoteAudio) {
-      await remoteAudio.play();
+      // Play and pause immediately to satisfy browser requirements
+      await remoteAudio.play().catch(e => console.warn("Priming failed, waiting for stream."));
       remoteAudio.pause();
       remoteAudio.currentTime = 0;
       console.log("✅ Remote audio element primed.");
     }
+    
     setHasInteracted(true);
   } catch (err) {
     console.warn("⚠️ Audio priming error:", err);
@@ -1128,9 +1138,8 @@ useEffect(() => {
     if (!targetAgentId) return;
   const fetchMessages = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
-        method: 'GET',
-        credentials: 'include' 
+      const response = await secureFetch(`/api/messages/${targetAgentId}?limit=50`, token, {
+        method: 'GET'
       });
       
       const data = await response.json();
@@ -1190,7 +1199,7 @@ useEffect(() => {
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);
-}, [agent?._id, agent?.id, slugFromUrl]);
+}, [agent?._id, agent?.id, slugFromUrl, token]); 
 
   const agentStatus = getStatusInfo(agent);
 
