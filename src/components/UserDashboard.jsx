@@ -241,7 +241,7 @@ const AudioSession = ({ isMuted, isMasked }) => {
     </>
   );
 };
-useEffect(() => {
+
 useEffect(() => {
   if (!hasInteracted) {
     window.addEventListener('click', unlockAudio);
@@ -1068,10 +1068,10 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
-useEffect(() => {
-  // 🛡️ STOP: Do not fetch session until the user has clicked the sync button
-  if (slugFromUrl === undefined || !hasInteracted) return;
 
+// 2. Guarded Session Fetching
+useEffect(() => {
+  if (slugFromUrl === undefined || !hasInteracted) return;
   const fetchUserSession = async () => {
     try {
       const url = slugFromUrl 
@@ -1083,15 +1083,12 @@ useEffect(() => {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include' // Required for HttpOnly cookie
       });
-
       if (response.status === 401 || response.status === 403) {
         console.warn("Auth failed, redirecting...");
         navigate('/');
         return;
       }
-
       const data = await response.json();
-      
       if (response.ok) {
         const loadedAgentSlug = data.agent?.slug;
         if (slugFromUrl && String(loadedAgentSlug || '').toLowerCase() !== String(slugFromUrl).toLowerCase()) {
@@ -1116,6 +1113,7 @@ useEffect(() => {
   const interval = setInterval(fetchUserSession, 30000);
   return () => clearInterval(interval);
 }, [hasInteracted, navigate, slugFromUrl]);
+
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
