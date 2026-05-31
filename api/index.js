@@ -1865,7 +1865,8 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
-    const { receiverId, text, receiverModel } = req.body;
+    // Added fileType and replyToId to destructuring
+    const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
     const myId = req.user.id;
 
     // 🛡️ SECURITY FIX 1: Explicit Input Structure and Hex ID Validation
@@ -1877,26 +1878,30 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
     }
 
-    // 🛡️ SECURITY FIX 2: Strict Model Whitelisting (Blocks Dynamic Model Injection)
-    const sanitizedModel = String(receiverModel).trim();
+    // 🛡️ SECURITY FIX 2: Strict Model Whitelisting
+    const sanitizedModel = String(receiverModel || '').trim();
     if (!['Agent', 'User'].includes(sanitizedModel)) {
-      return res.status(400).json({ success: false, message: "Unsupported receiver routing model categorization." });
+      return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
 
     const senderRole = req.user.role === 'agent' ? 'Agent' : 'User';
 
-    // 1. Create and Save Message with sanitized input data lengths
+    // 1. Create and Save Message with sanitized input and metadata
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
-      receiverId: new mongoose.Types.ObjectId(String(receiverId)),
+      receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: sanitizedModel, 
       text: String(text).trim(),
+      fileType: fileType || 'text', // Persist metadata
+      replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) 
+                 ? new mongoose.Types.ObjectId(replyToId) 
+                 : null, // Safe reference
       notificationSent: false 
     });
     await newMessage.save();
 
-    // 2. Fetch Receiver and Sender for notification context cleanly using getters
+    // 2. Fetch Context
     const TargetModel = sanitizedModel === 'Agent' ? getAgentModel() : (mongoose.models.User || User);
     const receiver = await TargetModel.findById(receiverId).select('+pushSubscription +lastNotificationEmail +email firstName lastName');
     
@@ -1911,22 +1916,15 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
 
-    // 4. Handle Web-Push Reminders
-    if (receiver.pushSubscription && receiver.pushSubscription.endpoint) {
+    // 4. Handle Web-Push
+    if (receiver.pushSubscription?.endpoint) {
       try {
         const payload = JSON.stringify({
           title: `New Message from ${sender?.firstName || 'Zing'}`,
           body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
-          data: { 
-            url: sanitizedModel === 'Agent' 
-              ? `/agent/dashboard?userId=${myId}` 
-              : `/user/dashboard?agentId=${myId}` 
-          }
+          data: { url: sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}` }
         });
-
         await webpush.sendNotification(receiver.pushSubscription, payload);
-        
-        // Use an atomic update to safely flag delivery status changes
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
         newMessage.notificationSent = true;
       } catch (pushErr) {
@@ -1934,20 +1932,13 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       }
     }
 
-    // 5. 🛡️ SECURITY FIX 3: Atomic Lockout Strategy (Defeats Email Race Conditions)
+    // 5. Atomic Lockout Strategy
     if (!isOnline) {
       try {
         const COOLDOWN = 30 * 60 * 1000; 
-        const now = Date.now();
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-
-        if (now - lastEmailTime > COOLDOWN) {
-          // 🌟 CRITICAL FIX: Run the atomic update BEFORE triggering the long-running email await operation.
-          // This immediately blocks concurrent incoming route executions from bypassing the cooldown block.
-          await TargetModel.findByIdAndUpdate(receiverId, { 
-            $set: { lastNotificationEmail: new Date(now) } 
-          });
-
+        if (Date.now() - lastEmailTime > COOLDOWN) {
+          await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
           await sendOfflineNotification(receiver, sender, text, sanitizedModel);
         }
       } catch (mailErr) {
@@ -1963,11 +1954,13 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
         senderModel: newMessage.senderModel,
         receiverId: newMessage.receiverId,
         content: newMessage.text,
+        fileType: newMessage.fileType,
+        replyToId: newMessage.replyToId,
         createdAt: newMessage.createdAt
       });
     }
 
-    // 🛡️ SECURITY FIX 4: Explicit Data Presentation Layer Output Mapping
+    // 7. Explicit Output Mapping
     return res.status(201).json({ 
       success: true, 
       message: {
@@ -1975,15 +1968,16 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
         senderId: newMessage.senderId,
         receiverId: newMessage.receiverId,
         content: newMessage.text,
+        fileType: newMessage.fileType,
+        replyToId: newMessage.replyToId,
         createdAt: newMessage.createdAt
       } 
     });
-
   } catch (err) {
-    // Forward unexpected failures smoothly into the central error interceptor
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED CHAT FETCH ROUTE (OFFSET CHRONOLOGY STABILIZED)
 // =========================================================================
