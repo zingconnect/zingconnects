@@ -192,7 +192,7 @@ const previousScrollTopRef = useRef(0);
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
-  
+
   const unlockAudio = useCallback(async () => {
   if (hasInteracted) return;
   
@@ -256,16 +256,19 @@ const AudioSession = ({ isMuted, isMasked }) => {
   );
 };
 
-useEffect(() => {
-  if (!hasInteracted) {
-    window.addEventListener('click', unlockAudio);
-    window.addEventListener('touchstart', unlockAudio);
+
+const handleSyncAndEnter = async (e) => {
+  if (e) e.stopPropagation();
+  
+  console.log("🚀 Starting Security Sync...");
+  
+  await unlockAudio();
+    if (token) {
+    console.log("🔑 Session verified, proceeding to dashboard...");
+  } else {
+    console.warn("⚠️ Token missing, check authentication state.");
   }
-  return () => {
-    window.removeEventListener('click', unlockAudio);
-    window.removeEventListener('touchstart', unlockAudio);
-  };
-}, [hasInteracted, unlockAudio]);
+};
 
 useEffect(() => {
   let remoteAudio = document.getElementById('remoteAudio');
@@ -1100,7 +1103,7 @@ useEffect(() => {
       const response = await secureFetch(endpoint, token);
 
       if (response.status === 401 || response.status === 403) {
-        navigate('/pricing'); // Redirect to pricing if token is invalid/expired
+        navigate('/'); 
         return;
       }
 
@@ -2300,12 +2303,12 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
   </div>
 </footer>
       </div>
-{/* --- 3. SECURITY ONBOARDING --- */}
+      {/* --- 3. SECURITY ONBOARDING --- */}
 {!hasInteracted && (
   <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 touch-none">
     <button 
       type="button" 
-      onClick={unlockAudio} 
+      onClick={handleSyncAndEnter} // Now using the consolidated handler
       className="bg-white p-5 md:p-8 rounded-[2rem] shadow-2xl text-center space-y-3 max-w-[280px] md:max-w-xs border border-blue-100 cursor-pointer select-none active:bg-slate-50 transition-colors w-full focus:outline-none"
       style={{ pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
     >
