@@ -13,6 +13,8 @@ import {
   BsTelephoneFill, BsTelephoneXFill, BsMicMuteFill, BsXLg, BsGearFill, BsPlusLg, BsPlus, BsSend, BsSendFill, BsPaperclip,
   BsCameraFill  
 } from 'react-icons/bs';
+import { useAuth } from "../context/AuthContext";
+import { secureFetch } from "../../api/utils/api";
 
 const formatLastSeen = (lastSeenDate, ticker) => {
   if (!lastSeenDate) return 'Recently';
@@ -58,7 +60,7 @@ const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentDashboard = () => {
   const navigate = useNavigate();
-  
+  const { token, isLoading, setToken } = useAuth();
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
@@ -727,6 +729,7 @@ useEffect(() => {
     }));
   }
 };
+
   socket.on("call-accepted", onCallAccepted);
   socket.on("answer-call", onCallAccepted);
   const fallbackCheck = setInterval(async () => {
@@ -1253,107 +1256,85 @@ useEffect(() => {
   };
 }, []);
 
- // 1. Modified Heartbeat with Dual Login detection
 useEffect(() => {
+  if (!token) return;
+
   const heartBeat = setInterval(async () => {
-    const token = localStorage.getItem('agentToken');
-    if (!token) return;
-
     try {
-      const response = await fetch('/api/agents/heartbeat', { 
-        method: 'POST', 
-        headers: { 'Authorization': `Bearer ${token}` } 
-      });
-
-      // If heartbeat detects a new session elsewhere
+      const response = await secureFetch('/api/agents/heartbeat', token);
+      
+      // If a conflict is detected
       if (response.status === 403) {
         const data = await response.json();
         if (data.reason === 'dual_login') {
-          setIsDualLoginConflict(true); // Triggers the Red/Black Security Alert
-          clearInterval(heartBeat); // Stop polling once conflict is found
+          setIsDualLoginConflict(true); 
         }
       }
     } catch (err) {
-      console.error("Heartbeat sync failed");
+      console.error("Heartbeat sync failed:", err);
     }
   }, 60000); 
-
   return () => clearInterval(heartBeat);
-}, []);
-
+}, [token]); // Added token as a dependency
 useEffect(() => {
-  // 1. Flutterwave Script Injection (Anti-Duplicate Logic)
-  const existingScript = document.querySelector('script[src*="flutterwave"]');
-  let script;
-
-  if (!existingScript) {
-    script = document.createElement('script');
+  // 1. Script injection: Use a persistent check
+  if (!document.querySelector('script[src*="flutterwave"]')) {
+    const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
     script.async = true;
     document.body.appendChild(script);
   }
-const fetchInitialData = async () => {
-  const token = localStorage.getItem('agentToken');
-  if (!token) return navigate('/');
 
-  try {
-    const profileRes = await fetch('/api/agents/profile/me', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-
-    // 1. DUAL LOGIN (Force immediate stop)
-    if (profileRes.status === 403) {
-      const errorData = await profileRes.json();
-      if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
-        setIsDualLoginConflict(true);
-        // Do NOT set isSubscribed here; keep it null so the Modal doesn't show
-        setLoading(false);
-        return; 
-      }
+  const fetchInitialData = async () => {
+    // Rely on AuthContext token provided to the component via props or hook
+    if (!token) {
+      navigate('/login');
+      return;
     }
 
-    // 2. AUTH ERRORS
-    if (profileRes.status === 401) {
-      localStorage.removeItem('agentToken');
-      return navigate('/login');
-    }
+    setLoading(true);
+    try {
+      // Use secureFetch: it injects the Authorization header automatically
+      const profileRes = await secureFetch('/api/agents/profile/me', token);
 
-    if (!profileRes.ok) throw new Error("Failed to load profile");
-    
-    const profileData = await profileRes.json();
-    const agent = profileData.agent;
-    
-    if (agent) {
-      setAgentData(agent);
-      // Now set the boolean correctly
-      setIsSubscribed(!!agent.isSubscribed); 
-
-      if (agent.plan) setSelectedPlan(agent.plan);
-
-      if (agent.isSubscribed) {
-        const usersRes = await fetch('/api/agents/my-users', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const userData = await usersRes.json();
-        if (userData.success && Array.isArray(userData.users)) {
-          setUsers(userData.users);
+      // Handle Dual Login (403)
+      if (profileRes.status === 403) {
+        const errorData = await profileRes.json();
+        if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
+          setIsDualLoginConflict(true);
+          return; // Stop execution here
         }
       }
-    }
-  } catch (err) {
-    console.error("Initialization error:", err);
-  } finally {
-    setLoading(false);
-  }
-};
 
-  fetchInitialData();
-  return () => {
-    if (script && document.body.contains(script)) {
-      document.body.removeChild(script);
+      if (!profileRes.ok) throw new Error("Failed to load profile");
+      
+      const profileData = await profileRes.json();
+      const agent = profileData.agent;
+      
+      if (agent) {
+        setAgentData(agent);
+        setIsSubscribed(!!agent.isSubscribed); 
+        if (agent.plan) setSelectedPlan(agent.plan);
+
+        // Fetch users only if subscribed, using secureFetch
+        if (agent.isSubscribed) {
+          const usersRes = await secureFetch('/api/agents/my-users', token);
+          const userData = await usersRes.json();
+          if (userData.success && Array.isArray(userData.users)) {
+            setUsers(userData.users);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Initialization error:", err);
+    } finally {
+      setLoading(false);
     }
   };
-}, [navigate]);
+
+  fetchInitialData();
+  // Removed cleanup that removes the script to prevent re-initialization bugs
+}, [token, navigate]); // Depend on token from AuthContext
 
   const handlePayment = async () => {
   if (!agentData || !agentData.email) {

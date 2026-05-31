@@ -162,42 +162,47 @@ const handleUserInquiry = async (e) => {
   }
 };
 
- const handleAgentLogin = async (e) => {
+const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);
 
+  // Clean the inputs explicitly before the request
+  const payload = {
+    email: loginEmail.toLowerCase().trim(),
+    password: loginPassword,
+    targetSlug: slug.toLowerCase().trim(), // Match server-side case sensitivity
+    force: true
+  };
+
   try {
-    const response = await fetch('/api/agents/login', {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agents/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // credentials: 'include', // Remove this since we are handling token manually
-      body: JSON.stringify({ 
-        email: loginEmail.trim(), 
-        password: loginPassword, 
-        targetSlug: slug, 
-        force: true 
-      })
+      body: JSON.stringify(payload)
     });
 
     const data = await response.json();
 
     if (response.ok && data.token) {
-      // Manually set the token in your context/storage
-      setToken(data.token, slug);
+      // Set the token globally for your AuthContext/API calls
+      localStorage.setItem('agentToken', data.token);
       
+      // Update UI state
       if (rememberAgent) {
         localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail.trim());
       }
       
       navigate(`/agent/dashboard/${slug}`);
     } else {
+      // Log the exact message from the server to debug the 401
+      console.error("Login Server Error:", data.message);
       alert(data.message || "Invalid Credentials");
     }
-  } catch (err) { 
-    console.error("Login error:", err);
-    alert("System error. Please try again."); 
-  } finally { 
-    setIsProcessing(false); 
+  } catch (err) {
+    console.error("Network Error:", err);
+    alert("Connection error. Please try again.");
+  } finally {
+    setIsProcessing(false);
   }
 };
 
