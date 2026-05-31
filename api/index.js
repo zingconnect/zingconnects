@@ -800,14 +800,23 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
 app.post('/api/users/handshake', async (req, res, next) => {
   try {
     await connectToDatabase();
-    const { email, agentId, agentSlug } = req.body;
+    
+    // 1. We only need email and agentSlug from the request body
+    const { email, agentSlug } = req.body;
     
     if (!email) return res.status(400).json({ success: false, message: "Email required" });
-    if (!agentId || !agentSlug) return res.status(400).json({ success: false, message: "Agent context is required" });
-    if (!mongoose.Types.ObjectId.isValid(agentId)) {
-      return res.status(400).json({ success: false, message: "Invalid context mapping parameter." });
-    }
+    if (!agentSlug) return res.status(400).json({ success: false, message: "Agent context is required" });
 
+    // 2. Dynamically find the Agent to get the correct agentId
+    const agent = await Agent.findOne({ slug: agentSlug.toLowerCase().trim() });
+    
+    if (!agent) {
+      return res.status(400).json({ success: false, message: "Agent not found" });
+    }
+    
+    const agentId = agent._id;
+
+    // 3. Proceed with User logic
     const normalizedEmail = email.toLowerCase().trim();
     let user = await User.findOne({ email: normalizedEmail }).select('email connectedAgents isProfileComplete');
     let isNewUser = false;
@@ -836,18 +845,17 @@ app.post('/api/users/handshake', async (req, res, next) => {
       { 
         id: user._id, 
         role: 'user',
-        activeAgentSlug: agentSlug.toLowerCase().trim() 
+        activeAgentSlug: agent.slug // Use the slug from the DB for consistency
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    // 🛡️ SECURITY FIX: Set HttpOnly Cookie instead of sending token in JSON
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     return res.json({ 
