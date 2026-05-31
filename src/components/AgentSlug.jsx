@@ -125,8 +125,13 @@ useEffect(() => {
 
 const handleUserInquiry = async (e) => {
   e.preventDefault();
+
   if (!userEmail) return alert("Please enter your email.");
+  if (!agentData?._id) return alert("Agent data is still loading, please wait.");
+  if (!slug) return alert("Agent slug is missing.");
+
   setIsProcessing(true);
+
   try {
     const response = await fetch('/api/users/handshake', {
       method: 'POST',
@@ -139,21 +144,27 @@ const handleUserInquiry = async (e) => {
       })
     });
 
-    const data = await response.json(); // Capture the server's error message
+    // 2. Parse response to handle server validation feedback
+    const data = await response.json();
 
     if (response.ok) {
-      if (rememberUser) localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+      if (rememberUser) {
+        localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+      }
       navigate(`/user/dashboard/${slug}`);
     } else {
-      // This will show you exactly what's wrong (e.g., "Invalid context mapping parameter")
       alert(`Connection failed: ${data.message || "Unknown error"}`);
       console.error("Server validation error:", data);
     }
   } catch (err) { 
+    // 4. Handle network or parsing errors
     console.error("System error:", err);
-    alert("System error. Check console for details."); 
-  } finally { setIsProcessing(false); }
+    alert("A system error occurred. Please try again later."); 
+  } finally { 
+    setIsProcessing(false); 
+  }
 };
+
   const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);

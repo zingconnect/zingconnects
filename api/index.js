@@ -796,6 +796,7 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
     next(err);
   }
 });
+
 app.post('/api/users/handshake', async (req, res, next) => {
   try {
     await connectToDatabase();
