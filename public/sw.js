@@ -18,13 +18,20 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
 });
 
-// Add this to your sw.js to ensure the browser sees it as 'controlling' the page
 self.addEventListener('fetch', (event) => {
-  // Your existing audio check
   const url = new URL(event.request.url);
-  if (event.request.destination === 'audio' || url.pathname.endsWith('.mp3')) return;
 
-  // Handle standard requests
+  // 1. Audio check (bypass SW)
+  if (event.request.destination === 'audio' || url.pathname.endsWith('.mp3') || url.pathname.endsWith('.wav')) {
+    return; 
+  }
+
+  // 2. ONLY cache/intercept requests to your own domain
+  if (url.origin !== self.location.origin) {
+    return; // This allows the request to proceed directly to the network
+  }
+
+  // 3. Handle your own assets
   event.respondWith(
     caches.match(event.request).then((response) => {
       return response || fetch(event.request);
