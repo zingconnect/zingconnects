@@ -367,9 +367,7 @@ useEffect(() => {
   if (!audioCtxRef.current) {
     audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
   }
-  
   const audioCtx = audioCtxRef.current;
-
   const handleAiAudioChunk = async (base64Audio) => {
     const isNaturalMode = activeCall?.voiceId === 'natural' || !activeCall?.voiceId;
     if (callStatus !== 'connected' || isNaturalMode) return;
@@ -886,6 +884,7 @@ const handleAcceptCall = async () => {
     handleEndCall();
   }
 };
+
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
@@ -1071,20 +1070,12 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
+
 useEffect(() => {
-  if (slugFromUrl === undefined || !hasInteracted) return;
+  if (!slugFromUrl) return;
 
   let isMounted = true;
-  setLoading(true);
-
-  // 🛡️ FAIL-SAFE: If the API hangs for > 10s, hide the loader to allow manual debug
-  const timeout = setTimeout(() => {
-    if (isMounted) {
-      console.warn("⚠️ API fetch timed out, forcing load completion.");
-      setLoading(false);
-    }
-  }, 10000);
-
+    setLoading(true);
   const fetchUserSession = async () => {
     try {
       const url = slugFromUrl 
@@ -1107,14 +1098,14 @@ useEffect(() => {
       if (isMounted && response.ok) {
         setAgent(data.agent);
         setUserData(data.user);
-        if (!data.user.isProfileComplete) setShowOnboarding(true);
+        // Onboarding check remains here
+        if (!data.user?.isProfileComplete) setShowOnboarding(true);
       }
     } catch (err) {
       console.error("Session fetch error:", err);
     } finally {
       if (isMounted) {
-        clearTimeout(timeout); // Cancel the fail-safe
-        setLoading(false);
+        setLoading(false); // UI will now stop "Securing" once data returns
       }
     }
   };
@@ -1125,9 +1116,9 @@ useEffect(() => {
   return () => {
     isMounted = false;
     clearInterval(interval);
-    clearTimeout(timeout);
   };
-}, [hasInteracted, navigate, slugFromUrl]);
+}, [navigate, slugFromUrl]);
+
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
@@ -1198,6 +1189,7 @@ useEffect(() => {
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);
 }, [agent?._id, agent?.id, slugFromUrl]);
+
   const agentStatus = getStatusInfo(agent);
 
   const handlePhotoClick = () => fileInputRef.current.click();
@@ -1251,8 +1243,6 @@ const fetchOlderMessages = async () => {
   const prevScrollHeight = container?.scrollHeight || 0;
 
   try {
-    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
-    // Authorization header removed to prevent token exposure
     const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
       method: 'GET',
       credentials: 'include'
@@ -1712,12 +1702,28 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 };
 
 
-  if (loading) return (
-    <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-black uppercase tracking-[0.2em] text-blue-900">
+if (loading && !agent) {
+  return (
+    <div className="h-screen flex items-center justify-center bg-[#f0f2f5] text-[10px] font-black uppercase tracking-[0.2em] text-blue-900 animate-pulse">
       Securing Connection...
     </div>
   );
+}
 
+// 2. If loading has finished but we still don't have an agent, handle the error gracefully
+if (!loading && !agent) {
+  return (
+    <div className="h-screen flex flex-col items-center justify-center bg-[#f0f2f5] text-red-600">
+      <p className="font-bold">Connection Failed</p>
+      <button 
+        onClick={() => window.location.reload()} 
+        className="mt-4 underline text-xs"
+      >
+        Retry Connection
+      </button>
+    </div>
+  );
+}
   return (
     <div className="h-screen w-screen bg-[#f0f2f5] flex overflow-hidden font-sans antialiased text-slate-900 relative">
       
