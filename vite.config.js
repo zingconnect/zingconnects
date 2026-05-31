@@ -17,6 +17,8 @@ export default defineConfig({
     }),
   ],
   build: {
+    // 🛡️ FIX: Disable source map generation completely to hide frontend code architecture from hackers
+    sourcemap: false, 
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       external: [

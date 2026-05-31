@@ -19,59 +19,67 @@ export const VerifyOTP = () => {
   useEffect(() => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
+const handleResend = async () => {
+  if (isResending) return;
+  setIsResending(true);
 
-  const handleResend = async () => {
-    if (isResending) return;
-    setIsResending(true);
+  try {
+    // 🛡️ SECURITY: credentials: 'include' ensures any session/CSRF tokens
+    // are included if your backend requires them for resend attempts.
+    const response = await fetch('/api/agents/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email, firstName, resend: true }),
+    });
 
-    try {
-      const response = await fetch('/api/agents/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, firstName, resend: true }), // Added a flag just in case
-      });
-
-      if (response.ok) {
-        alert("A new security code has been sent to your email.");
-        setOtp(''); // Clear input for the new code
-      } else {
-        const data = await response.json();
-        alert(data.message || "Failed to resend code.");
-      }
-    } catch (err) {
-      alert("Network error. Please try again.");
-    } finally {
-      setIsResending(false);
-    }
-  };
-
-  const handleVerify = async (e) => {
-    e.preventDefault();
-    setIsVerifying(true);
-
-    try {
-      const response = await fetch('/api/agents/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp }),
-      });
-
+    if (response.ok) {
+      alert("A new security code has been sent to your email.");
+      setOtp(''); 
+    } else {
       const data = await response.json();
-
-      if (response.ok) {
-        setServerSlug(data.slug);
-        localStorage.setItem('zingToken', data.token);
-        localStorage.setItem('agentSlug', data.slug);
-        setIsSuccess(true);
-      } else {
-        alert(data.message || "Invalid Code");
-      }
-    } catch (err) {
-      alert("Connection error. Try again.");
-    } finally {
-      setIsVerifying(false);
+      alert(data.message || "Failed to resend code.");
     }
-  };
+  } catch (err) {
+    alert("Network error. Please try again.");
+  } finally {
+    setIsResending(false);
+  }
+};
+
+const handleVerify = async (e) => {
+  e.preventDefault();
+  setIsVerifying(true);
+
+  try {
+    // 🛡️ SECURITY FIX: Use credentials: 'include'
+    // Authentication is now handled via HttpOnly cookie set by the server 
+    // in the response headers after verification.
+    const response = await fetch('/api/agents/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email, otp }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      setServerSlug(data.slug);
+      
+      // 🛡️ SECURITY: LocalStorage removal. 
+      // The server-side code should now set the HttpOnly cookie in the 
+      // response headers (Set-Cookie).
+      setIsSuccess(true);
+    } else {
+      alert(data.message || "Invalid Code");
+    }
+  } catch (err) {
+    alert("Connection error. Try again.");
+  } finally {
+    setIsVerifying(false);
+  }
+};
 
   const fullLink = `${window.location.origin}/${serverSlug}`;
 

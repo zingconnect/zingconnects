@@ -38,18 +38,23 @@ export const Registration = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setSelectedFile(file);
-      setImagePreview(URL.createObjectURL(file));
-    }
-  };
+ const handleImageChange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    alert("Profile picture is too large. Please select an image under 2MB.");
+    return;
+  }
+    if (!file.type.startsWith('image/')) {
+    alert("Please select a valid image file.");
+    return;
+  }
 
-  const handleSubmit = async (e) => {
+  setSelectedFile(file);
+  setImagePreview(URL.createObjectURL(file));
+};
+const handleSubmit = async (e) => {
     e.preventDefault();
-
-    // Prevent submission if the agent hasn't accepted the terms
     if (!agreeTerms) {
       alert("Please check the box to agree to the Terms and Conditions to proceed.");
       return;
@@ -59,20 +64,25 @@ export const Registration = () => {
     
     try {
       const data = new FormData();
-      
-      // Append all text fields from state
-      Object.keys(formData).forEach(key => {
-        data.append(key, formData[key]);
+            Object.keys(formData).forEach(key => {
+        const value = formData[key];
+        data.append(key, typeof value === 'string' ? value.trim() : value);
       });
       
-      // Append required plan metadata
       data.append('plan', selectedPlan.tier);
-      
-      // Append profile photo if selected
-      if (selectedFile) {
+            if (selectedFile) {
+        if (selectedFile.size > 2 * 1024 * 1024) { // 2MB Limit
+          alert("Profile picture is too large (max 2MB).");
+          setIsSubmitting(false);
+          return;
+        }
+        if (!selectedFile.type.startsWith('image/')) {
+          alert("Please upload a valid image file (JPG/PNG).");
+          setIsSubmitting(false);
+          return;
+        }
         data.append('photo', selectedFile);
       }
-
       const response = await fetch('/api/agents/register', {
         method: 'POST',
         body: data, 
@@ -81,19 +91,20 @@ export const Registration = () => {
       const result = await response.json();
 
       if (response.ok) {
-        // SUCCESS: Move to the OTP page and pass the email for verification
         navigate('/verify-otp', { state: { email: formData.email } });
       } else {
-        alert(`Registration Error: ${result.message || 'Validation failed'}`);
+        console.error("Server validation error:", result.message);
+        alert(result.message || "Registration failed. Please check your details.");
       }
 
     } catch (error) {
       console.error("Connection failed:", error);
-      alert("Could not connect to the server. Please check your internet connection.");
+      alert("Network error: Could not reach the server. Please try again later.");
     } finally {
       setIsSubmitting(false);
     }
   };
+
 
   if (!selectedPlan) return null;
 

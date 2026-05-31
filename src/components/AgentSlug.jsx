@@ -128,54 +128,55 @@ export const AgentSlug = () => {
     setDeferredPrompt(null);
   };
 
-  const handleUserInquiry = async (e) => {
+ const handleUserInquiry = async (e) => {
     e.preventDefault();
     if (!userEmail) return alert("Please enter your email to continue.");
+    
     setIsProcessing(true);
     try {
       const response = await fetch('/api/users/handshake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // 🛡️ CRITICAL: Includes cookies (JWT) in the request automatically
+        credentials: 'include', 
         body: JSON.stringify({ 
-          email: userEmail, 
+          email: userEmail.trim(), // Sanitize input
           agentId: agentData._id,
           agentSlug: slug 
         })
       });
+      
       const data = await response.json();
+      
       if (response.ok) {
         if (rememberUser) {
-          localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail);
+          localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
         } else {
           localStorage.removeItem(`rememberedUserEmail_${slug}`);
         }
-
-        // 🚀 SCANDAL PREVENTION: Save tokens and identifiers explicitly isolated by slug
-        localStorage.setItem('active_session_slug', slug);
-        localStorage.setItem(`userToken_${slug}`, data.token);
-        localStorage.setItem(`userEmail_${slug}`, userEmail);
-        
-        // 🚀 DYNAMIC ROUTE REDIRECT: Append the current slug to your dashboard routing architecture
         navigate(`/user/dashboard/${slug}`);
       } else {
         alert(data.message || "Connection failed.");
       }
     } catch (err) {
-      alert("System connection error.");
+      console.error("Connection error:", err);
+      alert("System connection error. Please try again.");
     } finally {
       setIsProcessing(false);
     }
   };
-
-  const handleAgentLogin = async (e) => {
+const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
+    
     try {
       const response = await fetch('/api/agents/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // 🛡️ CRITICAL: Enables cookie-based authentication
+        credentials: 'include', 
         body: JSON.stringify({ 
-          email: loginEmail, 
+          email: loginEmail.trim(), 
           password: loginPassword,
           targetSlug: slug,
           force: true 
@@ -184,26 +185,29 @@ export const AgentSlug = () => {
       
       const data = await response.json();
       
-      if (response.ok && data.token) {
+      if (response.ok) {
+        // Only store non-sensitive preferences
         if (rememberAgent) {
-          localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail);
+          localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail.trim());
         } else {
           localStorage.removeItem(`rememberedAgentEmail_${slug}`);
         }
 
-        localStorage.setItem('agentToken', data.token);
-        localStorage.setItem('agentSlug', data.slug);
-        window.location.href = `/agent/dashboard/${data.slug}`;
+        // ❌ REMOVED: localStorage.setItem('agentToken', data.token);
+        // ❌ REMOVED: localStorage.setItem('agentSlug', data.slug);
+        
+        // Redirect: The browser now automatically manages the HttpOnly session cookie
+        window.location.href = `/agent/dashboard/${slug}`;
       } else {
         alert(data.message || "Invalid Agent Credentials");
       }
     } catch (err) {
-      alert("Portal connection error");
+      console.error("Login error:", err);
+      alert("Portal connection error. Please check your network.");
     } finally {
       setIsProcessing(false);
     }
   };
-
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="w-8 h-8 border-[3px] border-blue-600 border-t-transparent rounded-full animate-spin" />

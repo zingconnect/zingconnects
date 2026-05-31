@@ -30,24 +30,19 @@ export const UserProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // 🛠️ FIX: Force a fresh database fetch on mount to bypass old cached context data
   useEffect(() => {
     const fetchUserData = async () => {
-    const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-      if (!token) {
-        console.error("No token found. User might not be logged in.");
-        setLoading(false);
-        return;
-      }
       try {
+        // Use credentials: 'include' to automatically send the HttpOnly cookie
         const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
           method: 'GET',
           headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Cache-Control': 'no-cache', // Bypass local edge-network caches
-            'Pragma': 'no-cache'
-          }
+            'Cache-Control': 'no-cache', 
+            'Pragma': 'no-cache' 
+          },
+          credentials: 'include' 
         });
+        
         const result = await res.json();
         
         if (res.ok && result.success) {
@@ -62,10 +57,9 @@ export const UserProfile = () => {
       }
     };
 
-    // Always fetch on mount to ensure deep fields (like agent photos) are up-to-date
     fetchUserData();
-  }, [setUserData]); // Removed userData dependency to prevent loop cascades
-  
+  }, [setUserData]);
+
   useEffect(() => {
     if (userData) {
       setFormData({
@@ -97,42 +91,45 @@ export const UserProfile = () => {
       setPreviewUrl(URL.createObjectURL(file));
     }
   };
+const handleUpdate = async () => {
+  setIsUpdating(true);
+  
+  const data = new FormData();
 
-  const handleUpdate = async () => {
-    setIsUpdating(true);
-    const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-    const data = new FormData();
-
-    Object.keys(formData).forEach(key => {
-      if (key === 'phone') {
-        data.append('phone', JSON.stringify(formData.phone));
-      } else {
-        data.append(key, formData[key]);
-      }
-    });
-    
-    if (selectedFile) data.append('photo', selectedFile);
-
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/update-profile`, { 
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: data
-      });
-
-      if (res.ok) {
-        const result = await res.json();
-        setUserData(result.user);
-        setIsEditing(false);
-        setSelectedFile(null);
-        alert("Profile updated successfully!");
-      }
-    } catch (err) {
-      console.error("Update error:", err);
-    } finally {
-      setIsUpdating(false);
+  Object.keys(formData).forEach(key => {
+    if (key === 'phone') {
+      data.append('phone', JSON.stringify(formData.phone));
+    } else {
+      data.append(key, formData[key]);
     }
-  };
+  });
+  
+  if (selectedFile) data.append('photo', selectedFile);
+
+  try {
+    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
+    // Authorization header removed to prevent token exposure
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/update-profile`, { 
+      method: 'PUT',
+      credentials: 'include',
+      body: data
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      setUserData(result.user);
+      setIsEditing(false);
+      setSelectedFile(null);
+      alert("Profile updated successfully!");
+    } else {
+      alert("Failed to update profile.");
+    }
+  } catch (err) {
+    console.error("Update error:", err);
+  } finally {
+    setIsUpdating(false);
+  }
+};
 
   if (loading) return <div className="flex h-screen items-center justify-center font-bold tracking-wider text-gray-400 uppercase text-xs">Loading profile...</div>;
 
