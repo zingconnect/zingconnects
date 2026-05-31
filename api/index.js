@@ -1851,6 +1851,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/save-subscription
 // =========================================================================

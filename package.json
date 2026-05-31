@@ -1,6 +1,15 @@
 {
   "name": "zingconnect",
   "version": "1.0.0",
+  "description": "ZingConnect Live Chat App",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon api/index.js",
+    "client": "vite",
+    "build": "node node_modules/vite/bin/vite.js build",
+    "start": "cross-env PORT=5000 node api/index.js"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1045.0",
     "@aws-sdk/lib-storage": "^3.1045.0",
