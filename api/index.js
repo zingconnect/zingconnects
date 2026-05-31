@@ -105,14 +105,14 @@ const getAgentModel = () => {
 };
 
 const authenticateToken = async (req, res, next) => {
-  console.log("Cookies received:", req.cookies); 
-  const token = req.cookies?.token || 
+console.log("DEBUG: Middleware reached for URL:", req.originalUrl);
+  console.log("DEBUG: Cookies received:", req.cookies);
+    const token = req.cookies?.token || 
                 (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].split(' ')[1] : null);
 
   if (!token) {
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
-
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
@@ -905,32 +905,34 @@ app.post('/api/agents/heartbeat', authenticateToken, async (req, res, next) => {
   }
 });
 
-// 🛠️ FIX 1: Add 'next' to your route arguments so the centralized error interceptor can catch issues
-app.get('/api/users/my-session', async (req, res, next) => {
-  try {
+app.get('/api/users/my-session', authenticateToken, async (req, res, next) => {
+    try {
     await connectToDatabase();
     
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: "No token" });
+    // 🛠️ FIX: Extract token from HttpOnly cookie (priority) or Authorization header
+    const token = req.cookies?.token || 
+                  (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null);
 
-    const token = authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ success: false, message: "No token provided" });
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // 🔍 Capture target agent criteria from query parameters
     const { agentId, slug } = req.query;
 
-    // 🛡️ SECURITY FIX 2: Harden user retrieval by only passing selected public properties
+    // 🛡️ User retrieval
     const user = await User.findByIdAndUpdate(
       decoded.id, 
       { lastActive: new Date() },
       { returnDocument: 'after' } 
-    ).select('email isProfileComplete lastActive connectedAgents') // 🌟 Force explicit safe database selection
+    ).select('email isProfileComplete lastActive connectedAgents')
     .populate({
       path: 'connectedAgents',
       select: 'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
     });
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    
     let activeAgent = null;
 
     if (user.connectedAgents && user.connectedAgents.length > 0) {
@@ -943,14 +945,11 @@ app.get('/api/users/my-session', async (req, res, next) => {
     
     if (!activeAgent && (slug || agentId)) {
       const query = slug ? { slug: slug } : { _id: agentId };
-      
-      // 🛡️ SECURITY FIX 3: Force limit selected data fields for fresh agent lookups
       const freshAgent = await Agent.findOne(query).select(
         'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
       );
 
       if (freshAgent) {
-        // Link the agent to the user's account in the database
         await User.findByIdAndUpdate(decoded.id, {
           $addToSet: { connectedAgents: freshAgent._id }
         });
@@ -967,7 +966,6 @@ app.get('/api/users/my-session', async (req, res, next) => {
     let signedPhotoUrl = null;
 
     if (activeAgent) {
-      // 🛡️ SECURITY FIX 4: Explicitly select fields here as well during deep database lookup
       const freshAgent = await Agent.findById(activeAgent._id)
         .select('firstName lastName photoUrl occupation program bio slug lastActive gender dob createdAt')
         .lean();
@@ -985,19 +983,15 @@ app.get('/api/users/my-session', async (req, res, next) => {
             lastSeenDisplay = `Last seen ${diffMins}m ago`;
           } else if (diffMins < 1440) {
             lastSeenDisplay = `Last seen ${Math.floor(diffMins / 60)}h ago`;
-          } else {
-            lastSeenDisplay = "Offline";
           }
         }
       }
 
-      // --- CORRECTED SIGNING LOGIC ---
       if (activeAgent.photoUrl) {
         signedPhotoUrl = await getPrivateUrl(activeAgent.photoUrl);
       }
     }
 
-    // Fallback Avatar if no photo exists or signing failed
     if (!signedPhotoUrl && activeAgent) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${activeAgent.firstName}+${activeAgent.lastName}&background=0D1117&color=fff&size=128`;
     }
@@ -1019,10 +1013,10 @@ app.get('/api/users/my-session', async (req, res, next) => {
     });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX 5: Hand the error down smoothly to the central filter to hide technical data
     next(err);
   }
 });
+
 // 🛡️ SECURITY FIX 1: Include 'next' in route parameters for global safety interception
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res, next) => {
   try {
