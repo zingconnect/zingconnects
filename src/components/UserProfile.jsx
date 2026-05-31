@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useParams} from 'react-router-dom';
 import { BsChevronLeft, BsCameraFill, BsPencilSquare, BsCheckLg, BsPersonBadgeFill } from 'react-icons/bs';
 import PhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
@@ -15,6 +15,7 @@ export const UserProfile = () => {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const { agentId: slugFromUrl } = useParams();
 
   const [formData, setFormData] = useState({
     firstName: '',
