@@ -124,7 +124,6 @@ useEffect(() => {
     setShowInstallBtn(false);
   }
 };
-
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -137,7 +136,6 @@ const handleUserInquiry = async (e) => {
     const response = await fetch('/api/users/handshake', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // Note: 'include' is no longer required if you use Authorization headers
       body: JSON.stringify({ 
         email: userEmail.trim(), 
         agentSlug: slug 
@@ -147,13 +145,14 @@ const handleUserInquiry = async (e) => {
     const data = await response.json();
 
     if (response.ok && data.token) {
-      setAuthToken(data.token); 
+      // CORRECTED: Use setToken from useAuth()
+      setToken(data.token); 
       
       if (rememberUser) {
         localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
       }
       
-      // 2. Navigate to dashboard
+      // Navigate to dashboard
       navigate(`/user/dashboard/${slug}`);
     } else {
       alert(`Connection failed: ${data.message || "Unknown error"}`);
@@ -165,7 +164,6 @@ const handleUserInquiry = async (e) => {
     setIsProcessing(false); 
   }
 };
-
   const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
