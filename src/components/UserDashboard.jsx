@@ -1152,8 +1152,7 @@ useEffect(() => {
     isMounted = false;
     clearInterval(interval);
   };
-// Keep dependencies clean: we only care about slug and token changes
-}, [slugFromUrl, token, isLoading]);
+}, [slugFromUrl]);
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
