@@ -748,11 +748,15 @@ const checkCalls = async () => {
   }
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
-      method: 'GET',
-      headers: { 'Cache-Control': 'no-cache' },
-      credentials: 'include'
-    });
+   const response = await secureFetch(
+  `${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, 
+  token, // Ensure the token is passed here
+  {
+    method: 'GET',
+    headers: { 'Cache-Control': 'no-cache' }
+  }
+);
+    
     if (response.status === 401 || response.status === 403) {
       console.warn("Session expired. Redirecting to agent entry...");
       window.location.href = `/${slugFromUrl}`; 
@@ -935,11 +939,13 @@ useEffect(() => {
     }
 
     try {
-      // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-        method: 'GET',
-        credentials: 'include'
-      });
+    const res = await secureFetch(
+  `${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, token, 
+  {
+    method: 'GET',
+    headers: { 'Cache-Control': 'no-cache' } // Maintain your specific headers
+  }
+);
       const statusData = await res.json();
       
       if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
