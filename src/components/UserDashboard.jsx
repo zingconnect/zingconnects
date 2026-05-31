@@ -189,25 +189,27 @@ const previousScrollTopRef = useRef(0);
     }
   };
   
-const unlockAudio = useCallback(() => {
+const unlockAudio = useCallback(async () => {
   if (hasInteracted) return;
   console.log("🔓 Unlocking secure audio channels...");
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (AudioContext) {
-    const tempCtx = new AudioContext();
-    if (tempCtx.state === 'suspended') tempCtx.resume();
-  }
-  const silentPlayer = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
-  silentPlayer.play()
-    .then(() => {
-      silentPlayer.pause();
-      setHasInteracted(true); 
-      console.log("✅ Audio hardware primed.");
-    })
-    .catch(err => console.warn("⚠️ Audio priming deferred:", err));
-  const remoteAudio = document.getElementById('remoteAudio');
-  if (remoteAudio) {
-    remoteAudio.play().then(() => remoteAudio.pause()).catch(() => {});
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) {
+      const ctx = new AudioContext();
+      await ctx.resume();
+      console.log("✅ AudioContext resumed.");
+    }
+    const remoteAudio = document.getElementById('remoteAudio');
+    if (remoteAudio) {
+      await remoteAudio.play();
+      remoteAudio.pause();
+      remoteAudio.currentTime = 0;
+      console.log("✅ Remote audio element primed.");
+    }
+    setHasInteracted(true);
+  } catch (err) {
+    console.warn("⚠️ Audio priming error:", err);
+    setHasInteracted(true); 
   }
 }, [hasInteracted]);
 
@@ -239,6 +241,7 @@ const AudioSession = ({ isMuted, isMasked }) => {
     </>
   );
 };
+useEffect(() => {
 useEffect(() => {
   if (!hasInteracted) {
     window.addEventListener('click', unlockAudio);
@@ -1065,33 +1068,39 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
-
 useEffect(() => {
-  if (slugFromUrl === undefined) return;
+  // 🛡️ STOP: Do not fetch session until the user has clicked the sync button
+  if (slugFromUrl === undefined || !hasInteracted) return;
+
   const fetchUserSession = async () => {
     try {
       const url = slugFromUrl 
         ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
+      
       const response = await fetch(url, {
         method: 'GET',
-        credentials: 'include' 
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include' // Required for HttpOnly cookie
       });
 
       if (response.status === 401 || response.status === 403) {
-        navigate('/'); // Redirect on auth failure
+        console.warn("Auth failed, redirecting...");
+        navigate('/');
         return;
       }
+
       const data = await response.json();
+      
       if (response.ok) {
         const loadedAgentSlug = data.agent?.slug;
-        if (slugFromUrl && String(loadedAgentSlug).toLowerCase() !== String(slugFromUrl).toLowerCase()) {
+        if (slugFromUrl && String(loadedAgentSlug || '').toLowerCase() !== String(slugFromUrl).toLowerCase()) {
           console.error("⛔ [Security Violation]: Mismatched context.");
-          navigate('/'); 
+          navigate('/');
           return;
         }
-        setAgent(data.agent); 
-        setUserData(data.user); 
+        setAgent(data.agent);
+        setUserData(data.user);
         if (!data.user.isProfileComplete) {
           setShowOnboarding(true);
         }
@@ -1102,11 +1111,11 @@ useEffect(() => {
       setLoading(false);
     }
   };
-  fetchUserSession();
-  const interval = setInterval(fetchUserSession, 30000); 
-  return () => clearInterval(interval);
-}, [navigate, slugFromUrl]);
 
+  fetchUserSession();
+  const interval = setInterval(fetchUserSession, 30000);
+  return () => clearInterval(interval);
+}, [hasInteracted, navigate, slugFromUrl]);
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
