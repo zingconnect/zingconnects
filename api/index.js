@@ -594,12 +594,13 @@ app.post('/api/agents/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
-    res.cookie('token', token, {
-      httpOnly: true,                // Prevents client-side JS access
-      secure: process.env.NODE_ENV === 'production', // Ensures HTTPS in production
-      sameSite: 'strict',            // Protects against CSRF
-      maxAge: 24 * 60 * 60 * 1000    // 24 hours
-    });
+   res.cookie('token', token, {
+  httpOnly: true,
+  secure: true,            // Must be true for SameSite: 'None'
+  sameSite: 'None',        // 'None' allows the cookie to be sent in cross-site requests
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/'
+});
 
     return res.json({ 
       success: true, 
@@ -842,12 +843,13 @@ app.post('/api/users/handshake', async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+   res.cookie('token', token, {
+  httpOnly: true,
+  secure: true,            // Must be true for SameSite: 'None'
+  sameSite: 'None',        // 'None' allows the cookie to be sent in cross-site requests
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/'
+});
 
     return res.json({ 
       success: true, 
@@ -1859,6 +1861,7 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
 // =========================================================================
