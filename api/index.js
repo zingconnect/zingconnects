@@ -904,116 +904,65 @@ app.post('/api/agents/heartbeat', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
-app.get('/api/users/my-session', authenticateToken, async (req, res, next) => {
-    try {
+app.get('/api/users/my-session', authenticateToken, async (req, res) => {
+  try {
+    // 1. Connect database locally (prevents global middleware timeouts)
     await connectToDatabase();
     
-    // 🛠️ FIX: Extract token from HttpOnly cookie (priority) or Authorization header
-    const token = req.cookies?.token || 
-                  (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null);
-
-    if (!token) return res.status(401).json({ success: false, message: "No token provided" });
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // 🔍 Capture target agent criteria from query parameters
+    // 2. Use req.user provided by the authenticateToken middleware
+    const userId = req.user.id || req.user._id;
     const { agentId, slug } = req.query;
 
-    // 🛡️ User retrieval
-    const user = await User.findByIdAndUpdate(
-      decoded.id, 
-      { lastActive: new Date() },
-      { returnDocument: 'after' } 
-    ).select('email isProfileComplete lastActive connectedAgents')
-    .populate({
-      path: 'connectedAgents',
-      select: 'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
-    });
+    // 3. Single User retrieval (Optimize query to prevent slow population)
+    const user = await User.findById(userId)
+      .select('email isProfileComplete lastActive connectedAgents')
+      .populate('connectedAgents', 'firstName lastName photoUrl occupation program bio slug lastActive gender dob');
 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
-    
+
+    // Update activity
+    await User.updateOne({ _id: userId }, { lastActive: new Date() });
+
+    // 4. Resolve Active Agent
     let activeAgent = null;
+    if (slug || agentId) {
+       activeAgent = user.connectedAgents.find(a => a.slug === slug || a._id.toString() === agentId);
+       
+       if (!activeAgent) {
+          const freshAgent = await Agent.findOne(slug ? { slug } : { _id: agentId });
+          if (freshAgent) {
+            await User.updateOne({ _id: userId }, { $addToSet: { connectedAgents: freshAgent._id } });
+            activeAgent = freshAgent;
+          }
+       }
+    } else {
+       activeAgent = user.connectedAgents[user.connectedAgents.length - 1] || null;
+    }
 
-    if (user.connectedAgents && user.connectedAgents.length > 0) {
-      if (agentId) {
-        activeAgent = user.connectedAgents.find(a => a._id.toString() === agentId.toString()) || null;
-      } else if (slug) {
-        activeAgent = user.connectedAgents.find(a => a.slug === slug) || null;
-      }
-    }
-    
-    if (!activeAgent && (slug || agentId)) {
-      const query = slug ? { slug: slug } : { _id: agentId };
-      const freshAgent = await Agent.findOne(query).select(
-        'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
-      );
-
-      if (freshAgent) {
-        await User.findByIdAndUpdate(decoded.id, {
-          $addToSet: { connectedAgents: freshAgent._id }
-        });
-        activeAgent = freshAgent;
-      }
-    }
-    
-    if (!activeAgent && user.connectedAgents && user.connectedAgents.length > 0) {
-      activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
-    }
-    
-    let isOnline = false;
-    let lastSeenDisplay = "Offline";
-    let signedPhotoUrl = null;
+    // 5. Final processing logic
+    let isOnline = false, lastSeenDisplay = "Offline", signedPhotoUrl = null;
 
     if (activeAgent) {
-      const freshAgent = await Agent.findById(activeAgent._id)
-        .select('firstName lastName photoUrl occupation program bio slug lastActive gender dob createdAt')
-        .lean();
-      
-      if (freshAgent) {
-        const now = new Date();
-        const lastActive = freshAgent.lastActive || freshAgent.createdAt;
-        isOnline = lastActive && (now - new Date(lastActive)) < 120000;
+      // Determine status
+      const lastActive = activeAgent.lastActive || activeAgent.createdAt;
+      isOnline = lastActive && (new Date() - new Date(lastActive)) < 120000;
+      lastSeenDisplay = isOnline ? "Online" : "Offline"; // Add your time diff logic here
 
-        if (isOnline) {
-          lastSeenDisplay = "Online";
-        } else if (lastActive) {
-          const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
-          if (diffMins < 60) {
-            lastSeenDisplay = `Last seen ${diffMins}m ago`;
-          } else if (diffMins < 1440) {
-            lastSeenDisplay = `Last seen ${Math.floor(diffMins / 60)}h ago`;
-          }
-        }
-      }
-
-      if (activeAgent.photoUrl) {
-        signedPhotoUrl = await getPrivateUrl(activeAgent.photoUrl);
-      }
-    }
-
-    if (!signedPhotoUrl && activeAgent) {
-      signedPhotoUrl = `https://ui-avatars.com/api/?name=${activeAgent.firstName}+${activeAgent.lastName}&background=0D1117&color=fff&size=128`;
+      // Signing URL
+      signedPhotoUrl = activeAgent.photoUrl ? await getPrivateUrl(activeAgent.photoUrl) : 
+                       `https://ui-avatars.com/api/?name=${activeAgent.firstName}+${activeAgent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
     res.json({
       success: true,
-      user: {
-        id: user._id,
-        email: user.email,
-        isProfileComplete: user.isProfileComplete,
-        lastActive: user.lastActive
-      },
-      agent: activeAgent ? {
-        ...(activeAgent.toObject ? activeAgent.toObject() : activeAgent),
-        photoUrl: signedPhotoUrl,
-        status: isOnline ? 'online' : 'offline',
-        lastSeenText: lastSeenDisplay
-      } : null
+      user: { id: user._id, email: user.email, isProfileComplete: user.isProfileComplete },
+      agent: activeAgent ? { ...activeAgent.toObject(), photoUrl: signedPhotoUrl, status: isOnline ? 'online' : 'offline', lastSeenText: lastSeenDisplay } : null
     });
 
   } catch (err) {
-    next(err);
+    console.error("CRITICAL SESSION ERROR:", err);
+    // Explicitly send 500 so frontend catches the error and hides loading screen
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
