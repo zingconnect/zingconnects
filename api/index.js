@@ -1125,6 +1125,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     next(err);
   }
 });
+
 // 🛡️ SECURITY FIX 1: Add 'next' parameter to route arguments
 app.get('/api/agents/:slug', async (req, res, next) => {
   try {

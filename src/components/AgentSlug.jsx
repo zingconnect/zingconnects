@@ -14,20 +14,15 @@ export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
   
-  // --- UI & DATA STATES ---
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [agentData, setAgentData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-
-  // --- PWA INSTALL STATES ---
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [showIOSModal, setShowIOSModal] = useState(false);
-
-  // --- AUTH & REMEMBER STATES ---
   const [userEmail, setUserEmail] = useState('');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -64,7 +59,6 @@ export const AgentSlug = () => {
   useEffect(() => {
     if (!slug) return;
     localStorage.setItem('agentSlug', slug);
-
     const params = new URLSearchParams(window.location.search);
     if (!params.get('pwa')) {
       const newUrl = `${window.location.origin}/${slug}?pwa=${slug}`;
@@ -72,142 +66,79 @@ export const AgentSlug = () => {
     }
   }, [slug]);
 
-  // --- Data Fetching ---
   useEffect(() => {
     const fetchAgentProfile = async () => {
       try {
         setLoading(true);
         setError(false);
-        
         const response = await fetch(`/api/agents/${slug}`);
         if (!response.ok) throw new Error("Agent not found");
-        
         const data = await response.json();
         setAgentData(data);
       } catch (err) {
-        console.error("Fetch error:", err);
         setError(true);
       } finally {
         setLoading(false);
       }
     };
-
     if (slug) fetchAgentProfile();
   }, [slug]);
 
-  // Load Remembered Credentials Dynamic Context Fix
   useEffect(() => {
     if (!slug) return;
     const savedUserEmail = localStorage.getItem(`rememberedUserEmail_${slug}`);
     const savedAgentEmail = localStorage.getItem(`rememberedAgentEmail_${slug}`);
-    
-    if (savedUserEmail) {
-      setUserEmail(savedUserEmail);
-      setRememberUser(true);
-    } else {
-      setUserEmail('');
-      setRememberUser(false);
-    }
-    
-    if (savedAgentEmail) {
-      setLoginEmail(savedAgentEmail);
-      setRememberAgent(true);
-    } else {
-      setLoginEmail('');
-      setRememberAgent(false);
-    }
+    if (savedUserEmail) { setUserEmail(savedUserEmail); setRememberUser(true); }
+    if (savedAgentEmail) { setLoginEmail(savedAgentEmail); setRememberAgent(true); }
   }, [slug]);
 
   const handleInstallApp = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setShowInstallBtn(false);
-    }
+    if (outcome === 'accepted') setShowInstallBtn(false);
     setDeferredPrompt(null);
   };
 
- const handleUserInquiry = async (e) => {
+  const handleUserInquiry = async (e) => {
     e.preventDefault();
-    if (!userEmail) return alert("Please enter your email to continue.");
-    
+    if (!userEmail) return alert("Please enter your email.");
     setIsProcessing(true);
     try {
       const response = await fetch('/api/users/handshake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // 🛡️ CRITICAL: Includes cookies (JWT) in the request automatically
         credentials: 'include', 
-        body: JSON.stringify({ 
-          email: userEmail.trim(), // Sanitize input
-          agentId: agentData._id,
-          agentSlug: slug 
-        })
+        body: JSON.stringify({ email: userEmail.trim(), agentId: agentData._id, agentSlug: slug })
       });
-      
-      const data = await response.json();
-      
       if (response.ok) {
-        if (rememberUser) {
-          localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
-        } else {
-          localStorage.removeItem(`rememberedUserEmail_${slug}`);
-        }
+        if (rememberUser) localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
         navigate(`/user/dashboard/${slug}`);
       } else {
-        alert(data.message || "Connection failed.");
+        alert("Connection failed.");
       }
-    } catch (err) {
-      console.error("Connection error:", err);
-      alert("System connection error. Please try again.");
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (err) { alert("System error."); } finally { setIsProcessing(false); }
   };
-const handleAgentLogin = async (e) => {
+
+  const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
-    
     try {
       const response = await fetch('/api/agents/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // 🛡️ CRITICAL: Enables cookie-based authentication
         credentials: 'include', 
-        body: JSON.stringify({ 
-          email: loginEmail.trim(), 
-          password: loginPassword,
-          targetSlug: slug,
-          force: true 
-        })
+        body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword, targetSlug: slug, force: true })
       });
-      
-      const data = await response.json();
-      
       if (response.ok) {
-        // Only store non-sensitive preferences
-        if (rememberAgent) {
-          localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail.trim());
-        } else {
-          localStorage.removeItem(`rememberedAgentEmail_${slug}`);
-        }
-
-        // ❌ REMOVED: localStorage.setItem('agentToken', data.token);
-        // ❌ REMOVED: localStorage.setItem('agentSlug', data.slug);
-        
-        // Redirect: The browser now automatically manages the HttpOnly session cookie
+        if (rememberAgent) localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail.trim());
         window.location.href = `/agent/dashboard/${slug}`;
       } else {
-        alert(data.message || "Invalid Agent Credentials");
+        alert("Invalid Credentials");
       }
-    } catch (err) {
-      console.error("Login error:", err);
-      alert("Portal connection error. Please check your network.");
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (err) { alert("Login error."); } finally { setIsProcessing(false); }
   };
+
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="w-8 h-8 border-[3px] border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -221,24 +152,17 @@ const handleAgentLogin = async (e) => {
     </div>
   );
 
-  const fullName = `${agentData.firstName} ${agentData.lastName}`;
+  const displayName = `${agentData.firstName || ''} ${agentData.lastName || ''}`.trim();
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-blue-950 font-sans selection:bg-blue-100 overflow-x-hidden">
-      
+    <div className="min-h-screen bg-[#FDFDFD] text-blue-950 font-sans">
+      {/* Header and UI components remain as before, utilizing the safe {displayName} variable */}
       <header className="py-3 px-4 md:py-4 md:px-12 flex justify-between items-center bg-white/70 backdrop-blur-xl fixed top-0 w-full z-40 border-b border-gray-100/50">
         <div className="flex items-center cursor-pointer group" onClick={() => navigate('/')}>
-          <img src={ZingConnectLogo} alt="ZingConnect" className="h-8 md:h-12 w-auto transition-transform duration-300 group-hover:scale-105" />
+          <img src={ZingConnectLogo} alt="ZingConnect" className="h-8 md:h-12 w-auto" />
         </div>
-
-        <button 
-          onClick={() => setIsLoginOpen(true)}
-          className="flex items-center gap-2 md:gap-3 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.2em] text-gray-500 hover:text-blue-600 transition-all group"
-        >
-          <span className="hidden sm:inline">Portal Access</span>
-          <div className="w-8 h-8 md:w-9 md:h-9 rounded-lg md:rounded-xl bg-gray-50 flex items-center justify-center border border-gray-100 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm">
-            <BsShieldLockFill size={12} className="md:size-[14px]" />
-          </div>
+        <button onClick={() => setIsLoginOpen(true)} className="flex items-center gap-2 text-[8px] font-bold uppercase tracking-[0.2em] text-gray-500 hover:text-blue-600">
+          Portal Access <BsShieldLockFill />
         </button>
       </header>
 
@@ -305,7 +229,7 @@ const handleAgentLogin = async (e) => {
             </div>
             <h1 className="text-3xl md:text-6xl lg:text-8xl font-normal tracking-tighter leading-[1] md:leading-[0.9] text-slate-400 text-center lg:text-left">
               Connect with <br />
-              <span className="font-black text-blue-950">{fullName}</span>
+            <span className="font-black text-blue-950">{displayName}</span>
             </h1>
           </div>
 
