@@ -710,48 +710,51 @@ useEffect(() => {
     }
   }
 }, [isSpeakerOn, activeCall?.voiceId, callStatus]);
-useEffect(() => {
-  const checkCalls = async () => {
-    if (
-      callStatusRef.current !== 'idle' || 
-      isEnding || 
-      isTransitioningRef.current
-    ) {
-      return; 
+
+const checkCalls = async () => {
+  if (
+    callStatusRef.current !== 'idle' || 
+    isEnding || 
+    isTransitioningRef.current
+  ) {
+    return; 
+  }
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache' },
+      credentials: 'include'
+    });
+    if (response.status === 401 || response.status === 403) {
+      console.warn("Session expired. Redirecting to agent entry...");
+      window.location.href = `/${slugFromUrl}`; 
+      return;
     }
 
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
-        method: 'GET',
-        headers: { 'Cache-Control': 'no-cache' },
-        credentials: 'include'
+    if (!response.ok) return;
+
+    const data = await response.json();
+
+    if (data && data.hasIncomingCall) {
+      if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
+
+      console.log("📡 Poller found incoming call, triggering UI...");
+      setActiveCall({
+        callId: data.callId,
+        fromId: data.callerData?.callerId || data.fromId,
+        roomName: data.roomName || data.callId,
+        callerData: data.callerData,
+        voiceId: data.voiceId
       });
-      if (!response.ok) return;
-      const data = await response.json();
-
-      if (data && data.hasIncomingCall) {
-        if (callStatusRef.current !== 'idle' || isEnding || isTransitioningRef.current) return;
-
-        console.log("📡 Poller found incoming call, triggering UI...");
-        setActiveCall({
-          callId: data.callId,
-          fromId: data.callerData?.callerId || data.fromId,
-          roomName: data.roomName || data.callId,
-          callerData: data.callerData,
-          voiceId: data.voiceId
-        });
-        
-        setIsIncomingCall(true); 
-        setCallStatus('ringing');
-      }
-    } catch (err) {
-      console.warn("User Polling error:", err);
+      
+      setIsIncomingCall(true); 
+      setCallStatus('ringing');
     }
-  };
-  
-  const interval = setInterval(checkCalls, 4000); 
-  return () => clearInterval(interval);
-}, [userData?._id, isEnding]);
+  } catch (err) {
+    console.warn("User Polling error:", err);
+  }
+};
 
 useEffect(() => {
   // 1. Set looping once
