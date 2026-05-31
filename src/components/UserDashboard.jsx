@@ -1591,6 +1591,7 @@ const handleStartCall = async () => {
 };
 const handleSendMessage = async (e) => {
   e.preventDefault();
+  // Ensure we have necessary data
   if (!newMessage.trim() || !agent?._id) return;
   
   const textToSend = newMessage;
@@ -1609,7 +1610,8 @@ const handleSendMessage = async (e) => {
   };
 
   setMessages(prev => [...prev, pendingMessage]);
-  setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  // Use scrollIntoView properly
+  setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
     const response = await fetch('/api/messages/send', {
@@ -1618,6 +1620,7 @@ const handleSendMessage = async (e) => {
       credentials: 'include',
       body: JSON.stringify({
         receiverId: agent._id,
+        receiverModel: 'Agent', // ADDED: Must match backend expectation
         text: textToSend,
         fileType: 'text',
         replyToId: replyingTo?._id 
@@ -1625,14 +1628,15 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
-    if (data.success) {
-      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
-      socket.emit("sendMessage", data.message); 
-      setReplyingTo(null);
-    } else {
-      throw new Error();
-    }
+    
+    if (!response.ok || !data.success) throw new Error(data.message || "Failed to send");
+
+    // SUCCESS: Backend handles the socket emit, so we just update the UI state.
+    setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+    setReplyingTo(null);
+    
   } catch (err) {
+    console.error("Message send failed:", err);
     setMessages(prev => prev.map(m => 
       m._id === tempId ? { ...m, status: 'failed' } : m
     ));

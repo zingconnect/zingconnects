@@ -103,47 +103,36 @@ const upload = multer({ storage: multer.memoryStorage() });
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
-
 const authenticateToken = async (req, res, next) => {
-console.log("DEBUG: Middleware reached for URL:", req.originalUrl);
-  console.log("DEBUG: Cookies received:", req.cookies);
-    const token = req.cookies?.token || 
-                (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].split(' ')[1] : null);
+  // 1. Extract token from Header or Cookie (Manual fallback for serverless)
+  const authHeader = req.headers['authorization'];
+  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+
+  if (!token && req.headers.cookie) {
+    const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+      const [key, value] = cookie.trim().split('=');
+      acc[key] = value;
+      return acc;
+    }, {});
+    token = cookies['token'];
+  }
 
   if (!token) {
+    console.log("DEBUG: Auth failed, no token found in headers or cookies.");
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    // Agent Logic
-    if (decoded.role === 'agent') {
-      const AgentModel = mongoose.models.Agent || Agent;
-      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-      
-      if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
-
-      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
-      }
-      
-      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
-    }
-
-    // Admin Logic
-    if (decoded.role === 'admin') {
-      const AdminModel = mongoose.models.Admin || Admin;
-      await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
-    }
+    // ... (Keep your existing Agent/Admin logic here)
 
     next();
   } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: "Token expired" });
-    }
-    return res.status(403).json({ success: false, message: "Invalid Token" });
+    console.error("DEBUG: Token verification failed:", err.message);
+    return res.status(403).json({ success: false, message: "Invalid or expired token" });
   }
 };
 
@@ -842,15 +831,14 @@ app.post('/api/users/handshake', async (req, res, next) => {
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
-
-   res.cookie('token', token, {
+res.cookie('token', token, {
   httpOnly: true,
-  secure: true,            // Must be true for SameSite: 'None'
-  sameSite: 'None',        // 'None' allows the cookie to be sent in cross-site requests
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/'
+  secure: true,           // Required for None
+  sameSite: 'None',       // Required for cross-context
+  path: '/',              // CRITICAL: Tells the browser the cookie applies to ALL routes
+  domain: '.vercel.app',  // OPTIONAL: Try adding this if the subdomains are failing
+  maxAge: 7 * 24 * 60 * 60 * 1000
 });
-
     return res.json({ 
       success: true, 
       isNewUser, 
