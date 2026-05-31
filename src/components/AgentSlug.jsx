@@ -161,24 +161,45 @@ const handleUserInquiry = async (e) => {
     setIsProcessing(false); 
   }
 };
-  const handleAgentLogin = async (e) => {
-    e.preventDefault();
-    setIsProcessing(true);
-    try {
-      const response = await fetch('/api/agents/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', 
-        body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword, targetSlug: slug, force: true })
-      });
-      if (response.ok) {
-        if (rememberAgent) localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail.trim());
-        window.location.href = `/agent/dashboard/${slug}`;
-      } else {
-        alert("Invalid Credentials");
+
+ const handleAgentLogin = async (e) => {
+  e.preventDefault();
+  setIsProcessing(true);
+
+  try {
+    const response = await fetch('/api/agents/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // credentials: 'include', // Remove this since we are handling token manually
+      body: JSON.stringify({ 
+        email: loginEmail.trim(), 
+        password: loginPassword, 
+        targetSlug: slug, 
+        force: true 
+      })
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.token) {
+      // Manually set the token in your context/storage
+      setToken(data.token, slug);
+      
+      if (rememberAgent) {
+        localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail.trim());
       }
-    } catch (err) { alert("Login error."); } finally { setIsProcessing(false); }
-  };
+      
+      navigate(`/agent/dashboard/${slug}`);
+    } else {
+      alert(data.message || "Invalid Credentials");
+    }
+  } catch (err) { 
+    console.error("Login error:", err);
+    alert("System error. Please try again."); 
+  } finally { 
+    setIsProcessing(false); 
+  }
+};
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white">

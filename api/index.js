@@ -559,6 +559,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     next(err); 
   }
 });
+
 app.post('/api/agents/login', async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -603,16 +604,19 @@ app.post('/api/agents/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
-   res.cookie('token', token, {
+  // In your app.post('/api/agents/login', ...)
+res.cookie('token', token, {
   httpOnly: true,
-  secure: true,            // Must be true for SameSite: 'None'
-  sameSite: 'None',        // 'None' allows the cookie to be sent in cross-site requests
+  secure: process.env.NODE_ENV === 'production', 
+  sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/'
+  path: '/',
+  domain: process.env.NODE_ENV === 'production' ? '.zingconnect.vercel.app' : undefined
 });
 
     return res.json({ 
       success: true, 
+      token: token,
       slug: agent.slug 
     });
 
