@@ -32,7 +32,7 @@ export const UserProfile = () => {
   // 🛠️ FIX: Force a fresh database fetch on mount to bypass old cached context data
   useEffect(() => {
     const fetchUserData = async () => {
-      const token = localStorage.getItem('userToken');
+    const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
       if (!token) {
         console.error("No token found. User might not be logged in.");
         setLoading(false);
@@ -99,7 +99,7 @@ export const UserProfile = () => {
 
   const handleUpdate = async () => {
     setIsUpdating(true);
-    const token = localStorage.getItem('userToken');
+    const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
     const data = new FormData();
 
     Object.keys(formData).forEach(key => {

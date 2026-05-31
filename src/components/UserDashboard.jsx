@@ -1085,15 +1085,16 @@ useEffect(() => {
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
 
-
 useEffect(() => {
-  // 🔍 Dynamic Lookup: Find the slug-isolated token first, fallback to generic
+  // 🛠️ FIX 1: If the page route is designed to have a slug parameter, 
+  // wait for React Router to finish parsing it before triggering network requests.
+  if (slugFromUrl === undefined) return;
+
   const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   if (!token) return navigate('/');
 
   const fetchUserSession = async () => {
     try {
-      // 🛠️ FIX: Send it explicitly as a slug query parameter to match the landing handshake context
       const url = slugFromUrl 
         ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
@@ -1106,7 +1107,6 @@ useEffect(() => {
       if (response.ok) {
         const loadedAgentSlug = data.agent?.slug;
 
-        // 🔥 Match strictly against slugs instead of database ObjectIds
         if (slugFromUrl && String(loadedAgentSlug).toLowerCase() !== String(slugFromUrl).toLowerCase()) {
           console.error("⛔ [Security Violation]: Mismatched route context detected. Forcing fallback isolation logic.");
           navigate('/'); 
@@ -1131,8 +1131,6 @@ useEffect(() => {
   const interval = setInterval(fetchUserSession, 30000); 
   return () => clearInterval(interval);
 }, [navigate, slugFromUrl]);
-// 1. Grab your URL param at the top of your component definition:
-// const { agentId: slugFromUrl } = useParams();
 
 useEffect(() => {
   // 🛠️ FIX 1: Dynamically look up the slug-isolated token variable first
@@ -2041,7 +2039,7 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
 <BsGearFill 
   className="cursor-pointer hover:text-gray-700 transition-colors active:scale-90" 
   size={18} 
-  onClick={() => navigate('/user/profile')} 
+onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 />
 </div>
         </header>
