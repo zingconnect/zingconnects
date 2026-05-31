@@ -66,21 +66,29 @@ export const AgentSlug = () => {
     }
   }, [slug]);
 
-  useEffect(() => {
+useEffect(() => {
     const fetchAgentProfile = async () => {
       try {
         setLoading(true);
         setError(false);
         const response = await fetch(`/api/agents/${slug}`);
         if (!response.ok) throw new Error("Agent not found");
-        const data = await response.json();
-        setAgentData(data);
+        
+        const result = await response.json();
+        // Correctly accessing the nested 'agent' object from your API response
+        if (result.success && result.agent) {
+          setAgentData(result.agent);
+        } else {
+          throw new Error("Invalid data format");
+        }
       } catch (err) {
+        console.error("Fetch error:", err);
         setError(true);
       } finally {
         setLoading(false);
       }
     };
+
     if (slug) fetchAgentProfile();
   }, [slug]);
 
@@ -229,7 +237,7 @@ export const AgentSlug = () => {
             </div>
             <h1 className="text-3xl md:text-6xl lg:text-8xl font-normal tracking-tighter leading-[1] md:leading-[0.9] text-slate-400 text-center lg:text-left">
               Connect with <br />
-            <span className="font-black text-blue-950">{displayName}</span>
+              <span className="font-black text-blue-950">{fullName}</span>
             </h1>
           </div>
 
