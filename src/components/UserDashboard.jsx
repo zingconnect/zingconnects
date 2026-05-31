@@ -440,12 +440,10 @@ const handleEndCall = useCallback(async () => {
 
   try {
     if (currentCallId) {
-      // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
-      await fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include'
-      });
+     await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, token, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' }
+});
       console.log("✅ Server notified: Call marked as inactive.");
     }
     if (socket && targetId) {
@@ -863,12 +861,10 @@ const handleAcceptCall = async () => {
     setCallStatus('connecting');
     setShowFullScreenCall(true);
 
-    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include'
-    });
+   const response = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, token, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' }
+});
 
     const data = await response.json();    
     if (data.success && data.lkToken) {
@@ -1087,6 +1083,7 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
+
 useEffect(() => {
   if (!slugFromUrl || !token) return; // Only fetch if we have a token
 

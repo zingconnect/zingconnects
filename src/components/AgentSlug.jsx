@@ -145,15 +145,12 @@ const handleUserInquiry = async (e) => {
     const data = await response.json();
 
     if (response.ok && data.token) {
-      // CORRECTED: Use setToken from useAuth()
-      setToken(data.token); 
+      setToken(data.token, slug);
       
       if (rememberUser) {
         localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
       }
-      
-      // Navigate to dashboard
-      navigate(`/user/dashboard/${slug}`);
+            navigate(`/user/dashboard/${slug}`);
     } else {
       alert(`Connection failed: ${data.message || "Unknown error"}`);
     }
