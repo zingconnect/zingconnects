@@ -122,13 +122,14 @@ useEffect(() => {
     setShowInstallBtn(false);
   }
 };
-
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
+  // Guard: User must have typed an email
   if (!userEmail) return alert("Please enter your email.");
-  if (!agentData?._id) return alert("Agent data is still loading, please wait.");
-  if (!slug) return alert("Agent slug is missing.");
+  
+  // Guard: If agentData is still null, the button should have been disabled anyway
+  if (!agentData?._id) return; 
 
   setIsProcessing(true);
 
@@ -144,7 +145,6 @@ const handleUserInquiry = async (e) => {
       })
     });
 
-    // 2. Parse response to handle server validation feedback
     const data = await response.json();
 
     if (response.ok) {
@@ -154,10 +154,8 @@ const handleUserInquiry = async (e) => {
       navigate(`/user/dashboard/${slug}`);
     } else {
       alert(`Connection failed: ${data.message || "Unknown error"}`);
-      console.error("Server validation error:", data);
     }
   } catch (err) { 
-    // 4. Handle network or parsing errors
     console.error("System error:", err);
     alert("A system error occurred. Please try again later."); 
   } finally { 
@@ -239,13 +237,15 @@ const handleUserInquiry = async (e) => {
                     <label htmlFor="rememberUser" className="text-[8px] md:text-[9px] font-black text-gray-400 uppercase tracking-widest cursor-pointer">Remember Identity</label>
                   </div>
                 </div>
-                
-                <button 
-                  type="submit" disabled={isProcessing}
-                  className="w-full py-5 md:py-6 bg-blue-600 text-white rounded-[1.5rem] md:rounded-[2rem] font-black text-[10px] md:text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50"
-                >
-                  {isProcessing ? "Connecting..." : "Start Live Session"} <BsLightningFill />
-                </button>
+             <button 
+  type="submit" 
+  // Disable if the data hasn't loaded OR if it's currently processing
+  disabled={!agentData || isProcessing} 
+  className={`w-full py-5 md:py-6 bg-blue-600 text-white rounded-[1.5rem] md:rounded-[2rem] font-black text-[10px] md:text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed`}
+>
+  {/* Dynamic button text */}
+  {isProcessing ? "Connecting..." : !agentData ? "Loading Profile..." : "Start Live Session"} <BsLightningFill />
+</button>
                 
                 <div className="flex flex-col items-center gap-2">
                   {showInstallBtn && (
