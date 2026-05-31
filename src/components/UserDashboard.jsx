@@ -143,6 +143,7 @@ const previousScrollTopRef = useRef(0);
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
   const [showFullScreenCall, setShowFullScreenCall] = useState(false);
   const [isIncomingCall, setIsIncomingCall] = useState(false);
+  const { agentId: slugFromUrl } = useParams();
   
   const API_BASE_URL = import.meta.env.VITE_API_URL
 
@@ -421,7 +422,7 @@ const handleEndCall = useCallback(async () => {
   }
   const myId = userData?._id || userData?.id;
   const currentCallId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
-  const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const targetId = activeCall?.fromId === myId 
     ? activeCall?.toId 
     : activeCall?.fromId;
@@ -620,7 +621,7 @@ const formatTime = (seconds) => {
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
 useEffect(() => {
-  const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const currentCallId = activeCall?.callId || activeCall?._id;
     if (!token || !currentCallId || callStatus === 'idle' || callStatus === 'connected' || isEnding) return;
   const syncSessionStart = Date.now();
@@ -709,7 +710,7 @@ useEffect(() => {
 }, [isSpeakerOn, activeCall?.voiceId, callStatus]);
 
 useEffect(() => {
-  const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   if (!token) return;
 
   const checkCalls = async () => {
@@ -839,7 +840,7 @@ const handleAcceptCall = async () => {
     ringtoneAudio.current.currentTime = 0;
   }
 
-  const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const callId = activeCall?.callId || activeCall?._id || activeCall?.roomName;
 
   if (!callId) {
@@ -912,7 +913,7 @@ useEffect(() => {
     socket.emit("confirm-ringing", { to: data.fromId || data.callerData?.callerId });
   }
   try {
-    const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
     const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -1040,7 +1041,7 @@ useEffect(() => {
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
-      const token = localStorage.getItem('userToken'); 
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
       if (!token) return;
       const response = await fetch('/api/save-subscription', {
         method: 'POST',
@@ -1085,16 +1086,16 @@ useEffect(() => {
 }, [socket, isSpeakerOn]);
 
 
-
- useEffect(() => {
-  const token = localStorage.getItem('userToken');
+useEffect(() => {
+  // 🔍 Dynamic Lookup: Find the slug-isolated token first, fallback to generic
+  const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   if (!token) return navigate('/');
 
   const fetchUserSession = async () => {
     try {
-      // 🛠️ FIX: Append slugAgentId query param so server fetches the right agent context
-      const url = slugAgentId 
-        ? `/api/users/my-session?agentId=${slugAgentId}` 
+      // 🛠️ FIX: Send it explicitly as a slug query parameter to match the landing handshake context
+      const url = slugFromUrl 
+        ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
 
       const response = await fetch(url, {
@@ -1103,10 +1104,12 @@ useEffect(() => {
       const data = await response.json();
       
       if (response.ok) {
-        const loadedAgentId = data.agent?._id || data.agent?.id;
-        if (slugAgentId && String(loadedAgentId) !== String(slugAgentId)) {
+        const loadedAgentSlug = data.agent?.slug;
+
+        // 🔥 Match strictly against slugs instead of database ObjectIds
+        if (slugFromUrl && String(loadedAgentSlug).toLowerCase() !== String(slugFromUrl).toLowerCase()) {
           console.error("⛔ [Security Violation]: Mismatched route context detected. Forcing fallback isolation logic.");
-          navigate('/dashboard'); 
+          navigate('/'); 
           return;
         }
 
@@ -1127,19 +1130,23 @@ useEffect(() => {
   fetchUserSession();
   const interval = setInterval(fetchUserSession, 30000); 
   return () => clearInterval(interval);
-}, [navigate, slugAgentId]);
+}, [navigate, slugFromUrl]);
+// 1. Grab your URL param at the top of your component definition:
+// const { agentId: slugFromUrl } = useParams();
 
 useEffect(() => {
-  const token = localStorage.getItem('userToken');
+  // 🛠️ FIX 1: Dynamically look up the slug-isolated token variable first
+  const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL;
   
+  // Exit gracefully if authentication context isn't ready yet
   if (!token || !targetAgentId) return;
 
   const fetchMessages = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?limit=50`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${token}` } // Now cleanly authorized!
       });
       const data = await response.json();
       
@@ -1205,7 +1212,8 @@ useEffect(() => {
   const interval = setInterval(fetchMessages, 5000); 
   
   return () => clearInterval(interval);
-}, [agent?._id, agent?.id]);
+  // 🛠️ FIX 2: Add slugFromUrl to the dependency array so changing profiles reinstantiates the poll cleanly
+}, [agent?._id, agent?.id, slugFromUrl]);
 
   const agentStatus = getStatusInfo(agent);
 
@@ -1250,7 +1258,7 @@ useEffect(() => {
   const fetchOlderMessages = async () => {
     if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
     
-    const token = localStorage.getItem('userToken');
+    const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
     const targetAgentId = agent._id || agent.id;
     const API_BASE_URL = import.meta.env.VITE_API_URL;
     const oldestMessage = messages.find(m => m._id && !m.isTemp);
@@ -1334,7 +1342,7 @@ const handleProfileSubmit = async (e) => {
   }
 
   setIsUploading(true); 
-  const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const data = new FormData();
   
   const fileToUpload = onboardingFile || previewFile;
@@ -1444,7 +1452,7 @@ const handleFinalSend = async () => {
   setPreviewFile(null);
 
   setIsUploading(true);
-  const token = localStorage.getItem('userToken'); 
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
 
   try {
     const urlResponse = await fetch('/api/messages/get-upload-url', {
@@ -1511,7 +1519,7 @@ const handleDownload = async (url, type) => {
 };
 
 const startStatusPolling = (roomName) => {
-  const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const startTime = Date.now(); // Mark when polling started
 
   if (pollingRef.current) clearInterval(pollingRef.current);
@@ -1551,7 +1559,7 @@ const handleStartCall = async () => {
   // 1. Validation and Setup
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
-  const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
   const API_BASE_URL = import.meta.env.VITE_API_URL;
 
   if (!currentAgentId || !currentUserId) {
@@ -1646,7 +1654,7 @@ const handleStartCall = async () => {
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
 
   try {
-    const token = localStorage.getItem('userToken');
+const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
     const response = await fetch('/api/messages/send', {
       method: 'POST',
       headers: { 

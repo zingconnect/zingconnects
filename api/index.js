@@ -904,6 +904,7 @@ app.post('/api/agents/heartbeat', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
+
 app.get('/api/users/my-session', async (req, res) => {
   try {
     await connectToDatabase();
@@ -927,23 +928,29 @@ app.get('/api/users/my-session', async (req, res) => {
     });
 
     if (!user) return res.status(404).json({ message: "User not found" });
-
-    // 🔍 2. Resolve Active Agent based on slug context or fallback array
     let activeAgent = null;
 
     if (user.connectedAgents && user.connectedAgents.length > 0) {
       if (agentId) {
-        // Find by specific _id
         activeAgent = user.connectedAgents.find(a => a._id.toString() === agentId.toString()) || null;
       } else if (slug) {
-        // Find by URL slug
         activeAgent = user.connectedAgents.find(a => a.slug === slug) || null;
       }
-      
-      // Fallback: If parameters weren't sent or agent wasn't found in user's list, grab the latest one
-      if (!activeAgent) {
-        activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
+    }
+    if (!activeAgent && (slug || agentId)) {
+      const query = slug ? { slug: slug } : { _id: agentId };
+      const freshAgent = await Agent.findOne(query);
+
+      if (freshAgent) {
+        // Link the agent to the user's account in the database
+        await User.findByIdAndUpdate(decoded.id, {
+          $addToSet: { connectedAgents: freshAgent._id }
+        });
+        activeAgent = freshAgent;
       }
+    }
+    if (!activeAgent && user.connectedAgents && user.connectedAgents.length > 0) {
+      activeAgent = user.connectedAgents[user.connectedAgents.length - 1];
     }
     
     let isOnline = false;

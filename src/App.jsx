@@ -107,11 +107,12 @@ function App() {
             <Route path="/agent/call-settings" element={<CallSetting />} />
           </Route>
 
-          {/* --- 3. PROTECTED USER ROUTES (Wrapped in UserCallProvider) --- */}
-          <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
-            <Route path="/user/dashboard" element={<UserDashboard />} />
-            <Route path="/user/profile" element={<UserProfile />} />
-          </Route>
+         {/* --- 3. PROTECTED USER ROUTES (Wrapped in UserCallProvider) --- */}
+<Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
+  {/* 🛠️ FIX: Added /:agentId pattern to handle dynamic incoming handshakes cleanly */}
+  <Route path="/user/dashboard/:agentId" element={<UserDashboard />} />
+  <Route path="/user/profile" element={<UserProfile />} />
+</Route>
 
           {/* --- 4. ADMINISTRATOR ROUTES --- */}
           <Route path="/admin/terminal" element={<ZingAdmin />} /> 
