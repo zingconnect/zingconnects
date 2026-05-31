@@ -1016,12 +1016,14 @@ useEffect(() => {
     socket.off("message-deleted");
   };
 }, [socket]);
+
 useEffect(() => {
   const setupNotifications = async () => {
-    try {
-      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-      if (!publicKey) return;
+    // 1. Guard: Only proceed if we have the token and keys
+    const publicKey = import.meta.env.VITE_PUBLIC_KEY;
+    if (!publicKey || !token) return; 
 
+    try {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') return;
 
@@ -1035,15 +1037,16 @@ useEffect(() => {
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
-      const response = await fetch('/api/save-subscription', {
+      const response = await secureFetch('/api/save-subscription', token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ subscription }) 
       });
 
       if (response.ok) {
         console.log("Database synced with Push Subscription");
+      } else {
+        console.error("Failed to sync subscription, status:", response.status);
       }
     } catch (err) {
       console.error("User Push setup failed:", err);
@@ -1053,7 +1056,7 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, []);
+}, [token]); // 3. Add token as a dependency so it runs once the token is ready
 
 useEffect(() => {
   const handleVoiceUpdate = (data) => {
@@ -1074,26 +1077,23 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
-
 useEffect(() => {
-  if (!slugFromUrl) return;
+  if (!slugFromUrl || !token) return; // Only fetch if we have a token
 
   let isMounted = true;
-    setLoading(true);
+  setLoading(true);
+
   const fetchUserSession = async () => {
     try {
-      const url = slugFromUrl 
+      const endpoint = slugFromUrl 
         ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
       
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include'
-      });
+      // Use secureFetch instead of standard fetch
+      const response = await secureFetch(endpoint, token);
 
       if (response.status === 401 || response.status === 403) {
-        navigate('/');
+        navigate('/pricing'); // Redirect to pricing if token is invalid/expired
         return;
       }
 
@@ -1102,14 +1102,13 @@ useEffect(() => {
       if (isMounted && response.ok) {
         setAgent(data.agent);
         setUserData(data.user);
-        // Onboarding check remains here
         if (!data.user?.isProfileComplete) setShowOnboarding(true);
       }
     } catch (err) {
       console.error("Session fetch error:", err);
     } finally {
       if (isMounted) {
-        setLoading(false); // UI will now stop "Securing" once data returns
+        setLoading(false);
       }
     }
   };
@@ -1121,8 +1120,7 @@ useEffect(() => {
     isMounted = false;
     clearInterval(interval);
   };
-}, [navigate, slugFromUrl]);
-
+}, [navigate, slugFromUrl, token]);
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
