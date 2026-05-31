@@ -29,61 +29,43 @@ export const UserProfile = () => {
   
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-useEffect(() => {
-  // 🛠️ Guard: Don't run the fetch until React Router has finished parsing the URL param
-  if (slugFromUrl === undefined) return;
 
-  const fetchUserData = async () => {
-    // 🛠️ Look up the dynamic, isolated token first
+  // 🛠️ FIX: Force a fresh database fetch on mount to bypass old cached context data
+  useEffect(() => {
+    const fetchUserData = async () => {
     const token = localStorage.getItem(`userToken_${slugFromUrl}`) || localStorage.getItem('userToken');
-    
-    if (!token) {
-      console.error("No token found. User might not be logged in.");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      // 🛠️ FIX: Dynamic URL context pairing. Use my-session with slug param to sync up perfectly with the dashboard
-      const url = slugFromUrl 
-        ? `${import.meta.env.VITE_API_URL}/api/users/my-session?slug=${slugFromUrl}` 
-        : `${import.meta.env.VITE_API_URL}/api/users/me`;
-
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
-      const result = await res.json();
-      
-      if (res.ok && result.success) {
-        setUserData(result.user);
-      } else {
-        console.error("API Error:", result.message || "Failed to fetch user");
-
-        // 🛡️ SECURITY FALLBACK: If the backend says the user doesn't exist (404),
-        // wipe the invalid tokens and safely route them back to registration.
-        if (res.status === 404) {
-          console.warn("Purging stale local user tokens...");
-          localStorage.removeItem(`userToken_${slugFromUrl}`);
-          localStorage.removeItem('userToken');
-          navigate('/');
-        }
+      if (!token) {
+        console.error("No token found. User might not be logged in.");
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      console.error("Network or parsing error:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
+          method: 'GET',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Cache-Control': 'no-cache', // Bypass local edge-network caches
+            'Pragma': 'no-cache'
+          }
+        });
+        const result = await res.json();
+        
+        if (res.ok && result.success) {
+          setUserData(result.user);
+        } else {
+          console.error("API Error:", result.message || "Failed to fetch user");
+        }
+      } catch (err) {
+        console.error("Network or parsing error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  fetchUserData();
-  // 🛠️ Include dependencies to keep the component reactive to URL path changes
-}, [setUserData, slugFromUrl, navigate]);
-
+    // Always fetch on mount to ensure deep fields (like agent photos) are up-to-date
+    fetchUserData();
+  }, [setUserData]); // Removed userData dependency to prevent loop cascades
+  
   useEffect(() => {
     if (userData) {
       setFormData({
