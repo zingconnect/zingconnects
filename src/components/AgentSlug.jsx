@@ -122,26 +122,38 @@ useEffect(() => {
     setShowInstallBtn(false);
   }
 };
-  const handleUserInquiry = async (e) => {
-    e.preventDefault();
-    if (!userEmail) return alert("Please enter your email.");
-    setIsProcessing(true);
-    try {
-      const response = await fetch('/api/users/handshake', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', 
-        body: JSON.stringify({ email: userEmail.trim(), agentId: agentData._id, agentSlug: slug })
-      });
-      if (response.ok) {
-        if (rememberUser) localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
-        navigate(`/user/dashboard/${slug}`);
-      } else {
-        alert("Connection failed.");
-      }
-    } catch (err) { alert("System error."); } finally { setIsProcessing(false); }
-  };
 
+const handleUserInquiry = async (e) => {
+  e.preventDefault();
+  if (!userEmail) return alert("Please enter your email.");
+  setIsProcessing(true);
+  try {
+    const response = await fetch('/api/users/handshake', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', 
+      body: JSON.stringify({ 
+        email: userEmail.trim(), 
+        agentId: agentData._id, 
+        agentSlug: slug 
+      })
+    });
+
+    const data = await response.json(); // Capture the server's error message
+
+    if (response.ok) {
+      if (rememberUser) localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+      navigate(`/user/dashboard/${slug}`);
+    } else {
+      // This will show you exactly what's wrong (e.g., "Invalid context mapping parameter")
+      alert(`Connection failed: ${data.message || "Unknown error"}`);
+      console.error("Server validation error:", data);
+    }
+  } catch (err) { 
+    console.error("System error:", err);
+    alert("System error. Check console for details."); 
+  } finally { setIsProcessing(false); }
+};
   const handleAgentLogin = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
