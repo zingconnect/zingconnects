@@ -1,26 +1,13 @@
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-
-  // 1. FORCE NETWORK FOR NAVIGATION (Ensures correct routing on iOS PWA)
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
-    );
-    return;
-  }
-
-  // 2. BYPASS SERVICE WORKER FOR AUDIO
   if (
     event.request.destination === 'audio' || 
     url.pathname.endsWith('.mp3') || 
     url.pathname.endsWith('.wav') ||
     event.request.headers.get('range')
   ) {
-    return; // Let browser handle via network
+    return; 
   }
-  
-  // 3. (Optional) Add your Cache-First strategy here for other assets
-  // event.respondWith(caches.match(event.request).then(response => response || fetch(event.request)));
 });
 // 2. LIFECYCLE HANDLERS (Ensures quick updates)
 self.addEventListener('install', (event) => {
