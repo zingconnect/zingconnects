@@ -18,32 +18,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
 });
 
-// 2. CONSOLIDATED FETCH HANDLER (One single listener)
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
 
-  // A. EXCLUSIONS: Bypass Service Worker for these
-  // 1. API requests (FIXES your 400 Bad Request error)
-  // 2. Audio/Streaming requests
-  // 3. Third-party domains (Cross-origin)
-  if (
-    url.pathname.startsWith('/api/') || 
-    event.request.destination === 'audio' || 
-    url.pathname.endsWith('.mp3') || 
-    url.pathname.endsWith('.wav') ||
-    event.request.headers.get('range') ||
-    url.origin !== self.location.origin
-  ) {
-    return; // Request proceeds directly to the network
-  }
-
-  // B. CACHING: Handle your own static assets
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request);
-    })
-  );
-});
 
 // 3. PUSH NOTIFICATION LOGIC
 self.addEventListener('push', function(event) {
