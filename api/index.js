@@ -22,7 +22,7 @@ import webpush from 'web-push';
 import { Server } from 'socket.io';
 import http from 'http';
 import { createClient } from 'redis'; // 👈 Added Redis Import
-
+import cookieParser from 'cookie-parser'; // Add this import
 // --- REDIS CACHING CLIENT INITIALIZATION ---
 const redisClient = createClient({
   url: process.env.REDIS_URL
@@ -39,18 +39,12 @@ redisClient.on('connect', () => console.log('⚡ Connected to Redis Cache Cloud 
     console.error('⚠️ Could not initialize Redis connection:', err.message);
   }
 })();
-// ------------------------------------------
 
-// 3. Database & Shared Configurations
 import { connectToDatabase } from './config/db.js';
 import { getS3Client, getPrivateUrl, uploadToS3, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from './config/s3.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-
-// 4. Local Utility Framework Helpers (Now fully hydrated with process.env keys)
 import { createLiveKitToken } from './utils/livekitHelper.js';
 import { sendOfflineNotification } from './utils/mailer.js';
-
-// 5. Schema Data Models
 import Agent from './models/Agent.js';
 import User from './models/User.js'; 
 import Message from './models/Message.js';
@@ -65,6 +59,7 @@ import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
 
 const app = express();
+app.use(cookieParser());
 app.disable('x-powered-by');
 
 const terminatingCallsCache = new Set();
@@ -108,39 +103,36 @@ const upload = multer({ storage: multer.memoryStorage() });
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
-const authenticateToken = async (req, res, next) => {
-  // 1. Extract token safely
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
-  if (!token) return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
+const authenticateToken = async (req, res, next) => {
+  console.log("Cookies received:", req.cookies); 
+  const token = req.cookies?.token || 
+                (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].split(' ')[1] : null);
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
+  }
 
   try {
-    // 2. Verify token synchronously
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    // 3. Logic for Agents
+    // Agent Logic
     if (decoded.role === 'agent') {
       const AgentModel = mongoose.models.Agent || Agent;
       const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
       
       if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
 
-      // Dual Login check
       if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ 
-          success: false, 
-          message: "Dual login detected.", 
-          reason: "dual_login" 
-        });
+        return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
       }
       
       await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
     }
 
-    // 4. Logic for Admin
+    // Admin Logic
     if (decoded.role === 'admin') {
       const AdminModel = mongoose.models.Admin || Admin;
       await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
@@ -148,7 +140,6 @@ const authenticateToken = async (req, res, next) => {
 
     next();
   } catch (err) {
-    // Distinguish between expired and invalid tokens
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ success: false, message: "Token expired" });
     }
