@@ -77,7 +77,7 @@ const handleSubmit = async (e) => {
     }
 
     // Using secureFetch with null token
-    const response = await secureFetch('/api/agents/register', null, {
+    const response = await secureFetch('/api/agents/register-init',null, {
       method: 'POST',
       body: data // secureFetch now detects this is FormData
     });
