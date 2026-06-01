@@ -21,9 +21,8 @@ export const secureFetch = async (url, token, options = {}) => {
 
   const response = await fetch(url, config);
 
-  if (response.status === 401 || response.status === 403) {
-    throw new Error('Unauthorized');
-  }
-
+  // 🛡️ FIX: Instead of throwing an error and crashing the runtime flow,
+  // we just return the raw response object. This allows components to read 
+  // response.status (401, 403) and inspect custom error JSON bodies safely.
   return response;
 };
