@@ -1711,103 +1711,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-// =========================================================================
-// 🛡️ HARDENED ENDPOINT: GET /api/messages/:otherUserId
-// =========================================================================
-app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) => {
-  try {
-    await connectToDatabase();
-    const myId = req.user.id;
-    const { otherUserId } = req.params;
-
-    // 🛡️ SECURITY FIX 1: Strict Hex-Id Parameter Structure Validation
-    if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
-      return res.status(400).json({ success: false, message: "Invalid target identifier structure." });
-    }
-    
-    // 🛡️ SECURITY FIX 2: Upper Ceiling Pagination Limits (Defeats Memory Exhaustion Attacks)
-    let limit = parseInt(req.query.limit, 10) || 30;
-    let skip = parseInt(req.query.skip, 10) || 0;
-
-    if (limit <= 0) limit = 30;
-    if (limit > 100) limit = 100; // Enforce hard maximum ceiling cap per network page frame
-    if (skip < 0) skip = 0;
-
-    // Fetch messages cleanly with index matching
-    const messages = await Message.find({
-      $or: [
-        { senderId: myId, receiverId: otherUserId },
-        { senderId: otherUserId, receiverId: myId }
-      ]
-    })
-    .sort({ createdAt: -1 }) 
-    .skip(skip)
-    .limit(limit)
-    .lean();
-
-    // Fetch user data safely
-    const userData = await mongoose.model('User').findById(otherUserId)
-      .select('firstName lastName email gender status isOnline lastActive photoUrl city state')
-      .lean();
-
-    let formattedUser = null;
-    if (userData) {
-      // 🛡️ SECURITY FIX 3: Safe DTO Object Builder (No raw leakage)
-      formattedUser = {
-        id: userData._id,
-        firstName: userData.firstName || "",
-        lastName: userData.lastName || "",
-        email: userData.email || "",
-        gender: userData.gender || "Not Specified",
-        city: userData.city || "",
-        state: userData.state || ""
-      };
-    }
-
-    // Process presigned assets safely inside limited loops
-    const signedMessages = await Promise.all(messages.map(async (m) => {
-      // Create a secure presentation object to avoid returning raw database document footprints
-      const processedMsg = {
-        id: m._id,
-        senderId: m.senderId,
-        receiverId: m.receiverId,
-        content: m.content || "",
-        fileUrl: null,
-        status: m.status || "sent",
-        createdAt: m.createdAt
-      };
-
-      if (m.fileUrl) {
-        let fileKey = m.fileUrl;
-        if (fileKey.startsWith('http')) {
-          const urlParts = fileKey.split('idrivee2.com/');
-          if (urlParts.length > 1) {
-            fileKey = urlParts[1].split('/').slice(1).join('/'); 
-          }
-        }
-        try {
-          processedMsg.fileUrl = await getPrivateUrl(fileKey);
-        } catch (s3Err) {
-          console.error(`[S3 Chat Error] URL signing failure for message ${m._id}:`, s3Err.message);
-          processedMsg.fileUrl = null; // Suppress leakage of raw path keys
-        }
-      }
-      return processedMsg;
-    }));
-
-    // Return sanitized outputs to the frontend client layout
-    return res.json({ 
-      success: true, 
-      messages: signedMessages.reverse(),
-      user: formattedUser 
-    });
-
-  } catch (err) {
-    // 🛡️ SECURITY FIX 4: Safely forward to the global catch interceptor
-    next(err);
-  }
-});
-
 
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
@@ -1927,7 +1830,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
 // 🛡️ HARDENED CHAT FETCH ROUTE (OFFSET CHRONOLOGY STABILIZED)
 // =========================================================================
@@ -1937,21 +1839,13 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     const myId = req.user.id;
     const { otherUserId } = req.params;
 
-    // 1. 🛡️ SECURITY FIX: Hex ID Structural Syntax Filter
     if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
       return res.status(400).json({ success: false, message: "Invalid chat target identifier structure." });
     }
 
-    // 2. 🛡️ SECURITY FIX: Strict Ceiling Boundaries on Pagination Input
-    let limit = parseInt(req.query.limit, 10) || 30;
-    let skip = parseInt(req.query.skip, 10) || 0;
+    let limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    let skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-    if (limit <= 0) limit = 30;
-    if (limit > 100) limit = 100; // Cap at 100 to protect Netlify Function runtime memory
-    if (skip < 0) skip = 0;
-
-    // 3. Fetch chat history logs
-    // We sort by newest first (-1) to ensure we slice the immediate preceding batch window correctly
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
@@ -1961,18 +1855,13 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     .sort({ createdAt: -1 }) 
     .skip(skip)
     .limit(limit)
-    // 🛡️ SECURITY FIX: Dynamic polymorphic lookup declaration 
-    // This tells Mongoose to look inside the senderModel/receiverModel fields to find the right collection
     .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
     .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
     .lean();
 
-    // Flip the array back chronological order (oldest to newest) for proper visual UI rendering
     const chronologicalMessages = messages.reverse();
 
-    // 4. Map, sign, and insulate object return schemas securely
     const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      // Build a strict DTO representation wrapper to block internal database parameters
       const msgDto = {
         id: m._id,
         content: m.text || "",
@@ -1991,35 +1880,26 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
         } : null
       };
 
-      // Secure private bucket parsing strategy
       if (m.fileUrl && typeof m.fileUrl === 'string') {
         let fileKey = m.fileUrl;
         if (fileKey.startsWith('http')) {
           const urlParts = fileKey.split('idrivee2.com/');
           if (urlParts.length > 1) {
-            // Clean up extraction path to prevent leading slash parsing errors
-            const pathParts = urlParts[1].split('/');
-            fileKey = pathParts.slice(1).join('/'); 
+            fileKey = urlParts[1].split('/').slice(1).join('/'); 
           }
         }
         try {
           msgDto.fileUrl = await getPrivateUrl(fileKey);
         } catch (s3Err) {
-          console.error(`[S3 Chat Error] Presigned URL generation dropped for message ${m._id}:`, s3Err.message);
-          msgDto.fileUrl = null; // Do not leak raw cloud keys or bucket paths on error
+          console.error(`[S3 Chat Error] URL drop for ${m._id}:`, s3Err.message);
         }
       }
       return msgDto;
     }));
 
-    return res.json({ 
-      success: true, 
-      count: processedMessages.length,
-      messages: processedMessages 
-    });
+    return res.json({ success: true, count: processedMessages.length, messages: processedMessages });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX: Pass database/parsing execution faults safely to your global interceptor handler
     next(err);
   }
 });

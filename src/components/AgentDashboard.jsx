@@ -290,6 +290,7 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
     }, 500);
   }
 };
+
 // Updated to use the secureFetch utility, which handles cookies automatically
 const fetchMessages = async (userId, limit = 30) => {
   if (isFetching) return null; 
@@ -1788,11 +1789,9 @@ useEffect(() => {
         return [...prev, data];
       });
 
-      // Mark as read immediately on backend
-      const token = localStorage.getItem('agentToken');
-      fetch(`/api/messages/mark-read/${selectedUser._id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}` }
+    // Mark as read using secureFetch (implicitly includes cookie)
+      secureFetch(`/api/messages/mark-read/${selectedUser._id}`, {
+        method: 'PATCH'
       }).catch(err => console.error("Mark read error:", err));
     }
     if (data.senderModel === 'User') {
