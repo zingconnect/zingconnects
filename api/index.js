@@ -1813,64 +1813,6 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
   }
 });
 
-// =========================================================================
-// 🛡️ HARDENED ENDPOINT: POST /api/save-subscription
-// =========================================================================
-app.post('/api/save-subscription', authenticateToken, async (req, res, next) => {
-  try {
-    await connectToDatabase();
-    
-    const userId = req.user?.id || req.user?._id;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "Identity context not found in token." });
-    }
-
-    const { subscription } = req.body;
-    
-    // 🛡️ SECURITY FIX 1: Input Presence Validation
-    if (!subscription || typeof subscription !== 'object') {
-      return res.status(400).json({ success: false, message: "Invalid push registration subscription payload." });
-    }
-
-    if (!subscription.endpoint) {
-      return res.status(400).json({ success: false, message: "Missing required push gateway registration endpoint." });
-    }
-    const sanitizedSubscription = {
-      endpoint: String(subscription.endpoint).trim(),
-      expirationTime: subscription.expirationTime || null,
-      keys: {
-        p256dh: subscription.keys?.p256dh ? String(subscription.keys.p256dh).trim() : "",
-        auth: subscription.keys?.auth ? String(subscription.keys.auth).trim() : ""
-      }
-    };
-    let TargetModel;
-    if (req.user.role === 'agent') {
-      TargetModel = getAgentModel(); // Using your model getter function
-    } else {
-      TargetModel = mongoose.models.User || User;
-    }
-
-    // Update using atomic $set operation
-    const updatedProfile = await TargetModel.findByIdAndUpdate(
-      userId, 
-      { $set: { pushSubscription: sanitizedSubscription } },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedProfile) {
-      return res.status(404).json({ success: false, message: "Profile tracking match not found." });
-    }
-
-    return res.json({ 
-      success: true, 
-      message: "Push notifications successfully registered and activated." 
-    });
-
-  } catch (err) {
-    // 🛡️ SECURITY FIX 4: Pipe directly out through your global error handling interception middleware
-    next(err);
-  }
-});
 
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
@@ -2121,26 +2063,21 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
-// =========================================================================
-// 🛡️ HARDENED ROUTE 2: POST /api/save-subscription
-// =========================================================================
 app.post('/api/save-subscription', authenticateToken, async (req, res, next) => {
   try {
-    await connectToDatabase();    
+    await connectToDatabase();
+    
     const userId = req.user?.id || req.user?._id;
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized: Missing context token identifier." });
+      return res.status(401).json({ success: false, message: "Identity context not found." });
     }
 
-    // Capture the body signature safely
+    // Standardize incoming payload
     const incomingSub = req.body.subscription || req.body;
-
-    if (!incomingSub || !incomingSub.endpoint) {
-      return res.status(400).json({ success: false, message: "Invalid subscription payload signature data." });
+    if (!incomingSub?.endpoint) {
+      return res.status(400).json({ success: false, message: "Invalid push registration payload." });
     }
 
-    // 🛡️ SECURITY FIX 1: Strict Nested Parameter Whitelisting (Web Push W3C Compliant)
     const sanitizedSubscription = {
       endpoint: String(incomingSub.endpoint).trim(),
       expirationTime: incomingSub.expirationTime || null,
@@ -2149,8 +2086,9 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
         auth: incomingSub.keys?.auth ? String(incomingSub.keys.auth).trim() : ""
       }
     };
-    const userRole = req.user.role === 'agent' ? 'agent' : 'user';
-    const TargetModel = userRole === 'agent' ? getAgentModel() : (mongoose.models.User || User);
+
+    // Dynamically choose model
+    const TargetModel = req.user.role === 'agent' ? getAgentModel() : (mongoose.models.User || User);
 
     const updated = await TargetModel.findByIdAndUpdate(
       userId,
@@ -2159,14 +2097,12 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
     );
 
     if (!updated) {
-      return res.status(404).json({ success: false, message: "Account mapping drop." });
+      return res.status(404).json({ success: false, message: "Profile not found." });
     }
 
-    console.log(`[Push Success] Subscription securely whitelisted and saved for ${userRole}: ${userId}`);
-    return res.json({ success: true, message: "Push credentials synchronized successfully." });
+    return res.json({ success: true, message: "Push credentials synchronized." });
 
   } catch (err) {
-    // Send unhandled parsing or query crashes to the bottom centralized firewall interceptor
     next(err);
   }
 });
