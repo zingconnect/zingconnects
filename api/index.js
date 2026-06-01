@@ -1561,6 +1561,7 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ROUTE 2: POST /api/subscriptions/verify
 // =========================================================================
@@ -1685,8 +1686,21 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     
-    // Auth context middleware verification extraction
-    const agentId = req.user?.id || req.body.agentId; 
+    // 1. MANUAL JWT AUTHENTICATION CONTEXT EXTREMETIES 
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: "Unauthorized extraction payload" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(403).json({ success: false, message: "Session expired context" });
+    }
+
+    const agentId = decoded.id; // Correctly maps identification directly out of signature validation
     const { planTier, months, transaction_id } = req.body;
 
     if (!planTier || !months || months < 1 || !transaction_id) {
@@ -1694,25 +1708,27 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
     }
 
     const agent = await AgentModel.findById(agentId);
-    if (!agent) return res.status(404).json({ success: false, message: "Agent account not found." });
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent account not found." });
+    }
 
-    // ✨ CRITICAL BUG FIX 1: Updated variable structure reference match
+    // ✨ CRITICAL SYNC FIX: Aligned with your frontend payment pricing matrix parameters
     const planPricesInNGN = {
       'BASIC': 8500,          
-      'GROWTH': 51000,         
-      'PROFESSIONAL': 102000    
+      'GROWTH': 43500,         
+      'PROFESSIONAL': 88500    
     };
 
     const targetPlan = planTier.toUpperCase().trim();
     const monthlyRate = planPricesInNGN[targetPlan];
     
     if (!monthlyRate) {
-      return res.status(400).json({ success: false, message: "Invalid tier selection." });
+      return res.status(400).json({ success: false, message: "Invalid tier selection classification." });
     }
 
     const totalCostExpected = monthlyRate * parseInt(months, 10);
 
-    // ✨ CRITICAL BUG FIX 2: Intercept Flutterwave metrics prior to writing document changes to DB
+    // 2. INTERCEPT FLUTTERWAVE GATEWAY METRICS PRIOR TO STATE PERSISTENCE
     const flwVerify = await flw.Transaction.verify({ id: transaction_id });
     const flwData = flwVerify.data;
 
@@ -1727,11 +1743,11 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       });
     }
 
-    // 2. STACKABLE CALCULATION ENGINE
+    // 3. STACKABLE CALCULATION ENGINE
     let baseDate = new Date();
     const now = Date.now();
 
-    // If current subscription is active, stack on top of the old expiry date
+    // If current subscription timeline is active, stack seamlessly on top of old expiry date
     if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > now) {
       baseDate = new Date(agent.expiryDate);
     }
@@ -1740,7 +1756,7 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
     baseDate.setMonth(baseDate.getMonth() + parseInt(months, 10));
     const newExpiryDate = baseDate.toISOString();
 
-    // 3. Persist Updated Subscription State to DB Doc
+    // 4. Persist Updated Subscription State to DB Doc
     agent.plan = targetPlan;
     agent.isSubscribed = true;
     agent.status = 'active';

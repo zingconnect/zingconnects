@@ -59,8 +59,8 @@ export const AgentProfile = () => {
   // Accurate Flutterwave System Pricing Map Structure Match
   const planPricesInNGN = {
     'BASIC': 8500,          
-    'GROWTH': 43500,         
-    'PROFESSIONAL': 88500    
+    'GROWTH': 51000,         
+    'PROFESSIONAL': 10200 
   };
 
   useEffect(() => {
