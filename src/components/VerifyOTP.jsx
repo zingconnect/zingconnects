@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsShieldCheck, BsCheckCircleFill, BsCopy, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
+import { secureFetch } from '../utils/api'; // Ensure this path is correct
 
 export const VerifyOTP = () => {
   const location = useLocation();
@@ -19,28 +20,21 @@ export const VerifyOTP = () => {
   useEffect(() => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
-const handleResend = async () => {
+  const handleResend = async () => {
   if (isResending) return;
   setIsResending(true);
 
   try {
-    // 🛡️ SECURITY: credentials: 'include' ensures any session/CSRF tokens
-    // are included if your backend requires them for resend attempts.
-    const response = await fetch('/api/agents/register', {
+    // secureFetch handles the 'credentials: include' automatically
+    await secureFetch('/api/agents/register', null, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ email, firstName, resend: true }),
     });
 
-    if (response.ok) {
-      alert("A new security code has been sent to your email.");
-      setOtp(''); 
-    } else {
-      const data = await response.json();
-      alert(data.message || "Failed to resend code.");
-    }
+    alert("A new security code has been sent to your email.");
+    setOtp(''); 
   } catch (err) {
+    console.error("Resend Error:", err);
     alert("Network error. Please try again.");
   } finally {
     setIsResending(false);
@@ -52,11 +46,9 @@ const handleVerify = async (e) => {
   setIsVerifying(true);
 
   try {
-    // 🛡️ SECURITY FIX: Use credentials: 'include'
-    const response = await fetch('/api/agents/verify-otp', {
+    // 🛡️ Use secureFetch for verification
+    const response = await secureFetch('/api/agents/verify-otp', null, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ email, otp }),
     });
 
@@ -64,15 +56,13 @@ const handleVerify = async (e) => {
 
     if (response.ok) {
       setServerSlug(data.slug);
-      
-      // 🛡️ SECURITY: LocalStorage removal. 
-      // The server-side code should now set the HttpOnly cookie in the 
-      // response headers (Set-Cookie).
+      // Upon successful verification, the backend sets the HttpOnly cookie
       setIsSuccess(true);
     } else {
       alert(data.message || "Invalid Code");
     }
   } catch (err) {
+    console.error("Verification Error:", err);
     alert("Connection error. Try again.");
   } finally {
     setIsVerifying(false);

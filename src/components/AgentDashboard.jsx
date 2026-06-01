@@ -1547,6 +1547,7 @@ const handleFinalSend = async () => {
     setIsUploading(false);
   }
 };
+
 const handleDisconnect = async (e) => {
   e.preventDefault();
   
@@ -1558,31 +1559,6 @@ const handleDisconnect = async (e) => {
     const targetUrl = slug ? `/${slug}` : '/';
     window.location.replace(targetUrl);
   }
-};
-
-const LogoutButton = () => {
-  const { slug } = useParams(); // Automatically grabs the correct slug from the URL
-  const navigate = useNavigate();
-  const handleLogout = async (e) => {
-    e.preventDefault();
-    try {
-      await secureFetch('/api/agents/logout', { method: 'POST' });
-    } catch (err) {
-      console.error("Logout failed:", err);
-    } finally {
-      // If 'slug' exists, redirect to it, otherwise go home
-      const targetUrl = slug ? `/${slug}` : '/';
-      window.location.replace(targetUrl); 
-    }
-  };
-  return (
-    <button 
-      onClick={handleLogout}
-      className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]"
-    >
-      Disconnect Other Device
-    </button>
-  );
 };
   
  const handleSelectUser = async (user) => {
@@ -1920,6 +1896,28 @@ const handleSendMessage = async (e) => {
     );
   }
 };
+
+const handleLogout = async (e) => {
+    e.preventDefault();
+    try {
+      await secureFetch('/api/agents/logout', null, { method: 'POST' });
+    } catch (err) {
+      console.error("Logout failed:", err);
+    } finally {
+      // Clear navigation/state and force a fresh redirect
+      const targetUrl = slug ? `/${slug}` : '/';
+      window.location.replace(targetUrl); 
+    }
+  };
+
+  return (
+    <button 
+      onClick={handleLogout}
+      className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px] hover:bg-blue-700 transition-all"
+    >
+      Disconnect Other Device
+    </button>
+  );
 
 if (loading) return (
   <div className="h-screen flex items-center justify-center bg-page-bg text-[10px] font-bold uppercase tracking-widest text-text-secondary">

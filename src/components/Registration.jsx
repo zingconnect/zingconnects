@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsEyeFill, BsEyeSlashFill, BsCloudUploadFill, BsArrowRight, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
+import { secureFetch } from '../utils/api';
 
 export const Registration = () => {
   const location = useLocation();
@@ -54,57 +55,49 @@ export const Registration = () => {
   setImagePreview(URL.createObjectURL(file));
 };
 const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!agreeTerms) {
-      alert("Please check the box to agree to the Terms and Conditions to proceed.");
-      return;
-    }
+  e.preventDefault();
+  if (!agreeTerms) {
+    alert("Please check the box to agree to the Terms and Conditions to proceed.");
+    return;
+  }
+  
+  setIsSubmitting(true);
+  
+  try {
+    const data = new FormData();
+    Object.keys(formData).forEach(key => {
+      const value = formData[key];
+      data.append(key, typeof value === 'string' ? value.trim() : value);
+    });
     
-    setIsSubmitting(true);
+    data.append('plan', selectedPlan.tier);
     
-    try {
-      const data = new FormData();
-            Object.keys(formData).forEach(key => {
-        const value = formData[key];
-        data.append(key, typeof value === 'string' ? value.trim() : value);
-      });
-      
-      data.append('plan', selectedPlan.tier);
-            if (selectedFile) {
-        if (selectedFile.size > 2 * 1024 * 1024) { // 2MB Limit
-          alert("Profile picture is too large (max 2MB).");
-          setIsSubmitting(false);
-          return;
-        }
-        if (!selectedFile.type.startsWith('image/')) {
-          alert("Please upload a valid image file (JPG/PNG).");
-          setIsSubmitting(false);
-          return;
-        }
-        data.append('photo', selectedFile);
-      }
-      const response = await fetch('/api/agents/register', {
-        method: 'POST',
-        body: data, 
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        navigate('/verify-otp', { state: { email: formData.email } });
-      } else {
-        console.error("Server validation error:", result.message);
-        alert(result.message || "Registration failed. Please check your details.");
-      }
-
-    } catch (error) {
-      console.error("Connection failed:", error);
-      alert("Network error: Could not reach the server. Please try again later.");
-    } finally {
-      setIsSubmitting(false);
+    if (selectedFile) {
+      data.append('photo', selectedFile);
     }
-  };
 
+    // Using secureFetch with null token
+    const response = await secureFetch('/api/agents/register', null, {
+      method: 'POST',
+      body: data // secureFetch now detects this is FormData
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      navigate('/verify-otp', { state: { email: formData.email } });
+    } else {
+      console.error("Server validation error:", result.message);
+      alert(result.message || "Registration failed. Please check your details.");
+    }
+
+  } catch (error) {
+    console.error("Connection failed:", error);
+    alert("Network error: Could not reach the server. Please try again later.");
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   if (!selectedPlan) return null;
 
