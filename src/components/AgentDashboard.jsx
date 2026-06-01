@@ -1311,44 +1311,45 @@ useEffect(() => {
     script.async = true;
     document.body.appendChild(script);
   }
-  const fetchInitialData = async () => {
-    setLoading(true);
-    try {
-      const profileRes = await secureFetch('/api/agents/profile/me', null, { method: 'GET' });
-      // Handle Dual Login (403)
-      if (profileRes.status === 403) {
-        const errorData = await profileRes.json().catch(() => ({}));
-        if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
-          setIsDualLoginConflict(true);
-          return;
-        }
-      }
-      if (!profileRes.ok) throw new Error("Failed to load profile");
-      const profileData = await profileRes.json();
-      const agent = profileData.agent;
-      if (agent) {
-        setAgentData(agent);
-        setIsSubscribed(!!agent.isSubscribed); 
-        if (agent.plan) setSelectedPlan(agent.plan);
+ const fetchInitialData = async () => {
+  setLoading(true);
+  try {
+    const profileRes = await secureFetch('/api/agents/profile/me', null, { method: 'GET' });
 
-        // Fetch users using secureFetch (token = null)
-        if (agent.isSubscribed) {
-          const usersRes = await secureFetch('/api/agents/my-users', null, { method: 'GET' });
-          const userData = await usersRes.json();
-          if (userData.success && Array.isArray(userData.users)) {
-            setUsers(userData.users);
-          }
-        }
+    // Explicit check for Unauth/Forbidden
+    if (profileRes.status === 401 || profileRes.status === 403) {
+      const errorData = await profileRes.json().catch(() => ({}));
+      if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
+        setIsDualLoginConflict(true);
+      } else {
+        // Just a standard session expiry, go to login
+        navigate('/login');
       }
-    } catch (err) {
-      console.error("Initialization error:", err);
-      // If we failed due to a 401/403, we should redirect to login
-      if (err.message === 'Unauthorized') navigate('/login');
-    } finally {
-      setLoading(false);
+      return; 
     }
-  };
 
+    if (!profileRes.ok) throw new Error("Failed to load profile");
+    
+    const profileData = await profileRes.json();
+    if (profileData.agent) {
+      setAgentData(profileData.agent);
+      setIsSubscribed(!!profileData.agent.isSubscribed); 
+      if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
+
+      if (profileData.agent.isSubscribed) {
+        const usersRes = await secureFetch('/api/agents/my-users', null, { method: 'GET' });
+        if (usersRes.ok) {
+           const userData = await usersRes.json();
+           if (userData.success) setUsers(userData.users);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Initialization error:", err);
+  } finally {
+    setLoading(false);
+  }
+};
   fetchInitialData();
 }, [navigate]); // Removed token from dependency, as the session is now cookie-managed
 const handlePayment = async () => {
