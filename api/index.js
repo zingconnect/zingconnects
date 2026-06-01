@@ -372,7 +372,19 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
 
     // With upload.single('photo') here, req.body is already populated 
     // by multer, and the multipart stream is consumed.
-    const { firstName, lastName, email, password } = req.body;
+    const { 
+      firstName, 
+      lastName, 
+      email, 
+      password, 
+      dob, 
+      gender, 
+      occupation, 
+      address, 
+      bio, 
+      program, 
+      plan 
+    } = req.body;
 
     // 1. INPUT VALIDATION
     if (!email) return res.status(400).json({ success: false, message: "Email required." });
@@ -407,25 +419,45 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
     // 2. DATA PERSISTENCE
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiry = Date.now() + (10 * 60 * 1000);
+    const hashedPassword = await bcrypt.hash(password || "temp123", 10);
 
     if (existingAgent) {
-      if (password) existingAgent.password = await bcrypt.hash(password, 10);
-      Object.assign(existingAgent, { otp: otpCode, otpExpires: otpExpiry, photoUrl: savedPhotoPath });
+      if (password) existingAgent.password = hashedPassword;
+      
+      // ✨ FIXED: Map incoming registration data variables safely into the existing document instance fallback
+      Object.assign(existingAgent, { 
+        otp: otpCode, 
+        otpExpires: otpExpiry, 
+        photoUrl: savedPhotoPath,
+        dob: dob || existingAgent.dob,
+        gender: gender || existingAgent.gender,
+        occupation: occupation !== undefined ? occupation : existingAgent.occupation,
+        address: address !== undefined ? address : existingAgent.address,
+        bio: bio !== undefined ? bio : existingAgent.bio,
+        program: program !== undefined ? program : existingAgent.program,
+        plan: plan || existingAgent.plan || "BASIC"
+      });
       await existingAgent.save();
     } else {
-      // ✨ FIXED: Initializing with empty strings to guarantee document-level field generation on document instantiation
+      // ✨ FIXED: Pull real values from req.body instead of passing hardcoded empty strings
       await AgentModel.create({
         firstName: (firstName || "Agent").trim(),
         lastName: (lastName || "").trim(),
         email: lowerEmail,
-        password: await bcrypt.hash(password || "temp123", 10),
+        password: hashedPassword,
         slug: `${(firstName || "agent").toLowerCase()}-${Date.now().toString().slice(-4)}`,
         photoUrl: savedPhotoPath,
-        occupation: "",
-        program: "",
-        bio: "",
-        address: "",
-        gender: "",
+        dob: dob || null,
+        gender: gender || "",
+        occupation: occupation || "",
+        address: address || "",
+        bio: bio || "",
+        program: program || "",
+        role: 'agent',
+        status: 'pending',
+        isVerified: false,
+        isSubscribed: false,
+        plan: plan || "BASIC",
         otp: otpCode,
         otpExpires: otpExpiry
       });
@@ -452,10 +484,9 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     from: `"ZingConnect Security" <${process.env.GMAIL_USER}>`,
     to: email,
     subject: "Your Verification Code",
-    // ✨ FIXED: Appended embedded logo attachment matching the template CID specification
     attachments: [{
       filename: 'logo.png',
-      path: './public/logo.png', // Adjust path configuration to point exactly to your brand logo resource asset location
+      path: './public/logo.png', 
       cid: 'zinglogo' 
     }],
     html: `
