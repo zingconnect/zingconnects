@@ -911,6 +911,27 @@ app.post('/api/agents/heartbeat', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
+app.post('/api/agents/logout', async (req, res, next) => {
+  try {
+    // res.clearCookie must match the settings used to set the cookie originally.
+    // Ensure 'path', 'sameSite', 'secure', and 'domain' (if applicable) are identical.
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: true,      // Must be true for HTTPS (Vercel)
+      sameSite: 'None',  // Must match the SameSite attribute used during login
+      path: '/'
+    });
+
+    return res.json({ 
+      success: true, 
+      message: "Session successfully terminated." 
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get('/api/users/my-session', authenticateToken, async (req, res) => {
   try {
     // 1. Connect database locally (prevents global middleware timeouts)
