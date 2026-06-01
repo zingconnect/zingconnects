@@ -59,22 +59,21 @@ import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
 
 const app = express();
-app.use(cookieParser());
+app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
 
 const terminatingCallsCache = new Set();
 app.set('terminatingCallsCache', terminatingCallsCache);
 
-// Expose redis cache global registry context into routing modules 
 app.set('redisClient', redisClient); 
 
 const corsOptions = {
   origin: "https://zingconnect.vercel.app",
   methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true,
-  optionsSuccessStatus: 200
+  credentials: true, // MANDATORY for cookies
+  allowedHeaders: ["Content-Type", "Authorization"], 
+  exposedHeaders: ["Set-Cookie"] // Helps the browser see the cookie
 };
-
 app.use(cors(corsOptions));
 app.use(express.json());
 
@@ -104,17 +103,9 @@ const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
 
-
 const authenticateToken = async (req, res, next) => {
-  // 1. Attempt Authorization header first (Industry Standard)
-  const authHeader = req.headers['authorization'];
-  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-
-  // 2. Fallback: Parse cookies manually if Header is missing
-  if (!token && req.headers.cookie) {
-    const cookies = Object.fromEntries(req.headers.cookie.split('; ').map(c => c.split('=')));
-    token = cookies['token'];
-  }
+  // 1. Extract token from Authorization header OR cookie
+  const token = req.headers['authorization']?.split(' ')[1] || req.cookies?.token;
 
   if (!token) {
     console.warn("DEBUG: Auth failed, no token found in headers or cookies.");
@@ -126,13 +117,14 @@ const authenticateToken = async (req, res, next) => {
     req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    // Agent Logic
+    // 2. Agent Session Logic
     if (decoded.role === 'agent') {
       const AgentModel = mongoose.models.Agent || Agent;
       const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
       
       if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
 
+      // Check for dual login
       if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
         return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
       }
@@ -140,7 +132,7 @@ const authenticateToken = async (req, res, next) => {
       await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
     }
 
-    // Admin Logic
+    // 3. Admin Activity Update
     if (decoded.role === 'admin') {
       const AdminModel = mongoose.models.Admin || Admin;
       await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
@@ -149,10 +141,13 @@ const authenticateToken = async (req, res, next) => {
     next();
   } catch (err) {
     console.error("DEBUG: Token verification failed:", err.message);
+    
+    // Distinguish between expired and invalid tokens for better frontend handling
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ success: false, message: "Token expired" });
     }
-    return res.status(403).json({ success: false, message: "Invalid Token" });
+    
+    return res.status(403).json({ success: false, message: "Invalid or expired token" });
   }
 };
 
@@ -606,10 +601,10 @@ app.post('/api/agents/login', async (req, res, next) => {
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production', 
-  sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
+  secure: true, 
+  sameSite: 'None',
+  signed: true, // IMPORTANT: Matches the middleware configuration
+  maxAge: 7 * 24 * 60 * 60 * 1000
 });
 
     return res.json({ 
@@ -855,9 +850,9 @@ app.post('/api/users/handshake', async (req, res, next) => {
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production', // true only in production
-  sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
-  path: '/',
+  secure: true, 
+  sameSite: 'None',
+  signed: true, // IMPORTANT: Matches the middleware configuration
   maxAge: 7 * 24 * 60 * 60 * 1000
 });
     return res.json({ 
@@ -2063,6 +2058,7 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 app.post('/api/save-subscription', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();

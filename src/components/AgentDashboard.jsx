@@ -1738,16 +1738,10 @@ useEffect(() => {
       // We use agentToken here because that is what your AgentDashboard uses
       const token = localStorage.getItem('agentToken');
       if (!token) return;
-
-      // Sync with backend
-      await fetch('/api/save-subscription', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ subscription }) 
-      });
+await secureFetch('/api/save-subscription', {
+      method: 'POST',
+      body: JSON.stringify({ subscription }) 
+    });
       
       console.log("Agent Mobile Push Synced to DB");
     } catch (err) {
