@@ -605,7 +605,8 @@ res.cookie('token', token, {
   secure: true, 
   sameSite: 'None',
   signed: true, // IMPORTANT: Matches the middleware configuration
-  maxAge: 7 * 24 * 60 * 60 * 1000
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/'
 });
 
     return res.json({ 
