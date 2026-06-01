@@ -26,7 +26,7 @@ const plans = [
   {
     tier: 'GROWTH',
     term: '6 Months',
-    price: '43,500', 
+    price: '51,000', 
     frequency: '/6 mos', 
     popular: true,
     features: [
@@ -38,7 +38,7 @@ const plans = [
   {
     tier: 'PROFESSIONAL',
     term: '1 Year',
-    price: '88,500', 
+    price: '102,000', 
     frequency: '/yr',
     popular: false,
     features: [

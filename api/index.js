@@ -1591,8 +1591,8 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
     // Fixed pricing architecture map
     const planPricesInNGN = {
       'BASIC': 8500,          
-      'GROWTH': 43500,         
-      'PROFESSIONAL': 88500    
+      'GROWTH': 51000,         
+      'PROFESSIONAL': 102000    
     };
 
     const targetPlan = String(plan).toUpperCase().trim();
@@ -1699,8 +1699,8 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
     // ✨ CRITICAL BUG FIX 1: Updated variable structure reference match
     const planPricesInNGN = {
       'BASIC': 8500,          
-      'GROWTH': 43500,         
-      'PROFESSIONAL': 88500    
+      'GROWTH': 51000,         
+      'PROFESSIONAL': 102000    
     };
 
     const targetPlan = planTier.toUpperCase().trim();

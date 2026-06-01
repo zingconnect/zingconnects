@@ -142,7 +142,7 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
     {
       tier: 'GROWTH',
       term: '6 Months',
-      price: '43,500', 
+      price: '51,000', 
       frequency: '/6mo',
       popular: true,
       features: ['All Basic', 'Priority Routing', 'Enhanced Support'],
@@ -150,7 +150,7 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
     {
       tier: 'PROFESSIONAL',
       term: '1 Year',
-      price: '76,500', 
+      price: '102,000', 
       frequency: '1yr',
       popular: false,
       features: ['All Growth', 'Deep Analytics', 'Dedicated Priority Support'],
