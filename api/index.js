@@ -106,11 +106,10 @@ const getAgentModel = () => {
 };
 
 const authenticateToken = async (req, res, next) => {
-  // 1. Extract token from Authorization header OR cookie
-  const token = req.headers['authorization']?.split(' ')[1] || req.cookies?.token;
+  const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
 
   if (!token) {
-    console.warn("DEBUG: Auth failed, no token found in headers or cookies.");
+    console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
 
