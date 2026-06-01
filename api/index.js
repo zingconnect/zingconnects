@@ -23,7 +23,7 @@ import { Server } from 'socket.io';
 import http from 'http';
 import { createClient } from 'redis'; // 👈 Added Redis Import
 import cookieParser from 'cookie-parser'; // Add this import
-// --- REDIS CACHING CLIENT INITIALIZATION ---
+
 const redisClient = createClient({
   url: process.env.REDIS_URL
 });
@@ -51,6 +51,7 @@ import Message from './models/Message.js';
 import Admin from './models/Admin.js';
 import Call from './models/Call.js'; 
 import SupportMessage from './models/Support.js';
+import Transaction from './models/Transaction.js'; 
 
 // 6. Express Routing Modules
 import authRoutes from './routes/auth.js';
@@ -1561,9 +1562,8 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
-// 🛡️ HARDENED ROUTE 2: POST /api/subscriptions/verify
+// 🛡️ HARDENED ROUTE 1: POST /api/subscriptions/verify
 // =========================================================================
 app.post('/api/subscriptions/verify', async (req, res, next) => {
   try {
@@ -1620,6 +1620,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
 
       const now = new Date();
       let baseDate = new Date();
+      let calculatedMonths = 1;
 
       // ✨ STACKING ENGINE LOGIC: If subscription is active, stack on top of old expiry date
       if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > Date.now()) {
@@ -1629,11 +1630,27 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       // Calculate timeline duration blocks dynamically depending on selected tier
       if (targetPlan === 'BASIC') {
         baseDate.setMonth(baseDate.getMonth() + 1);
+        calculatedMonths = 1;
       } else if (targetPlan === 'GROWTH') {
         baseDate.setMonth(baseDate.getMonth() + 6);
+        calculatedMonths = 6;
       } else if (targetPlan === 'PROFESSIONAL') {
         baseDate.setFullYear(baseDate.getFullYear() + 1);
+        calculatedMonths = 12;
       }
+
+      // 📜 CREATE IMMUTABLE LEDGER RECORD PRIOR TO PROFILE STATE CHANGE
+      await Transaction.create({
+        agentId: agent._id,
+        transactionId: String(transaction_id),
+        txRef: data.tx_ref || `ZING-VRF-${Date.now()}`,
+        plan: targetPlan,
+        months: calculatedMonths,
+        amount: Number(data.amount),
+        currency: "NGN",
+        status: "successful",
+        paidAt: now
+      });
 
       // 3. PERSIST RE-CALCULATED DOCUMENT VALUES
       agent.isSubscribed = true;
@@ -1645,6 +1662,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       agent.expiryDate = baseDate;
       agent.expiryNotificationSent = false;
       agent.lastTransactionId = String(transaction_id);
+      agent.subscriptionAmount = Number(data.amount); // Tracks latest injection amount
       agent.paymentDetails = {
         amountNgn: data.amount,
         currency: "NGN",
@@ -1663,7 +1681,8 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
           email: agent.email,
           plan: agent.plan,
           isSubscribed: !!agent.isSubscribed,
-          expiryDate: agent.expiryDate
+          expiryDate: agent.expiryDate,
+          subscriptionAmount: agent.subscriptionAmount
         }
       });
     } else {
@@ -1700,7 +1719,7 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       return res.status(403).json({ success: false, message: "Session expired context" });
     }
 
-    const agentId = decoded.id; // Correctly maps identification directly out of signature validation
+    const agentId = decoded.id; 
     const { planTier, months, transaction_id } = req.body;
 
     if (!planTier || !months || months < 1 || !transaction_id) {
@@ -1745,10 +1764,10 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
 
     // 3. STACKABLE CALCULATION ENGINE
     let baseDate = new Date();
-    const now = Date.now();
+    const now = new Date();
 
     // If current subscription timeline is active, stack seamlessly on top of old expiry date
-    if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > now) {
+    if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > now.getTime()) {
       baseDate = new Date(agent.expiryDate);
     }
 
@@ -1756,23 +1775,36 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
     baseDate.setMonth(baseDate.getMonth() + parseInt(months, 10));
     const newExpiryDate = baseDate.toISOString();
 
+    // 📜 CREATE THE IMMUTABLE HISTORICAL LEDGER DOCUMENT ENTRY
+    await Transaction.create({
+      agentId: agent._id,
+      transactionId: String(transaction_id),
+      txRef: flwData.tx_ref || `ZING-EXT-${Date.now()}`,
+      plan: targetPlan,
+      months: parseInt(months, 10),
+      amount: Number(flwData.amount),
+      currency: "NGN",
+      status: "successful",
+      paidAt: now
+    });
+
     // 4. Persist Updated Subscription State to DB Doc
     agent.plan = targetPlan;
     agent.isSubscribed = true;
     agent.status = 'active';
-    agent.subscriptionAmount = totalCostExpected;
+    agent.subscriptionAmount = Number(flwData.amount); // Tracks latest injection amount
     agent.expiryDate = newExpiryDate;
     agent.lastTransactionId = String(transaction_id);
     
     if (!agent.subscriptionDate) {
-      agent.subscriptionDate = new Date().toISOString();
+      agent.subscriptionDate = now.toISOString();
     }
 
     // Update payment details object for dashboard fallback display
     agent.paymentDetails = {
       amountNgn: flwData.amount,
       currency: "NGN",
-      verifiedAt: new Date().toISOString()
+      verifiedAt: now.toISOString()
     };
 
     await agent.save();
@@ -1791,6 +1823,41 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
 
   } catch (err) {
     console.error("❌ Subscription Sync Error:", err);
+    next(err);
+  }
+});
+
+// =========================================================================
+// 📑 HISTORICAL FETCH QUERY: GET /api/agents/subscription/history
+// =========================================================================
+app.get('/api/agents/subscription/history', async (req, res, next) => {
+  try {
+    await connectToDatabase();
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: "Unauthorized history query request." });
+    }
+
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(403).json({ success: false, message: "Session expired context." });
+    }
+
+    // Find all payment history references tied to this agent sorted by latest paid timestamp
+    const history = await Transaction.find({ agentId: decoded.id })
+      .sort({ paidAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      history
+    });
+
+  } catch (err) {
+    console.error("❌ Transaction History Fetch Failure:", err);
     next(err);
   }
 });
