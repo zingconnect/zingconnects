@@ -290,26 +290,27 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
     }, 500);
   }
 };
-
+// Updated to use the secureFetch utility, which handles cookies automatically
 const fetchMessages = async (userId, limit = 30) => {
-  if (isFetching) return null; // Prevent stacking requests
+  if (isFetching) return null; 
   isFetching = true;
   
-  const token = localStorage.getItem('agentToken');
   try {
-    const res = await fetch(`/api/messages/${userId}?limit=${limit}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    // secureFetch is now configured to include: 'include', 
+    // which tells the browser to send HttpOnly cookies automatically
+    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`);
+    
+    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+    
     const data = await res.json();
     return data.success ? data.messages : null;
   } catch (err) {
     console.error("Fetch error:", err);
     return null;
   } finally {
-    isFetching = false; // Always unlock
+    isFetching = false; 
   }
 };
-
 const handleAcceptCall = async () => {
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
@@ -1078,6 +1079,7 @@ useEffect(() => {
   const handleVisibilityChange = async () => {
     if (document.visibilityState === 'visible') {
       console.log("📱 ZingConnect: App returned to foreground.");
+      
       if (callStatus !== 'idle') {
         console.log("📞 Call active. Skipping re-sync to maintain connection.");
         return; 
@@ -1091,11 +1093,13 @@ useEffect(() => {
       }
 
       if (selectedUser?._id) {
-        const token = localStorage.getItem('agentToken');
         try {
-          const response = await fetch(`/api/messages/${selectedUser._id}?limit=30`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
+          // Changed to secureFetch which uses credentials: 'include'
+          // This automatically sends the HttpOnly cookie
+          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`);
+          
+          if (!response.ok) throw new Error("Sync failed");
+          
           const data = await response.json();
           if (data.success) setMessages(data.messages);
         } catch (err) {
@@ -1107,7 +1111,7 @@ useEffect(() => {
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-}, [agentData?._id, selectedUser?._id, callStatus]);
+}, [agentData?._id, selectedUser?._id, callStatus, socket]); // Added socket as dependency
 
 
 useEffect(() => {
@@ -1468,45 +1472,41 @@ const handleDownload = async (fileUrl, detectedType) => {
     console.error("Download failed:", error);
   }
 };
-
 const handleDeleteMessage = async (msgId) => {
-  const token = localStorage.getItem('agentToken');
-    const originalMessages = [...messages];
-  setMessages(prev => prev.filter(m => (m._id || m.id) !== msgId));
+  const originalMessages = [...messages];
+    setMessages(prev => prev.filter(m => (m._id || m.id) !== msgId));
 
   try {
-    const res = await fetch(`/api/messages/${msgId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+    const res = await secureFetch(`/api/messages/${msgId}`, {
+      method: 'DELETE'
     });
 
     if (!res.ok) {
-      setMessages(originalMessages);
-      alert("Failed to delete message from server.");
+      throw new Error("Server rejected deletion");
     }
   } catch (err) {
-    setMessages(originalMessages);
     console.error("Delete request failed:", err);
+    // Rollback to original state on failure
+    setMessages(originalMessages);
+    alert("Failed to delete message from server.");
   }
 };
-
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
   setIsUploading(true);
 
   try {
-    const token = localStorage.getItem('agentToken');
     const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
     
-    // 1. Get Signed URL
-    const urlResponse = await fetch('/api/messages/get-upload-url', {
+    // 1. Get Signed URL (Using secureFetch for cookie-based auth)
+    const urlResponse = await secureFetch('/api/messages/get-upload-url', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ fileName: previewFile.name, fileType: previewFile.type })
     });
+    
+    if (!urlResponse.ok) throw new Error("Failed to retrieve upload signature");
     const { uploadUrl, key } = await urlResponse.json();
 
-    // 2. Upload directly to S3/Cloud Storage
     const directUpload = await fetch(uploadUrl, {
       method: 'PUT',
       body: previewFile,
@@ -1515,10 +1515,9 @@ const handleFinalSend = async () => {
 
     if (!directUpload.ok) throw new Error("Cloud upload failed");
 
-    // 3. Confirm to DB
-    const confirmResponse = await fetch('/api/messages/confirm-upload', {
+    // 3. Confirm to DB (Using secureFetch for cookie-based auth)
+    const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({
         receiverId: selectedUser._id,
         text: caption,
@@ -1535,8 +1534,11 @@ const handleFinalSend = async () => {
       setPreviewUrl(null);
       setPreviewFile(null);
       setCaption("");
+    } else {
+      throw new Error(finalData.message || "Database confirmation failed");
     }
   } catch (err) {
+    console.error("Upload process error:", err);
     alert("Upload failed. Please check your connection.");
   } finally {
     setIsUploading(false);
@@ -1556,7 +1558,6 @@ const handleFinalSend = async () => {
  const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
-  // 1. Set the initial user immediately (contains full data from sidebar)
   setSelectedUser(user);
   setMessages([]);
   setIsInitialLoad(true);
@@ -1870,13 +1871,8 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, optimisticMsg]);
 
   try {
-    const token = localStorage.getItem('agentToken');
-    const response = await fetch('/api/messages/send', {
+   const response = await secureFetch('/api/messages/send', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
       body: JSON.stringify({
         receiverId: selectedUser._id,
         text: textToSend,
