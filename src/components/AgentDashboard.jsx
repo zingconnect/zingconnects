@@ -1582,15 +1582,10 @@ const handleDisconnect = async (e) => {
   setMessages([]);
   setIsInitialLoad(true);
   setLimit(30);
-  
   if (socket) socket.emit('join-chat', user._id);
-
-  try {
-    const token = localStorage.getItem('agentToken');
-    if (!token) return;
-
-    const response = await fetch(`/api/messages/${user._id}?limit=30`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+ try {
+    const response = await secureFetch(`/api/messages/${user._id}?limit=30`, null, {
+       method: 'GET'
     });
 
     if (response.ok) {
@@ -1599,9 +1594,7 @@ const handleDisconnect = async (e) => {
       
       if (data.success && Array.isArray(data.messages)) {
         setMessages(data.messages);
-        
-        // ✨ THE FIX: Safely merge incoming data with existing state without blanking out fields
-        if (data.user || data.clientDetails) {
+                if (data.user || data.clientDetails) {
           const freshData = data.user || data.clientDetails;
           
           setSelectedUser(prev => {
@@ -1621,11 +1614,9 @@ const handleDisconnect = async (e) => {
           });
         }
       }
-      
-      fetch(`/api/messages/mark-read/${user._id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.error("Mark read error:", err));
+    await secureFetch(`/api/messages/mark-read/${user._id}`, null, {
+        method: 'PATCH'
+      });
     }
   } catch (err) {
     setConnectionStatus('connecting');
