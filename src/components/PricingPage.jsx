@@ -231,7 +231,7 @@ React.useEffect(() => {
       if (!guestId) return;
 
       try {
-        const response = await fetch(`https://zingconnect.chat/api/support/history/${guestId}`);
+        const response = await fetch(`https://www.zingconnect.chat/api/support/history/${guestId}`);
         const data = await response.json();
 
         if (data.success && data.messages && data.messages.length > 0) {

@@ -64,7 +64,7 @@ const toggleEmailSelection = (email) => {
   );
 };
 useEffect(() => {
-  const newSocket = io("https://zingconnect.chat", {
+  const newSocket = io("https://www.zingconnect.chat", {
     path: "/socket.io/", // Ensures it bypasses any automated /api prefixes
     transports: ["websocket"], // Forces direct WebSockets, bypassing xhr polling
     upgrade: false
@@ -84,7 +84,7 @@ useEffect(() => {
     }
 
     try {
-      const response = await fetch('https://zingconnect.chat/api/admin/stats', {
+      const response = await fetch('https://www.zingconnect.chat/api/admin/stats', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
@@ -110,7 +110,7 @@ if (activeTab === 'Agents' || activeTab === 'News Update') {
         const fetchAgents = async () => {
         const token = localStorage.getItem('adminToken');
         try {
-          const response = await fetch('https://zingconnect.chat/api/admin/agents', {
+          const response = await fetch('https://www.zingconnect.chat/api/admin/agents', {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           const data = await response.json();
@@ -128,7 +128,7 @@ useEffect(() => {
     const fetchActiveGuests = async () => {
       const token = localStorage.getItem('adminToken');
       try {
-        const response = await fetch('https://zingconnect.chat/api/admin/support/guests', {
+        const response = await fetch('https://www.zingconnect.chat/api/admin/support/guests', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
@@ -256,7 +256,7 @@ const handleAdminReply = async () => {
 
   // 2. Direct Fallback Safe HTTP Network Post 
   try {
-    const targetUrl = 'https://zingconnect.chat/api/admin/support/reply';
+    const targetUrl = 'https://www.zingconnect.chat/api/admin/support/reply';
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
@@ -326,7 +326,7 @@ const handleSendBroadcast = async () => {
   };
 
   try {
-    const response = await fetch('https://zingconnect.chat/api/admin/broadcast-news', {
+    const response = await fetch('https://www.zingconnect.chat/api/admin/broadcast-news', {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${token}`,
@@ -360,7 +360,7 @@ const handleViewAgent = async (agentId) => {
     setLoading(true);
     const token = localStorage.getItem('adminToken');
     try {
-      const response = await fetch(`https://zingconnect.chat/api/admin/agents/${agentId}`, {
+      const response = await fetch(`https://www.zingconnect.chat/api/admin/agents/${agentId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -376,7 +376,7 @@ const handleViewAgent = async (agentId) => {
 
 const handleToggleVerification = async (agentId) => {
   try {
-    const response = await fetch(`https://zingconnect.chat/api/admin/agents/${agentId}/verify`, {
+    const response = await fetch(`https://www.zingconnect.chat/api/admin/agents/${agentId}/verify`, {
       method: 'PATCH', 
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
@@ -590,7 +590,7 @@ const handleToggleVerification = async (agentId) => {
               setActiveChat(user);
               const token = localStorage.getItem('adminToken');
               try {
-                const response = await fetch(`https://zingconnect.chat/api/admin/support/messages/${chatIdentifier}`, {
+                const response = await fetch(`https://www.zingconnect.chat/api/admin/support/messages/${chatIdentifier}`, {
                   headers: { 'Authorization': `Bearer ${token}` }
                 });
                 const data = await response.json();      

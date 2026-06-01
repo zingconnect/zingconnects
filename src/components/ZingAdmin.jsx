@@ -34,7 +34,7 @@ const ZingAdmin = () => {
 
   setLoading(true);
   const endpoint = isLogin ? '/api/admin/login' : '/api/admin/register';
-  const baseUrl = 'https://zingconnect.chat'; 
+  const baseUrl = 'https://www.zingconnect.chat'; 
 
   try {
     const response = await fetch(`${baseUrl}${endpoint}`, {
