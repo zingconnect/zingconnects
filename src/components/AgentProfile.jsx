@@ -13,7 +13,7 @@ import {
   BsSunFill,
   BsDisplay,
   BsReceipt
-} from 'react-icons/react-icons/bs'; // Verified import path configuration alignment
+} from 'react-icons/bs'; // ✨ Fixed: Standard export path
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 
