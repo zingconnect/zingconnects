@@ -1547,21 +1547,42 @@ const handleFinalSend = async () => {
     setIsUploading(false);
   }
 };
-const handleLogout = async () => {
-  const currentSlug = agentData?.slug;
-
+const handleDisconnect = async (e) => {
+  e.preventDefault();
+  
   try {
     await secureFetch('/api/agents/logout', { method: 'POST' });
   } catch (err) {
-    console.error("Logout request failed, but proceeding with local cleanup:", err);
+    console.error("Logout request failed:", err);
   } finally {
-    localStorage.removeItem('agentToken');
-        if (currentSlug) {
-      window.location.href = `/${currentSlug}`;
-    } else {
-      window.location.href = '/';
-    }
+    const targetUrl = slug ? `/${slug}` : '/';
+    window.location.replace(targetUrl);
   }
+};
+
+const LogoutButton = () => {
+  const { slug } = useParams(); // Automatically grabs the correct slug from the URL
+  const navigate = useNavigate();
+  const handleLogout = async (e) => {
+    e.preventDefault();
+    try {
+      await secureFetch('/api/agents/logout', { method: 'POST' });
+    } catch (err) {
+      console.error("Logout failed:", err);
+    } finally {
+      // If 'slug' exists, redirect to it, otherwise go home
+      const targetUrl = slug ? `/${slug}` : '/';
+      window.location.replace(targetUrl); 
+    }
+  };
+  return (
+    <button 
+      onClick={handleLogout}
+      className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]"
+    >
+      Disconnect Other Device
+    </button>
+  );
 };
   
  const handleSelectUser = async (user) => {
@@ -2157,24 +2178,8 @@ return (
       </div>
       <h2 className="text-2xl font-black uppercase tracking-tighter text-slate-900 mb-4">Security Alert</h2>
       <p className="text-slate-500 text-sm mb-8">Your account is active on another device.</p>
-  <button 
-  onClick={async (e) => {
-    e.preventDefault(); // Prevents accidental form submissions
-        const pathParts = window.location.pathname.split('/').filter(Boolean);
-    const currentSlug = pathParts[0]; // Adjust index based on your URL structure
-    console.log("Current Slug captured:", currentSlug);
-    try {
-      console.log("Attempting logout...");
-      await secureFetch('/api/agents/logout', { method: 'POST' });
-      console.log("Logout successful");
-    } catch (err) {
-      console.error("Logout request failed (server side):", err);
-    } finally {
-      const targetUrl = currentSlug ? `/${currentSlug}` : '/';
-      console.log("Redirecting to:", targetUrl);
-            window.location.replace(targetUrl);
-    }
-  }} 
+ <button 
+  onClick={handleDisconnect}
   className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]"
 >
   Disconnect Other Device
@@ -2226,7 +2231,7 @@ return (
     {/* --- SIDEBAR --- */}
     <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
   <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center  shrink-0">
-    <button onClick={() => navigate('/agent/profile')} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center">
+    <button onClick={() => navigate(`/agent/profile/${slugFromUrl}`)} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center">
       <BsPersonCircle size={32} className="text-text-secondary" />
     </button>
     <BsThreeDotsVertical className="cursor-pointer text-text-secondary" size={18} />

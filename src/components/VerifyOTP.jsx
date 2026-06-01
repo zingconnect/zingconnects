@@ -53,8 +53,6 @@ const handleVerify = async (e) => {
 
   try {
     // 🛡️ SECURITY FIX: Use credentials: 'include'
-    // Authentication is now handled via HttpOnly cookie set by the server 
-    // in the response headers after verification.
     const response = await fetch('/api/agents/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

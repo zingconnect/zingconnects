@@ -3,8 +3,6 @@ import { createContext, useState, useContext, useEffect } from 'react';
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  // 1. SYNCHRONOUS INITIALIZATION
-  // We initialize state directly from localStorage so it's ready on the first render.
   const [token, setTokenState] = useState(() => {
     const activeSlug = localStorage.getItem('zing_active_slug');
     return activeSlug ? localStorage.getItem(`zing_token_${activeSlug}`) : null;
