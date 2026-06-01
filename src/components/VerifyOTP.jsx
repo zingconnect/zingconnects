@@ -12,7 +12,7 @@ export const VerifyOTP = () => {
 
   const [otp, setOtp] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isResending, setIsResending] = useState(false);
+  const [isResending, setIsResending] = useState(false); 
   const [isSuccess, setIsSuccess] = useState(false);
   const [serverSlug, setServerSlug] = useState('');
   const [copied, setCopied] = useState(false);
@@ -141,8 +141,8 @@ export const VerifyOTP = () => {
             <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">
               Congratulations, {firstName}!
             </h2>
-            <p className="text-xs md:text-sm font-bold text-gray-400 uppercase tracking-widest max-w-lg mx-auto mb-12 leading-relaxed">
-              Your profile has been verified. Sign in and subscribe with any of our plans: 1-Month Plan, 6-Month Plan, or 1-Year Plan.
+            <p className="text-xs md:text-sm font-bold text-gray-400 uppercase tracking-widest max-w-xl mx-auto mb-12 leading-relaxed">
+              Your profile has been verified. Sign in and Subscribe with any of our plans: 1-Month Plan, 6-Month Plan, or 1-Year Plan.
             </p>
 
             <div className="w-full max-w-md mx-auto space-y-4">
@@ -161,7 +161,7 @@ export const VerifyOTP = () => {
             </div>
 
             <button 
-              onClick={() => navigate(`/agent/dashboard/${serverSlug || ''}`)}
+              onClick={() => navigate('/agent/dashboard')}
               className="mt-16 px-12 py-6 bg-blue-950 text-white rounded-full text-[12px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-2xl active:scale-95"
             >
               Enter Dashboard →
