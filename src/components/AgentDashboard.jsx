@@ -2157,19 +2157,22 @@ return (
       </div>
       <h2 className="text-2xl font-black uppercase tracking-tighter text-slate-900 mb-4">Security Alert</h2>
       <p className="text-slate-500 text-sm mb-8">Your account is active on another device.</p>
-     <button 
-  onClick={async () => { const pathParts = window.location.pathname.split('/'); const currentSlug = pathParts[pathParts.length - 1];
-
+  <button 
+  onClick={async (e) => {
+    e.preventDefault(); // Prevents accidental form submissions
+        const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const currentSlug = pathParts[0]; // Adjust index based on your URL structure
+    console.log("Current Slug captured:", currentSlug);
     try {
+      console.log("Attempting logout...");
       await secureFetch('/api/agents/logout', { method: 'POST' });
+      console.log("Logout successful");
     } catch (err) {
-      console.error("Logout request failed:", err);
+      console.error("Logout request failed (server side):", err);
     } finally {
-      // 3. Always clean up local storage regardless of network success
-      localStorage.removeItem('agentToken');
-      
-      // 4. Redirect to login, passing the slug so the user can easily resume
-      window.location.href = `/login?redirect=${currentSlug}`;
+      const targetUrl = currentSlug ? `/${currentSlug}` : '/';
+      console.log("Redirecting to:", targetUrl);
+            window.location.replace(targetUrl);
     }
   }} 
   className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]"
