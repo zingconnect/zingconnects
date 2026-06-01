@@ -1715,8 +1715,8 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
     // ✨ CRITICAL SYNC FIX: Aligned with your frontend payment pricing matrix parameters
     const planPricesInNGN = {
       'BASIC': 8500,          
-      'GROWTH': 43500,         
-      'PROFESSIONAL': 88500    
+      'GROWTH': 51000,         
+      'PROFESSIONAL': 102000   
     };
 
     const targetPlan = planTier.toUpperCase().trim();

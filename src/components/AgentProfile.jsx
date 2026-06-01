@@ -197,6 +197,14 @@ export const AgentProfile = () => {
 
             if (verifyRes.ok) {
               const result = await verifyRes.json();
+              
+              // ✨ CRITICAL FIX: Explicitly shut down the Flutterwave Checkout modal wrapper overlay frame
+              if (typeof response.close === 'function') {
+                response.close();
+              } else if (window.FlutterwaveCheckout && typeof window.FlutterwaveCheckout.close === 'function') {
+                window.FlutterwaveCheckout.close();
+              }
+
               alert(result.message || "Subscription tenure stacked successfully!");
               
               // Direct state merge avoids full layout flickering resets

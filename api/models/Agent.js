@@ -108,6 +108,7 @@ export const agentSchema = new mongoose.Schema({
   },
 }, { 
   timestamps: true,
+  bufferCommands: false, // ✨ CRITICAL: Kills the 10s buffering hang on uninitialized instances
   toJSON: { virtuals: true }, 
   toObject: { virtuals: true } 
 });
@@ -131,37 +132,38 @@ agentSchema.virtual('isVoicePackageExpired').get(function() {
   return new Date() > this.voicePackageExpiry;
 });
 
-// ✨ FIXED: Removed 'next' parameter since this is an async function
+// ✨ FIXED: Added early validation guard clauses to prevent registration loop crashes
 agentSchema.pre('validate', async function() {
+  if (!this.firstName || !this.lastName) return; // Prevent loop execution if base names aren't present yet
+
   if (this.isModified('firstName') || this.isModified('lastName') || !this.slug) {
-    // 1. Create baseline slug string format (e.g., "john-doe")
     const baseSlug = `${this.firstName}-${this.lastName}`
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-') // replace spaces/special characters with hyphens
-      .replace(/(^-|-$)+/g, '');   // trim trailing hyphens
+      .replace(/[^a-z0-9]+/g, '-') 
+      .replace(/(^-|-$)+/g, '');   
 
     let generatedSlug = baseSlug;
     let counter = 1;
 
-    // 2. Loop check to guarantee absolute uniqueness in database collection
+    // Direct model fallback check protects database access during server instantiations
+    const AgentModel = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
+
     while (true) {
-      const existingAgent = await mongoose.models.Agent.findOne({ 
+      const existingAgent = await AgentModel.findOne({ 
         slug: generatedSlug, 
         _id: { $ne: this._id } 
       });
 
       if (!existingAgent) {
-        break; // Found an available slug!
+        break; 
       }
 
-      // If slug exists, attach index counter (e.g., "john-doe-1", "john-doe-2")
       generatedSlug = `${baseSlug}-${counter}`;
       counter++;
     }
 
     this.slug = generatedSlug;
   }
-  // No next() call here. Returning or resolving the async function tells Mongoose to proceed.
 });
 
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
