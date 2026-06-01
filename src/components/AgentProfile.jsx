@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams} from 'react-router-dom';
 import { 
   BsChevronLeft, 
   BsCameraFill, 
@@ -13,9 +13,13 @@ import {
   BsSunFill,
   BsDisplay
 } from 'react-icons/bs';
+import { useAuth } from "../context/AuthContext";
+import { secureFetch } from "../../api/utils/api";
 
 export const AgentProfile = () => {
   const navigate = useNavigate();
+   const { token, isLoading, setToken } = useAuth();
+    const { slug } = useParams();
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(true);
@@ -47,22 +51,14 @@ export const AgentProfile = () => {
     newPassword: '',
     confirmPassword: ''
   });
-
-  useEffect(() => {
+useEffect(() => {
     const fetchProfile = async () => {
-      const token = localStorage.getItem('agentToken');
-      if (!token) return navigate('/');
-
       try {
-        const response = await fetch('/api/agents/profile/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
+        const response = await secureFetch('/api/agents/profile/me', null, { 
+          method: 'GET' 
         });
 
-        if (response.status === 401) {
-          localStorage.removeItem('agentToken');
-          return navigate('/');
-        }
-
+        // If response is not ok, this will be handled by the catch block
         if (!response.ok) throw new Error("Failed to load profile");
 
         const result = await response.json();
@@ -79,6 +75,8 @@ export const AgentProfile = () => {
         }
       } catch (err) {
         console.error("Profile Fetch Error:", err);
+        // If secureFetch threw an error (Unauthorized), navigate to home
+        navigate('/');
       } finally {
         setLoading(false);
       }
@@ -101,38 +99,44 @@ export const AgentProfile = () => {
       root.classList.remove('dark');
     }
   };
-
-  const handleUpdate = async (e) => {
+const handleUpdate = async (e) => {
     e.preventDefault();
+    
     if (passwordData.newPassword && passwordData.newPassword !== passwordData.confirmPassword) {
       return alert("New passwords do not match!");
     }
 
     setIsSaving(true);
-    const token = localStorage.getItem('agentToken');
 
     try {
-      const response = await fetch(`/api/agents/update-profile`, {
+      // 1. Using secureFetch with null for the token (uses cookies)
+      const response = await secureFetch('/api/agents/update-profile', null, {
         method: 'PUT',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
+          'Content-Type': 'application/json' 
         },
         body: JSON.stringify({
           ...agentData,    
           ...passwordData
         })
       });
+
+      // 2. secureFetch throws an error on 401/403, 
+      // but if we get here, it's a successful network response.
       if (response.ok) {
         alert("Identity & Security Sync Successful");
         setPasswordData({ oldPassword: '', newPassword: '', confirmPassword: '' });
+        
+        // OPTIONAL: If you still need this for local UI state, it's fine.
+        // If it's for auth, consider moving to a Context/State provider.
         localStorage.setItem('agentVoiceProfile', agentData.voiceId);
       } else {
         const errorData = await response.json();
         alert(errorData.message || "Error updating profile");
       }
     } catch (err) {
-      alert("Error updating profile");
+      console.error("Profile Update Error:", err);
+      alert("Error updating profile. Please check your connection.");
     } finally {
       setIsSaving(false);
     }
@@ -156,10 +160,11 @@ export const AgentProfile = () => {
   return (
     <div className="min-h-screen bg-page-bg text-text-main pb-20 font-sans antialiased transition-colors duration-300">
       <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-100 dark:border-slate-800 px-4 py-4 md:px-12 flex justify-between items-center">
-        <button 
-          onClick={() => navigate('/agent/dashboard')}
-          className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 hover:text-blue-600 transition-all"
-        >
+       <button 
+  // Use the slug from your agentData state
+  onClick={() => navigate(`/agent/dashboard/${agentData.slug}`)} 
+  className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 hover:text-blue-600 transition-all"
+>
           <BsChevronLeft size={14} /> <span className="hidden xs:inline">Back to Portal</span>
         </button>
         <div className="flex items-center gap-2">
