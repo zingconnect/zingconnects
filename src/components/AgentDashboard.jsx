@@ -1276,6 +1276,8 @@ useEffect(() => {
   }, 60000); 
   return () => clearInterval(heartBeat);
 }, [token]); // Added token as a dependency
+
+
 useEffect(() => {
   // 1. Script injection: Use a persistent check
   if (!document.querySelector('script[src*="flutterwave"]')) {

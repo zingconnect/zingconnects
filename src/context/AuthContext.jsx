@@ -3,36 +3,43 @@ import { createContext, useState, useContext, useEffect } from 'react';
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  // 1. Start as null so we know we are in the "loading" phase
   const [token, setTokenState] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 2. Eagerly hydrate from localStorage on mount
+  // 1. Eagerly hydrate from the SPECIFIC active slug
   useEffect(() => {
-    let foundToken = null;
-    
-    // Scan for any token key
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith('zing_token_')) {
-        foundToken = localStorage.getItem(key);
-        break;
-      }
+    const activeSlug = localStorage.getItem('zing_active_slug');
+    if (activeSlug) {
+      const savedToken = localStorage.getItem(`zing_token_${activeSlug}`);
+      setTokenState(savedToken);
     }
-    
-    setTokenState(foundToken);
-    setIsLoading(false); // Signal that check is complete
+    setIsLoading(false);
   }, []);
 
+  // 2. Listen for cross-tab updates
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      // Only react if the active slug or the active token changed
+      if (e.key === 'zing_active_slug' || e.key === `zing_token_${localStorage.getItem('zing_active_slug')}`) {
+        setTokenState(localStorage.getItem(`zing_token_${localStorage.getItem('zing_active_slug')}`));
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  // 3. Updated setToken to manage the pointer
   const setToken = (newToken, slug = 'default') => {
-    setTokenState(newToken);
     if (newToken) {
+      localStorage.setItem('zing_active_slug', slug);
       localStorage.setItem(`zing_token_${slug}`, newToken);
+      setTokenState(newToken);
     } else {
-      // Clear all zing_tokens on logout
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('zing_token_')) localStorage.removeItem(key);
-      });
+      // Clear specific session
+      const activeSlug = localStorage.getItem('zing_active_slug');
+      if (activeSlug) localStorage.removeItem(`zing_token_${activeSlug}`);
+      localStorage.removeItem('zing_active_slug');
+      setTokenState(null);
     }
   };
 

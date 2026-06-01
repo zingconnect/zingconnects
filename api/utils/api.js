@@ -1,16 +1,14 @@
 // src/utils/api.js
 export const secureFetch = async (url, token, options = {}) => {
-  const config = {
-    ...options,
-    // CRITICAL: This allows the browser to send cookies (like your 'token' cookie)
-    credentials: 'include', 
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-      // Only include Bearer token if it exists; otherwise rely on cookies
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    },
-  };
+const config = {
+  ...options,
+  credentials: 'include',
+  headers: {
+    'Content-Type': 'application/json',
+    ...(token && !options.headers?.Authorization ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...options.headers, // Spreading last ensures user-defined headers take precedence
+  },
+};
 
   const response = await fetch(url, config);
 

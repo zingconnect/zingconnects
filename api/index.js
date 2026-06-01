@@ -857,10 +857,9 @@ app.post('/api/users/handshake', async (req, res, next) => {
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,           // Required for None
-  sameSite: 'None',       // Required for cross-context
-  path: '/',              // CRITICAL: Tells the browser the cookie applies to ALL routes
-  domain: '.vercel.app',  // OPTIONAL: Try adding this if the subdomains are failing
+  secure: process.env.NODE_ENV === 'production', // true only in production
+  sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+  path: '/',
   maxAge: 7 * 24 * 60 * 60 * 1000
 });
     return res.json({ 
