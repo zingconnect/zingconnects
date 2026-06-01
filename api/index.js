@@ -709,6 +709,7 @@ app.get('/api/agents/profile', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // ==========================================
 // 🛡️ HARDENED ROUTE 2: GET /api/agents/profile/me
 // ==========================================
@@ -722,6 +723,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
 
     const AgentModel = getAgentModel();
     
+    // 🛡️ SECURITY FIX RESOLVED: Included occupation, program, bio, address, and subscriptionAmount / payment fields
     const agent = await AgentModel.findById(req.user.id)
       .select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive lastActive createdAt');
 
@@ -777,6 +779,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
+    // Return Normalized Client Presentation Payload
     return res.status(200).json({
       success: true,
       agent: {
@@ -785,41 +788,39 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
         firstName: agent.firstName || "",
         lastName: agent.lastName || "",
         occupation: agent.occupation || "",
-        program: agent.program || "",         
-        bio: agent.bio || "",                 
-        address: agent.address || "",         
+        program: agent.program || "",         // ✨ Added for frontend UI
+        bio: agent.bio || "",                 // ✨ Added for frontend UI
+        address: agent.address || "",         // ✨ Added for frontend UI
         photoUrl: signedPhotoUrl, 
         slug: agent.slug || "",
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed, 
-        subscriptionAmount: agent.subscriptionAmount || 0, 
+        subscriptionAmount: agent.subscriptionAmount || 0, // ✨ Added fallback mapping
         subscriptionDate: agent.subscriptionDate || null,
         expiryDate: agent.expiryDate || null,
         voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
         voicePackageActive: !!agent.voicePackageActive, 
         status: isOnline ? 'online' : 'offline',
         lastActive: agent.lastActive,
+        // ✨ Added to support nested payment mapping configurations matching your card parsing logic
         paymentDetails: {
-          amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0,
-          currency: agent.paymentDetails?.currency || "NGN"
+          amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0
         }
       }
     });
 
   } catch (err) {
+    // 🛡️ SECURITY FIX: Drop to the global error interceptor rather than printing err.message
     next(err);
   }
 });
-
-// ==========================================
-// 🛡️ RECONFIGURED ROUTE: POST /api/agents/update-plan
-// ==========================================
+// 🛡️ SECURITY FIX 1: Add 'next' parameter for global error handling
 app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     const { plan } = req.body; 
-    const allowedPlans = ['BASIC', 'GROWTH', 'PROFESSIONAL']; // ✨ FIXED: Restructured to match schema enums
-    const sanitizedPlan = plan ? String(plan).toUpperCase().trim() : null;
+    const allowedPlans = ['BASIC', 'PREMIUM', 'ENTERPRISE']; 
+        const sanitizedPlan = plan ? String(plan).toUpperCase().trim() : null;
 
     if (!sanitizedPlan || !allowedPlans.includes(sanitizedPlan)) {
       return res.status(400).json({ 
@@ -827,28 +828,11 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
         message: "Invalid plan type selection parameter." 
       });
     }
-
-    const planPricesInNGN = {
-      'BASIC': 8500,          
-      'GROWTH': 51000,         
-      'PROFESSIONAL': 102000    
-    };
-
-    const targetPrice = planPricesInNGN[sanitizedPlan];
     const AgentModel = getAgentModel(); 
-
-    // ✨ FIXED: Sync both fields safely together during manual updates
-    const updatedAgent = await AgentModel.findByIdAndUpdate(
+        const updatedAgent = await AgentModel.findByIdAndUpdate(
       req.user.id,
-      { 
-        $set: { 
-          plan: sanitizedPlan,
-          subscriptionAmount: targetPrice,
-          'paymentDetails.amountNgn': targetPrice,
-          'paymentDetails.currency': 'NGN'
-        } 
-      }, 
-      { new: true, select: 'plan subscriptionAmount paymentDetails' }
+      { $set: { plan: sanitizedPlan } }, // Using explicit $set operator
+      { new: true, select: 'plan' }     // 🌟 Only fetch back the 'plan' key, nothing else!
     );
 
     if (!updatedAgent) {
@@ -857,8 +841,7 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
 
     return res.json({ 
       success: true, 
-      plan: updatedAgent.plan,
-      subscriptionAmount: updatedAgent.subscriptionAmount
+      plan: updatedAgent.plan 
     });
 
   } catch (err) {
@@ -1580,6 +1563,7 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ROUTE 1: POST /api/subscriptions/verify
 // =========================================================================
@@ -1587,6 +1571,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
   try {
     await connectToDatabase();
 
+    // 1. JWT AUTHENTICATION CHECK
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -1606,6 +1591,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       return res.status(400).json({ message: "Transaction ID and target plan choice are required" });
     }
 
+    // Fixed pricing architecture map
     const planPricesInNGN = {
       'BASIC': 8500,          
       'GROWTH': 51000,         
@@ -1618,6 +1604,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
     }
     const expectedNairaPrice = planPricesInNGN[targetPlan];
     
+    // 2. FLUTTERWAVE VERIFICATION ENGINE
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
     
@@ -1627,7 +1614,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       Number(data.amount) >= expectedNairaPrice
     ) {
       
-      const AgentModel = getAgentModel(); 
+      const AgentModel = getAgentModel(); // Fetch model instance safely
       const agent = await AgentModel.findById(decoded.id);
       if (!agent) {
         return res.status(404).json({ message: "Agent profile mapping context missing." });
@@ -1637,10 +1624,12 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       let baseDate = new Date();
       let calculatedMonths = 1;
 
+      // ✨ STACKING ENGINE LOGIC: If subscription is active, stack on top of old expiry date
       if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > Date.now()) {
         baseDate = new Date(agent.expiryDate);
       }
 
+      // Calculate timeline duration blocks dynamically depending on selected tier
       if (targetPlan === 'BASIC') {
         baseDate.setMonth(baseDate.getMonth() + 1);
         calculatedMonths = 1;
@@ -1652,6 +1641,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
         calculatedMonths = 12;
       }
 
+      // 📜 CREATE IMMUTABLE LEDGER RECORD PRIOR TO PROFILE STATE CHANGE
       await Transaction.create({
         agentId: agent._id,
         transactionId: String(transaction_id),
@@ -1664,9 +1654,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
         paidAt: now
       });
 
-      const finalNumericAmount = Number(data.amount);
-
-      // Persist values cleanly to the document instance
+      // 3. PERSIST RE-CALCULATED DOCUMENT VALUES
       agent.isSubscribed = true;
       agent.plan = targetPlan;
       agent.status = 'active';
@@ -1676,18 +1664,16 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       agent.expiryDate = baseDate;
       agent.expiryNotificationSent = false;
       agent.lastTransactionId = String(transaction_id);
-      
-      // ✨ FIXED: Cast cleanly to guarantees identical data values across properties
-      agent.subscriptionAmount = finalNumericAmount; 
+      agent.subscriptionAmount = Number(data.amount); // Tracks latest injection amount
       agent.paymentDetails = {
-        amountNgn: finalNumericAmount,
+        amountNgn: data.amount,
         currency: "NGN",
         verifiedAt: now
       };
 
       await agent.save();
 
-      console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Amount: ₦${finalNumericAmount}`);
+      console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Amount: ₦${data.amount}`);
 
       return res.json({
         success: true,
@@ -1698,8 +1684,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
           plan: agent.plan,
           isSubscribed: !!agent.isSubscribed,
           expiryDate: agent.expiryDate,
-          subscriptionAmount: agent.subscriptionAmount,
-          paymentDetails: agent.paymentDetails
+          subscriptionAmount: agent.subscriptionAmount
         }
       });
     } else {
@@ -1722,6 +1707,7 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     
+    // 1. MANUAL JWT AUTHENTICATION CONTEXT EXTREMETIES 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ success: false, message: "Unauthorized extraction payload" });
@@ -1747,6 +1733,7 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Agent account not found." });
     }
 
+    // ✨ CRITICAL SYNC FIX: Aligned with your frontend payment pricing matrix parameters
     const planPricesInNGN = {
       'BASIC': 8500,          
       'GROWTH': 51000,         
@@ -1762,6 +1749,7 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
 
     const totalCostExpected = monthlyRate * parseInt(months, 10);
 
+    // 2. INTERCEPT FLUTTERWAVE GATEWAY METRICS PRIOR TO STATE PERSISTENCE
     const flwVerify = await flw.Transaction.verify({ id: transaction_id });
     const flwData = flwVerify.data;
 
@@ -1776,16 +1764,20 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       });
     }
 
+    // 3. STACKABLE CALCULATION ENGINE
     let baseDate = new Date();
     const now = new Date();
 
+    // If current subscription timeline is active, stack seamlessly on top of old expiry date
     if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > now.getTime()) {
       baseDate = new Date(agent.expiryDate);
     }
 
+    // Extend the month block safely
     baseDate.setMonth(baseDate.getMonth() + parseInt(months, 10));
     const newExpiryDate = baseDate.toISOString();
 
+    // 📜 CREATE THE IMMUTABLE HISTORICAL LEDGER DOCUMENT ENTRY
     await Transaction.create({
       agentId: agent._id,
       transactionId: String(transaction_id),
@@ -1798,13 +1790,11 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       paidAt: now
     });
 
-    const finalUpgradeAmount = Number(flwData.amount);
-
-    // Persist completely synchronized state fields together
+    // 4. Persist Updated Subscription State to DB Doc
     agent.plan = targetPlan;
     agent.isSubscribed = true;
     agent.status = 'active';
-    agent.subscriptionAmount = finalUpgradeAmount; 
+    agent.subscriptionAmount = Number(flwData.amount); // Tracks latest injection amount
     agent.expiryDate = newExpiryDate;
     agent.lastTransactionId = String(transaction_id);
     
@@ -1812,8 +1802,9 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       agent.subscriptionDate = now.toISOString();
     }
 
+    // Update payment details object for dashboard fallback display
     agent.paymentDetails = {
-      amountNgn: finalUpgradeAmount,
+      amountNgn: flwData.amount,
       currency: "NGN",
       verifiedAt: now.toISOString()
     };
@@ -1858,6 +1849,7 @@ app.get('/api/agents/subscription/history', async (req, res, next) => {
       return res.status(403).json({ success: false, message: "Session expired context." });
     }
 
+    // Find all payment history references tied to this agent sorted by latest paid timestamp
     const history = await Transaction.find({ agentId: decoded.id })
       .sort({ paidAt: -1 });
 
