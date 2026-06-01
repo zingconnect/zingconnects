@@ -1303,6 +1303,7 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
   }, [isDualLoginConflict]);
+
   useEffect(() => {
   let isMounted = true;
 
@@ -1316,11 +1317,12 @@ useEffect(() => {
   }
 
   const fetchInitialData = async () => {
-    // 🛡️ GUARD 1: If there is no token at all, send them straight to login
-   if (slug && profileData.agent.slug === slug.toLowerCase().trim()) {
-          navigate(`/agent/dashboard/${slug}`);
-          return;
-        }
+    // 🛡️ GUARD 1: If there's no token, stop here! 
+    // This is a public page, so visitors without a token should view it cleanly without getting redirected.
+    if (!token) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -1334,20 +1336,28 @@ useEffect(() => {
         if (errorData.reason === 'dual_login') {
           setIsDualLoginConflict(true);
         } else {
-          // 🛡️ GUARD 2: The token is dead/expired. Clear it out completely!
+          // Token is dead/expired. Wipe it so they are treated as a regular public visitor.
           localStorage.removeItem('accessToken'); 
-          navigate('/login'); // Force clean login window
         }
         return; 
       }
 
       if (!profileRes.ok) throw new Error("Profile fetch failed");
       
+      // ✅ Now profileData is safely defined here after the fetch succeeds!
       const profileData = await profileRes.json();
+      
       if (isMounted && profileData.agent) {
         setAgentData(profileData.agent);
         setIsSubscribed(!!profileData.agent.isSubscribed); 
         if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
+
+        // 🚀 SMART ROUTING: Move this here!
+        // If the logged-in agent is viewing their own profile page, bounce them to their private dashboard.
+        if (slug && profileData.agent.slug === slug.toLowerCase().trim()) {
+          navigate(`/agent/dashboard/${slug}`);
+          return;
+        }
 
         if (profileData.agent.isSubscribed) {
           const usersRes = await secureFetch('/api/agents/my-users', token, { method: 'GET' });
