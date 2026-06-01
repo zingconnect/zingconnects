@@ -62,6 +62,7 @@ export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
   const { slug } = useParams();
+
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
@@ -125,6 +126,8 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
   const [previewFile, setPreviewFile] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");          
+    const slugFromUrl = slug || agentData?.slug || '';
+
 
   let isFetching = false;
   const plans = [
@@ -2236,9 +2239,12 @@ return (
     {/* --- SIDEBAR --- */}
     <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
   <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center  shrink-0">
-    <button onClick={() => navigate(`/agent/profile/${slugFromUrl}`)} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center">
-      <BsPersonCircle size={32} className="text-text-secondary" />
-    </button>
+   <button 
+  onClick={() => navigate(`/agent/profile/${slug || agentData?.slug || ''}`)} 
+  className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center"
+>
+  <BsPersonCircle size={32} className="text-text-secondary" />
+</button>
     <BsThreeDotsVertical className="cursor-pointer text-text-secondary" size={18} />
   </header>
     <div className="p-2 bg-card-bg">
