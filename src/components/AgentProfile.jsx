@@ -18,8 +18,8 @@ import { secureFetch } from "../../api/utils/api";
 
 export const AgentProfile = () => {
   const navigate = useNavigate();
-   const { token, isLoading, setToken } = useAuth();
-    const { slug } = useParams();
+  const { token, isLoading, setToken } = useAuth();
+  const { slug } = useParams();
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(true);
@@ -51,14 +51,16 @@ export const AgentProfile = () => {
     newPassword: '',
     confirmPassword: ''
   });
-useEffect(() => {
+
+  useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const response = await secureFetch('/api/agents/profile/me', null, { 
+        const storedToken = localStorage.getItem('accessToken');
+
+        const response = await secureFetch('/api/agents/profile/me', storedToken, { 
           method: 'GET' 
         });
 
-        // If response is not ok, this will be handled by the catch block
         if (!response.ok) throw new Error("Failed to load profile");
 
         const result = await response.json();
@@ -75,7 +77,6 @@ useEffect(() => {
         }
       } catch (err) {
         console.error("Profile Fetch Error:", err);
-        // If secureFetch threw an error (Unauthorized), navigate to home
         navigate('/');
       } finally {
         setLoading(false);
@@ -85,7 +86,6 @@ useEffect(() => {
     fetchProfile();
   }, [navigate]);
 
-  // THEME CHANGE LOGIC
   const handleThemeChange = (newTheme) => {
     const root = window.document.documentElement;
     localStorage.setItem('theme', newTheme);
@@ -99,7 +99,8 @@ useEffect(() => {
       root.classList.remove('dark');
     }
   };
-const handleUpdate = async (e) => {
+
+  const handleUpdate = async (e) => {
     e.preventDefault();
     
     if (passwordData.newPassword && passwordData.newPassword !== passwordData.confirmPassword) {
@@ -109,8 +110,9 @@ const handleUpdate = async (e) => {
     setIsSaving(true);
 
     try {
-      // 1. Using secureFetch with null for the token (uses cookies)
-      const response = await secureFetch('/api/agents/update-profile', null, {
+      const storedToken = localStorage.getItem('accessToken');
+
+      const response = await secureFetch('/api/agents/update-profile', storedToken, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json' 
@@ -121,14 +123,9 @@ const handleUpdate = async (e) => {
         })
       });
 
-      // 2. secureFetch throws an error on 401/403, 
-      // but if we get here, it's a successful network response.
       if (response.ok) {
         alert("Identity & Security Sync Successful");
         setPasswordData({ oldPassword: '', newPassword: '', confirmPassword: '' });
-        
-        // OPTIONAL: If you still need this for local UI state, it's fine.
-        // If it's for auth, consider moving to a Context/State provider.
         localStorage.setItem('agentVoiceProfile', agentData.voiceId);
       } else {
         const errorData = await response.json();
@@ -160,11 +157,10 @@ const handleUpdate = async (e) => {
   return (
     <div className="min-h-screen bg-page-bg text-text-main pb-20 font-sans antialiased transition-colors duration-300">
       <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-100 dark:border-slate-800 px-4 py-4 md:px-12 flex justify-between items-center">
-       <button 
-  // Use the slug from your agentData state
-  onClick={() => navigate(`/agent/dashboard/${agentData.slug}`)} 
-  className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 hover:text-blue-600 transition-all"
->
+        <button 
+          onClick={() => navigate(`/agent/dashboard/${agentData.slug || ''}`)} 
+          className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 hover:text-blue-600 transition-all"
+        >
           <BsChevronLeft size={14} /> <span className="hidden xs:inline">Back to Portal</span>
         </button>
         <div className="flex items-center gap-2">
@@ -174,8 +170,6 @@ const handleUpdate = async (e) => {
       </header>
 
       <main className="max-w-4xl mx-auto mt-6 md:mt-16 px-4">
-        
-        {/* --- SUBSCRIPTION STATUS CARDS --- */}
         <section className="mb-10 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="bg-blue-900 text-white p-5 rounded-[1.5rem] shadow-lg flex flex-col justify-between relative overflow-hidden min-h-[110px]">
             <BsCashStack className="absolute -right-2 -bottom-2 text-white/10" size={70} />
@@ -213,7 +207,6 @@ const handleUpdate = async (e) => {
         </section>
 
         <form onSubmit={handleUpdate} className="space-y-8">
-          {/* PROFILE PHOTO SECTION */}
           <section className="flex flex-col md:flex-row items-center gap-6 md:gap-10 text-center md:text-left">
             <div className="relative group">
               <div className="w-28 h-28 md:w-36 md:h-36 rounded-[2rem] bg-gray-100 dark:bg-slate-800 border-4 border-white dark:border-slate-900 shadow-xl overflow-hidden">
@@ -237,7 +230,6 @@ const handleUpdate = async (e) => {
             </div>
           </section>
 
-          {/* IDENTITY DATA FIELDS */}
           <section className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-1.5">
               <label className="text-[8px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 ml-4">Professional Title</label>
@@ -306,7 +298,6 @@ const handleUpdate = async (e) => {
             </div>
           </section>
 
-          {/* --- DISPLAY THEME SETTINGS --- */}
           <section className="bg-card-bg/50 dark:bg-slate-900/50 p-6 rounded-[2rem] border border-dashed border-gray-200 dark:border-slate-700">
             <div className="flex items-center gap-2 mb-5">
               <BsDisplay className="text-blue-600" size={16} />
@@ -336,7 +327,6 @@ const handleUpdate = async (e) => {
             </div>
           </section>
 
-          {/* SECURITY CREDENTIALS SECTION */}
           <section className="bg-card-bg/50 dark:bg-slate-900/50 p-6 rounded-[2rem] border border-dashed border-gray-200 dark:border-slate-700">
             <div className="flex items-center gap-2 mb-5">
               <BsKeyFill className="text-blue-600" size={16} />
