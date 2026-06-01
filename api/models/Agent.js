@@ -132,6 +132,7 @@ agentSchema.virtual('isVoicePackageExpired').get(function() {
   return new Date() > this.voicePackageExpiry;
 });
 
+
 // ✨ FIXED: Added early validation guard clauses to prevent registration loop crashes
 agentSchema.pre('validate', async function() {
   if (!this.firstName || !this.lastName) return; // Prevent loop execution if base names aren't present yet
@@ -164,6 +165,23 @@ agentSchema.pre('validate', async function() {
 
     this.slug = generatedSlug;
   }
+});
+
+// ✨ FORCE BILLING ALIGNMENT: Keeps subscriptionAmount and paymentDetails.amountNgn completely synced
+agentSchema.pre('save', function(next) {
+  // Case A: If paymentDetails.amountNgn changed or was initialized, sync the top-level field
+  if (this.isModified('paymentDetails.amountNgn') && this.paymentDetails?.amountNgn !== undefined) {
+    this.subscriptionAmount = this.paymentDetails.amountNgn;
+  }
+  // Case B: If subscriptionAmount changed or was initialized, sync the sub-document field
+  else if (this.isModified('subscriptionAmount')) {
+    if (!this.paymentDetails) {
+      this.paymentDetails = { currency: 'NGN' };
+    }
+    this.paymentDetails.amountNgn = this.subscriptionAmount;
+  }
+  
+  next();
 });
 
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);

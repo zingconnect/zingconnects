@@ -13,7 +13,7 @@ import {
   BsSunFill,
   BsDisplay,
   BsReceipt
-} from 'react-icons/bs'; // ✨ Fixed: Standard export path
+} from 'react-icons/bs'; 
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 
@@ -26,10 +26,10 @@ export const AgentProfile = () => {
   const [isSubscribed, setIsSubscribed] = useState(true);
   const [activeTheme, setActiveTheme] = useState(localStorage.getItem('theme') || 'system');
   
-  // ✨ SUBSCRIPTION UPGRADE & TRANSACTION STATE CONFIGURATION
+  // SUBSCRIPTION UPGRADE & TRANSACTION STATE CONFIGURATION
   const [subConfig, setSubConfig] = useState({ planTier: 'BASIC', months: 1 });
   const [isUpdatingSub, setIsUpdatingSub] = useState(false);
-  const [transactions, setTransactions] = useState([]); // Ledger storage array
+  const [transactions, setTransactions] = useState([]); 
   
   const [agentData, setAgentData] = useState({
     email: '',
@@ -58,14 +58,16 @@ export const AgentProfile = () => {
     confirmPassword: ''
   });
 
-  // Accurate Flutterwave System Pricing Map Structure Match
   const planPricesInNGN = {
     'BASIC': 8500,          
     'GROWTH': 51000,         
-    'PROFESSIONAL': 102000 // Fixed typo balance index block here
+    'PROFESSIONAL': 102000 
   };
 
   useEffect(() => {
+    // Apply theme changes to document root instantly on initial mount
+    handleThemeChange(activeTheme);
+
     const fetchProfileAndHistory = async () => {
       try {
         const storedToken = localStorage.getItem('accessToken');
@@ -89,7 +91,7 @@ export const AgentProfile = () => {
           }));
         }
 
-        // 2. ✨ Fetch Ledger History Collections Cleanly
+        // 2. Fetch Ledger History Collections Cleanly
         const historyResponse = await secureFetch('/api/agents/subscription/history', storedToken, {
           method: 'GET'
         });
@@ -163,7 +165,7 @@ export const AgentProfile = () => {
     }
   };
 
-  // ✨ HANDLER: PROCESS PRODUCTION FLUTTERWAVE EXTENSION GATEWAY PIPELINE
+  // HANDLER: PROCESS PRODUCTION FLUTTERWAVE EXTENSION GATEWAY PIPELINE
   const handleUpgradeSubscription = async (e) => {
     e.preventDefault();
 
@@ -197,7 +199,7 @@ export const AgentProfile = () => {
           try {
             const storedToken = localStorage.getItem('accessToken');
 
-            // Send real transaction reference directly to your hardened PUT upgrade endpoint
+            // ✨ FIXED: Closed stringify bracket layers safely inside your parameters layout configuration
             const verifyRes = await secureFetch('/api/agents/update-subscription', storedToken, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
@@ -205,13 +207,13 @@ export const AgentProfile = () => {
                 planTier: subConfig.planTier,
                 months: parseInt(subConfig.months, 10),
                 transaction_id: response.transaction_id
-              }
-            )});
+              })
+            });
 
             if (verifyRes.ok) {
               const result = await verifyRes.json();
               
-              // ✨ CRITICAL FIX: Explicitly shut down the Flutterwave Checkout modal wrapper overlay frame
+              // Explicitly shut down the Flutterwave Checkout modal wrapper overlay frame
               if (typeof response.close === 'function') {
                 response.close();
               } else if (window.FlutterwaveCheckout && typeof window.FlutterwaveCheckout.close === 'function') {
@@ -220,7 +222,6 @@ export const AgentProfile = () => {
 
               alert(result.message || "Subscription tenure stacked successfully!");
               
-              // Direct state merge avoids full layout flickering resets
               setAgentData(prev => ({
                 ...prev,
                 plan: result.agent.plan,
