@@ -70,7 +70,6 @@ app.set('redisClient', redisClient);
 const corsOptions = {
 origin: [
     "https://www.zingconnect.chat", 
-    "https://zingconnect.chat"
   ],
     methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true, // MANDATORY for cookies
