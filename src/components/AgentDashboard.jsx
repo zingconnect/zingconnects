@@ -1303,13 +1303,11 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
   }, [isDualLoginConflict]);
-useEffect(() => {
+  useEffect(() => {
   let isMounted = true;
 
-  // Retrieve your token (Adjust this to match how your app stores tokens)
   const token = localStorage.getItem('accessToken'); 
 
-  // Script injection
   if (!document.querySelector('script[src*="flutterwave"]')) {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
@@ -1318,19 +1316,16 @@ useEffect(() => {
   }
 
   const fetchInitialData = async () => {
-    // 🛡️ GUARD CLAUSE: If there's no token, don't ping the server. Redirection fallback immediately.
+    // 🛡️ GUARD 1: If there is no token at all, send them straight to login
     if (!token) {
-      const fallbackPath = slug ? `/${slug}` : '/';
-      navigate(fallbackPath);
+      navigate('/login');
       return;
     }
 
     setLoading(true);
     try {
-      // ✅ PASS THE TOKEN HERE instead of null
       const profileRes = await secureFetch('/api/agents/profile/me', token, { method: 'GET' });
 
-      // Now that secureFetch doesn't throw, this block safely runs!
       if (profileRes.status === 401 || profileRes.status === 403) {
         if (!isMounted) return;
         
@@ -1339,8 +1334,9 @@ useEffect(() => {
         if (errorData.reason === 'dual_login') {
           setIsDualLoginConflict(true);
         } else {
-          const fallbackPath = slug ? `/${slug}` : '/';
-          navigate(fallbackPath);
+          // 🛡️ GUARD 2: The token is dead/expired. Clear it out completely!
+          localStorage.removeItem('accessToken'); 
+          navigate('/login'); // Force clean login window
         }
         return; 
       }
@@ -1354,7 +1350,6 @@ useEffect(() => {
         if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
 
         if (profileData.agent.isSubscribed) {
-          // ✅ PASS THE TOKEN HERE TOO
           const usersRes = await secureFetch('/api/agents/my-users', token, { method: 'GET' });
           if (usersRes.ok) {
              const userData = await usersRes.json();
