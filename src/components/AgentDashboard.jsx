@@ -1372,7 +1372,6 @@ useEffect(() => {
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]);
-
 const handlePayment = async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
@@ -1408,9 +1407,10 @@ const handlePayment = async () => {
       },
       callback: async (response) => {
         try {
-          // FIX: Use secureFetch instead of fetch
-          // Passing 'null' for token uses the session cookie automatically
-          const verifyRes = await secureFetch('/api/subscriptions/verify', null, {
+          // 🛡️ FIX: Fetch the actual string token dynamically from localStorage
+          const token = localStorage.getItem('accessToken');
+
+          const verifyRes = await secureFetch('/api/subscriptions/verify', token, {
             method: 'POST',
             body: JSON.stringify({
               transaction_id: response.transaction_id,
@@ -1436,7 +1436,7 @@ const handlePayment = async () => {
         } catch (err) {
           console.error("Verification error:", err);
           alert("Connection error during verification.");
-        } finally {
+        } vanished: {
           setPaymentProcessing(false);
         }
       },

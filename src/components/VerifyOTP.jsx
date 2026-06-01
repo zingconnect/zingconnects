@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BsShieldCheck, BsCheckCircleFill, BsCopy, BsArrowLeft } from 'react-icons/bs';
+import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { secureFetch } from "../../api/utils/api";
-
 
 export const VerifyOTP = () => {
   const location = useLocation();
@@ -13,7 +12,7 @@ export const VerifyOTP = () => {
 
   const [otp, setOtp] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isResending, setIsResending] = useState(false); // New state for resending
+  const [isResending, setIsResending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [serverSlug, setServerSlug] = useState('');
   const [copied, setCopied] = useState(false);
@@ -21,54 +20,52 @@ export const VerifyOTP = () => {
   useEffect(() => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
+
   const handleResend = async () => {
-  if (isResending) return;
-  setIsResending(true);
+    if (isResending) return;
+    setIsResending(true);
 
-  try {
-    // secureFetch handles the 'credentials: include' automatically
-    await secureFetch('/api/agents/register', null, {
-      method: 'POST',
-      body: JSON.stringify({ email, firstName, resend: true }),
-    });
+    try {
+      await secureFetch('/api/agents/register', null, {
+        method: 'POST',
+        body: JSON.stringify({ email, firstName, resend: true }),
+      });
 
-    alert("A new security code has been sent to your email.");
-    setOtp(''); 
-  } catch (err) {
-    console.error("Resend Error:", err);
-    alert("Network error. Please try again.");
-  } finally {
-    setIsResending(false);
-  }
-};
-
-const handleVerify = async (e) => {
-  e.preventDefault();
-  setIsVerifying(true);
-
-  try {
-    // 🛡️ Use secureFetch for verification
-    const response = await secureFetch('/api/agents/verify-otp', null, {
-      method: 'POST',
-      body: JSON.stringify({ email, otp }),
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      setServerSlug(data.slug);
-      // Upon successful verification, the backend sets the HttpOnly cookie
-      setIsSuccess(true);
-    } else {
-      alert(data.message || "Invalid Code");
+      alert("A new security code has been sent to your email.");
+      setOtp(''); 
+    } catch (err) {
+      console.error("Resend Error:", err);
+      alert("Network error. Please try again.");
+    } finally {
+      setIsResending(false);
     }
-  } catch (err) {
-    console.error("Verification Error:", err);
-    alert("Connection error. Try again.");
-  } finally {
-    setIsVerifying(false);
-  }
-};
+  };
+
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    setIsVerifying(true);
+
+    try {
+      const response = await secureFetch('/api/agents/verify-otp', null, {
+        method: 'POST',
+        body: JSON.stringify({ email, otp }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setServerSlug(data.slug);
+        setIsSuccess(true);
+      } else {
+        alert(data.message || "Invalid Code");
+      }
+    } catch (err) {
+      console.error("Verification Error:", err);
+      alert("Connection error. Try again.");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   const fullLink = `${window.location.origin}/${serverSlug}`;
 
@@ -137,13 +134,16 @@ const handleVerify = async (e) => {
             </form>
           </div>
         ) : (
-          /* SUCCESS STATE REMAINS SAME */
           <div className="w-full animate-in zoom-in-95 duration-700">
             <div className="inline-flex items-center justify-center w-24 h-24 bg-green-50 text-green-500 rounded-full mb-8 shadow-inner">
               <BsCheckCircleFill size={48} />
             </div>
-            <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">Account Ready</h2>
-            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-12">Your profile has been verified. Sign in and Subscribe</p>
+            <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">
+              Congratulations, {firstName}!
+            </h2>
+            <p className="text-xs md:text-sm font-bold text-gray-400 uppercase tracking-widest max-w-lg mx-auto mb-12 leading-relaxed">
+              Your profile has been verified. Sign in and subscribe with any of our plans: 1-Month Plan, 6-Month Plan, or 1-Year Plan.
+            </p>
 
             <div className="w-full max-w-md mx-auto space-y-4">
               <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] block">Your Public Link</span>
@@ -161,7 +161,7 @@ const handleVerify = async (e) => {
             </div>
 
             <button 
-              onClick={() => navigate('/agent/dashboard')}
+              onClick={() => navigate(`/agent/dashboard/${serverSlug || ''}`)}
               className="mt-16 px-12 py-6 bg-blue-950 text-white rounded-full text-[12px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-2xl active:scale-95"
             >
               Enter Dashboard →

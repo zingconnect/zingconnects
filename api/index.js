@@ -1511,7 +1511,6 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
 // 🛡️ HARDENED ROUTE 2: POST /api/subscriptions/verify
 // =========================================================================
@@ -1532,18 +1531,16 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       return res.status(403).json({ message: "Session expired" });
     }
 
-    // The client only tells us the transaction_id and the intended plan.
-    const { transaction_id, plan } = req.body;
+    const { transaction_id, plan } = req.body || {};
 
     if (!transaction_id || !plan) {
       return res.status(400).json({ message: "Transaction ID and target plan choice are required" });
     }
 
-    // 🛡️ PURE NAIRA SOURCE OF TRUTH: Define your exact pricing in NGN on the server
     const planPricesInNGN = {
-      'BASIC': 8500,          // e.g., ₦8,500
-      'GROWTH': 43500,         // e.g., ₦43,500
-      'PROFESSIONAL': 88500    // e.g., ₦88,500
+      'BASIC': 8500,          
+      'GROWTH': 43500,         
+      'PROFESSIONAL': 88500    
     };
 
     const targetPlan = String(plan).toUpperCase().trim();
@@ -1551,9 +1548,11 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid tier classification choice." });
     }
     const expectedNairaPrice = planPricesInNGN[targetPlan];
+    
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
-        if (
+    
+    if (
       data.status === "successful" &&
       data.currency === "NGN" &&
       Number(data.amount) >= expectedNairaPrice
@@ -1570,7 +1569,6 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
         expiry.setFullYear(now.getFullYear() + 1);
       }
 
-      // Explicit selection projection wrapper during assignment update
       const updatedAgent = await Agent.findByIdAndUpdate(
         decoded.id,
         {
@@ -1597,7 +1595,6 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
 
       console.log(`Subscription ACTIVATED for: ${updatedAgent.email} | Amount: ₦${data.amount}`);
 
-      // Structured presentation return DTO (Zero token/session leaks)
       return res.json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",
@@ -1617,10 +1614,10 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
     }
 
   } catch (err) {
-    // Redirect to the bottom centralized global error interceptor
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: GET /api/agents/my-users
 // =========================================================================
