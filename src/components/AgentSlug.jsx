@@ -184,13 +184,20 @@ const handleAgentLogin = async (e) => {
     const data = await response.json();
 
     if (response.ok && data.token) {
-setToken(data.token, payload.targetSlug);      
-      // Update UI state
-     if (rememberAgent) {
-       localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
-    }
+      // 🛡️ CRITICAL FIX: Explicitly write to localStorage synchronously 
+      // so AgentLayoutWrapper reads it immediately during navigation.
+      localStorage.setItem('accessToken', data.token);
+
+      // Call your state engine updater
+      setToken(data.token, payload.targetSlug);      
       
-    navigate(`/agent/dashboard/${payload.targetSlug}`);
+      // Update UI state
+      if (rememberAgent) {
+        localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
+      }
+      
+      // Safe navigation now that localStorage is populated
+      navigate(`/agent/dashboard/${payload.targetSlug}`);
     } else {
       // Log the exact message from the server to debug the 401
       console.error("Login Server Error:", data.message);
@@ -200,7 +207,7 @@ setToken(data.token, payload.targetSlug);
     console.error("Network Error:", err);
     alert("Connection error. Please try again.");
   } finally {
-    setIsProcessing(false);
+    if (isMounted) setIsProcessing(false);
   }
 };
 

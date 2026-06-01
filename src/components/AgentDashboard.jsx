@@ -1317,10 +1317,10 @@ useEffect(() => {
 
   const fetchInitialData = async () => {
     // 🛡️ GUARD 1: If there is no token at all, send them straight to login
-    if (!token) {
-      navigate('/login');
-      return;
-    }
+   if (slug && profileData.agent.slug === slug.toLowerCase().trim()) {
+          navigate(`/agent/dashboard/${slug}`);
+          return;
+        }
 
     setLoading(true);
     try {
