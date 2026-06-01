@@ -154,13 +154,19 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
     },
   ];
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimeTicker(Date.now());
-    }, 60000); 
-    return () => clearInterval(interval);
-  }, []);
-  
+  const handleLogout = async (e) => {
+    e.preventDefault();
+    try {
+      await secureFetch('/api/agents/logout', null, { method: 'POST' });
+    } catch (err) {
+      console.error("Logout failed:", err);
+    } finally {
+      const targetUrl = slug ? `/${slug}` : '/';
+      window.location.replace(targetUrl); 
+    }
+  };
+
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'seen':
@@ -603,6 +609,14 @@ const handleAcceptCall = async () => {
   callingAudio 
 }) => {
   const room = useRoomContext();
+
+    useEffect(() => {
+    const interval = setInterval(() => {
+      setTimeTicker(Date.now());
+    }, 60000); 
+    return () => clearInterval(interval);
+  }, []);
+  
 
   useEffect(() => {
     if (!room) return;
@@ -1897,17 +1911,7 @@ const handleSendMessage = async (e) => {
   }
 };
 
-const handleLogout = async (e) => {
-    e.preventDefault();
-    try {
-      await secureFetch('/api/agents/logout', null, { method: 'POST' });
-    } catch (err) {
-      console.error("Logout failed:", err);
-    } finally {
-      const targetUrl = slug ? `/${slug}` : '/';
-      window.location.replace(targetUrl); 
-    }
-  };
+
   
 if (loading) return (
   <div className="h-screen flex items-center justify-center bg-page-bg text-[10px] font-bold uppercase tracking-widest text-text-secondary">
@@ -2271,8 +2275,11 @@ return (
   <p className="text-center text-gray-500 py-10 text-xs font-bold uppercase tracking-widest">No users connected.</p>
 )}
       </div>
-      <div className="p-4 border-t bg-gray-50/50">
-        <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95">
+     <div className="p-4 border-t bg-gray-50/50">
+        <button 
+          onClick={handleLogout} 
+          className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95"
+        >
           <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
         </button>
       </div>
