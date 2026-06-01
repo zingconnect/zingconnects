@@ -600,7 +600,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
   }
 });
 
-app.post('/api/agents/login', async (req, res) => {
+app.post('/api/agents/login', async (req, res, next) => {
   try {
     await connectToDatabase();
     const { email, password, targetSlug } = req.body;

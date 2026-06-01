@@ -11,6 +11,7 @@ import {
 import ZingConnectLogo from '../../public/logo.png';
 import { useAuth } from '../context/AuthContext'; // Import your hook
 
+
 export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -32,6 +33,7 @@ export const AgentSlug = () => {
   const [rememberUser, setRememberUser] = useState(false);
   const [rememberAgent, setRememberAgent] = useState(false);
 const fullName = agentData ? `${agentData.firstName || ''} ${agentData.lastName || ''}`.trim() : '';
+const isMounted = React.useRef(true);
 
   useEffect(() => {
     const handler = (e) => {
@@ -87,7 +89,7 @@ useEffect(() => {
       } catch (err) {
         console.error("Fetch error:", err);
         setError(true);
-      } finally {
+            } finally {
         setLoading(false);
       }
     };
@@ -124,6 +126,12 @@ useEffect(() => {
     setShowInstallBtn(false);
   }
 };
+
+React.useEffect(() => {
+  return () => { isMounted.current = false; };
+}, []);
+
+
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -163,53 +171,48 @@ const handleUserInquiry = async (e) => {
 };
 
 const handleAgentLogin = async (e) => {
-  e.preventDefault();
-  setIsProcessing(true);
+    e.preventDefault();
+    setIsProcessing(true);
 
-  // Clean the inputs explicitly before the request
-  const payload = {
-    email: loginEmail.toLowerCase().trim(),
-    password: loginPassword,
-    targetSlug: slug.toLowerCase().trim(), // Match server-side case sensitivity
-    force: true
-  };
+    const payload = {
+      email: loginEmail.toLowerCase().trim(),
+      password: loginPassword,
+      targetSlug: slug.toLowerCase().trim(),
+      force: true
+    };
 
-  try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agents/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agents/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    if (response.ok && data.token) {
-      // 🛡️ CRITICAL FIX: Explicitly write to localStorage synchronously 
-      // so AgentLayoutWrapper reads it immediately during navigation.
-      localStorage.setItem('accessToken', data.token);
+      // Only proceed if component is still mounted
+      if (!isMounted.current) return;
 
-      // Call your state engine updater
-      setToken(data.token, payload.targetSlug);      
-      
-      // Update UI state
-      if (rememberAgent) {
-        localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
+      if (response.ok && data.token) {
+        localStorage.setItem('accessToken', data.token);
+        setToken(data.token, payload.targetSlug);
+        
+        if (rememberAgent) {
+          localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
+        }
+        
+        navigate(`/agent/dashboard/${payload.targetSlug}`);
+      } else {
+        console.error("Login Server Error:", data.message);
+        alert(data.message || "Invalid Credentials");
       }
-      
-      // Safe navigation now that localStorage is populated
-      navigate(`/agent/dashboard/${payload.targetSlug}`);
-    } else {
-      // Log the exact message from the server to debug the 401
-      console.error("Login Server Error:", data.message);
-      alert(data.message || "Invalid Credentials");
+    } catch (err) {
+      console.error("Network Error:", err);
+      if (isMounted.current) alert("Connection error. Please try again.");
+    } finally {
+      if (isMounted.current) setIsProcessing(false);
     }
-  } catch (err) {
-    console.error("Network Error:", err);
-    alert("Connection error. Please try again.");
-  } finally {
-    if (isMounted) setIsProcessing(false);
-  }
-};
+  };
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white">
