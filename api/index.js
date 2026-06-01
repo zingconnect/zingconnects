@@ -363,16 +363,16 @@ const addDays = (date, days) => {
   return result;
 };
 
-// =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
-// =========================================================================
+// We keep the route path, but we apply multer directly here.
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
 
+    // With upload.single('photo') here, req.body is already populated 
+    // by multer, and the multipart stream is consumed.
     const { firstName, lastName, email, password } = req.body;
-    const isResend = req.body.resend === 'true' || req.body.resend === true;
 
     // 1. INPUT VALIDATION
     if (!email) return res.status(400).json({ success: false, message: "Email required." });
@@ -380,7 +380,7 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
     const lowerEmail = String(email).toLowerCase().trim();
     let existingAgent = await AgentModel.findOne({ email: lowerEmail });
 
-    // 🛡️ SECURITY FIX: OTP Throttling (Prevents Email Bombing)
+    // 🛡️ SECURITY FIX: OTP Throttling
     if (existingAgent?.otpExpires && existingAgent.otpExpires > Date.now()) {
       return res.status(429).json({ success: false, message: "Verification code already sent. Please wait." });
     }
@@ -430,7 +430,8 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
     return res.status(200).json({ success: true, message: "Verification code sent." });
 
   } catch (err) {
-    next(err); // Safely log error
+    console.error("❌ Registration Error:", err);
+    next(err); 
   }
 });
 
