@@ -362,9 +362,9 @@ const addDays = (date, days) => {
   result.setDate(result.getDate() + days);
   return result;
 };
-
+// ==========================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
-// We keep the route path, but we apply multer directly here.
+// ==========================================
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -413,6 +413,7 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
       Object.assign(existingAgent, { otp: otpCode, otpExpires: otpExpiry, photoUrl: savedPhotoPath });
       await existingAgent.save();
     } else {
+      // ✨ FIXED: Initializing with empty strings to guarantee document-level field generation on document instantiation
       await AgentModel.create({
         firstName: (firstName || "Agent").trim(),
         lastName: (lastName || "").trim(),
@@ -420,6 +421,11 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
         password: await bcrypt.hash(password || "temp123", 10),
         slug: `${(firstName || "agent").toLowerCase()}-${Date.now().toString().slice(-4)}`,
         photoUrl: savedPhotoPath,
+        occupation: "",
+        program: "",
+        bio: "",
+        address: "",
+        gender: "",
         otp: otpCode,
         otpExpires: otpExpiry
       });
@@ -446,64 +452,70 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     from: `"ZingConnect Security" <${process.env.GMAIL_USER}>`,
     to: email,
     subject: "Your Verification Code",
+    // ✨ FIXED: Appended embedded logo attachment matching the template CID specification
+    attachments: [{
+      filename: 'logo.png',
+      path: './public/logo.png', // Adjust path configuration to point exactly to your brand logo resource asset location
+      cid: 'zinglogo' 
+    }],
     html: `
-        <!DOCTYPE html>
-                  <html>
-                  <head>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <style>
-                      @media only screen and (max-width: 600px) {
-                        .container { width: 100% !important; border-radius: 0 !important; }
-                        .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
-                      }
-                    </style>
-                  </head>
-                  <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                      <tr>
-                        <td align="center" style="padding: 40px 10px;">
-                          <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                            <tr>
-                              <td align="center" style="padding: 30px 40px 10px 40px;">
-                                <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
-                              </td>
-                            </tr>
-                            <tr>
-                              <td style="padding: 20px 40px 40px 40px; text-align: center;">
-                                <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
-                                <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
-                                  Hello <strong>${firstName || 'Agent'}</strong>,<br>
-                                  Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
-                                </p>
-                                <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
-                                  ${otpCode}
-                                </div>
-                                <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
-                                  This code is valid for <strong>10 minutes</strong>.<br>
-                                  If you didn't request this, you can safely ignore this email.
-                                </p>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
-                                <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                                  &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
-                                </p>
-                              </td>
-                            </tr>
-                          </table>
-                        </td>
-                      </tr>
-                    </table>
-                  </body>
-                  </html>
-                `
-            });
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          @media only screen and (max-width: 600px) {
+            .container { width: 100% !important; border-radius: 0 !important; }
+            .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+          }
+        </style>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr>
+            <td align="center" style="padding: 40px 10px;">
+              <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                <tr>
+                  <td align="center" style="padding: 30px 40px 10px 40px;">
+                    <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                    <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                    <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                      Hello <strong>${firstName || 'Agent'}</strong>,<br>
+                      Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                    </p>
+                    <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
+                      ${otpCode}
+                    </div>
+                    <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                      This code is valid for <strong>10 minutes</strong>.<br>
+                      If you didn't request this, you can safely ignore this email.
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                    <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                      &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `
+  });
 }
 
-// =========================================================================
+// ==========================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/verify-otp
-// =========================================================================
+// ==========================================
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -518,10 +530,8 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
     // 🛡️ SECURITY FIX 1: Brute-Force & Validation Check
-    // We check if the agent exists first to keep the logic clean and prevent timing attacks
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      // 🛡️ SECURITY FIX 2: Generic Error Message
-      // Never tell the attacker WHY it failed (expired vs. wrong code) to prevent enumeration
+      // 🛡️ SECURITY FIX 2: Generic Error Message to prevent enumeration
       return res.status(400).json({ 
         success: false, 
         message: "Invalid or expired verification code." 
@@ -534,6 +544,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     agent.otp = undefined;
     agent.otpExpires = undefined;
     await agent.save();
+    
     if (!process.env.JWT_SECRET) {
       throw new Error("Security configuration error.");
     }
@@ -552,7 +563,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX 4: Prevent leaking internal DB details
+    // 🛡️ SECURITY FIX 4: Prevent leaking internal DB details via fallback global handling
     next(err); 
   }
 });
