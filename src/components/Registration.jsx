@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsEyeFill, BsEyeSlashFill, BsCloudUploadFill, BsArrowRight, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
-import { secureFetch } from '../utils/api';
+import { secureFetch } from "../../api/utils/api";
 
 export const Registration = () => {
   const location = useLocation();

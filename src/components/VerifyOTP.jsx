@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsShieldCheck, BsCheckCircleFill, BsCopy, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
-import { secureFetch } from '../utils/api'; // Ensure this path is correct
+import { secureFetch } from "../../api/utils/api";
+
 
 export const VerifyOTP = () => {
   const location = useLocation();
