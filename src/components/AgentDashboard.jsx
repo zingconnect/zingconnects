@@ -1315,50 +1315,48 @@ useEffect(() => {
     document.body.appendChild(script);
   }
 
-  const fetchInitialData = async () => {
-    setLoading(true);
-    try {
-      const profileRes = await secureFetch('/api/agents/profile/me', null, { method: 'GET' });
+const fetchInitialData = async () => {
+  setLoading(true);
+  try {
+    const profileRes = await secureFetch('/api/agents/profile/me', null, { method: 'GET' });
 
-      // Handle Unauthorized/Forbidden explicitly
-      if (profileRes.status === 401 || profileRes.status === 403) {
-        if (!isMounted) return;
-        
-        const errorData = await profileRes.json().catch(() => ({}));
-        if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
-          setIsDualLoginConflict(true);
-        } else {
-          // Redirect to dynamic login path
-          const loginPath = slug ? `/${slug}/login` : '/login';
-          navigate(loginPath);
-        }
-        return; 
-      }
-
-      if (!profileRes.ok) throw new Error("Failed to load profile");
+    if (profileRes.status === 401 || profileRes.status === 403) {
+      if (!isMounted) return;
       
-      const profileData = await profileRes.json();
-      if (isMounted && profileData.agent) {
-        setAgentData(profileData.agent);
-        setIsSubscribed(!!profileData.agent.isSubscribed); 
-        if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
+      const errorData = await profileRes.json().catch(() => ({}));
+      
+      if (errorData.reason === 'dual_login') {
+        setIsDualLoginConflict(true);
+      } else {
+        // Fallback to agent's home instead of /login
+        const fallbackPath = slug ? `/${slug}` : '/';
+        navigate(fallbackPath);
+      }
+      return; 
+    }
 
-        // Fetch users only if subscribed
-        if (profileData.agent.isSubscribed) {
-          const usersRes = await secureFetch('/api/agents/my-users', null, { method: 'GET' });
-          if (usersRes.ok) {
-            const userData = await usersRes.json();
-            if (userData.success) setUsers(userData.users);
-          }
+    if (!profileRes.ok) throw new Error("Profile fetch failed");
+    
+    const profileData = await profileRes.json();
+    if (isMounted && profileData.agent) {
+      setAgentData(profileData.agent);
+      setIsSubscribed(!!profileData.agent.isSubscribed); 
+      if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
+
+      if (profileData.agent.isSubscribed) {
+        const usersRes = await secureFetch('/api/agents/my-users', null, { method: 'GET' });
+        if (usersRes.ok) {
+           const userData = await usersRes.json();
+           if (userData.success) setUsers(userData.users);
         }
       }
-    } catch (err) {
-      console.error("Initialization error:", err);
-    } finally {
-      if (isMounted) setLoading(false);
     }
-  };
-
+  } catch (err) {
+    console.error("Initialization error:", err);
+  } finally {
+    if (isMounted) setLoading(false);
+  }
+};
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]);
