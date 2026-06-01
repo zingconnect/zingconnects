@@ -1538,6 +1538,7 @@ app.put('/api/users/update-profile', authenticateToken, upload.single('photo'), 
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ ROUTE 1: GET /api/subscriptions/rate/:planPrice
 // =========================================================================
@@ -1567,6 +1568,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
   try {
     await connectToDatabase();
 
+    // 1. JWT AUTHENTICATION CHECK
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -1586,6 +1588,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       return res.status(400).json({ message: "Transaction ID and target plan choice are required" });
     }
 
+    // Fixed pricing architecture map
     const planPricesInNGN = {
       'BASIC': 8500,          
       'GROWTH': 43500,         
@@ -1598,6 +1601,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
     }
     const expectedNairaPrice = planPricesInNGN[targetPlan];
     
+    // 2. FLUTTERWAVE VERIFICATION ENGINE
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
     
@@ -1607,52 +1611,58 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
       Number(data.amount) >= expectedNairaPrice
     ) {
       
-      const now = new Date();
-      let expiry = new Date();
-
-      if (targetPlan === 'BASIC') {
-        expiry.setMonth(now.getMonth() + 1);
-      } else if (targetPlan === 'GROWTH') {
-        expiry.setMonth(now.getMonth() + 6);
-      } else if (targetPlan === 'PROFESSIONAL') {
-        expiry.setFullYear(now.getFullYear() + 1);
-      }
-
-      const updatedAgent = await Agent.findByIdAndUpdate(
-        decoded.id,
-        {
-          $set: {
-            isSubscribed: true,
-            plan: targetPlan,
-            subscriptionDate: now,
-            expiryDate: expiry, 
-            expiryNotificationSent: false,
-            lastTransactionId: String(transaction_id),
-            paymentDetails: {
-              amountNgn: data.amount,
-              currency: "NGN",
-              verifiedAt: now
-            }
-          }
-        },
-        { new: true }
-      ).select('firstName lastName email plan isSubscribed expiryDate');
-
-      if (!updatedAgent) {
+      const AgentModel = getAgentModel(); // Fetch model instance safely
+      const agent = await AgentModel.findById(decoded.id);
+      if (!agent) {
         return res.status(404).json({ message: "Agent profile mapping context missing." });
       }
 
-      console.log(`Subscription ACTIVATED for: ${updatedAgent.email} | Amount: ₦${data.amount}`);
+      const now = new Date();
+      let baseDate = new Date();
+
+      // ✨ STACKING ENGINE LOGIC: If subscription is active, stack on top of old expiry date
+      if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > Date.now()) {
+        baseDate = new Date(agent.expiryDate);
+      }
+
+      // Calculate timeline duration blocks dynamically depending on selected tier
+      if (targetPlan === 'BASIC') {
+        baseDate.setMonth(baseDate.getMonth() + 1);
+      } else if (targetPlan === 'GROWTH') {
+        baseDate.setMonth(baseDate.getMonth() + 6);
+      } else if (targetPlan === 'PROFESSIONAL') {
+        baseDate.setFullYear(baseDate.getFullYear() + 1);
+      }
+
+      // 3. PERSIST RE-CALCULATED DOCUMENT VALUES
+      agent.isSubscribed = true;
+      agent.plan = targetPlan;
+      agent.status = 'active';
+      if (!agent.subscriptionDate) {
+        agent.subscriptionDate = now;
+      }
+      agent.expiryDate = baseDate;
+      agent.expiryNotificationSent = false;
+      agent.lastTransactionId = String(transaction_id);
+      agent.paymentDetails = {
+        amountNgn: data.amount,
+        currency: "NGN",
+        verifiedAt: now
+      };
+
+      await agent.save();
+
+      console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Amount: ₦${data.amount}`);
 
       return res.json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",
         agent: {
-          id: updatedAgent._id,
-          email: updatedAgent.email,
-          plan: updatedAgent.plan,
-          isSubscribed: !!updatedAgent.isSubscribed,
-          expiryDate: updatedAgent.expiryDate
+          id: agent._id,
+          email: agent.email,
+          plan: agent.plan,
+          isSubscribed: !!agent.isSubscribed,
+          expiryDate: agent.expiryDate
         }
       });
     } else {
@@ -1663,6 +1673,108 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
     }
 
   } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================================
+// 💳 EXTEND/UPGRADE SUBSCRIPTION PIPELINE (WITH GATEWAY ENFORCEMENT)
+// =========================================================================
+app.put('/api/agents/update-subscription', async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
+    
+    // Auth context middleware verification extraction
+    const agentId = req.user?.id || req.body.agentId; 
+    const { planTier, months, transaction_id } = req.body;
+
+    if (!planTier || !months || months < 1 || !transaction_id) {
+      return res.status(400).json({ success: false, message: "Invalid parameters or missing Flutterwave transaction reference." });
+    }
+
+    const agent = await AgentModel.findById(agentId);
+    if (!agent) return res.status(404).json({ success: false, message: "Agent account not found." });
+
+    // ✨ CRITICAL BUG FIX 1: Updated variable structure reference match
+    const planPricesInNGN = {
+      'BASIC': 8500,          
+      'GROWTH': 43500,         
+      'PROFESSIONAL': 88500    
+    };
+
+    const targetPlan = planTier.toUpperCase().trim();
+    const monthlyRate = planPricesInNGN[targetPlan];
+    
+    if (!monthlyRate) {
+      return res.status(400).json({ success: false, message: "Invalid tier selection." });
+    }
+
+    const totalCostExpected = monthlyRate * parseInt(months, 10);
+
+    // ✨ CRITICAL BUG FIX 2: Intercept Flutterwave metrics prior to writing document changes to DB
+    const flwVerify = await flw.Transaction.verify({ id: transaction_id });
+    const flwData = flwVerify.data;
+
+    if (
+      flwData.status !== "successful" ||
+      flwData.currency !== "NGN" ||
+      Number(flwData.amount) < totalCostExpected
+    ) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Payment validation failed. Expected: ₦${totalCostExpected}, Received: ₦${flwData.amount}` 
+      });
+    }
+
+    // 2. STACKABLE CALCULATION ENGINE
+    let baseDate = new Date();
+    const now = Date.now();
+
+    // If current subscription is active, stack on top of the old expiry date
+    if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > now) {
+      baseDate = new Date(agent.expiryDate);
+    }
+
+    // Extend the month block safely
+    baseDate.setMonth(baseDate.getMonth() + parseInt(months, 10));
+    const newExpiryDate = baseDate.toISOString();
+
+    // 3. Persist Updated Subscription State to DB Doc
+    agent.plan = targetPlan;
+    agent.isSubscribed = true;
+    agent.status = 'active';
+    agent.subscriptionAmount = totalCostExpected;
+    agent.expiryDate = newExpiryDate;
+    agent.lastTransactionId = String(transaction_id);
+    
+    if (!agent.subscriptionDate) {
+      agent.subscriptionDate = new Date().toISOString();
+    }
+
+    // Update payment details object for dashboard fallback display
+    agent.paymentDetails = {
+      amountNgn: flwData.amount,
+      currency: "NGN",
+      verifiedAt: new Date().toISOString()
+    };
+
+    await agent.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully extended ${targetPlan} subscription by ${months} month(s)!`,
+      agent: {
+        plan: agent.plan,
+        isSubscribed: agent.isSubscribed,
+        expiryDate: agent.expiryDate,
+        subscriptionAmount: agent.subscriptionAmount,
+        paymentDetails: agent.paymentDetails
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Subscription Sync Error:", err);
     next(err);
   }
 });

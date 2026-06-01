@@ -25,6 +25,10 @@ export const AgentProfile = () => {
   const [isSubscribed, setIsSubscribed] = useState(true);
   const [activeTheme, setActiveTheme] = useState(localStorage.getItem('theme') || 'system');
   
+  // ✨ SUBSCRIPTION UPGRADE STATE CONFIGURATION
+  const [subConfig, setSubConfig] = useState({ planTier: 'BASIC', months: 1 });
+  const [isUpdatingSub, setIsUpdatingSub] = useState(false);
+  
   const [agentData, setAgentData] = useState({
     email: '',
     firstName: '',
@@ -51,6 +55,13 @@ export const AgentProfile = () => {
     newPassword: '',
     confirmPassword: ''
   });
+
+  // Accurate Flutterwave System Pricing Map Structure Match
+  const planPricesInNGN = {
+    'BASIC': 8500,          
+    'GROWTH': 43500,         
+    'PROFESSIONAL': 88500    
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -139,6 +150,87 @@ export const AgentProfile = () => {
     }
   };
 
+  // ✨ HANDLER: PROCESS PRODUCTION FLUTTERWAVE EXTENSION GATEWAY PIPELINE
+  const handleUpgradeSubscription = async (e) => {
+    e.preventDefault();
+
+    if (!agentData || !agentData.email) {
+      alert("Profile telemetry mapping incomplete. Please try again.");
+      return;
+    }
+
+    setIsUpdatingSub(true);
+
+    const targetMonthlyRate = planPricesInNGN[subConfig.planTier] || 8500;
+    const finalCalculatedNairaAmount = targetMonthlyRate * subConfig.months;
+
+    try {
+      window.FlutterwaveCheckout({
+        public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
+        tx_ref: `ZING-EXT-${Date.now()}`,
+        amount: finalCalculatedNairaAmount,
+        currency: "NGN",
+        payment_options: "card, account, transfer, ussd",
+        customer: {
+          email: agentData?.email,
+          name: `${agentData?.firstName || ''} ${agentData?.lastName || ''}`.trim() || "Agent User",
+        },
+        customizations: {
+          title: "ZingConnect",
+          description: `Extend ${subConfig.planTier} Plan by ${subConfig.months} Month(s) (₦${finalCalculatedNairaAmount.toLocaleString()})`,
+          logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
+        },
+        callback: async (response) => {
+          try {
+            const storedToken = localStorage.getItem('accessToken');
+
+            // Send real transaction reference directly to your hardened PUT upgrade endpoint
+            const verifyRes = await secureFetch('/api/agents/update-subscription', storedToken, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                planTier: subConfig.planTier,
+                months: parseInt(subConfig.months, 10),
+                transaction_id: response.transaction_id
+              })
+            });
+
+            if (verifyRes.ok) {
+              const result = await verifyRes.json();
+              alert(result.message || "Subscription tenure stacked successfully!");
+              
+              // Direct state merge avoids full layout flickering resets
+              setAgentData(prev => ({
+                ...prev,
+                plan: result.agent.plan,
+                isSubscribed: result.agent.isSubscribed,
+                expiryDate: result.agent.expiryDate,
+                subscriptionAmount: result.agent.subscriptionAmount,
+                paymentDetails: result.agent.paymentDetails
+              }));
+              setIsSubscribed(true);
+            } else {
+              const errData = await verifyRes.json();
+              alert(errData.message || "Tenure processing pipeline rejection error.");
+            }
+          } catch (err) {
+            console.error("Verification backend error:", err);
+            alert("Connection timeout syncing transaction parameters.");
+          } finally {
+            setIsUpdatingSub(false);
+          }
+        },
+        onclose: () => {
+          setIsUpdatingSub(false);
+        }
+      });
+    } catch (err) {
+      console.error("Flutterwave Runtime Framework Crash:", err);
+      alert("Failed to initialize payment frame connection layer.");
+      setIsUpdatingSub(false);
+    }
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -178,7 +270,7 @@ export const AgentProfile = () => {
               <h2 className="text-xl font-black uppercase leading-none">{agentData.plan || 'BASIC'}</h2>
             </div>
             <p className="text-lg font-bold mt-2">
-              ₦{Number(agentData.subscriptionAmount || agentData.paymentDetails?.amountNgn || 0).toLocaleString()}
+              ₦{Number(agentData.subscriptionAmount || agentData.paymentDetails?.amountNgn || planPricesInNGN[agentData.plan] || 0).toLocaleString()}
             </p>
           </div>
 
@@ -200,9 +292,64 @@ export const AgentProfile = () => {
                 <span className="text-xs font-bold break-words">{formatDate(agentData.expiryDate)}</span>
               </div>
             </div>
-            <span className={`mt-2 text-[7px] font-black uppercase tracking-widest ${agentData.isSubscribed ? 'text-green-500' : 'text-red-500'}`}>
-              ● {agentData.isSubscribed ? 'Active' : 'Expired'}
+            <span className={`mt-2 text-[7px] font-black uppercase tracking-widest ${isSubscribed ? 'text-green-500' : 'text-red-500'}`}>
+              ● {isSubscribed ? 'Active' : 'Expired'}
             </span>
+          </div>
+        </section>
+
+        {/* ✨ REAL TIME STACKABLE SUBSCRIPTION RENEWAL PANEL */}
+        <section className="mb-10 bg-card-bg/50 dark:bg-slate-900/50 p-6 rounded-[2rem] border border-dashed border-gray-200 dark:border-slate-700">
+          <div className="flex items-center gap-2 mb-5">
+            <BsCashStack className="text-blue-600" size={16} />
+            <h3 className="text-[9px] font-black uppercase tracking-[0.15em] text-blue-900 dark:text-blue-400">Stack / Extend Subscription Tenure</h3>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+            <div className="space-y-1.5">
+              <label className="text-[8px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 ml-2">Select Subscription Tier</label>
+              <select 
+                value={subConfig.planTier}
+                onChange={(e) => setSubConfig({ ...subConfig, planTier: e.target.value })}
+                className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-4 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-colors"
+              >
+                <option value="BASIC">BASIC — ₦8,500/mo</option>
+                <option value="GROWTH">GROWTH — ₦43,500/mo</option>
+                <option value="PROFESSIONAL">PROFESSIONAL — ₦88,500/mo</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[8px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-500 ml-2">Extension Multiplier (Tenure Months)</label>
+              <select 
+                value={subConfig.months}
+                onChange={(e) => setSubConfig({ ...subConfig, months: parseInt(e.target.value, 10) })}
+                className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-4 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-colors"
+              >
+                <option value="1">1 Month Extension</option>
+                <option value="2">2 Months Extension</option>
+                <option value="3">3 Months Extension</option>
+                <option value="6">6 Months Extension</option>
+                <option value="12">12 Months (Full Year Sync)</option>
+              </select>
+            </div>
+
+            <div className="md:col-span-2 pt-2 flex flex-col sm:flex-row gap-4 items-center justify-between bg-white dark:bg-slate-900 p-5 rounded-2xl border border-gray-100 dark:border-slate-800">
+              <div>
+                <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Calculated Billing Ingestion</p>
+                <p className="text-lg font-black text-blue-900 dark:text-blue-400 mt-0.5">
+                  ₦{Number((planPricesInNGN[subConfig.planTier] || 8500) * subConfig.months).toLocaleString()}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isUpdatingSub}
+                onClick={handleUpgradeSubscription}
+                className="w-full sm:w-auto px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-[9px] uppercase tracking-widest rounded-xl transition-all disabled:opacity-50 shadow-md"
+              >
+                {isUpdatingSub ? "Awaiting Gateway Payment..." : "Authorize Renewal Tenure"}
+              </button>
+            </div>
           </div>
         </section>
 
