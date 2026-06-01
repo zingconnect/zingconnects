@@ -184,15 +184,13 @@ const handleAgentLogin = async (e) => {
     const data = await response.json();
 
     if (response.ok && data.token) {
-      // Set the token globally for your AuthContext/API calls
-      localStorage.setItem('agentToken', data.token);
-      
+setToken(data.token, payload.targetSlug);      
       // Update UI state
-      if (rememberAgent) {
-        localStorage.setItem(`rememberedAgentEmail_${slug}`, loginEmail.trim());
-      }
+     if (rememberAgent) {
+       localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
+    }
       
-      navigate(`/agent/dashboard/${slug}`);
+    navigate(`/agent/dashboard/${payload.targetSlug}`);
     } else {
       // Log the exact message from the server to debug the 401
       console.error("Login Server Error:", data.message);

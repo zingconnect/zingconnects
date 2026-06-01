@@ -3,25 +3,22 @@ import { createContext, useState, useContext, useEffect } from 'react';
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [token, setTokenState] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // 1. Eagerly hydrate from the SPECIFIC active slug
-  useEffect(() => {
+  // 1. SYNCHRONOUS INITIALIZATION
+  // We initialize state directly from localStorage so it's ready on the first render.
+  const [token, setTokenState] = useState(() => {
     const activeSlug = localStorage.getItem('zing_active_slug');
-    if (activeSlug) {
-      const savedToken = localStorage.getItem(`zing_token_${activeSlug}`);
-      setTokenState(savedToken);
-    }
-    setIsLoading(false);
-  }, []);
+    return activeSlug ? localStorage.getItem(`zing_token_${activeSlug}`) : null;
+  });
 
-  // 2. Listen for cross-tab updates
+  // We set loading to false immediately because we've already hydrated the state.
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 2. Listen for cross-tab updates (remains the same)
   useEffect(() => {
     const handleStorageChange = (e) => {
-      // Only react if the active slug or the active token changed
-      if (e.key === 'zing_active_slug' || e.key === `zing_token_${localStorage.getItem('zing_active_slug')}`) {
-        setTokenState(localStorage.getItem(`zing_token_${localStorage.getItem('zing_active_slug')}`));
+      const activeSlug = localStorage.getItem('zing_active_slug');
+      if (e.key === 'zing_active_slug' || e.key === `zing_token_${activeSlug}`) {
+        setTokenState(localStorage.getItem(`zing_token_${activeSlug}`));
       }
     };
     window.addEventListener('storage', handleStorageChange);
@@ -35,7 +32,6 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem(`zing_token_${slug}`, newToken);
       setTokenState(newToken);
     } else {
-      // Clear specific session
       const activeSlug = localStorage.getItem('zing_active_slug');
       if (activeSlug) localStorage.removeItem(`zing_token_${activeSlug}`);
       localStorage.removeItem('zing_active_slug');
