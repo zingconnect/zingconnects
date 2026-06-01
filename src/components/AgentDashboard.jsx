@@ -1303,13 +1303,11 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
   }, [isDualLoginConflict]);
-
-  useEffect(() => {
+useEffect(() => {
   let isMounted = true;
 
   const token = localStorage.getItem('accessToken'); 
 
-  // Script injection
   if (!document.querySelector('script[src*="flutterwave"]')) {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
@@ -1318,16 +1316,13 @@ useEffect(() => {
   }
 
   const fetchInitialData = async () => {
-    // 🛡️ GUARD 1: If there's no token, stop immediately.
-    // This is a public page, so visitors without a token see it cleanly without loops.
     if (!token) {
-      setLoading(false);
+      navigate(`/agent/dashboard/${slug}`);
       return;
     }
 
     setLoading(true);
     try {
-      // 🚀 SPEED BOOST: Trigger BOTH network requests at the exact same moment!
       const [profileResponse, usersResponse] = await Promise.allSettled([
         secureFetch('/api/agents/profile/me', token, { method: 'GET' }),
         secureFetch('/api/agents/my-users', token, { method: 'GET' })
@@ -1335,21 +1330,19 @@ useEffect(() => {
 
       if (!isMounted) return;
 
-      // 1. Validate the profile fetch request
       if (profileResponse.status === 'rejected') {
         throw new Error("Profile network request failed completely");
       }
       
       const profileRes = profileResponse.value;
 
-      // Handle Authentication failures instantly
       if (profileRes.status === 401 || profileRes.status === 403) {
         const errorData = await profileRes.json().catch(() => ({}));
         if (errorData.reason === 'dual_login') {
           setIsDualLoginConflict(true);
         } else {
-          // Token is dead/expired. Wipe it so they remain as a normal visitor.
           localStorage.removeItem('accessToken'); 
+          navigate(`/agent/dashboard/${slug}`);
         }
         return; 
       }
@@ -1358,20 +1351,12 @@ useEffect(() => {
       
       const profileData = await profileRes.json();
       
-      // 2. Populate Agent data state smoothly
       if (profileData.agent) {
         setAgentData(profileData.agent);
         const subscribed = !!profileData.agent.isSubscribed;
         setIsSubscribed(subscribed); 
         if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
 
-        // 🚀 SMART ROUTING: Bounces logged-in agents straight to their dashboard
-        if (slug && profileData.agent.slug === slug.toLowerCase().trim()) {
-          navigate(`/agent/dashboard/${slug}`);
-          return;
-        }
-
-        // 3. Process the pre-fetched concurrent users array if subscribed
         if (subscribed && usersResponse.status === 'fulfilled' && usersResponse.value.ok) {
           const userData = await usersResponse.value.json();
           if (userData.success) setUsers(userData.users);
@@ -1380,14 +1365,13 @@ useEffect(() => {
     } catch (err) {
       console.error("Initialization speed-error:", err);
     } finally {
-      if (isMounted) setLoading(false); // 💨 Drops the loader significantly faster!
+      if (isMounted) setLoading(false);
     }
   };
 
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]);
-
 
 const handlePayment = async () => {
   if (!agentData || !agentData.email) {
