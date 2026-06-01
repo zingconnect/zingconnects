@@ -391,7 +391,7 @@ router.post('/broadcast-news', authenticateToken, isAdmin, async (req, res) => {
     // If you exported 'transporter' in mailer.js, use it. Otherwise, create a one-time transporter here:
     // For this example, I'll assume you add an export to your mailer.js or just use the same config:
     
-    const baseUrl = "https://zingconnect.vercel.app";
+    const baseUrl = "https://zingconnect.chat";
     const logoUrl = `${baseUrl}/logo-s.png`; // Points to your public/logo.png
     const brandColor = "#2563eb";
 

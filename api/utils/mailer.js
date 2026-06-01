@@ -69,7 +69,7 @@ const sendMailWithFailover = async (mailOptions) => {
  */
 export const sendOfflineNotification = async (receiver, sender, text, receiverType, fileUrl = null, fileType = null) => {
   try {
-    const baseUrl = "https://zingconnect.vercel.app";
+    const baseUrl = "https://zingconnect.chat";
     const brandColor = "#007bff"; 
     
     // 🚀 Dynamically label who the notification is coming from

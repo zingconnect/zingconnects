@@ -68,7 +68,7 @@ app.set('terminatingCallsCache', terminatingCallsCache);
 app.set('redisClient', redisClient); 
 
 const corsOptions = {
-  origin: "https://zingconnect.vercel.app",
+  origin: "https://zingconnect.chat",
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true, // MANDATORY for cookies
   allowedHeaders: ["Content-Type", "Authorization"], 
@@ -3343,7 +3343,7 @@ app.post('/api/admin/broadcast-news', authenticateToken, isAdmin, async (req, re
       auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
     });
 
-    const baseUrl = "https://zingconnect.vercel.app";
+    const baseUrl = "https://zingconnect.chat";
     const logoUrl = `${baseUrl}/logos.png`;
     const configs = {
       maintenance: { color: "#f59e0b", label: "SYSTEM MAINTENANCE", bg: "#fffbeb", icon: "⚙️" },

@@ -1268,7 +1268,9 @@ useEffect(() => {
 
   const heartBeat = setInterval(async () => {
     try {
-      const response = await secureFetch('/api/agents/heartbeat', token);
+      const response = await secureFetch('/api/agents/heartbeat', {
+      method: 'POST' 
+    });
       
       // If a conflict is detected
       if (response.status === 403) {
@@ -1545,16 +1547,22 @@ const handleFinalSend = async () => {
     setIsUploading(false);
   }
 };
+const handleLogout = async () => {
+  const currentSlug = agentData?.slug;
 
-  const handleLogout = () => {
-    const currentSlug = agentData.slug;
+  try {
+    await secureFetch('/api/agents/logout', { method: 'POST' });
+  } catch (err) {
+    console.error("Logout request failed, but proceeding with local cleanup:", err);
+  } finally {
     localStorage.removeItem('agentToken');
-    if (currentSlug) {
+        if (currentSlug) {
       window.location.href = `/${currentSlug}`;
     } else {
       window.location.href = '/';
     }
-  };
+  }
+};
   
  const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
@@ -2149,12 +2157,25 @@ return (
       </div>
       <h2 className="text-2xl font-black uppercase tracking-tighter text-slate-900 mb-4">Security Alert</h2>
       <p className="text-slate-500 text-sm mb-8">Your account is active on another device.</p>
-      <button 
-        onClick={() => { localStorage.removeItem('agentToken'); window.location.href = '/login'; }} 
-        className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]"
-      >
-        Disconnect Other Device
-      </button>
+     <button 
+  onClick={async () => { const pathParts = window.location.pathname.split('/'); const currentSlug = pathParts[pathParts.length - 1];
+
+    try {
+      await secureFetch('/api/agents/logout', { method: 'POST' });
+    } catch (err) {
+      console.error("Logout request failed:", err);
+    } finally {
+      // 3. Always clean up local storage regardless of network success
+      localStorage.removeItem('agentToken');
+      
+      // 4. Redirect to login, passing the slug so the user can easily resume
+      window.location.href = `/login?redirect=${currentSlug}`;
+    }
+  }} 
+  className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[11px]"
+>
+  Disconnect Other Device
+</button>
     </div>
   </div>
 ) : !isSubscribed && !showSuccessOverlay ? (
