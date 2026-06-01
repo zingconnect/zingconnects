@@ -666,7 +666,6 @@ app.get('/api/agents/profile', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 // ==========================================
 // 🛡️ HARDENED ROUTE 2: GET /api/agents/profile/me
 // ==========================================
@@ -680,9 +679,9 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
 
     const AgentModel = getAgentModel();
     
-    // 🛡️ SECURITY FIX: Ensure sensitive properties don't populate application layer memory spaces
+    // 🛡️ SECURITY FIX RESOLVED: Included occupation, program, bio, address, and subscriptionAmount / payment fields
     const agent = await AgentModel.findById(req.user.id)
-      .select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation photoUrl slug plan isSubscribed subscriptionDate voiceId voicePackageActive lastActive createdAt');
+      .select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive lastActive createdAt');
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -745,16 +744,24 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
         firstName: agent.firstName || "",
         lastName: agent.lastName || "",
         occupation: agent.occupation || "",
+        program: agent.program || "",         // ✨ Added for frontend UI
+        bio: agent.bio || "",                 // ✨ Added for frontend UI
+        address: agent.address || "",         // ✨ Added for frontend UI
         photoUrl: signedPhotoUrl, 
         slug: agent.slug || "",
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed, 
+        subscriptionAmount: agent.subscriptionAmount || 0, // ✨ Added fallback mapping
         subscriptionDate: agent.subscriptionDate || null,
         expiryDate: agent.expiryDate || null,
         voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
         voicePackageActive: !!agent.voicePackageActive, 
         status: isOnline ? 'online' : 'offline',
-        lastActive: agent.lastActive
+        lastActive: agent.lastActive,
+        // ✨ Added to support nested payment mapping configurations matching your card parsing logic
+        paymentDetails: {
+          amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0
+        }
       }
     });
 

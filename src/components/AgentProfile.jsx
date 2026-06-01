@@ -178,7 +178,7 @@ export const AgentProfile = () => {
               <h2 className="text-xl font-black uppercase leading-none">{agentData.plan || 'BASIC'}</h2>
             </div>
             <p className="text-lg font-bold mt-2">
-              ₦{Number(agentData.paymentDetails?.amountNgn || 0).toLocaleString()}
+              ₦{Number(agentData.subscriptionAmount || agentData.paymentDetails?.amountNgn || 0).toLocaleString()}
             </p>
           </div>
 
