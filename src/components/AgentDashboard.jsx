@@ -1693,19 +1693,18 @@ useEffect(() => {
 
 useEffect(() => {
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
+
   const refreshUserList = async () => {
     try {
-      const res = await secureFetch('/api/agents/my-users', null, { 
+      const token = localStorage.getItem('accessToken');
+      const res = await secureFetch('/api/agents/my-users', token, { 
         method: 'GET' 
       });
-
       if (res.status === 403 || res.status === 401) {
         setIsDualLoginConflict(true);
         return;
       }
-
       if (!res.ok) throw new Error("Failed to fetch");
-
       const data = await res.json();
       if (data.success) {
         setUsers(data.users);
@@ -1715,8 +1714,7 @@ useEffect(() => {
     }
   };
   const interval = setInterval(refreshUserList, 15000);
-    refreshUserList();
-
+  refreshUserList();
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
 
