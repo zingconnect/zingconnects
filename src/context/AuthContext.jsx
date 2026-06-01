@@ -8,10 +8,8 @@ export const AuthProvider = ({ children }) => {
     return activeSlug ? localStorage.getItem(`zing_token_${activeSlug}`) : null;
   });
 
-  // We set loading to false immediately because we've already hydrated the state.
   const [isLoading, setIsLoading] = useState(false);
 
-  // 2. Listen for cross-tab updates (remains the same)
   useEffect(() => {
     const handleStorageChange = (e) => {
       const activeSlug = localStorage.getItem('zing_active_slug');

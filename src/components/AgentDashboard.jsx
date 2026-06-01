@@ -256,31 +256,35 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
       handleEndCall();
     }
   };
+const startStatusPolling = (roomName) => {
+  const startTime = Date.now(); 
 
-  const startStatusPolling = (roomName) => {
-    const startTime = Date.now(); 
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const token = localStorage.getItem('agentToken');
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });      
-        const data = await res.json();
-        const isTimeout = (Date.now() - startTime) > 45000; 
-        
-        if (data.success && (['ended', 'rejected', 'missed'].includes(data.status) || (isTimeout && data.status === 'calling'))) {
-          console.log("🚫 Call timed out or changed state in remote polling engine.");
-          clearInterval(pollInterval);
-          handleEndCall(); 
-        }
-      } catch (err) {
-        console.error("Poller Error:", err);
+  const pollInterval = setInterval(async () => {
+    try {
+      const res = await secureFetch(`/api/calls/status/${roomName}`, null, { 
+        method: 'GET' 
+      });
+      
+      const data = await res.json();
+      const isTimeout = (Date.now() - startTime) > 45000; 
+      
+      if (data.success && (['ended', 'rejected', 'missed'].includes(data.status) || (isTimeout && data.status === 'calling'))) {
+        console.log("🚫 Call state changed or timed out.");
+        clearInterval(pollInterval);
+        handleEndCall(); 
       }
-    }, 4000); 
-    
-    if (pollingIntervalRef) pollingIntervalRef.current = pollInterval;
-  };
+    } catch (err) {
+      if (err.message === 'Unauthorized') {
+        console.warn("Polling halted: Unauthorized");
+        clearInterval(pollInterval);
+        setIsDualLoginConflict(true);
+      }
+      console.error("Poller Error:", err);
+    }
+  }, 4000); 
+  
+  if (pollingIntervalRef) pollingIntervalRef.current = pollInterval;
+};
 
   const handleScroll = async (e) => {
   const container = e.target;
@@ -297,17 +301,22 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
   }
 };
 
-// Updated to use the secureFetch utility, which handles cookies automatically
 const fetchMessages = async (userId, limit = 30) => {
   if (isFetching) return null; 
   isFetching = true;
   
   try {
-    // secureFetch is now configured to include: 'include', 
-    // which tells the browser to send HttpOnly cookies automatically
-    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`);
+    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, null, {
+      method: 'GET'
+    });
     
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+    if (!res.ok) {
+      // If the server signals an auth issue, trigger the conflict state
+      if (res.status === 401 || res.status === 403) {
+        setIsDualLoginConflict(true);
+      }
+      throw new Error(`HTTP error! status: ${res.status}`);
+    }
     
     const data = await res.json();
     return data.success ? data.messages : null;
@@ -318,6 +327,7 @@ const fetchMessages = async (userId, limit = 30) => {
     isFetching = false; 
   }
 };
+
 const handleAcceptCall = async () => {
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
@@ -333,16 +343,11 @@ const handleAcceptCall = async () => {
     return;
   }
 
-  try {
+ try {
     setCallStatus('connecting'); 
     setShowFullScreenCall(true);
-    
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
+        const res = await secureFetch(`/api/calls/accept/${callId}`, null, {
+      method: 'POST'
     });
     
     if (!res.ok) {
@@ -457,16 +462,16 @@ const handleAcceptCall = async () => {
     if (activeCallerRef) activeCallerRef.current = null;
     
     const token = localStorage.getItem('agentToken');
-    if (currentCallId && token) {
-      fetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
+    if (currentCallId) {
+    try {
+      await secureFetch(`/api/calls/end/${currentCallId}`, null, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ callId: currentCallId }) 
-      }).catch(e => console.error("❌ DB Sync Error:", e));
+        body: JSON.stringify({ callId: currentCallId })
+      });
+    } catch (e) {
+      console.warn("Call end sync skipped due to session or network:", e);
     }
+  }
   }, [agentData, activeCall, activeCaller, socket]);
 
   const handleRejectCall = async () => {
@@ -752,8 +757,8 @@ useEffect(() => {
   const fallbackCheck = setInterval(async () => {
     if (callStatus === 'calling' && !peerConnected) {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+        const res = await secureFetch(`/api/calls/status/${currentCallId}`, null, {
+          method: 'GET'
         });
         const data = await res.json();
         
@@ -972,8 +977,8 @@ useEffect(() => {
     const token = localStorage.getItem('agentToken'); 
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${callId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await secureFetch(`/api/calls/status/${callId}`, null, {
+        method: 'GET'
       });
       const statusData = await res.json();
       
@@ -1055,8 +1060,8 @@ useEffect(() => {
   }
   const pollForCalls = async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await secureFetch(`/api/calls/check-incoming`, null, {
+        method: 'GET'
       });
       const data = await res.json();
       if (data.hasIncomingCall && callStatus === 'idle') {
@@ -1109,12 +1114,10 @@ useEffect(() => {
 
       if (selectedUser?._id) {
         try {
-          // Changed to secureFetch which uses credentials: 'include'
-          // This automatically sends the HttpOnly cookie
-          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`);
-          
+          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, null, {
+            method: 'GET'
+          });
           if (!response.ok) throw new Error("Sync failed");
-          
           const data = await response.json();
           if (data.success) setMessages(data.messages);
         } catch (err) {
@@ -1128,41 +1131,43 @@ useEffect(() => {
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
 }, [agentData?._id, selectedUser?._id, callStatus, socket]); // Added socket as dependency
 
-
 useEffect(() => {
-  const token = localStorage.getItem('agentToken') || localStorage.getItem('userToken');
   const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
 
-  if (!token || !currentCallId || typeof currentCallId !== 'string' || callStatus === 'idle') {
+  // 1. Guard Clause: Stop if no ID, idle, or already in a security conflict
+  if (!currentCallId || typeof currentCallId !== 'string' || callStatus === 'idle' || isDualLoginConflict) {
     return;
   }
+
   const syncStatus = async () => {
     if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json' 
-        }
+      // 2. Use secureFetch (token = null for cookie auth)
+      const res = await secureFetch(`/api/calls/status/${currentCallId}`, null, {
+        method: 'GET'
       });
-      const contentType = res.headers.get("content-type");
-      if (!res.ok || !contentType?.includes("application/json")) {
+      // 3. Handle Unauthorized/Forbidden (Conflict)
+      if (res.status === 401 || res.status === 403) {
+        setIsDualLoginConflict(true); // This stops the interval via the dependency below
+        return;
+      }
+      if (!res.ok) {
         if (res.status === 404) handleEndCall();
         return;
       }
-      const data = await res.json();
+      const data = await res.json(); 
+      // 4. Update status based on data
       if (data?.status === 'ringing' && callStatus === 'calling') {
         setCallStatus('ringing');
       }
-            if (data?.status === 'connected' && callStatus !== 'connected') {
+      if (data?.status === 'connected' && callStatus !== 'connected') {
         if (isIncomingCall) {
           setCallStatus('connected');
           setPeerConnected(true);
         } else {
-          console.log("📡 DB is connected, but Agent is dialing out. Awaiting explicit user socket acceptance...");
+          console.log("📡 DB connected, awaiting socket acceptance.");
         }
       }
-
       if (data && ['ended', 'declined', 'missed', 'rejected'].includes(data.status)) {
         handleEndCall();
       }
@@ -1172,7 +1177,7 @@ useEffect(() => {
   };
   const interval = setInterval(syncStatus, 3000);
   return () => clearInterval(interval);
-}, [callStatus, activeCall?.roomName, activeCall?.callId, activeCall?._id, handleEndCall, isIncomingCall]); 
+}, [callStatus, activeCall?.roomName, activeCall?.callId, activeCall?._id, handleEndCall, isIncomingCall, isDualLoginConflict]);
 
 useEffect(() => {
   if (!socket) return;
@@ -1278,16 +1283,14 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
-  if (!token) return;
+  if (isDualLoginConflict) return;
 
   const heartBeat = setInterval(async () => {
     try {
-      const response = await secureFetch('/api/agents/heartbeat', {
-      method: 'POST' 
-    });
-      
-      // If a conflict is detected
-      if (response.status === 403) {
+      const response = await secureFetch('/api/agents/heartbeat', null, {
+        method: 'POST' 
+      });
+            if (response.status === 403) {
         const data = await response.json();
         if (data.reason === 'dual_login') {
           setIsDualLoginConflict(true); 
@@ -1297,53 +1300,40 @@ useEffect(() => {
       console.error("Heartbeat sync failed:", err);
     }
   }, 60000); 
-  return () => clearInterval(heartBeat);
-}, [token]); // Added token as a dependency
 
+  return () => clearInterval(heartBeat);
+  }, [isDualLoginConflict]);
 
 useEffect(() => {
-  // 1. Script injection: Use a persistent check
   if (!document.querySelector('script[src*="flutterwave"]')) {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
     script.async = true;
     document.body.appendChild(script);
   }
-
   const fetchInitialData = async () => {
-    // Rely on AuthContext token provided to the component via props or hook
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
     setLoading(true);
     try {
-      // Use secureFetch: it injects the Authorization header automatically
-      const profileRes = await secureFetch('/api/agents/profile/me', token);
-
+      const profileRes = await secureFetch('/api/agents/profile/me', null, { method: 'GET' });
       // Handle Dual Login (403)
       if (profileRes.status === 403) {
-        const errorData = await profileRes.json();
+        const errorData = await profileRes.json().catch(() => ({}));
         if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
           setIsDualLoginConflict(true);
-          return; // Stop execution here
+          return;
         }
       }
-
       if (!profileRes.ok) throw new Error("Failed to load profile");
-      
       const profileData = await profileRes.json();
       const agent = profileData.agent;
-      
       if (agent) {
         setAgentData(agent);
         setIsSubscribed(!!agent.isSubscribed); 
         if (agent.plan) setSelectedPlan(agent.plan);
 
-        // Fetch users only if subscribed, using secureFetch
+        // Fetch users using secureFetch (token = null)
         if (agent.isSubscribed) {
-          const usersRes = await secureFetch('/api/agents/my-users', token);
+          const usersRes = await secureFetch('/api/agents/my-users', null, { method: 'GET' });
           const userData = await usersRes.json();
           if (userData.success && Array.isArray(userData.users)) {
             setUsers(userData.users);
@@ -1352,24 +1342,23 @@ useEffect(() => {
       }
     } catch (err) {
       console.error("Initialization error:", err);
+      // If we failed due to a 401/403, we should redirect to login
+      if (err.message === 'Unauthorized') navigate('/login');
     } finally {
       setLoading(false);
     }
   };
 
   fetchInitialData();
-  // Removed cleanup that removes the script to prevent re-initialization bugs
-}, [token, navigate]); // Depend on token from AuthContext
-
-  const handlePayment = async () => {
+}, [navigate]); // Removed token from dependency, as the session is now cookie-managed
+const handlePayment = async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
     return;
   }
   setPaymentProcessing(true);
-  const token = localStorage.getItem('agentToken');
+  
   const activePlan = plans.find(p => p.tier === selectedPlan);
-
   if (!activePlan) {
     alert("Invalid plan selected");
     setPaymentProcessing(false);
@@ -1388,7 +1377,7 @@ useEffect(() => {
       customer: {
         email: agentData?.email,
         name: `${agentData?.firstName} ${agentData?.lastName}`,
-        phone_number: agentData?.phone, // Optional: added phone since we now collect it
+        phone_number: agentData?.phone,
       },
       customizations: {
         title: "ZingConnect",
@@ -1397,18 +1386,21 @@ useEffect(() => {
       },
       callback: async (response) => {
         try {
-          const verifyRes = await fetch('/api/subscriptions/verify', {
+          // FIX: Use secureFetch instead of fetch
+          // Passing 'null' for token uses the session cookie automatically
+          const verifyRes = await secureFetch('/api/subscriptions/verify', null, {
             method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
             body: JSON.stringify({
               transaction_id: response.transaction_id,
               plan: activePlan.tier,
-              ngnAmount: finalNairaAmount // Changed from usdAmount to ngnAmount
+              ngnAmount: finalNairaAmount
             })
           });
+
+          if (verifyRes.status === 401 || verifyRes.status === 403) {
+            setIsDualLoginConflict(true);
+            return;
+          }
 
           if (verifyRes.ok) {
             setShowSuccessOverlay(true);
@@ -1489,25 +1481,33 @@ const handleDownload = async (fileUrl, detectedType) => {
     console.error("Download failed:", error);
   }
 };
+
 const handleDeleteMessage = async (msgId) => {
   const originalMessages = [...messages];
-    setMessages(prev => prev.filter(m => (m._id || m.id) !== msgId));
+  setMessages(prev => prev.filter(m => (m._id || m.id) !== msgId));
 
   try {
-    const res = await secureFetch(`/api/messages/${msgId}`, {
+    const res = await secureFetch(`/api/messages/${msgId}`, null, {
       method: 'DELETE'
     });
+
+    if (res.status === 401 || res.status === 403) {
+      setIsDualLoginConflict(true);
+      throw new Error("Unauthorized");
+    }
 
     if (!res.ok) {
       throw new Error("Server rejected deletion");
     }
   } catch (err) {
     console.error("Delete request failed:", err);
-    // Rollback to original state on failure
     setMessages(originalMessages);
-    alert("Failed to delete message from server.");
+        if (err.message !== "Unauthorized") {
+      alert("Failed to delete message from server.");
+    }
   }
 };
+
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !selectedUser) return;
   setIsUploading(true);
@@ -1671,30 +1671,33 @@ useEffect(() => {
 
 useEffect(() => {
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
-
   const refreshUserList = async () => {
-    const token = localStorage.getItem('agentToken');
     try {
-      const res = await fetch('/api/agents/my-users', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await secureFetch('/api/agents/my-users', null, { 
+        method: 'GET' 
       });
-      if (res.status === 403) {
+
+      if (res.status === 403 || res.status === 401) {
         setIsDualLoginConflict(true);
         return;
       }
 
+      if (!res.ok) throw new Error("Failed to fetch");
+
       const data = await res.json();
-      if (data.success) setUsers(data.users);
+      if (data.success) {
+        setUsers(data.users);
+      }
     } catch (err) { 
-      console.warn("User list refresh failed"); 
+      console.warn("User list refresh failed:", err); 
     }
   };
-
   const interval = setInterval(refreshUserList, 15000);
+    refreshUserList();
+
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
 
-// 2. Polling for the Active Chat (Contextual)
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
@@ -1703,8 +1706,6 @@ useEffect(() => {
 
     const incomingMsgs = await fetchMessages(selectedUser._id, limit);
     if (!incomingMsgs) return;
-
-    // Only update if there is a real change
     setMessages(prev => {
       const isNew = incomingMsgs.length !== prev.length || 
                     incomingMsgs[incomingMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
