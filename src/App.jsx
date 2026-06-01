@@ -108,9 +108,9 @@ function App() {
             <Route element={<ProtectedRoute />}>
               {/* Agent Routes */}
               <Route element={<AgentLayoutWrapper />}>
-                <Route path="/agent/dashboard" element={<AgentDashboard />} />
-                <Route path="/agent/profile" element={<AgentProfile />} />
-                <Route path="/agent/call-settings" element={<CallSetting />} />
+                <Route path="/agent/dashboard/:slug" element={<AgentDashboard />} />
+                <Route path="/agent/profile/:slug" element={<AgentProfile />} />
+                <Route path="/agent/call-settings/:slug" element={<CallSetting />} />
               </Route>
 
               {/* User Routes */}

@@ -61,6 +61,7 @@ const socket = io(import.meta.env.VITE_API_URL);
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
+  const { slug } = useParams();
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
@@ -893,6 +894,7 @@ useEffect(() => {
     socket.off('user_status_update', handleStatusUpdate);
   };
 }, [socket]);
+
 useEffect(() => {
   let timer;
 
