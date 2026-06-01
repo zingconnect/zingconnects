@@ -1305,53 +1305,64 @@ useEffect(() => {
   }, [isDualLoginConflict]);
 
 useEffect(() => {
+  let isMounted = true;
+
+  // Script injection
   if (!document.querySelector('script[src*="flutterwave"]')) {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
     script.async = true;
     document.body.appendChild(script);
   }
- const fetchInitialData = async () => {
-  setLoading(true);
-  try {
-    const profileRes = await secureFetch('/api/agents/profile/me', null, { method: 'GET' });
 
-    // Explicit check for Unauth/Forbidden
-    if (profileRes.status === 401 || profileRes.status === 403) {
-      const errorData = await profileRes.json().catch(() => ({}));
-      if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
-        setIsDualLoginConflict(true);
-      } else {
-        // Just a standard session expiry, go to login
-        navigate('/login');
+  const fetchInitialData = async () => {
+    setLoading(true);
+    try {
+      const profileRes = await secureFetch('/api/agents/profile/me', null, { method: 'GET' });
+
+      // Handle Unauthorized/Forbidden explicitly
+      if (profileRes.status === 401 || profileRes.status === 403) {
+        if (!isMounted) return;
+        
+        const errorData = await profileRes.json().catch(() => ({}));
+        if (errorData.reason === 'dual_login' || errorData.message === "Session Mismatch") {
+          setIsDualLoginConflict(true);
+        } else {
+          // Redirect to dynamic login path
+          const loginPath = slug ? `/${slug}/login` : '/login';
+          navigate(loginPath);
+        }
+        return; 
       }
-      return; 
-    }
 
-    if (!profileRes.ok) throw new Error("Failed to load profile");
-    
-    const profileData = await profileRes.json();
-    if (profileData.agent) {
-      setAgentData(profileData.agent);
-      setIsSubscribed(!!profileData.agent.isSubscribed); 
-      if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
+      if (!profileRes.ok) throw new Error("Failed to load profile");
+      
+      const profileData = await profileRes.json();
+      if (isMounted && profileData.agent) {
+        setAgentData(profileData.agent);
+        setIsSubscribed(!!profileData.agent.isSubscribed); 
+        if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
 
-      if (profileData.agent.isSubscribed) {
-        const usersRes = await secureFetch('/api/agents/my-users', null, { method: 'GET' });
-        if (usersRes.ok) {
-           const userData = await usersRes.json();
-           if (userData.success) setUsers(userData.users);
+        // Fetch users only if subscribed
+        if (profileData.agent.isSubscribed) {
+          const usersRes = await secureFetch('/api/agents/my-users', null, { method: 'GET' });
+          if (usersRes.ok) {
+            const userData = await usersRes.json();
+            if (userData.success) setUsers(userData.users);
+          }
         }
       }
+    } catch (err) {
+      console.error("Initialization error:", err);
+    } finally {
+      if (isMounted) setLoading(false);
     }
-  } catch (err) {
-    console.error("Initialization error:", err);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
   fetchInitialData();
-}, [navigate]); // Removed token from dependency, as the session is now cookie-managed
+  return () => { isMounted = false; };
+}, [navigate, slug]);
+
 const handlePayment = async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
