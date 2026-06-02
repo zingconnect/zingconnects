@@ -167,28 +167,6 @@ agentSchema.pre('validate', async function() {
   }
 });
 
-// Locate your existing pre('save') in Agent.js and update it:
-agentSchema.pre('save', function(next) {
-  try {
-    // Case A: If paymentDetails.amountNgn changed or was initialized
-    if (this.isModified('paymentDetails.amountNgn') && this.paymentDetails?.amountNgn !== undefined) {
-      this.subscriptionAmount = this.paymentDetails.amountNgn;
-    }
-    // Case B: If subscriptionAmount changed or was initialized
-    else if (this.isModified('subscriptionAmount')) {
-      if (!this.paymentDetails) {
-        this.paymentDetails = { currency: 'NGN' };
-      }
-      this.paymentDetails.amountNgn = this.subscriptionAmount;
-    }
-    
-    // Explicitly call next() to finish the middleware chain
-    next(); 
-  } catch (err) {
-    // Pass the error to Mongoose's internal error handler
-    next(err); 
-  }
-});
 
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
