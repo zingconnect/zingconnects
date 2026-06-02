@@ -2001,38 +2001,35 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
 // =========================================================================
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
-console.log("DEBUG: POST /api/messages/send - User Payload:", req.user);
+const myId = req.user.id;
+  console.log("DEBUG: POST /api/messages/send - User Payload:", req.user);
+  console.log("DEBUG: Processing message from myId:", myId);
+
   try {
     await connectToDatabase();
-    // Added fileType and replyToId to destructuring
-    const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
-    const myId = req.user.id;
+    
+    // 1. Debugging Agent Lookup
+    const AgentModel = getAgentModel();
+    const agentDoc = await AgentModel.findById(myId);
+    console.log("DEBUG: Agent document found:", !!agentDoc); 
+    if (agentDoc) {
+        console.log("DEBUG: Agent slug/email:", agentDoc.email);
+    }
 
-    // 🛡️ SECURITY FIX 1: Explicit Input Structure and Hex ID Validation
+    const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
+// 🛡️ SECURITY FIX 1 & 2
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ success: false, message: "Message text cannot be blank." });
     }
-
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
     }
-
-    // 🛡️ SECURITY FIX 2: Strict Model Whitelisting
     const sanitizedModel = String(receiverModel || '').trim();
     if (!['Agent', 'User'].includes(sanitizedModel)) {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
-
-let senderRole = 'User'; // Default
-
-if (req.user.role === 'agent') {
-  senderRole = 'Agent';
-} else {
-  // If the JWT says 'user', double check just in case
-  const AgentModel = getAgentModel();
-  const isAgent = await AgentModel.findById(myId);
-  if (isAgent) senderRole = 'Agent';
-}
+    const senderRole = agentDoc ? 'Agent' : 'User';
+    console.log("DEBUG: Determined senderRole:", senderRole);
     // 1. Create and Save Message with sanitized input and metadata
     const newMessage = new Message({
       senderId: myId,
@@ -2047,8 +2044,6 @@ if (req.user.role === 'agent') {
       notificationSent: false 
     });
     await newMessage.save();
-
-    // 2. Fetch Context
     const TargetModel = sanitizedModel === 'Agent' ? getAgentModel() : (mongoose.models.User || User);
     const receiver = await TargetModel.findById(receiverId).select('+pushSubscription +lastNotificationEmail +email firstName lastName');
     

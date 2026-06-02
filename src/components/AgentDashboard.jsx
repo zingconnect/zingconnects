@@ -1875,29 +1875,31 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
-    if (!newMessage.trim() || !selectedUser || isUploading) return;
+  if (!newMessage.trim() || !selectedUser || isUploading) return;
 
   const textToSend = newMessage;
-  const tempId = Date.now().toString(); // Temporary ID for the UI key
-  setNewMessage(''); // Clear input immediately for speed
+  const tempId = Date.now().toString();
+  setNewMessage('');
+
   const optimisticMsg = {
     _id: tempId,
-    text: textToSend,
+    content: textToSend, // Matches your backend response mapping
     senderModel: 'Agent',
-    status: 'sending', // Triggers the spinner in our UI
+    receiverModel: selectedUser.modelType, // Make sure you have this on the user object
+    status: 'sending',
     createdAt: new Date().toISOString(),
     fileType: 'text'
   };
   setMessages(prev => [...prev, optimisticMsg]);
 
   try {
-   const response = await secureFetch('/api/messages/send', token, {
+    const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: selectedUser._id,
+        receiverModel: selectedUser.modelType || 'User', // Explicitly set this
         text: textToSend,
         fileType: 'text'
       })
@@ -1907,21 +1909,17 @@ const handleSendMessage = async (e) => {
 
     if (data.success) {
       setMessages(prev => 
-        prev.map(msg => msg._id === tempId ? data.message : msg)
+        prev.map(msg => msg._id === tempId ? { ...data.message, content: data.message.content } : msg)
       );
     } else {
-      setMessages(prev => 
-        prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg)
-      );
+      throw new Error(data.message);
     }
   } catch (err) {
-    console.error("Message failed to send:", err);
     setMessages(prev => 
       prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg)
     );
   }
 };
-
 
   
 if (loading) return (
