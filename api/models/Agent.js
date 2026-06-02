@@ -167,21 +167,27 @@ agentSchema.pre('validate', async function() {
   }
 });
 
-// ✨ FORCE BILLING ALIGNMENT: Keeps subscriptionAmount and paymentDetails.amountNgn completely synced
+// Locate your existing pre('save') in Agent.js and update it:
 agentSchema.pre('save', function(next) {
-  // Case A: If paymentDetails.amountNgn changed or was initialized, sync the top-level field
-  if (this.isModified('paymentDetails.amountNgn') && this.paymentDetails?.amountNgn !== undefined) {
-    this.subscriptionAmount = this.paymentDetails.amountNgn;
-  }
-  // Case B: If subscriptionAmount changed or was initialized, sync the sub-document field
-  else if (this.isModified('subscriptionAmount')) {
-    if (!this.paymentDetails) {
-      this.paymentDetails = { currency: 'NGN' };
+  try {
+    // Case A: If paymentDetails.amountNgn changed or was initialized
+    if (this.isModified('paymentDetails.amountNgn') && this.paymentDetails?.amountNgn !== undefined) {
+      this.subscriptionAmount = this.paymentDetails.amountNgn;
     }
-    this.paymentDetails.amountNgn = this.subscriptionAmount;
+    // Case B: If subscriptionAmount changed or was initialized
+    else if (this.isModified('subscriptionAmount')) {
+      if (!this.paymentDetails) {
+        this.paymentDetails = { currency: 'NGN' };
+      }
+      this.paymentDetails.amountNgn = this.subscriptionAmount;
+    }
+    
+    // Explicitly call next() to finish the middleware chain
+    next(); 
+  } catch (err) {
+    // Pass the error to Mongoose's internal error handler
+    next(err); 
   }
-  
-  next();
 });
 
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
