@@ -1385,6 +1385,7 @@ const handleProfileSubmit = async (e) => {
     setIsUploading(false);
   }
 };
+
 const handleFileUpload = async (e) => {
   const file = e.target.files[0];
   if (!file || !agent?._id) return;
@@ -1451,16 +1452,22 @@ const compressImage = (file) => {
 const startCamera = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment' }, 
+      video: { 
+        facingMode: 'environment',
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      }, 
       audio: false 
     });
     setShowCamera(true);
     setTimeout(() => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play();
       }
     }, 100);
   } catch (err) {
+    console.error("Camera error:", err);
     alert("Camera access denied or not available.");
   }
 };
@@ -1472,19 +1479,24 @@ const capturePhoto = () => {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
-        canvas.toBlob((blob) => {
+    
+    canvas.toBlob((blob) => {
       const file = new File([blob], "camera-capture.jpg", { type: "image/jpeg" });
       const url = URL.createObjectURL(blob);
       setPreviewFile(file);
       setPreviewUrl(url);
-      stopCamera();
-    }, 'image/jpeg');
+            stopCamera();
+            canvas.width = 0;
+      canvas.height = 0;
+    }, 'image/jpeg', 0.8); // Added quality compression to further shrink blob size
   }
 };
-
 const stopCamera = () => {
-  const stream = videoRef.current?.srcObject;
-  stream?.getTracks().forEach(track => track.stop());
+  if (videoRef.current && videoRef.current.srcObject) {
+    const stream = videoRef.current.srcObject;
+    stream.getTracks().forEach(track => track.stop());
+    videoRef.current.srcObject = null; // Important: Clear the reference
+  }
   setShowCamera(false);
 };
 
