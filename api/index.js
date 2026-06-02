@@ -58,7 +58,6 @@ import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
 import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
-const app = require('../app');
 const app = express();
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
