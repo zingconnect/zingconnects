@@ -101,19 +101,12 @@ app.use('/api/agents', authRoutes);
 app.use('/api/admin', adminRoutes);
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
-const vapidPublicKey = process.env.VITE_PUBLIC_KEY;
-const vapidPrivateKey = process.env.VITE_PRIVATE_KEY;
+webpush.setVapidDetails(
+  `mailto:${process.env.VITE_EMAIL}`,
+  process.env.VITE_PUBLIC_KEY,
+  process.env.VITE_PRIVATE_KEY
+);
 
-if (!vapidPublicKey || !vapidPrivateKey) {
-  console.error("❌ CRITICAL: VAPID keys are missing from environment variables.");
-} else {
-  webpush.setVapidDetails(
-    `mailto:${process.env.VITE_EMAIL}`,
-    vapidPublicKey,
-    vapidPrivateKey
-  );
-  console.log("✅ VAPID details set successfully.");
-}
 
 const upload = multer({ storage: multer.memoryStorage() });
 const getAgentModel = () => {
@@ -2017,6 +2010,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
   const myId = req.user.id;
   console.log("DEBUG: Processing message from ID:", myId);
+  console.log("DEBUG: Sending to endpoint:", receiver.pushSubscription?.endpoint);
 
   try {
     await connectToDatabase();
