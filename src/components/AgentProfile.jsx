@@ -37,7 +37,7 @@ export const AgentProfile = () => {
   const [isSubscribed, setIsSubscribed] = useState(true);
   const [activeTheme, setActiveTheme] = useState(localStorage.getItem('theme') || 'system');
   
-  // SUBSCRIPTION UPGRADE & TRANSACTION STATE CONFIGURATION
+  const [showPassword, setShowPassword] = useState(false);
   const [subConfig, setSubConfig] = useState({ planTier: 'BASIC', months: 1 });
   const [isUpdatingSub, setIsUpdatingSub] = useState(false);
   const [transactions, setTransactions] = useState([]); 
@@ -588,37 +588,46 @@ export const AgentProfile = () => {
             </div>
           </section>
 
-          {/* SECURITY/PASSWORD RENEWAL MODULE */}
-          <section className="bg-card-bg/50 dark:bg-slate-900/50 p-6 rounded-[2rem] border border-dashed border-gray-200 dark:border-slate-700">
-            <div className="flex items-center gap-2 mb-5">
-              <BsKeyFill className="text-blue-600" size={16} />
-              <h3 className="text-[9px] font-black uppercase tracking-[0.15em] text-blue-900 dark:text-blue-400">Security Credentials</h3>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <input 
-                type="password" 
-                placeholder="Old Password"
-                value={passwordData.oldPassword}
-                onChange={(e) => setPasswordData({...passwordData, oldPassword: e.target.value})}
-                className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-5 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-all"
-              />
-              <input 
-                type="password" 
-                placeholder="New Password"
-                value={passwordData.newPassword}
-                onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
-                className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-5 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-all"
-              />
-              <input 
-                type="password" 
-                placeholder="Confirm New"
-                value={passwordData.confirmPassword}
-                onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
-                className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-5 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-all"
-              />
-            </div>
-          </section>
+{/* SECURITY/PASSWORD RENEWAL MODULE */}
+<section className="bg-card-bg/50 dark:bg-slate-900/50 p-6 rounded-[2rem] border border-dashed border-gray-200 dark:border-slate-700">
+  <div className="flex items-center justify-between mb-5">
+    <div className="flex items-center gap-2">
+      <BsKeyFill className="text-blue-600" size={16} />
+      <h3 className="text-[9px] font-black uppercase tracking-[0.15em] text-blue-900 dark:text-blue-400">Security Credentials</h3>
+    </div>
+    <button 
+      type="button" 
+      onClick={() => setShowPassword(!showPassword)}
+      className="text-[8px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-colors"
+    >
+      {showPassword ? "Hide Passwords" : "Show Passwords"}
+    </button>
+  </div>
+  
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <input 
+      type={showPassword ? "text" : "password"} 
+      placeholder="Old Password"
+      value={passwordData.oldPassword}
+      onChange={(e) => setPasswordData({...passwordData, oldPassword: e.target.value})}
+      className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-5 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-all"
+    />
+    <input 
+      type={showPassword ? "text" : "password"} 
+      placeholder="New Password"
+      value={passwordData.newPassword}
+      onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
+      className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-5 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-all"
+    />
+    <input 
+      type={showPassword ? "text" : "password"} 
+      placeholder="Confirm New"
+      value={passwordData.confirmPassword}
+      onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
+      className="w-full bg-input-bg border border-gray-100 dark:border-slate-800 rounded-xl px-5 py-3.5 text-sm text-text-main outline-none focus:border-blue-600 transition-all"
+    />
+  </div>
+</section>
 
           {/* PERSISTENCE TRIGGER ACTION CONTAINER FOOTER */}
           <footer className="pt-6 border-t border-gray-100 dark:border-slate-800 flex flex-col sm:flex-row gap-4 items-center justify-between">
