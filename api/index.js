@@ -2001,6 +2001,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
 // =========================================================================
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
+console.log("DEBUG: POST /api/messages/send - User Payload:", req.user);
   try {
     await connectToDatabase();
     // Added fileType and replyToId to destructuring
@@ -2022,8 +2023,16 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
 
-    const senderRole = req.user.role === 'agent' ? 'Agent' : 'User';
+let senderRole = 'User'; // Default
 
+if (req.user.role === 'agent') {
+  senderRole = 'Agent';
+} else {
+  // If the JWT says 'user', double check just in case
+  const AgentModel = getAgentModel();
+  const isAgent = await AgentModel.findById(myId);
+  if (isAgent) senderRole = 'Agent';
+}
     // 1. Create and Save Message with sanitized input and metadata
     const newMessage = new Message({
       senderId: myId,
@@ -2115,6 +2124,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED CHAT FETCH ROUTE (OFFSET CHRONOLOGY STABILIZED)
 // =========================================================================
@@ -2147,6 +2157,8 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     const chronologicalMessages = messages.reverse();
 
     const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
+      const senderModel = m.senderModel || 'User';
+      const receiverModel = m.receiverModel || 'User';
       const msgDto = {
         id: m._id,
         content: m.text || "",

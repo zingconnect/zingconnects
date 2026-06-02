@@ -1810,8 +1810,6 @@ useEffect(() => {
 
   const handleIncomingMessage = (data) => {
     console.log("📥 Real-time Socket Message Detected:", data);
-
-    // 1. Core Safeguard: Drop duplicates by tracking message ID explicitly
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
@@ -1822,8 +1820,6 @@ useEffect(() => {
         if (prev.some(m => m._id === data._id)) return prev;
         return [...prev, data];
       });
-
-    // Mark as read using secureFetch (implicitly includes cookie)
       secureFetch(`/api/messages/mark-read/${selectedUser._id}`, token, {
         method: 'PATCH'
       }).catch(err => console.error("Mark read error:", err));
