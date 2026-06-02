@@ -1388,80 +1388,125 @@ const handleProfileSubmit = async (e) => {
     setIsUploading(false);
   }
 };
+const handleFileUpload = async (e) => {
+  const file = e.target.files[0];
+  if (!file || !agent?._id) return;
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file || !agent?._id) return;
-    const isVideo = file.type.startsWith('video/');
-    const isImage = file.type.startsWith('image/');
-    if (!isVideo && !isImage) {
-      alert("Please upload only images or videos.");
-      return;
-    }
-    const maxLimit = 100 * 1024 * 1024; 
-    if (file.size > maxLimit) {
-      alert(`This file is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed is 100MB.`);
-      e.target.value = null; 
-      return;
-    }
+  const isVideo = file.type.startsWith('video/');
+  const isImage = file.type.startsWith('image/');
+  
+  if (!isVideo && !isImage) {
+    alert("Please upload only images or videos.");
+    return;
+  }
 
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
+  // File size check (100MB limit)
+  if (file.size > 100 * 1024 * 1024) {
+    alert("File too large. Maximum allowed is 100MB.");
+    e.target.value = null;
+    return;
+  }
 
-    const localUrl = URL.createObjectURL(file);
-    setPreviewFile(file);
-    setPreviewUrl(localUrl);
-    setCaption(""); 
-    if (e.target) e.target.value = null; 
-  };
+  // Process file: Compress if image, proceed if video
+  if (isImage) {
+    try {
+      const resizedFile = await compressImage(file);
+      processFile(resizedFile);
+    } catch (err) {
+      console.error("Compression failed, falling back to original:", err);
+      processFile(file);
+    }
+  } else {
+    processFile(file);
+  }
+
+  if (e.target) e.target.value = null;
+};
+
+// Helper: Compress image via Canvas to prevent memory overflow
+const compressImage = (file) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Cap width at 1200px to drastically reduce memory usage
+        const MAX_WIDTH = 1200;
+        const scale = Math.min(MAX_WIDTH / img.width, 1);
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // Export to Blob (reduces size from 5MB+ to <500KB)
+        canvas.toBlob((blob) => {
+          resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+        }, 'image/jpeg', 0.85);
+      };
+    };
+  });
+};
+
+const processFile = (file) => {
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  setPreviewFile(file);
+  setPreviewUrl(URL.createObjectURL(file));
+  setCaption("");
+};
 
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
 
   const tempId = Date.now().toString();
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-  const savedFile = previewFile;
-  const savedCaption = caption;
+  
+  // Store reference to files for the upload
+  const fileToUpload = previewFile;
+  const currentUrl = previewUrl;
 
   const pendingMedia = {
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
     senderModel: 'User',
-    text: savedCaption,
-    fileUrl: previewUrl,
+    text: caption,
+    fileUrl: currentUrl,
     fileType: detectedType,
     status: 'sending',
-    createdAt: new Date().toISOString(),
-    isTemp: true,
-    originalFile: savedFile
+    createdAt: new Date().toISOString()
   };
 
   setMessages(prev => [...prev, pendingMedia]);
+  
+  // CLEAR STATE IMMEDIATELY: Helps the browser garbage collect the memory
   setPreviewUrl(null);
   setPreviewFile(null);
   setIsUploading(true);
 
   try {
-    // 1. Get Signed Upload URL using secureFetch
     const urlResponse = await secureFetch('/api/messages/get-upload-url', token, {
       method: 'POST',
-      body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
+      body: JSON.stringify({ fileName: fileToUpload.name, fileType: fileToUpload.type })
     });
 
     const urlData = await urlResponse.json();
     if (!urlData.success) throw new Error("Upload permission failed");
+
     await fetch(urlData.uploadUrl, {
       method: 'PUT',
-      body: savedFile,
-      headers: { 'Content-Type': savedFile.type }
+      body: fileToUpload,
+      headers: { 'Content-Type': fileToUpload.type }
     });
+
     const confirmResponse = await secureFetch('/api/messages/confirm-upload', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
-        text: savedCaption.trim(),
+        text: caption.trim(),
         fileUrl: urlData.key,
         fileType: detectedType
       })
@@ -1471,6 +1516,7 @@ const handleFinalSend = async () => {
     if (data.success) {
       setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
       setReplyingTo(null);
+      setCaption("");
     } else {
       throw new Error(data.message || "Upload confirmation failed");
     }
