@@ -2001,17 +2001,26 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 // =========================================================================
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
   const myId = req.user.id;
-  console.log("DEBUG: POST /api/messages/send - User Payload:", req.user);
-  console.log("DEBUG: Processing message from myId:", myId);
+  console.log("DEBUG: Processing message from ID:", myId);
 
   try {
     await connectToDatabase();
 
-    // 1. HARDENED SENDER IDENTIFICATION (Using direct model imports)
-    // We check if the ID exists in the Agent collection first.
-    const isAgent = await Agent.findById(myId);
-    const senderRole = isAgent ? 'Agent' : 'User';
-    console.log("DEBUG: Final resolved senderRole:", senderRole);
+    // 1. DYNAMIC IDENTITY RESOLUTION (Polymorphic Lookup)
+    // Check Agent collection first, then User.
+    let senderDoc = await Agent.findById(myId);
+    let senderRole = 'Agent';
+
+    if (!senderDoc) {
+      senderDoc = await User.findById(myId);
+      senderRole = 'User';
+    }
+
+    if (!senderDoc) {
+      return res.status(404).json({ success: false, message: "Sender identity not found." });
+    }
+    
+    console.log("DEBUG: Resolved senderRole as:", senderRole);
 
     const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
 
@@ -2044,10 +2053,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 
     // 3. Dynamic Model resolution for Context
     const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
-    const SenderModel = senderRole === 'Agent' ? Agent : User;
-
     const receiver = await TargetModel.findById(receiverId).select('+pushSubscription +lastNotificationEmail +email firstName lastName');
-    const sender = await SenderModel.findById(myId).select('firstName lastName');
 
     if (!receiver) {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
@@ -2061,7 +2067,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     if (receiver.pushSubscription?.endpoint) {
       try {
         const payload = JSON.stringify({
-          title: `New Message from ${sender?.firstName || 'Zing'}`,
+          title: `New Message from ${senderDoc.firstName || 'Zing'}`,
           body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
           data: { url: sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}` }
         });
@@ -2080,7 +2086,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
         if (Date.now() - lastEmailTime > COOLDOWN) {
           await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-          await sendOfflineNotification(receiver, sender, text, sanitizedModel);
+          await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
         }
       } catch (mailErr) {
         console.error("Email Throttle Error:", mailErr.message);
@@ -2121,6 +2127,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED CHAT FETCH ROUTE (OFFSET CHRONOLOGY STABILIZED)
 // =========================================================================
