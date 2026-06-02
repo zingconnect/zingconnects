@@ -2037,15 +2037,12 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 </div>
         </header>
         <main 
-  ref={chatContainerRef}
-  onScroll={handleChatScroll}
-  className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
-  style={{
-    scrollAnchor: 'none',            
-    overscrollBehaviorY: 'contain',  
-    WebkitOverflowScrolling: 'touch'  
-  }}
->
+ ref={chatContainerRef}
+          onScroll={handleChatScroll}
+          className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
+          style={{ scrollAnchor: 'none', overscrollBehaviorY: 'contain', WebkitOverflowScrolling: 'touch' }}
+        >
+
    {/* Fetching State Indicator */}
   {isFetchingOlder && (
     <div className="self-center z-20 my-2 px-3 py-1.5 bg-[#005c4b] text-white rounded-full text-[10px] font-bold tracking-wider flex items-center gap-2 shadow-md border border-emerald-500/20 animate-pulse">
@@ -2142,12 +2139,12 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
     );
   })}
 
-  <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
+<div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
 
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
 {previewUrl && !showOnboarding && (
-    <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
+<div className="fixed inset-0 z-[5000] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
     {/* Header */}
     <div className="p-4 flex justify-between items-center text-white">
       <button 
@@ -2213,7 +2210,7 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 )}
 
 <footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
-    
+
     {/* --- 1. REPLY PREVIEW PANEL --- */}
     {replyingTo && (
       <div className="px-2 md:px-6 pt-2">
@@ -2312,10 +2309,7 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 
     {/* --- FULLSCREEN IMAGE OVERLAY (LIGHTBOX) --- */}
 {fullscreenImage && (
-  <div 
-    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
-    onClick={() => setFullscreenImage(null)}
-  >
+  <div className="fixed inset-0 z-[6000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200" onClick={() => setFullscreenImage(null)}>
     {/* Top Navigation Bar */}
     <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
       <button 
@@ -2354,10 +2348,7 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 
 {/* --- FULLSCREEN VIDEO OVERLAY --- */}
 {fullscreenVideo && (
-  <div 
-    className="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200"
-    onClick={() => setFullscreenVideo(null)} // Click background to close
-  >
+  <div className="fixed inset-0 z-[6000] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200" onClick={() => setFullscreenVideo(null)}>
     {/* Top Navigation Bar */}
     <div className="absolute top-0 w-full p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
       <button 
@@ -2399,8 +2390,7 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 
 {/* --- UNIFIED SECURE CALL INTERFACE --- */}
 {callStatus !== 'idle' && (
-  <div className="fixed inset-0 z-[10000] bg-[#0b141a] flex flex-col items-center justify-between py-20 animate-in fade-in zoom-in duration-300 text-white">
-    
+<div className="fixed inset-0 z-[7000] bg-[#0b141a] flex flex-col items-center justify-between py-20 animate-in fade-in zoom-in duration-300 text-white">    
    {/* 1. IDENTITY SECTION */}
 <div className="flex flex-col items-center gap-6 mt-10">
   <div className="relative">
