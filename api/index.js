@@ -108,7 +108,7 @@ if (!vapidPublicKey || !vapidPrivateKey) {
   console.error("❌ CRITICAL: VAPID keys are missing from environment variables.");
 } else {
   webpush.setVapidDetails(
-    `mailto:${process.env.VITE_EMAIL || 'support@zingconnect.chat'}`,
+    `mailto:${process.env.VITE_EMAIL}`,
     vapidPublicKey,
     vapidPrivateKey
   );
@@ -2080,7 +2080,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
         const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
 
         const payload = JSON.stringify({
-          title: `New Message from ${senderDoc.firstName || 'Zing'}`,
+          title: `New Message from ${senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing'}`,
           body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
           icon: `${baseUrl}/logo-s.png`,
           badge: `${baseUrl}/logo-s.png`,
