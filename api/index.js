@@ -106,6 +106,8 @@ webpush.setVapidDetails(
   process.env.VITE_PUBLIC_KEY,
   process.env.VITE_PRIVATE_KEY
 );
+console.log("DEBUG: VAPID Configured for:", process.env.VITE_EMAIL);
+console.log("DEBUG: Public Key defined:", !!process.env.VITE_PUBLIC_KEY);
 
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -2057,7 +2059,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     // 3. Dynamic Model resolution for Context
     const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId).select('+pushSubscription +lastNotificationEmail +email firstName lastName');
-
+    
     if (!receiver) {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
@@ -2072,26 +2074,33 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
     if (receiver.pushSubscription?.endpoint) {
-      try {
-        const baseUrl = "https://www.zingconnect.chat";
-        const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
+     try {
+    const baseUrl = "https://www.zingconnect.chat";
+    const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
 
-        const payload = JSON.stringify({
-          title: `New Message from ${senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing'}`,
-          body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
-          icon: `${baseUrl}/logo-s.png`,
-          badge: `${baseUrl}/logo-s.png`,
-          data: { 
+    // USE THE senderDoc YOU ALREADY FETCHED AT THE TOP
+    const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
+
+    const payload = JSON.stringify({
+        title: `New Message from ${senderName}`,
+        body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
+        icon: `${baseUrl}/logo-s.png`,
+        badge: `${baseUrl}/logo-s.png`,
+        data: { 
             url: `${baseUrl}${path}`,
             type: 'message'
-          }
-        });
+        }
+    });
 
-        await webpush.sendNotification(receiver.pushSubscription, payload);
-        await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
-        
-      } catch (pushErr) {
-        console.error("PUSH FAILURE:", pushErr.statusCode, pushErr.message);
+    console.log("DEBUG: Attempting webpush.sendNotification...");
+    await webpush.sendNotification(receiver.pushSubscription, payload);
+    
+    // Update DB
+    await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+    console.log("✅ Push Sent Successfully");
+    
+} catch (pushErr) {
+    console.error("❌ PUSH FAILED: Check VAPID/Subscription. Error:", pushErr.message);
 
         // Remove stale subscription
         if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
