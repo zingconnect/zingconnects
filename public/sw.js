@@ -1,15 +1,4 @@
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-  if (
-    event.request.destination === 'audio' || 
-    url.pathname.endsWith('.mp3') || 
-    url.pathname.endsWith('.wav') ||
-    event.request.headers.get('range')
-  ) {
-    return; 
-  }
-});
-// 2. LIFECYCLE HANDLERS (Ensures quick updates)
+// 1. LIFECYCLE HANDLERS
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
@@ -18,14 +7,11 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
 });
 
-// 2. CONSOLIDATED FETCH HANDLER (One single listener)
+// 2. CONSOLIDATED FETCH HANDLER (One single, robust listener)
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // A. EXCLUSIONS: Bypass Service Worker for these
-  // 1. API requests (FIXES your 400 Bad Request error)
-  // 2. Audio/Streaming requests
-  // 3. Third-party domains (Cross-origin)
   if (
     url.pathname.startsWith('/api/') || 
     event.request.destination === 'audio' || 
@@ -34,13 +20,17 @@ self.addEventListener('fetch', (event) => {
     event.request.headers.get('range') ||
     url.origin !== self.location.origin
   ) {
-    return; // Request proceeds directly to the network
+    return; // Request proceeds directly to the network without intervention
   }
 
-  // B. CACHING: Handle your own static assets
+  // B. CACHING: Handle static assets with error safety
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request);
+    caches.match(event.request).then((cachedResponse) => {
+      // Return cached response if found, otherwise fetch from network
+      return cachedResponse || fetch(event.request).catch((err) => {
+        console.error('Fetch failed for:', event.request.url, err);
+        throw err; // Re-throw to inform the browser the fetch failed
+      });
     })
   );
 });
@@ -59,53 +49,47 @@ self.addEventListener('push', function(event) {
   const iconUrl = '/logo-s.png'; 
   const isCall = data.type === 'CALL_INVITE' || data.title?.toLowerCase().includes('call');
 
- const options = {
-  body: data.body || 'New Notification',
-  icon: iconUrl,
-  badge: iconUrl,
-  vibrate: isCall ? [500, 200, 500, 200, 500] : [200, 100, 200],
-  requireInteraction: isCall,
-  tag: isCall ? 'incoming-call' : 'new-msg',
-  renotify: true,
-  // ADDED: Helps OS decide whether to show a heads-up banner
-  priority: 'high', 
-  data: {
-    url: data.data?.url || data.url || '/dashboard',
-    type: data.type || 'message'
-  },
-  actions: isCall ? [
-    { action: 'answer', title: '✅ Answer' },
-    { action: 'decline', title: '❌ Decline' }
-  ] : []
-};
+  const options = {
+    body: data.body || 'New Notification',
+    icon: iconUrl,
+    badge: iconUrl,
+    vibrate: isCall ? [500, 200, 500, 200, 500] : [200, 100, 200],
+    requireInteraction: isCall,
+    tag: isCall ? 'incoming-call' : 'new-msg',
+    renotify: true,
+    data: {
+      url: data.data?.url || data.url || '/dashboard',
+      type: data.type || 'message'
+    },
+    actions: isCall ? [
+      { action: 'answer', title: '✅ Answer' },
+      { action: 'decline', title: '❌ Decline' }
+    ] : []
+  };
+
   event.waitUntil(
     self.registration.showNotification(data.title || 'ZingConnect', options)
   );
 });
 
+// 4. NOTIFICATION CLICK HANDLER
 self.addEventListener('notificationclick', function(event) {
   event.notification.close(); 
+
+  if (event.action === 'decline') return; 
 
   const targetPath = event.notification.data.url || '/dashboard';
   const targetUrl = new URL(targetPath, self.location.origin).href;
 
-  if (event.action === 'decline') {
-    return; 
-  }
-
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
-      for (let i = 0; i < windowClients.length; i++) {
-        const client = windowClients[i];
+      for (const client of windowClients) {
         if (client.url.includes('/dashboard')) {
-          return client.focus().then(() => {
-            return client.postMessage({ type: 'NAVIGATE', url: targetUrl });
-          });
+          client.focus();
+          return client.postMessage({ type: 'NAVIGATE', url: targetUrl });
         }
       }
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
-      }
+      if (clients.openWindow) return clients.openWindow(targetUrl);
     })
   );
 });
