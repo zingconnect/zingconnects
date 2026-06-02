@@ -106,6 +106,12 @@ const isFirstLoad = useRef(true);
   const audioCtxRef = useRef(null);
 const nextStartTimeRef = useRef(0);
 const chatContainerRef = useRef(null);
+const isSyncing = useRef(false);
+const isAdjustingScrollRef = useRef(false); 
+const previousScrollHeightRef = useRef(0);
+const previousScrollTopRef = useRef(0);
+const scrollSentinelRef = useRef(null); 
+
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -118,11 +124,8 @@ const chatContainerRef = useRef(null);
   const [page, setPage] = useState(1);
 const [hasMore, setHasMore] = useState(true);
 const [loadingMore, setLoadingMore] = useState(false);
-const scrollSentinelRef = useRef(null); 
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
-const isAdjustingScrollRef = useRef(false); 
-const previousScrollHeightRef = useRef(0);
-const previousScrollTopRef = useRef(0);
+
 
 
   const [callStatus, setCallStatus] = useState('idle'); 
@@ -192,40 +195,33 @@ const previousScrollTopRef = useRef(0);
         return <BsCheckAll className="text-gray-300" size={14} />;
     }
   };
-
-  const unlockAudio = useCallback(async () => {
-  if (hasInteracted) return;
-  
-  console.log("🔓 Unlocking secure audio channels...");
-  
-  try {
-    if (!audioCtxRef.current) {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      audioCtxRef.current = new AudioContext();
-    }
-        if (audioCtxRef.current.state === 'suspended') {
-      await audioCtxRef.current.resume();
-      console.log("✅ AudioContext resumed.");
-    }
-    const remoteAudio = document.getElementById('remoteAudio');
-    if (remoteAudio) {
-      try {
-        await remoteAudio.play();
-        remoteAudio.pause();
-        remoteAudio.currentTime = 0;
-        console.log("✅ Remote audio element primed.");
-      } catch (playErr) {
-        console.warn("⚠️ Audio element play() call failed (likely no stream source yet).", playErr);
-      }
-    }
-    
-    // 4. Final State Update
-    setHasInteracted(true);
-  } catch (err) {
-    console.error("❌ Critical audio priming error:", err);
-    setHasInteracted(true); 
+const unlockAudio = useCallback(async () => {
+  // 1. Check/Create Audio Context
+  if (!audioCtxRef.current) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    audioCtxRef.current = new AudioContext();
   }
-}, [hasInteracted]); 
+  
+  // 2. Resume Context
+  if (audioCtxRef.current.state === 'suspended') {
+    await audioCtxRef.current.resume();
+    console.log("✅ AudioContext resumed.");
+  }
+
+  // 3. Prime Audio Element
+  const remoteAudio = document.getElementById('remoteAudio');
+  if (remoteAudio) {
+    try {
+      await remoteAudio.play();
+      remoteAudio.pause();
+      remoteAudio.currentTime = 0;
+      console.log("✅ Remote audio element primed.");
+    } catch (playErr) {
+      console.warn("⚠️ Audio element play() call failed (expected if no stream).", playErr);
+    }
+  }
+  // DO NOT setHasInteracted here
+}, []); // Empty dependency array is safe now
 
 const LocalUserMuteController = ({ isMuted, isMasked }) => {
   const { localParticipant } = useLocalParticipant();
@@ -255,34 +251,24 @@ const AudioSession = ({ isMuted, isMasked }) => {
     </>
   );
 };
+
 const handleSyncAndEnter = useCallback(async (e) => {
-  if (e) {
-    e.stopPropagation();
-    e.preventDefault();
-  }
-  if (hasInteracted) {
-    console.log("⚠️ SYNC IGNORED: User has already interacted.");
-    return;
-  }
-  console.log("🚀 [1/3] Starting Security Sync initiated by user...");
+  if (e) { e.stopPropagation(); e.preventDefault(); }
+  
+  if (hasInteracted || isSyncing.current) return;
+
+  isSyncing.current = true; // Lock the gate
+  console.log("🚀 [1/3] Starting Security Sync...");
 
   try {
-    console.log("🔊 [2/3] Attempting to unlock audio channels...");
     await unlockAudio();
-    console.log("✅ Audio channels unlocked successfully.");
-    if (token) {
-      console.log("🔑 [3/3] Session verified. Token detected:", token.substring(0, 10) + "...");
-    } else {
-      console.warn("⚠️ [3/3] Session warning: Token missing or empty.");
-    }
-    console.log("🏁 Triggering application transition (setHasInteracted: true)");
-    setHasInteracted(true);
-    
+    console.log("✅ Sync complete.");
+    setHasInteracted(true); // Final state change
   } catch (err) {
     console.error("❌ CRITICAL SYNC ERROR:", err);
-    setHasInteracted(true);
+    isSyncing.current = false; // Allow retry if it failed
   }
-}, [hasInteracted, unlockAudio, token]);
+}, [hasInteracted, unlockAudio]);
 
 useEffect(() => {
   let remoteAudio = document.getElementById('remoteAudio');
