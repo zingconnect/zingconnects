@@ -101,11 +101,19 @@ app.use('/api/agents', authRoutes);
 app.use('/api/admin', adminRoutes);
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
-webpush.setVapidDetails(
-  `mailto:${process.env.VITE_EMAIL}`,
-  process.env.VITE_PUBLIC_KEY, 
-  process.env.VITE_PRIVATE_KEY
-);
+const vapidPublicKey = process.env.VITE_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VITE_PRIVATE_KEY;
+
+if (!vapidPublicKey || !vapidPrivateKey) {
+  console.error("❌ CRITICAL: VAPID keys are missing from environment variables.");
+} else {
+  webpush.setVapidDetails(
+    `mailto:${process.env.VITE_EMAIL || 'support@zingconnect.chat'}`,
+    vapidPublicKey,
+    vapidPrivateKey
+  );
+  console.log("✅ VAPID details set successfully.");
+}
 
 const upload = multer({ storage: multer.memoryStorage() });
 const getAgentModel = () => {
