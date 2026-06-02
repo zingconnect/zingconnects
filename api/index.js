@@ -58,7 +58,7 @@ import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
 import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
-
+const app = require('../app');
 const app = express();
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
@@ -69,13 +69,20 @@ app.set('terminatingCallsCache', terminatingCallsCache);
 app.set('redisClient', redisClient); 
 
 const corsOptions = {
-origin: [
+  origin: [
     "https://www.zingconnect.chat", 
+    "https://zingconnect.chat" // Add the non-www version too for safety
   ],
-    methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true, // MANDATORY for cookies
-  allowedHeaders: ["Content-Type", "Authorization"], 
-  exposedHeaders: ["Set-Cookie"] // Helps the browser see the cookie
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // ADDED OPTIONS
+  credentials: true, 
+  allowedHeaders: [
+    "Content-Type", 
+    "Authorization", 
+    "X-Requested-With", 
+    "Accept", 
+    "Origin"
+  ],
+  exposedHeaders: ["Set-Cookie"]
 };
 app.use(cors(corsOptions));
 app.use(express.json());

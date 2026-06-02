@@ -1304,6 +1304,8 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
   }, [isDualLoginConflict]);
+
+  
 useEffect(() => {
   let isMounted = true;
 
