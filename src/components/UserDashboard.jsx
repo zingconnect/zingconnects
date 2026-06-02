@@ -2039,7 +2039,7 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
         <main 
   ref={chatContainerRef}
   onScroll={handleChatScroll}
-  className="flex-1 w-full overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 relative"
+  className="flex-1 relative overflow-y-auto bg-[#efeae2] p-4 md:px-[15%] lg:px-[25%] flex flex-col space-y-2 scrollbar-hide"
   style={{
     scrollAnchor: 'none',            
     overscrollBehaviorY: 'contain',  
@@ -2086,79 +2086,59 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
     const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
 
     return (
-     <div 
-  key={msgKey} 
-  className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
-    isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-  } mb-3`}
->
-  {/* Media Handling - UPDATED WITH LAYOUT CONSTRAINTS */}
-  {(m.fileType === 'image' || m.fileType === 'video') && (
-    <div className="relative mb-2 mt-1 group">
-      {m.fileType === 'image' ? (
-        <>
-          <img 
-            src={m.fileUrl} 
-            alt="attachment" 
-            onClick={() => setFullscreenImage(m.fileUrl)} 
-            // Using object-contain and max-h-80 ensures it never blows out the container
-            className="rounded-lg bg-gray-100 object-contain w-full max-h-80 cursor-pointer" 
-            onError={(e) => { e.target.onerror = null; e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable'; }}
-          />
-          <button 
-            onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }} 
-            className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <BsDownload size={14} />
-          </button>
-        </>
-      ) : (
-        <div className="relative">
-          <video 
-            // Using max-h-80 here prevents video from pushing the footer
-            className="rounded-lg w-full max-h-80 bg-black cursor-pointer" 
-            onClick={() => setFullscreenVideo(m.fileUrl)}
-          >
-            <source src={m.fileUrl} type="video/mp4" />
-          </video>
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="bg-black/40 p-3 rounded-full text-white">
-              <BsPlayFill size={30} />
-            </div>
+      <div 
+        key={msgKey} 
+        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
+          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+        } mb-3`}
+      >
+        {/* Media Handling */}
+        {(m.fileType === 'image' || m.fileType === 'video') && (
+          <div className="relative mb-2 mt-1 group">
+            {m.fileType === 'image' ? (
+              <>
+                <img 
+                  src={m.fileUrl} 
+                  alt="attachment" 
+                  onClick={() => setFullscreenImage(m.fileUrl)} 
+                  className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer" 
+                  onError={(e) => { e.target.onerror = null; e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable'; }}
+                />
+                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
+              </>
+            ) : (
+              <div className="relative">
+                <video className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
+                  <source src={m.fileUrl} type="video/mp4" />
+                </video>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="bg-black/40 p-3 rounded-full text-white"><BsPlayFill size={30} /></div></div>
+                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
+              </div>
+            )}
           </div>
-          <button 
-            onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }} 
-            className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <BsDownload size={14} />
-          </button>
-        </div>
-      )}
-    </div>
-  )}
-
-  {m.text && (
-    <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType ? 'mt-1 mb-1' : ''}`}>
-      {m.text}
-    </p>
-  )}
-
-  {/* Timestamp and Status */}
-  <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
-    <span className="text-[9px] text-gray-400 font-bold uppercase">
-      {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-    </span>
-    {isMe && (
-      <div className="flex items-center ml-1">
-        {m.status === 'sending' && <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />}
-        {m.status === 'failed' && <button onClick={() => handleResend(m)} className="bg-red-500 text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase">Retry</button>}
-        {(!m.status || m.status === 'sent' || m.status === 'seen') && (
-          <BsCheckAll className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} size={16} />
         )}
+
+        {m.text && (
+          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType ? 'mt-1 mb-1' : ''}`}>
+            {m.text}
+          </p>
+        )}
+
+        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
+          <span className="text-[9px] text-gray-400 font-bold uppercase">
+            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {isMe && (
+            <div className="flex items-center ml-1">
+              {m.status === 'sending' && <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />}
+              {m.status === 'failed' && <button onClick={() => handleResend(m)} className="bg-red-500 text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase">Retry</button>}
+              {(!m.status || m.status === 'sent' || m.status === 'seen') && (
+                <BsCheckAll className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} size={16} />
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    )}
-  </div>
-</div>
     );
   })}
 
@@ -2167,7 +2147,7 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
 {previewUrl && !showOnboarding && (
-    <div className="fixed inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
+    <div className="absolute inset-0 z-[500] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
     {/* Header */}
     <div className="p-4 flex justify-between items-center text-white">
       <button 
@@ -2232,7 +2212,8 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
   </div>
 )}
 
-<footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">    
+<footer className="shrink-0 bg-[#f0f2f5] z-20 border-t border-gray-200 pb-safe">
+    
     {/* --- 1. REPLY PREVIEW PANEL --- */}
     {replyingTo && (
       <div className="px-2 md:px-6 pt-2">
