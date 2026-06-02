@@ -1175,9 +1175,13 @@ useEffect(() => {
             });
           }
           fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
-            method: 'PATCH',
-            credentials: 'include' 
-          }).catch(err => console.error("Mark read failed:", err));
+  method: 'PATCH',
+  headers: {
+    'Authorization': `Bearer ${token}`, // Pass the active token
+    'Content-Type': 'application/json'
+  },
+  credentials: 'include' 
+}).catch(err => console.error("Mark read failed:", err));
         }
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
