@@ -1824,7 +1824,8 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       currency: "NGN",
       verifiedAt: now.toISOString()
     };
-    syncBilling(agent, finalNumericAmount);
+  
+    syncBilling(agent, finalUpgradeAmount);
     await agent.save();
 
     return res.status(200).json({
