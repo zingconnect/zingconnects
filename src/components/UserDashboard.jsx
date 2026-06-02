@@ -2141,17 +2141,16 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
 
 <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
-
 {/* --- UPDATED WHATSAPP PREVIEW FOR USER DASHBOARD --- */}
 {previewUrl && !showOnboarding && (
-<div className="fixed inset-0 z-[5000] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
-    {/* Header */}
-    <div className="p-4 flex justify-between items-center text-white">
+  <div className="fixed inset-0 z-[5000] bg-black/90 flex flex-col animate-in fade-in zoom-in duration-200">
+    {/* Header: Added shrink-0 to prevent compression */}
+    <div className="p-4 flex justify-between items-center text-white shrink-0">
       <button 
         onClick={() => { 
           URL.revokeObjectURL(previewUrl);
           setPreviewUrl(null); 
-          setPreviewFile(null); // Ensure this matches your state name
+          setPreviewFile(null);
         }} 
         className="p-2 hover:bg-white/10 rounded-full transition-colors"
       >
@@ -2161,8 +2160,8 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
       <div className="w-10" /> 
     </div>
 
-    {/* Dynamic Media Preview Container */}
-    <div className="flex-1 flex items-center justify-center p-4">
+    {/* Dynamic Media Preview Container: Added overflow-hidden and constrained height */}
+    <div className="flex-1 flex items-center justify-center p-2 overflow-hidden">
       {previewFile?.type?.startsWith('video/') ? (
         <video 
           key={previewUrl}
@@ -2171,19 +2170,21 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
           autoPlay 
           muted
           playsInline
-          className="max-h-full max-w-full rounded-lg shadow-2xl bg-black"
+          // Constrained to 60vh to leave room for caption bar and header on mobile
+          className="max-h-[60vh] w-full object-contain rounded-lg shadow-2xl bg-black"
         />
       ) : (
         <img 
           src={previewUrl} 
           alt="Preview" 
-          className="max-h-full max-w-full object-contain rounded-lg shadow-2xl" 
+          // Constrained to 60vh to prevent layout overflow
+          className="max-h-[60vh] w-full object-contain rounded-lg shadow-2xl" 
         />
       )}
     </div>
 
-    {/* Caption Input Area */}
-    <div className="p-4 bg-black/40 backdrop-blur-md">
+    {/* Caption Input Area: Added shrink-0 to keep it pinned at the bottom */}
+    <div className="p-4 bg-black/40 backdrop-blur-md shrink-0">
       <div className="max-w-4xl mx-auto flex items-end gap-3 bg-white/10 p-2 rounded-2xl border border-white/20">
         <input
           type="text"
