@@ -250,14 +250,23 @@ export const AgentProfile = () => {
     }
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+ // A unified helper that provides options
+const formatData = (isoString, includeTime = true) => {
+  if (!isoString) return 'N/A';
+  
+  const options = {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    ...(includeTime && { hour: '2-digit', minute: '2-digit', hour12: true })
   };
+  
+  return new Date(isoString).toLocaleString(undefined, options);
+};
+
+// Usage:
+formatData(tx.paidAt); // Includes time (default)
+formatData(tx.paidAt, false); // Date only
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-page-bg transition-colors duration-300">
@@ -374,93 +383,92 @@ export const AgentProfile = () => {
           </div>
         </section>
 
-        {/* ✨ NEW MODULE: RESPONSIVE BILLING & INVOICING LEDGER TRACKER */}
-        <section className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-[2rem] p-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-            <div>
-              <h3 className="text-sm font-black tracking-tight text-blue-950 dark:text-white flex items-center gap-2">
-                <BsReceipt className="text-blue-600" size={16} /> Billing Ingestion History
-              </h3>
-              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">Verified Ledger Audit Balance</p>
+      <section className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-[2rem] p-6 shadow-sm">
+  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+    <div>
+      <h3 className="text-sm font-black tracking-tight text-blue-950 dark:text-white flex items-center gap-2">
+        <BsReceipt className="text-blue-600" size={16} /> Billing Ingestion History
+      </h3>
+      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">Verified Ledger Audit Balance</p>
+    </div>
+    <span className="self-start sm:self-auto px-3 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 text-[9px] font-black uppercase rounded-lg">
+      {transactions.length} Payment Nodes Found
+    </span>
+  </div>
+
+  {transactions.length === 0 ? (
+    <div className="text-center py-12 border border-dashed border-gray-100 dark:border-slate-800 rounded-2xl">
+      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">No transactional ledger payloads logged yet.</p>
+    </div>
+  ) : (
+    <>
+      {/* Desktop Dashboard View */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-gray-100 dark:border-slate-800">
+              <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Reference ID</th>
+              <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Tier Stacked</th>
+              <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Tenure Block</th>
+              <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Ingested Date</th>
+              <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400 text-right">Amount Injected</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50 dark:divide-slate-800/50">
+            {transactions.map((tx, idx) => (
+              <tr key={tx.transactionId || idx} className="text-xs hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
+                <td className="py-3.5 font-mono text-[10px] text-gray-500 dark:text-slate-400 font-bold">
+                  #{String(tx.transactionId).slice(-8).toUpperCase()}
+                </td>
+                <td className="py-3.5">
+                  <span className="px-2 py-0.5 bg-blue-900 text-white dark:bg-blue-600 font-black text-[8px] tracking-wide rounded uppercase">
+                    {tx.plan}
+                  </span>
+                </td>
+                <td className="py-3.5 text-gray-500 dark:text-slate-400 font-bold uppercase text-[10px]">
+                  {tx.months} Mo{tx.months > 1 ? 's' : ''} Extension
+                </td>
+                <td className="py-3.5 text-gray-400 font-medium">
+                  {formatDateTime(tx.paidAt)}
+                </td>
+                <td className="py-3.5 text-right font-black text-blue-950 dark:text-white">
+                  ₦{Number(tx.amount).toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Handheld Mobile Device View */}
+      <div className="md:hidden space-y-3">
+        {transactions.map((tx, idx) => (
+          <div key={tx.transactionId || idx} className="bg-input-bg/60 border border-gray-100 dark:border-slate-800 p-4 rounded-xl space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="font-mono text-[10px] text-gray-400 font-bold">
+                #{String(tx.transactionId).slice(-8).toUpperCase()}
+              </span>
+              <span className="px-2 py-0.5 bg-blue-900 text-white font-black text-[8px] tracking-wide rounded uppercase">
+                {tx.plan}
+              </span>
             </div>
-            <span className="self-start sm:self-auto px-3 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 text-[9px] font-black uppercase rounded-lg">
-              {transactions.length} Payment Nodes Found
-            </span>
+            <div className="flex justify-between items-end pt-1">
+              <div>
+                <p className="text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase">
+                  {tx.months} Month{tx.months > 1 ? 's' : ''} Block
+                </p>
+                <p className="text-[9px] text-gray-400 mt-0.5">{formatDateTime(tx.paidAt)}</p>
+              </div>
+              <span className="text-sm font-black text-blue-950 dark:text-blue-400">
+                ₦{Number(tx.amount).toLocaleString()}
+              </span>
+            </div>
           </div>
-
-          {transactions.length === 0 ? (
-            <div className="text-center py-12 border border-dashed border-gray-100 dark:border-slate-800 rounded-2xl">
-              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">No transactional ledger payloads logged yet.</p>
-            </div>
-          ) : (
-            <>
-              {/* Desktop Dashboard View (Hidden on mobile browsers) */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-gray-100 dark:border-slate-800">
-                      <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Reference ID</th>
-                      <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Tier Stacked</th>
-                      <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Tenure Block</th>
-                      <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400">Ingested Date</th>
-                      <th className="pb-3 text-[9px] font-black uppercase tracking-wider text-gray-400 text-right">Amount Injected</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50 dark:divide-slate-800/50">
-                    {transactions.map((tx, idx) => (
-                      <tr key={tx.transactionId || idx} className="text-xs hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
-                        <td className="py-3.5 font-mono text-[10px] text-gray-500 dark:text-slate-400 font-bold">
-                          #{String(tx.transactionId).slice(-8).toUpperCase()}
-                        </td>
-                        <td className="py-3.5">
-                          <span className="px-2 py-0.5 bg-blue-900 text-white dark:bg-blue-600 font-black text-[8px] tracking-wide rounded uppercase">
-                            {tx.plan}
-                          </span>
-                        </td>
-                        <td className="py-3.5 text-gray-500 dark:text-slate-400 font-bold uppercase text-[10px]">
-                          {tx.months} Mo{tx.months > 1 ? 's' : ''} Extension
-                        </td>
-                        <td className="py-3.5 text-gray-400 font-medium">
-                          {formatDate(tx.paidAt)}
-                        </td>
-                        <td className="py-3.5 text-right font-black text-blue-950 dark:text-white">
-                          ₦{Number(tx.amount).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Handheld Mobile Device View (Hidden on desktop screens) */}
-              <div className="md:hidden space-y-3">
-                {transactions.map((tx, idx) => (
-                  <div key={tx.transactionId || idx} className="bg-input-bg/60 border border-gray-100 dark:border-slate-800 p-4 rounded-xl space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="font-mono text-[10px] text-gray-400 font-bold">
-                        #{String(tx.transactionId).slice(-8).toUpperCase()}
-                      </span>
-                      <span className="px-2 py-0.5 bg-blue-900 text-white font-black text-[8px] tracking-wide rounded uppercase">
-                        {tx.plan}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-end pt-1">
-                      <div>
-                        <p className="text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase">
-                          {tx.months} Month{tx.months > 1 ? 's' : ''} Block
-                        </p>
-                        <p className="text-[9px] text-gray-400 mt-0.5">{formatDate(tx.paidAt)}</p>
-                      </div>
-                      <span className="text-sm font-black text-blue-950 dark:text-blue-400">
-                        ₦{Number(tx.amount).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </section>
+        ))}
+      </div>
+    </>
+  )}
+</section>
 
         {/* PRIMARY EDIT PROFILE IDENTITY CONTAINER */}
         <form onSubmit={handleUpdate} className="space-y-8">
