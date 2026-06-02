@@ -17,6 +17,17 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 
+const formatDateTime = (isoString, includeTime = true) => {
+  if (!isoString) return 'N/A';
+  return new Date(isoString).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    ...(includeTime && { hour: '2-digit', minute: '2-digit', hour12: true })
+  });
+};
+
+
 export const AgentProfile = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
@@ -250,24 +261,6 @@ export const AgentProfile = () => {
     }
   };
 
- // A unified helper that provides options
-const formatData = (isoString, includeTime = true) => {
-  if (!isoString) return 'N/A';
-  
-  const options = {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    ...(includeTime && { hour: '2-digit', minute: '2-digit', hour12: true })
-  };
-  
-  return new Date(isoString).toLocaleString(undefined, options);
-};
-
-// Usage:
-formatData(tx.paidAt); // Includes time (default)
-formatData(tx.paidAt, false); // Date only
-
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-page-bg transition-colors duration-300">
       <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -308,9 +301,9 @@ formatData(tx.paidAt, false); // Date only
             <p className="text-[8px] font-black uppercase tracking-widest text-gray-400 mb-1">Activation Date</p>
             <div className="flex items-center gap-2 text-blue-900 dark:text-blue-400">
               <BsCalendarCheck size={12} className="shrink-0" />
-              <span className="text-xs font-bold break-words">
-                {formatDate(agentData.subscriptionDate)}
-              </span>
+             <span className="text-xs font-bold break-words">
+  {formatDateTime(agentData.subscriptionDate, false)}
+</span>
             </div>
           </div>
 
@@ -319,7 +312,9 @@ formatData(tx.paidAt, false); // Date only
               <p className="text-[8px] font-black uppercase tracking-widest text-gray-400 mb-1">Expiry Date</p>
               <div className="flex items-center gap-2 text-red-500">
                 <BsHourglassSplit size={12} className="shrink-0" />
-                <span className="text-xs font-bold break-words">{formatDate(agentData.expiryDate)}</span>
+<span className="text-xs font-bold break-words">
+  {formatDateTime(agentData.expiryDate, false)}
+</span>
               </div>
             </div>
             <span className={`mt-2 text-[7px] font-black uppercase tracking-widest ${isSubscribed ? 'text-green-500' : 'text-red-500'}`}>
