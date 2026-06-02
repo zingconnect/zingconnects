@@ -64,8 +64,11 @@ notificationSent: {
   timestamps: true 
 });
 
+// Keep these for your primary chat load queries
+messageSchema.index({ senderId: 1, receiverId: 1, createdAt: -1 });
+messageSchema.index({ receiverId: 1, senderId: 1, createdAt: -1 });
 
-messageSchema.index({ senderId: 1, receiverId: 1, createdAt: 1 });
+// Keep these for specific functional needs
 messageSchema.index({ receiverId: 1, status: 1 });
 messageSchema.index({ senderId: 1, receiverId: 1, fileType: 1 });
 
