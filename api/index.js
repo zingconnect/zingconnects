@@ -2012,9 +2012,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 
   try {
     await connectToDatabase();
-
-    // 1. DYNAMIC IDENTITY RESOLUTION (Polymorphic Lookup)
-    // Check Agent collection first, then User.
     let senderDoc = await Agent.findById(myId);
     let senderRole = 'Agent';
 
@@ -2068,28 +2065,36 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
+// 5. Handle Web-Push with Absolute URLs
     if (receiver.pushSubscription?.endpoint) {
       try {
+        const baseUrl = "https://www.zingconnect.chat";
+        const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
+
         const payload = JSON.stringify({
           title: `New Message from ${senderDoc.firstName || 'Zing'}`,
           body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
-          data: { url: sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}` }
+          icon: `${baseUrl}/logo-s.png`,
+          badge: `${baseUrl}/logo-s.png`,
+          data: { 
+            url: `${baseUrl}${path}`,
+            type: 'message'
+          }
         });
-        
+
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
         
       } catch (pushErr) {
-        console.error("Push delivery failed:", pushErr.message);
-                if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-          console.log("Removing stale subscription from DB...");
-          await TargetModel.findByIdAndUpdate(receiverId, { 
-            $unset: { pushSubscription: "" } 
-          });
+        console.error("PUSH FAILURE:", pushErr.statusCode, pushErr.message);
+
+        // Remove stale subscription
+        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
+          console.log("Stale subscription removed for user:", receiverId);
         }
       }
     }
-
     // 6. Atomic Lockout Strategy
     if (!isOnline) {
       try {
