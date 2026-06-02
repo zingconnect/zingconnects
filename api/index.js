@@ -2009,8 +2009,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 // =========================================================================
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
   const myId = req.user.id;
-  console.log("DEBUG: Processing message from ID:", myId);
-  console.log("DEBUG: Sending to endpoint:", receiver.pushSubscription?.endpoint);
 
   try {
     await connectToDatabase();
@@ -2026,7 +2024,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     
-    console.log("DEBUG: Resolved senderRole as:", senderRole);
 
     const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
 
@@ -2064,10 +2061,16 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     if (!receiver) {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
+    console.log(`DEBUG: Target Found: ${receiver._id}`);
+    console.log(`DEBUG: Push Subscription Exists: ${!!receiver.pushSubscription}`);
+    if (receiver.pushSubscription) {
+        console.log(`DEBUG: Endpoint: ${receiver.pushSubscription.endpoint}`);
+    } else {
+        console.warn(`⚠️ WARNING: No pushSubscription found in DB for user ${receiverId}`);
+    }
 
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
-// 5. Handle Web-Push with Absolute URLs
     if (receiver.pushSubscription?.endpoint) {
       try {
         const baseUrl = "https://www.zingconnect.chat";
