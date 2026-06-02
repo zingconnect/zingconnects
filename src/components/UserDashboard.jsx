@@ -86,7 +86,6 @@ export const UserDashboard = () => {
   const { token, isLoading } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
 const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
@@ -110,6 +109,9 @@ const isAdjustingScrollRef = useRef(false);
 const previousScrollHeightRef = useRef(0);
 const previousScrollTopRef = useRef(0);
 const scrollSentinelRef = useRef(null); 
+const videoRef = useRef(null);
+const canvasRef = useRef(null);
+const [showCamera, setShowCamera] = useState(false);
 
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
@@ -370,12 +372,7 @@ useEffect(() => {
   return () => { isMounted = false; };
 }, [unlockAudio]);
 
-const triggerCamera = () => {
-  if (cameraInputRef.current) {
-    cameraInputRef.current.value = ''; 
-    cameraInputRef.current.click();
-  }
-};
+
 
 useEffect(() => {
   if (!socket) return;
@@ -1451,6 +1448,46 @@ const compressImage = (file) => {
   });
 };
 
+const startCamera = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'environment' }, 
+      audio: false 
+    });
+    setShowCamera(true);
+    setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    }, 100);
+  } catch (err) {
+    alert("Camera access denied or not available.");
+  }
+};
+
+const capturePhoto = () => {
+  const video = videoRef.current;
+  const canvas = canvasRef.current;
+  if (video && canvas) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+        canvas.toBlob((blob) => {
+      const file = new File([blob], "camera-capture.jpg", { type: "image/jpeg" });
+      const url = URL.createObjectURL(blob);
+      setPreviewFile(file);
+      setPreviewUrl(url);
+      stopCamera();
+    }, 'image/jpeg');
+  }
+};
+
+const stopCamera = () => {
+  const stream = videoRef.current?.srcObject;
+  stream?.getTracks().forEach(track => track.stop());
+  setShowCamera(false);
+};
+
 const processFile = (file) => {
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   setPreviewFile(file);
@@ -2300,30 +2337,37 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
     )}
 
   {/* --- MAIN INPUT CONTROLS --- */}
-   <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
-    <input  type="file"  ref={fileInputRef}  onChange={handleFileUpload}  accept="image/*,video/*"  className="hidden"/>
-{/* Optimized for Camera */}
-<input 
-  type="file" 
-  ref={cameraInputRef} 
-  onChange={handleFileUpload} 
-  accept="image/*;capture=camera,video/*;capture=camcorder"
-  capture="environment" 
-  className="hidden" 
-/>
+  <div className="px-2 md:px-6 py-3 flex items-center gap-2 md:gap-3">
+  {/* ONLY keep the standard file input for gallery/file picking */}
+  <input 
+    type="file" 
+    ref={fileInputRef} 
+    onChange={handleFileUpload} 
+    accept="image/*,video/*" 
+    className="hidden"
+  />
 
-    <div className="flex gap-1 md:gap-2 text-gray-500">
-      <button type="button" onClick={() => fileInputRef.current.click()} disabled={isUploading} 
-        className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
-        <BsPaperclip size={22} />
-      </button>
+  <div className="flex gap-1 md:gap-2 text-gray-500">
+    <button 
+      type="button" 
+      onClick={() => fileInputRef.current?.click()} 
+      disabled={isUploading} 
+      className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
+    >
+      <BsPaperclip size={22} />
+    </button>
 
-     <button type="button" onClick={triggerCamera} disabled={isUploading}
-  className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90">
-  <BsCameraFill size={22} />
-</button>
-    </div>
-    
+    {/* This now triggers your new WebRTC CameraModal instead of a hidden input */}
+    <button 
+      type="button" 
+      onClick={startCamera} 
+      disabled={isUploading}
+      className="p-2 hover:bg-black/5 rounded-full transition-colors active:scale-90"
+    >
+      <BsCameraFill size={22} />
+    </button>
+  </div>
+
     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
       <div className="flex-1 relative flex items-center">
         <input 
@@ -2565,6 +2609,17 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
     <div className="flex items-center gap-2 opacity-30">
       <BsShieldLockFill size={12} />
       <span className="text-[9px] font-bold uppercase tracking-[0.2em]">End-to-End Encrypted Session</span>
+    </div>
+  </div>
+)}
+
+{showCamera && (
+  <div className="fixed inset-0 z-[8000] bg-black flex flex-col items-center justify-center">
+    <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+    <canvas ref={canvasRef} className="hidden" />
+    <div className="absolute bottom-10 flex gap-6">
+      <button onClick={stopCamera} className="bg-white/20 p-4 rounded-full text-white">Cancel</button>
+      <button onClick={capturePhoto} className="bg-white w-16 h-16 rounded-full border-4 border-white/50" />
     </div>
   </div>
 )}
