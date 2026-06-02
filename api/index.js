@@ -180,6 +180,13 @@ const requireSuperAdmin = (req, res, next) => {
   });
 };
 
+const syncBilling = (agent, amount) => {
+  agent.subscriptionAmount = amount;
+  if (!agent.paymentDetails) agent.paymentDetails = {};
+  agent.paymentDetails.amountNgn = amount;
+  agent.paymentDetails.currency = 'NGN';
+};
+
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
   socket.on("join-main-room", async (userId) => {
@@ -1684,7 +1691,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
         currency: "NGN",
         verifiedAt: now
       };
-
+      syncBilling(agent, finalNumericAmount);
       await agent.save();
 
       console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Amount: ₦${finalNumericAmount}`);
@@ -1817,7 +1824,7 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
       currency: "NGN",
       verifiedAt: now.toISOString()
     };
-
+    syncBilling(agent, finalNumericAmount);
     await agent.save();
 
     return res.status(200).json({
