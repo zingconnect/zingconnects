@@ -160,7 +160,7 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
   const handleLogout = async (e) => {
     e.preventDefault();
     try {
-      await secureFetch('/api/agents/logout', null, { method: 'POST' });
+      await secureFetch('/api/agents/logout', token, { method: 'POST' });
     } catch (err) {
       console.error("Logout failed:", err);
     } finally {
@@ -264,7 +264,7 @@ const startStatusPolling = (roomName) => {
 
   const pollInterval = setInterval(async () => {
     try {
-      const res = await secureFetch(`/api/calls/status/${roomName}`, null, { 
+      const res = await secureFetch(`/api/calls/status/${roomName}`, token, { 
         method: 'GET' 
       });
       
@@ -309,7 +309,7 @@ const fetchMessages = async (userId, limit = 30) => {
   isFetching = true;
   
   try {
-    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, null, {
+    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, token, {
       method: 'GET'
     });
     
@@ -349,7 +349,7 @@ const handleAcceptCall = async () => {
  try {
     setCallStatus('connecting'); 
     setShowFullScreenCall(true);
-        const res = await secureFetch(`/api/calls/accept/${callId}`, null, {
+        const res = await secureFetch(`/api/calls/accept/${callId}`, token, {
       method: 'POST'
     });
     
@@ -467,7 +467,7 @@ const handleAcceptCall = async () => {
     const token = localStorage.getItem('agentToken');
     if (currentCallId) {
     try {
-      await secureFetch(`/api/calls/end/${currentCallId}`, null, {
+      await secureFetch(`/api/calls/end/${currentCallId}`, token, {
         method: 'POST',
         body: JSON.stringify({ callId: currentCallId })
       });
@@ -596,8 +596,6 @@ const handleAcceptCall = async () => {
       const handleStateChange = () => {
         if (room.state === 'connected') syncMic();
       };
-
-      // FIXED: Swapped out undefined RoomEvent tracking references for robust string literal events
       room.on('connectionStateChanged', handleStateChange);
       return () => {
         room.off('connectionStateChanged', handleStateChange);
@@ -760,7 +758,7 @@ useEffect(() => {
   const fallbackCheck = setInterval(async () => {
     if (callStatus === 'calling' && !peerConnected) {
       try {
-        const res = await secureFetch(`/api/calls/status/${currentCallId}`, null, {
+        const res = await secureFetch(`/api/calls/status/${currentCallId}`, token, {
           method: 'GET'
         });
         const data = await res.json();
@@ -980,7 +978,7 @@ useEffect(() => {
     const token = localStorage.getItem('agentToken'); 
 
     try {
-      const res = await secureFetch(`/api/calls/status/${callId}`, null, {
+      const res = await secureFetch(`/api/calls/status/${callId}`, token, {
         method: 'GET'
       });
       const statusData = await res.json();
@@ -1063,7 +1061,7 @@ useEffect(() => {
   }
   const pollForCalls = async () => {
     try {
-      const res = await secureFetch(`/api/calls/check-incoming`, null, {
+      const res = await secureFetch(`/api/calls/check-incoming`, token, {
         method: 'GET'
       });
       const data = await res.json();
@@ -1117,7 +1115,7 @@ useEffect(() => {
 
       if (selectedUser?._id) {
         try {
-          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, null, {
+          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, token, {
             method: 'GET'
           });
           if (!response.ok) throw new Error("Sync failed");
@@ -1146,7 +1144,7 @@ useEffect(() => {
     if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
     try {
       // 2. Use secureFetch (token = null for cookie auth)
-      const res = await secureFetch(`/api/calls/status/${currentCallId}`, null, {
+      const res = await secureFetch(`/api/calls/status/${currentCallId}`, token, {
         method: 'GET'
       });
       // 3. Handle Unauthorized/Forbidden (Conflict)
@@ -1290,7 +1288,7 @@ useEffect(() => {
 
   const heartBeat = setInterval(async () => {
     try {
-      const response = await secureFetch('/api/agents/heartbeat', null, {
+      const response = await secureFetch('/api/agents/heartbeat', token, {
         method: 'POST' 
       });
             if (response.status === 403) {
@@ -1514,7 +1512,7 @@ const handleDeleteMessage = async (msgId) => {
   setMessages(prev => prev.filter(m => (m._id || m.id) !== msgId));
 
   try {
-    const res = await secureFetch(`/api/messages/${msgId}`, null, {
+    const res = await secureFetch(`/api/messages/${msgId}`, token, {
       method: 'DELETE'
     });
 
@@ -1543,7 +1541,7 @@ const handleFinalSend = async () => {
     const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
     
     // 1. Get Signed URL (Using secureFetch for cookie-based auth)
-    const urlResponse = await secureFetch('/api/messages/get-upload-url', {
+    const urlResponse = await secureFetch('/api/messages/get-upload-url', token, {
       method: 'POST',
       body: JSON.stringify({ fileName: previewFile.name, fileType: previewFile.type })
     });
@@ -1560,7 +1558,7 @@ const handleFinalSend = async () => {
     if (!directUpload.ok) throw new Error("Cloud upload failed");
 
     // 3. Confirm to DB (Using secureFetch for cookie-based auth)
-    const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
+    const confirmResponse = await secureFetch('/api/messages/confirm-upload', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: selectedUser._id,
@@ -1611,7 +1609,7 @@ const handleDisconnect = async (e) => {
   setLimit(30);
   if (socket) socket.emit('join-chat', user._id);
  try {
-    const response = await secureFetch(`/api/messages/${user._id}?limit=30`, null, {
+    const response = await secureFetch(`/api/messages/${user._id}?limit=30`, token, {
        method: 'GET'
     });
 
@@ -1641,7 +1639,7 @@ const handleDisconnect = async (e) => {
           });
         }
       }
-    await secureFetch(`/api/messages/mark-read/${user._id}`, null, {
+    await secureFetch(`/api/messages/mark-read/${user._id}`, token, {
         method: 'PATCH'
       });
     }
@@ -1775,7 +1773,7 @@ useEffect(() => {
       // We use agentToken here because that is what your AgentDashboard uses
       const token = localStorage.getItem('agentToken');
       if (!token) return;
-await secureFetch('/api/save-subscription', {
+        await secureFetch('/api/save-subscription', token,{
       method: 'POST',
       body: JSON.stringify({ subscription }) 
     });
@@ -1826,7 +1824,7 @@ useEffect(() => {
       });
 
     // Mark as read using secureFetch (implicitly includes cookie)
-      secureFetch(`/api/messages/mark-read/${selectedUser._id}`, {
+      secureFetch(`/api/messages/mark-read/${selectedUser._id}`, token, {
         method: 'PATCH'
       }).catch(err => console.error("Mark read error:", err));
     }
@@ -1900,7 +1898,7 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, optimisticMsg]);
 
   try {
-   const response = await secureFetch('/api/messages/send', {
+   const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: selectedUser._id,
