@@ -1607,6 +1607,7 @@ const handleStartCall = async () => {
     handleEndCall();
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
   // Ensure we have necessary data
@@ -1628,23 +1629,24 @@ const handleSendMessage = async (e) => {
   };
 
   setMessages(prev => [...prev, pendingMessage]);
-  // Use scrollIntoView properly
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
     const response = await fetch('/api/messages/send', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` // Dynamically injected active token
+      },
       credentials: 'include',
       body: JSON.stringify({
         receiverId: agent._id,
-        receiverModel: 'Agent', // ADDED: Must match backend expectation
+        receiverModel: 'Agent',
         text: textToSend,
         fileType: 'text',
         replyToId: replyingTo?._id 
       })
     });
-
     const data = await response.json();
     
     if (!response.ok || !data.success) throw new Error(data.message || "Failed to send");
