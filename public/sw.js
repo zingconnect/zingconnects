@@ -1,96 +1,55 @@
-// 1. LIFECYCLE HANDLERS
-self.addEventListener('install', (event) => {
-  self.skipWaiting();
-});
+// 1. LIFECYCLE
+self.addEventListener('install', (event) => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(clients.claim());
-});
-
-// 2. CONSOLIDATED FETCH HANDLER (One single, robust listener)
+// 2. FETCH HANDLER: Focused only on bypassing, not caching
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // A. EXCLUSIONS: Bypass Service Worker for these
-  if (
-    url.pathname.startsWith('/api/') || 
-    event.request.destination === 'audio' || 
-    url.pathname.endsWith('.mp3') || 
-    url.pathname.endsWith('.wav') ||
-    event.request.headers.get('range') ||
-    url.origin !== self.location.origin
-  ) {
-    return; // Request proceeds directly to the network without intervention
+  // ALWAYS bypass for APIs and Audio
+  if (url.pathname.startsWith('/api/') || event.request.destination === 'audio' || event.request.headers.get('range')) {
+    return; 
   }
-
-  // B. CACHING: Handle static assets with error safety
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      // Return cached response if found, otherwise fetch from network
-      return cachedResponse || fetch(event.request).catch((err) => {
-        console.error('Fetch failed for:', event.request.url, err);
-        throw err; // Re-throw to inform the browser the fetch failed
-      });
-    })
-  );
 });
 
-// 3. PUSH NOTIFICATION LOGIC
+// 3. PUSH NOTIFICATION: Error-proofed
 self.addEventListener('push', function(event) {
-  console.log("Service Worker: Push received by browser!", event.data?.text());
-  if (!event.data) return;
+  let data = { title: 'ZingConnect', body: 'You have a new message' };
   
-  let data;
-  try {
-    data = event.data.json();
-  } catch (e) {
-    data = { title: 'ZingConnect', body: event.data.text() };
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data.body = event.data.text();
+    }
   }
   
-  const iconUrl = '/logo-s.png'; 
-  const isCall = data.type === 'CALL_INVITE' || data.title?.toLowerCase().includes('call');
+  const iconUrl = '/logo-s.png'; // Ensure this exists at your root
 
   const options = {
-    body: data.body || 'New Notification',
+    body: data.body,
     icon: iconUrl,
     badge: iconUrl,
-    vibrate: isCall ? [500, 200, 500, 200, 500] : [200, 100, 200],
-    requireInteraction: isCall,
-    tag: isCall ? 'incoming-call' : 'new-msg',
-    renotify: true,
-    data: {
-      url: data.data?.url || data.url || '/dashboard',
-      type: data.type || 'message'
-    },
-    actions: isCall ? [
-      { action: 'answer', title: '✅ Answer' },
-      { action: 'decline', title: '❌ Decline' }
-    ] : []
+    vibrate: [200, 100, 200],
+    data: { url: data.data?.url || data.url || '/dashboard' }
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title || 'ZingConnect', options)
+    self.registration.showNotification(data.title, options)
   );
 });
 
-// 4. NOTIFICATION CLICK HANDLER
+// 4. CLICK HANDLER: Standardized
 self.addEventListener('notificationclick', function(event) {
-  event.notification.close(); 
-
-  if (event.action === 'decline') return; 
-
-  const targetPath = event.notification.data.url || '/dashboard';
-  const targetUrl = new URL(targetPath, self.location.origin).href;
+  event.notification.close();
+  const url = event.notification.data.url;
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
-      for (const client of windowClients) {
-        if (client.url.includes('/dashboard')) {
-          client.focus();
-          return client.postMessage({ type: 'NAVIGATE', url: targetUrl });
-        }
+    clients.matchAll({ type: 'window' }).then(clientList => {
+      for (const client of clientList) {
+        if (client.url === url && 'focus' in client) return client.focus();
       }
-      if (clients.openWindow) return clients.openWindow(targetUrl);
+      if (clients.openWindow) return clients.openWindow(url);
     })
   );
 });
