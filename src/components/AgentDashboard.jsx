@@ -1877,6 +1877,7 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!newMessage.trim() || !selectedUser || isUploading) return;
