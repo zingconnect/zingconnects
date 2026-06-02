@@ -2066,11 +2066,8 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // 4. Socket.io Online Gateway Validation
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
-
-    // 5. Handle Web-Push
     if (receiver.pushSubscription?.endpoint) {
       try {
         const payload = JSON.stringify({
@@ -2078,11 +2075,18 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
           body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
           data: { url: sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}` }
         });
+        
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
-        newMessage.notificationSent = true;
+        
       } catch (pushErr) {
         console.error("Push delivery failed:", pushErr.message);
+                if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+          console.log("Removing stale subscription from DB...");
+          await TargetModel.findByIdAndUpdate(receiverId, { 
+            $unset: { pushSubscription: "" } 
+          });
+        }
       }
     }
 

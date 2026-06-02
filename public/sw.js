@@ -37,6 +37,7 @@ self.addEventListener('fetch', (event) => {
 
 // 3. PUSH NOTIFICATION LOGIC
 self.addEventListener('push', function(event) {
+  console.log("Service Worker: Push received by browser!", event.data?.text());
   if (!event.data) return;
   
   let data;
