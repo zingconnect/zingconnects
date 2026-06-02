@@ -195,66 +195,50 @@ export const AgentProfile = () => {
           description: `Extend ${subConfig.planTier} Plan by ${subConfig.months} Month(s) (₦${finalCalculatedNairaAmount.toLocaleString()})`,
           logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
         },
-        callback: async (response) => {
-          try {
-            const storedToken = localStorage.getItem('accessToken');
+       callback: async (response) => {
+  setIsUpdatingSub(true);
 
-            // ✨ FIXED: Closed stringify bracket layers safely inside your parameters layout configuration
-            const verifyRes = await secureFetch('/api/agents/update-subscription', storedToken, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                planTier: subConfig.planTier,
-                months: parseInt(subConfig.months, 10),
-                transaction_id: response.transaction_id
-              })
-            });
+  try {
+    const storedToken = localStorage.getItem('accessToken');
 
-            if (verifyRes.ok) {
-              const result = await verifyRes.json();
-              
-              // Explicitly shut down the Flutterwave Checkout modal wrapper overlay frame
-              if (typeof response.close === 'function') {
-                response.close();
-              } else if (window.FlutterwaveCheckout && typeof window.FlutterwaveCheckout.close === 'function') {
-                window.FlutterwaveCheckout.close();
-              }
+    const verifyRes = await secureFetch('/api/agents/update-subscription', storedToken, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        planTier: subConfig.planTier,
+        months: parseInt(subConfig.months, 10),
+        transaction_id: response.transaction_id
+      })
+    });
 
-              alert(result.message || "Subscription tenure stacked successfully!");
-              
-              setAgentData(prev => ({
-                ...prev,
-                plan: result.agent.plan,
-                isSubscribed: result.agent.isSubscribed,
-                expiryDate: result.agent.expiryDate,
-                subscriptionAmount: result.agent.subscriptionAmount,
-                paymentDetails: result.agent.paymentDetails
-              }));
-              setIsSubscribed(true);
+    const result = await verifyRes.json();
 
-              // Inject the new record directly into our ledger UI state optimistically
-              setTransactions(prev => [
-                {
-                  transactionId: String(response.transaction_id),
-                  plan: subConfig.planTier,
-                  months: parseInt(subConfig.months, 10),
-                  amount: finalCalculatedNairaAmount,
-                  paidAt: new Date().toISOString()
-                },
-                ...prev
-              ]);
+    if (verifyRes.ok) {
+      // 1. Update React State Optimistically
+      setAgentData(prev => ({
+        ...prev,
+        plan: result.agent.plan,
+        isSubscribed: result.agent.isSubscribed,
+        expiryDate: result.agent.expiryDate,
+        subscriptionAmount: result.agent.subscriptionAmount,
+        paymentDetails: result.agent.paymentDetails
+      }));
+      setIsSubscribed(true);
 
-            } else {
-              const errData = await verifyRes.json();
-              alert(errData.message || "Tenure processing pipeline rejection error.");
-            }
-          } catch (err) {
-            console.error("Verification backend error:", err);
-            alert("Connection timeout syncing transaction parameters.");
-          } finally {
-            setIsUpdatingSub(false);
-          }
-        },
+      // 2. Refresh the page to ensure all components (Nav, Dashboard, Profile) 
+      // fetch the fresh data from the server
+      alert(result.message || "Subscription updated successfully!");
+      window.location.reload(); 
+    } else {
+      alert(result.message || "Payment verification failed.");
+    }
+  } catch (err) {
+    console.error("Critical Failure in Subscription Sync:", err);
+    alert("Connection error occurred while syncing your payment.");
+  } finally {
+    setIsUpdatingSub(false);
+  }
+},
         onclose: () => {
           setIsUpdatingSub(false);
         }
