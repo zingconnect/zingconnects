@@ -386,79 +386,92 @@ const handleAgentLogin = async (e) => {
         </div>
       </footer>
 
-      {isLoginOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-blue-950/20 backdrop-blur-2xl">
-          <div className="w-full max-w-sm bg-white p-8 md:p-12 rounded-[3rem] shadow-2xl border border-gray-100">
-            <div className="text-center mb-8">
-              <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-950 text-white rounded-[1rem] md:rounded-[1.5rem] flex items-center justify-center mb-4 mx-auto shadow-xl">
-                <BsShieldLockFill size={20} />
-              </div>
-              <h2 className="text-xl font-black text-blue-950">ZingConnect Portal</h2>
-            </div>
+    {isLoginOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-md animate-in fade-in duration-300">
+    <div className="w-full max-w-sm bg-white p-8 md:p-10 rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.15)] border border-gray-100 relative overflow-hidden">
+      
+      {/* Decorative Top Accent */}
+      <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-950" />
 
-            <form onSubmit={handleAgentLogin} className="space-y-4">
-              <input 
-                required type="email" value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="Agent Secure ID"
-                className="w-full px-6 py-4 bg-gray-50 border border-transparent rounded-[1.5rem] text-xs outline-none focus:border-blue-600 transition-all"
-              />
-              <div className="relative">
-                <input 
-                  required type={showPassword ? "text" : "password"} value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="Access Key"
-                  className="w-full px-6 py-4 bg-gray-50 border border-transparent rounded-[1.5rem] text-xs outline-none focus:border-blue-600 transition-all"
-                />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400">
-                  {showPassword ? <BsEyeSlashFill size={16} /> : <BsEyeFill size={16} />}
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2 ml-2 mt-1">
-                <input 
-                  type="checkbox" id="rememberAgent" checked={rememberAgent}
-                  onChange={(e) => setRememberAgent(e.target.checked)}
-                  className="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                />
-                <label htmlFor="rememberAgent" className="text-[9px] font-black text-gray-400 uppercase tracking-widest cursor-pointer">
-                  Remember Access Key ID
-                </label>
-              </div>
-
-              <button disabled={isProcessing} className="w-full py-5 bg-blue-950 text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-lg mt-2 disabled:opacity-50">
-                {isProcessing ? "Verifying..." : "Establish Connection"}
-              </button>
-
-              <div className="flex flex-col items-center pt-4">
-                {showInstallBtn && (
-                  <button 
-                    type="button" onClick={handleInstallApp}
-                    className="flex items-center gap-2 text-[9px] font-black text-blue-600 uppercase tracking-widest hover:opacity-70 transition-opacity mb-4"
-                  >
-                    <BsDownload size={10} /> Install Agent Portal App
-                  </button>
-                )}
-
-                {isIOS && (
-                  <div className="w-full mb-4">
-                    <button 
-                      type="button" onClick={() => setShowIOSModal(true)}
-                      className="w-full flex items-center justify-center gap-2 py-3 bg-blue-50 border border-blue-100 rounded-2xl hover:bg-blue-100 transition-colors group"
-                    >
-                      <BsDownload size={12} className="text-blue-600" />
-                      <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Install ZingConnect Portal</span>
-                    </button>
-                  </div>
-                )}
-                <button type="button" onClick={() => setIsLoginOpen(false)} className="w-full text-[9px] font-black text-gray-400 uppercase tracking-widest">
-                  Terminate Access
-                </button>
-              </div>
-            </form>
-          </div>
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 bg-blue-50 text-blue-950 rounded-[1.5rem] flex items-center justify-center mb-6 mx-auto">
+          <BsShieldLockFill size={28} />
         </div>
-      )}
+        <h2 className="text-2xl font-extrabold text-blue-950">ZingConnect Portal</h2>
+        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em] mt-1">Secure Agent Authentication</p>
+      </div>
+
+      <form onSubmit={handleAgentLogin} className="space-y-4">
+        {/* Email Input */}
+        <div>
+          <input 
+            required type="email" value={loginEmail}
+            onChange={(e) => setLoginEmail(e.target.value)}
+            placeholder="AGENT SECURE ID"
+            className="w-full px-6 py-4 bg-gray-50 border border-gray-100 rounded-[1.25rem] text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-gray-400"
+          />
+        </div>
+
+        {/* Password Input */}
+        <div className="relative">
+          <input 
+            required type={showPassword ? "text" : "password"} value={loginPassword}
+            onChange={(e) => setLoginPassword(e.target.value)}
+            placeholder="ACCESS KEY"
+            className="w-full px-6 py-4 bg-gray-50 border border-gray-100 rounded-[1.25rem] text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-gray-400"
+          />
+          <button 
+            type="button" 
+            onClick={() => setShowPassword(!showPassword)} 
+            className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-600 transition-colors"
+          >
+            {showPassword ? <BsEyeSlashFill size={16} /> : <BsEyeFill size={16} />}
+          </button>
+        </div>
+
+        {/* Remember Me */}
+        <div className="flex items-center gap-2 ml-1">
+          <input 
+            type="checkbox" id="rememberAgent" checked={rememberAgent}
+            onChange={(e) => setRememberAgent(e.target.checked)}
+            className="w-3.5 h-3.5 rounded border-gray-300 text-blue-950 focus:ring-blue-500 cursor-pointer"
+          />
+          <label htmlFor="rememberAgent" className="text-[9px] font-black text-gray-400 uppercase tracking-widest cursor-pointer">
+            Remember Access Key
+          </label>
+        </div>
+
+        {/* Submit Button */}
+        <button 
+          disabled={isProcessing} 
+          className="w-full py-5 bg-blue-950 text-white rounded-[1.25rem] font-black text-[10px] uppercase tracking-[0.25em] shadow-lg shadow-blue-950/20 active:scale-[0.98] transition-all disabled:opacity-60 mt-2"
+        >
+          {isProcessing ? "Verifying Identity..." : "Establish Connection"}
+        </button>
+
+        {/* Secondary Actions */}
+        <div className="flex flex-col items-center pt-4 space-y-4">
+          {(showInstallBtn || isIOS) && (
+            <button 
+              type="button" 
+              onClick={isIOS ? () => setShowIOSModal(true) : handleInstallApp}
+              className="flex items-center gap-2 text-[9px] font-black text-blue-600 uppercase tracking-widest hover:text-blue-800 transition-colors"
+            >
+              <BsDownload size={10} /> Install Portal App
+            </button>
+          )}
+          <button 
+            type="button" 
+            onClick={() => setIsLoginOpen(false)} 
+            className="text-[9px] font-black text-gray-400 uppercase tracking-widest hover:text-red-500 transition-colors"
+          >
+            Terminate Access
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
     </div>
   );
 };

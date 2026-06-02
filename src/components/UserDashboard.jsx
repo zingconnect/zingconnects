@@ -1174,14 +1174,17 @@ useEffect(() => {
               tag: 'zing-msg'
             });
           }
-          fetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
+         // Replace your old fetch block with this:
+secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, token, {
   method: 'PATCH',
   headers: {
-    'Authorization': `Bearer ${token}`, // Pass the active token
     'Content-Type': 'application/json'
-  },
-  credentials: 'include' 
-}).catch(err => console.error("Mark read failed:", err));
+  }
+}).then(res => {
+  if (!res.ok) console.error("Mark read failed with status:", res.status);
+}).catch(err => {
+  console.error("Mark read network error:", err);
+});
         }
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
@@ -1249,12 +1252,10 @@ useEffect(() => {
     if (sentinel) observer.unobserve(sentinel);
   };
 }, [loadingMore, hasMore]);
-
 const fetchOlderMessages = async () => {
   if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
   
   const targetAgentId = agent._id || agent.id;
-  const API_BASE_URL = import.meta.env.VITE_API_URL;
   const oldestMessage = messages.find(m => m._id && !m.isTemp);
   
   if (!oldestMessage) return;
@@ -1265,9 +1266,9 @@ const fetchOlderMessages = async () => {
   const prevScrollHeight = container?.scrollHeight || 0;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
-      method: 'GET',
-      credentials: 'include'
+    // 🛡️ Updated to use secureFetch
+    const response = await secureFetch(`/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, token, {
+      method: 'GET'
     });
     
     const data = await response.json();
@@ -1281,6 +1282,7 @@ const fetchOlderMessages = async () => {
           const uniqueHistorical = data.messages.filter(m => !existingIds.has(m._id));
           return [...uniqueHistorical, ...prev];
         });
+        
         requestAnimationFrame(() => {
           if (container) {
             const newHeight = container.scrollHeight;
@@ -1439,30 +1441,24 @@ const handleFinalSend = async () => {
   setMessages(prev => [...prev, pendingMedia]);
   setPreviewUrl(null);
   setPreviewFile(null);
-
   setIsUploading(true);
 
   try {
-    const urlResponse = await fetch('/api/messages/get-upload-url', {
+    // 1. Get Signed Upload URL using secureFetch
+    const urlResponse = await secureFetch('/api/messages/get-upload-url', token, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ fileName: savedFile.name, fileType: savedFile.type })
     });
 
     const urlData = await urlResponse.json();
     if (!urlData.success) throw new Error("Upload permission failed");
-
     await fetch(urlData.uploadUrl, {
       method: 'PUT',
       body: savedFile,
       headers: { 'Content-Type': savedFile.type }
     });
-
-    const confirmResponse = await fetch('/api/messages/confirm-upload', {
+    const confirmResponse = await secureFetch('/api/messages/confirm-upload', token, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({
         receiverId: agent._id,
         text: savedCaption.trim(),
@@ -1476,9 +1472,10 @@ const handleFinalSend = async () => {
       setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
       setReplyingTo(null);
     } else {
-      throw new Error();
+      throw new Error(data.message || "Upload confirmation failed");
     }
   } catch (err) {
+    console.error("Upload process error:", err);
     setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
   } finally {
     setIsUploading(false);
@@ -1507,12 +1504,13 @@ const startStatusPolling = (roomName) => {
   if (pollingRef.current) clearInterval(pollingRef.current);
 
   const pollInterval = setInterval(async () => {
+    // 1. Guard clauses
     if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
-        method: 'GET',
-        credentials: 'include'
+      // 2. Use secureFetch instead of raw fetch
+      const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, token, {
+        method: 'GET'
       });
 
       if (res.status === 404) {
@@ -1539,6 +1537,7 @@ const startStatusPolling = (roomName) => {
 
   pollingRef.current = pollInterval;
 };
+
 const handleStartCall = async () => {
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
@@ -1635,14 +1634,10 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, pendingMessage]);
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
-  try {
-    const response = await fetch('/api/messages/send', {
+ try {
+    // 🛡️ Replace manual fetch with secureFetch
+    const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}` // Dynamically injected active token
-      },
-      credentials: 'include',
       body: JSON.stringify({
         receiverId: agent._id,
         receiverModel: 'Agent',
@@ -1654,8 +1649,6 @@ const handleSendMessage = async (e) => {
     const data = await response.json();
     
     if (!response.ok || !data.success) throw new Error(data.message || "Failed to send");
-
-    // SUCCESS: Backend handles the socket emit, so we just update the UI state.
     setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
     setReplyingTo(null);
     
