@@ -1996,28 +1996,26 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
 // =========================================================================
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
-const myId = req.user.id;
+  const myId = req.user.id;
   console.log("DEBUG: POST /api/messages/send - User Payload:", req.user);
   console.log("DEBUG: Processing message from myId:", myId);
 
   try {
     await connectToDatabase();
-    
-    // 1. Debugging Agent Lookup
-    const AgentModel = getAgentModel();
-    const agentDoc = await AgentModel.findById(myId);
-    console.log("DEBUG: Agent document found:", !!agentDoc); 
-    if (agentDoc) {
-        console.log("DEBUG: Agent slug/email:", agentDoc.email);
-    }
+
+    // 1. HARDENED SENDER IDENTIFICATION (Using direct model imports)
+    // We check if the ID exists in the Agent collection first.
+    const isAgent = await Agent.findById(myId);
+    const senderRole = isAgent ? 'Agent' : 'User';
+    console.log("DEBUG: Final resolved senderRole:", senderRole);
 
     const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
-// 🛡️ SECURITY FIX 1 & 2
+
+    // 🛡️ SECURITY FIX 1 & 2
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ success: false, message: "Message text cannot be blank." });
     }
@@ -2028,37 +2026,38 @@ const myId = req.user.id;
     if (!['Agent', 'User'].includes(sanitizedModel)) {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
-    const senderRole = agentDoc ? 'Agent' : 'User';
-    console.log("DEBUG: Determined senderRole:", senderRole);
-    // 1. Create and Save Message with sanitized input and metadata
+
+    // 2. Create and Save Message
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
       receiverId: new mongoose.Types.ObjectId(receiverId),
-      receiverModel: sanitizedModel, 
+      receiverModel: sanitizedModel,
       text: String(text).trim(),
-      fileType: fileType || 'text', // Persist metadata
+      fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) 
                  ? new mongoose.Types.ObjectId(replyToId) 
-                 : null, // Safe reference
-      notificationSent: false 
+                 : null,
+      notificationSent: false
     });
     await newMessage.save();
-    const TargetModel = sanitizedModel === 'Agent' ? getAgentModel() : (mongoose.models.User || User);
+
+    // 3. Dynamic Model resolution for Context
+    const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
+    const SenderModel = senderRole === 'Agent' ? Agent : User;
+
     const receiver = await TargetModel.findById(receiverId).select('+pushSubscription +lastNotificationEmail +email firstName lastName');
-    
-    const SenderModel = senderRole === 'Agent' ? getAgentModel() : (mongoose.models.User || User);
     const sender = await SenderModel.findById(myId).select('firstName lastName');
 
     if (!receiver) {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // 3. Socket.io Online Gateway Validation
+    // 4. Socket.io Online Gateway Validation
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
 
-    // 4. Handle Web-Push
+    // 5. Handle Web-Push
     if (receiver.pushSubscription?.endpoint) {
       try {
         const payload = JSON.stringify({
@@ -2074,10 +2073,10 @@ const myId = req.user.id;
       }
     }
 
-    // 5. Atomic Lockout Strategy
+    // 6. Atomic Lockout Strategy
     if (!isOnline) {
       try {
-        const COOLDOWN = 30 * 60 * 1000; 
+        const COOLDOWN = 30 * 60 * 1000;
         const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
         if (Date.now() - lastEmailTime > COOLDOWN) {
           await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
@@ -2088,13 +2087,14 @@ const myId = req.user.id;
       }
     }
 
-    // 6. Real-Time WebSocket Emit
+    // 7. Real-Time WebSocket Emit
     if (isOnline) {
       io.to(receiverId.toString()).emit("new-message", {
         id: newMessage._id,
         senderId: newMessage.senderId,
         senderModel: newMessage.senderModel,
         receiverId: newMessage.receiverId,
+        receiverModel: newMessage.receiverModel,
         content: newMessage.text,
         fileType: newMessage.fileType,
         replyToId: newMessage.replyToId,
@@ -2102,24 +2102,25 @@ const myId = req.user.id;
       });
     }
 
-    // 7. Explicit Output Mapping
-    return res.status(201).json({ 
-      success: true, 
+    // 8. Explicit Output Mapping
+    return res.status(201).json({
+      success: true,
       message: {
         id: newMessage._id,
         senderId: newMessage.senderId,
+        senderModel: newMessage.senderModel,
         receiverId: newMessage.receiverId,
+        receiverModel: newMessage.receiverModel,
         content: newMessage.text,
         fileType: newMessage.fileType,
         replyToId: newMessage.replyToId,
         createdAt: newMessage.createdAt
-      } 
+      }
     });
   } catch (err) {
     next(err);
   }
 });
-
 // =========================================================================
 // 🛡️ HARDENED CHAT FETCH ROUTE (OFFSET CHRONOLOGY STABILIZED)
 // =========================================================================
@@ -2136,67 +2137,76 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     let limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
     let skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
+    // 1. Fetch messages using the polymorphic refPath logic
+    // Using lean() for performance; ensure your refPath is set correctly in Message schema
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
     })
-    .sort({ createdAt: -1 }) 
+    .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
     .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
     .lean();
 
+    // 2. Reverse for chronological order
     const chronologicalMessages = messages.reverse();
 
+    // 3. Process DTOs with safety checks
     const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      const senderModel = m.senderModel || 'User';
-      const receiverModel = m.receiverModel || 'User';
       const msgDto = {
         id: m._id,
         content: m.text || "",
-        senderModel: m.senderModel,
-        receiverModel: m.receiverModel,
+        senderModel: m.senderModel || 'User',
+        receiverModel: m.receiverModel || 'User',
         fileUrl: null,
         createdAt: m.createdAt,
-        sender: m.senderId ? {
+        // Ensure null-safety if populate() returned null (e.g., deleted account)
+        sender: m.senderId && typeof m.senderId === 'object' ? {
           id: m.senderId._id,
           firstName: m.senderId.firstName || "",
           lastName: m.senderId.lastName || "",
           photoUrl: m.senderId.photoUrl || ""
-        } : null,
-        receiver: m.receiverId ? {
+        } : { id: m.senderId, firstName: "Unknown", lastName: "User" },
+        receiver: m.receiverId && typeof m.receiverId === 'object' ? {
           id: m.receiverId._id,
           firstName: m.receiverId.firstName || "",
           lastName: m.receiverId.lastName || ""
-        } : null
+        } : { id: m.receiverId, firstName: "Unknown", lastName: "User" }
       };
 
+      // 4. Handle S3 Private URL retrieval
       if (m.fileUrl && typeof m.fileUrl === 'string') {
         let fileKey = m.fileUrl;
         if (fileKey.startsWith('http')) {
           const urlParts = fileKey.split('idrivee2.com/');
           if (urlParts.length > 1) {
-            fileKey = urlParts[1].split('/').slice(1).join('/'); 
+            fileKey = urlParts[1].split('/').slice(1).join('/');
           }
         }
         try {
           msgDto.fileUrl = await getPrivateUrl(fileKey);
         } catch (s3Err) {
-          console.error(`[S3 Chat Error] URL drop for ${m._id}:`, s3Err.message);
+          console.error(`[S3 Chat Error] URL retrieval failed for ${m._id}:`, s3Err.message);
         }
       }
       return msgDto;
     }));
 
-    return res.json({ success: true, count: processedMessages.length, messages: processedMessages });
+    return res.json({ 
+      success: true, 
+      count: processedMessages.length, 
+      messages: processedMessages 
+    });
 
   } catch (err) {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ROUTE 1: GET /api/portal/dashboard
 // =========================================================================
