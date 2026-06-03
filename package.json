@@ -15,6 +15,7 @@
     "@aws-sdk/lib-storage": "^3.1045.0",
     "@aws-sdk/s3-request-presigner": "^3.1032.0",
     "@livekit/components-react": "^2.9.21",
+    "@socket.io/redis-adapter": "^8.3.0",
     "@tailwindcss/vite": "^4.2.2",
     "@use-gesture/react": "^10.3.1",
     "bcryptjs": "^3.0.3",

@@ -23,6 +23,7 @@ import { Server } from 'socket.io';
 import http from 'http';
 import { createClient } from 'redis'; // 👈 Added Redis Import
 import cookieParser from 'cookie-parser'; // Add this import
+import { createAdapter } from '@socket.io/redis-adapter';
 
 const redisClient = createClient({
   url: process.env.REDIS_URL
@@ -64,7 +65,6 @@ app.disable('x-powered-by');
 
 const terminatingCallsCache = new Set();
 app.set('terminatingCallsCache', terminatingCallsCache);
-
 app.set('redisClient', redisClient); 
 
 const corsOptions = {
@@ -87,11 +87,16 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 const server = http.createServer(app);
+const pubClient = redisClient;
+const subClient = redisClient.duplicate();
+
 const io = new Server(server, {
   path: '/api/socket.io',
   cors: corsOptions,
   transports: ['polling', 'websocket'],
-  allowEIO3: true
+  allowEIO3: true,
+  // 🚀 THIS IS THE MISSING KEY
+  adapter: createAdapter(pubClient, subClient)
 });
 
 app.set('socketio', io);
@@ -2077,10 +2082,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
      try {
     const baseUrl = "https://www.zingconnect.chat";
     const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
-
-    // USE THE senderDoc YOU ALREADY FETCHED AT THE TOP
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
-
     const payload = JSON.stringify({
         title: `New Message from ${senderName}`,
         body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
@@ -2091,11 +2093,8 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
             type: 'message'
         }
     });
-
     console.log("DEBUG: Attempting webpush.sendNotification...");
     await webpush.sendNotification(receiver.pushSubscription, payload);
-    
-    // Update DB
     await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
     console.log("✅ Push Sent Successfully");
     
@@ -2109,36 +2108,52 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
         }
       }
     }
-    // 6. Atomic Lockout Strategy
-    if (!isOnline) {
-      try {
-        const COOLDOWN = 30 * 60 * 1000;
-        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-        if (Date.now() - lastEmailTime > COOLDOWN) {
-          await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-          await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
-        }
-      } catch (mailErr) {
-        console.error("Email Throttle Error:", mailErr.message);
-      }
-    }
+ let deliveredViaSocket = false;
+const messageData = {
+  id: newMessage._id,
+  senderId: newMessage.senderId,
+  senderModel: newMessage.senderModel,
+  receiverId: newMessage.receiverId,
+  receiverModel: newMessage.receiverModel,
+  content: newMessage.text,
+  fileType: newMessage.fileType,
+  replyToId: newMessage.replyToId,
+  createdAt: newMessage.createdAt
+};
 
-    // 7. Real-Time WebSocket Emit
-    if (isOnline) {
-      io.to(receiverId.toString()).emit("new-message", {
-        id: newMessage._id,
-        senderId: newMessage.senderId,
-        senderModel: newMessage.senderModel,
-        receiverId: newMessage.receiverId,
-        receiverModel: newMessage.receiverModel,
-        content: newMessage.text,
-        fileType: newMessage.fileType,
-        replyToId: newMessage.replyToId,
-        createdAt: newMessage.createdAt
+if (isOnline) {
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Socket ACK Timeout")), 3000);
+      
+      // Emit the message and wait for the client's callback
+      io.to(receiverId.toString()).emit("new-message", messageData, (ack) => {
+        clearTimeout(timer);
+        resolve(true);
       });
-    }
+    });
+    deliveredViaSocket = true;
+    console.log("✅ Message confirmed received by client via WebSocket");
+  } catch (err) {
+    console.warn("⚠️ WebSocket delivery failed or timed out. Falling back to email logic.");
+  }
+}
 
-    // 8. Explicit Output Mapping
+// 8. Trigger Email Fallback if Socket delivery failed
+if (!deliveredViaSocket) {
+  try {
+    const COOLDOWN = 30 * 60 * 1000;
+    const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+    
+    if (Date.now() - lastEmailTime > COOLDOWN) {
+      await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
+      await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
+      console.log("📧 Email notification dispatched as fallback.");
+    }
+  } catch (mailErr) {
+    console.error("Email Fallback Error:", mailErr.message);
+  }
+}
     return res.status(201).json({
       success: true,
       message: {
