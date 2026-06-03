@@ -23,38 +23,47 @@ async function clearUserCache(app, modelName, userId) {
   }
 }
 
-
-// 1. GET HISTORY (POLYMORPHIC REFPATH POPULATION & OFFSET CHRONOLOGY STABILIZED)
+// 1. GET HISTORY (POLYMORPHIC REFPATH & CURSOR CHRONOLOGY STABILIZED)
 router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
+    const { beforeId } = req.query;
 
     // 🛡️ SECURITY FIX 1: Strict Hex-Id Parameter Structure Validation
     if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
       return res.status(400).json({ success: false, message: "Invalid chat target identifier structure." });
     }
 
-    // Dynamic constraint processing for data payloads
+    // Dynamic constraint processing for request limits
     let limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
-    let skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-    // Execute dynamic multi-conditional retrieval using schema layout instructions (refPath tracking maps)
-    const messages = await Message.find({
+    // Build query base for the two participants
+    const query = {
       $or: [
         { senderId: myId, receiverId: otherUserId },
         { senderId: otherUserId, receiverId: myId }
       ]
-    })
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
-    .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
-    .lean();
+    };
 
-    // Reverse documents into chronological appearance structures
+    // ⚡ CURSOR PAGINATION ENGINE: Prevents layout shifting/skipping on live infinite scroll
+    if (beforeId && mongoose.Types.ObjectId.isValid(beforeId)) {
+      const referenceMessage = await Message.findById(beforeId).select('createdAt');
+      if (referenceMessage) {
+        query.createdAt = { $lt: referenceMessage.createdAt };
+      }
+    }
+
+    // Execute query with dynamic polymorphic mappings based on schema-defined refPaths
+    const messages = await Message.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
+      .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
+      .lean();
+
+    // Reverse documents back into proper chronological display sequence
     const chronologicalMessages = messages.reverse();
 
     // 🛡️ SECURITY FIX 2: Explicit Data Object Mapping (DTO Format Structure)
@@ -66,9 +75,10 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
         receiverModel: m.receiverModel || 'User',
         fileUrl: null,
         fileType: m.fileType || 'text',
+        status: m.status || 'sent',
         createdAt: m.createdAt,
         
-        // Handle fallback parsing arrays gracefully if references point to deleted accounts
+        // Handle fallback null-safety gracefully if references point to deleted accounts
         sender: m.senderId && typeof m.senderId === 'object' ? {
           id: m.senderId._id,
           firstName: m.senderId.firstName || "",
@@ -86,6 +96,8 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
       // 🛡️ SECURITY FIX 3: Parse S3 Storage Path Strings & Retrieve Presigned Delivery URLs
       if (m.fileUrl && typeof m.fileUrl === 'string') {
         let fileKey = m.fileUrl;
+        
+        // Isolate object path if absolute URL slipped into database document string
         if (fileKey.startsWith('http')) {
           const urlParts = fileKey.split('idrivee2.com/');
           if (urlParts.length > 1) {
