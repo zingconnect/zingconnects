@@ -2011,6 +2011,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
   const myId = req.user.id;
 
@@ -2063,7 +2064,8 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 
     // 1. ALWAYS attempt Socket emission if online
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+    const sockets = await io.in(receiverId.toString()).fetchSockets();
+    const isOnline = sockets.length > 0;
 
     if (isOnline) {
       io.to(receiverId.toString()).emit("new-message", {
