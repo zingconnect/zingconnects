@@ -2271,7 +2271,9 @@ app.get('/api/portal/dashboard', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
+// =========================================================================
+// 🛡️ HARDENED ROUTE: POST /api/save-subscription (DEEP DE-SERIALIZATION)
+// =========================================================================
 app.post('/api/save-subscription', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -2280,22 +2282,49 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
     if (!userId) {
       return res.status(401).json({ success: false, message: "Identity context not found." });
     }
-    let sub = req.body.subscription || req.body;
-        const keys = sub.keys || (sub.toJSON ? sub.toJSON().keys : null);
 
-    if (!sub.endpoint || !keys || !keys.p256dh || !keys.auth) {
-      console.error("DEBUG: Incomplete push payload received:", { endpoint: !!sub.endpoint, keys: !!keys });
-      return res.status(400).json({ success: false, message: "Incomplete push payload: Missing endpoint or encryption keys." });
+    let sub = req.body.subscription || req.body;
+    if (!sub) {
+      return res.status(400).json({ success: false, message: "No subscription payload provided." });
     }
+
+    // Dynamic Deep-Extraction Check handles both pure JSON strings or raw payload formats safely
+    let targetKeys = sub.keys;
+    if (!targetKeys && sub.toJSON) {
+      targetKeys = sub.toJSON().keys;
+    }
+
+    // Structural recovery if nested inside parent strings
+    const endpoint = sub.endpoint;
+    const p256dh = targetKeys?.p256dh;
+    const auth = targetKeys?.auth;
+
+    if (!endpoint || !p256dh || !auth) {
+      console.error("DEBUG: Incomplete push payload received:", { 
+        endpoint: !!endpoint, 
+        hasKeys: !!targetKeys,
+        p256dh: !!p256dh,
+        auth: !!auth
+      });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Incomplete push payload: Missing endpoint or encryption keys." 
+      });
+    }
+
     const sanitizedSubscription = {
-      endpoint: String(sub.endpoint).trim(),
+      endpoint: String(endpoint).trim(),
       expirationTime: sub.expirationTime || null,
       keys: {
-        p256dh: String(keys.p256dh).trim(),
-        auth: String(keys.auth).trim()
+        p256dh: String(p256dh).trim(),
+        auth: String(auth).trim()
       }
     };
-    const TargetModel = req.user.role === 'agent' ? getAgentModel() : (mongoose.models.User || User);
+
+    // Fallback support checking token roles explicitly to split your collections 
+    const TargetModelName = req.user.role === 'agent' ? 'Agent' : 'User';
+    const TargetModel = mongoose.models[TargetModelName] || mongoose.model(TargetModelName);
+
     const updated = await TargetModel.findByIdAndUpdate(
       userId,
       { $set: { pushSubscription: sanitizedSubscription } },
@@ -2303,10 +2332,10 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
     );
 
     if (!updated) {
-      return res.status(404).json({ success: false, message: "Profile not found." });
+      return res.status(404).json({ success: false, message: "Profile matching token credentials not found." });
     }
 
-    console.log(`✅ Push credentials synchronized for user: ${userId}`);
+    console.log(`✅ Push credentials synchronized for target [${TargetModelName}]: ${userId}`);
     return res.json({ success: true, message: "Push credentials synchronized." });
 
   } catch (err) {

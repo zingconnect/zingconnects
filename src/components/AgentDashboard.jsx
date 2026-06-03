@@ -1750,11 +1750,13 @@ useEffect(() => {
   const interval = setInterval(refreshMessages, 5000); // 5s is good for active chat
   return () => clearInterval(interval);
 }, [selectedUser?._id, callStatus, limit]); // Only re-run if chat or status changes
-
 useEffect(() => {
   const setupNotifications = async () => {
     // 1. Ensure token is available from context
     if (!token) return;
+
+    // Preventive check matching your user optimization flow
+    if (localStorage.getItem('agentPushSynced') === 'true') return;
 
     try {
       const publicKey = import.meta.env.VITE_PUBLIC_KEY;
@@ -1772,16 +1774,21 @@ useEffect(() => {
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
+
+      // ✨ CRITICAL FIX: Explicitly serialize the native PushSubscription instance
+      const subData = subscription.toJSON();
+
       const response = await secureFetch('/api/save-subscription', token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          subscription: subscription,
+          subscription: subData, // Send clean, stringified JSON literal parameters
           userType: 'agent' 
         }) 
       });
 
       if (response.ok) {
+        localStorage.setItem('agentPushSynced', 'true');
         console.log("Agent Mobile Push Synced to DB");
       } else {
         throw new Error(`Sync failed with status: ${response.status}`);
@@ -1794,7 +1801,7 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, [token]); 
+}, [token]);
 
 useEffect(() => {
   const applyTheme = () => {
