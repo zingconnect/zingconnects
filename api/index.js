@@ -2268,25 +2268,28 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
     if (!userId) {
       return res.status(401).json({ success: false, message: "Identity context not found." });
     }
+    let sub = req.body.subscription || req.body;
+        const keys = sub.keys || (sub.toJSON ? sub.toJSON().keys : null);
 
-    // Standardize incoming payload
-    const incomingSub = req.body.subscription || req.body;
-    if (!incomingSub?.endpoint) {
-      return res.status(400).json({ success: false, message: "Invalid push registration payload." });
+    if (!sub.endpoint || !keys || !keys.p256dh || !keys.auth) {
+      console.error("DEBUG: Incomplete push payload received:", { endpoint: !!sub.endpoint, keys: !!keys });
+      return res.status(400).json({ success: false, message: "Incomplete push payload: Missing endpoint or encryption keys." });
     }
 
+    // 3. Create sanitized object
     const sanitizedSubscription = {
-      endpoint: String(incomingSub.endpoint).trim(),
-      expirationTime: incomingSub.expirationTime || null,
+      endpoint: String(sub.endpoint).trim(),
+      expirationTime: sub.expirationTime || null,
       keys: {
-        p256dh: incomingSub.keys?.p256dh ? String(incomingSub.keys.p256dh).trim() : "",
-        auth: incomingSub.keys?.auth ? String(incomingSub.keys.auth).trim() : ""
+        p256dh: String(keys.p256dh).trim(),
+        auth: String(keys.auth).trim()
       }
     };
 
-    // Dynamically choose model
+    // 4. Dynamically choose model
     const TargetModel = req.user.role === 'agent' ? getAgentModel() : (mongoose.models.User || User);
 
+    // 5. Database Update
     const updated = await TargetModel.findByIdAndUpdate(
       userId,
       { $set: { pushSubscription: sanitizedSubscription } },
@@ -2297,9 +2300,11 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
       return res.status(404).json({ success: false, message: "Profile not found." });
     }
 
+    console.log(`✅ Push credentials synchronized for user: ${userId}`);
     return res.json({ success: true, message: "Push credentials synchronized." });
 
   } catch (err) {
+    console.error("❌ Error saving subscription:", err);
     next(err);
   }
 });

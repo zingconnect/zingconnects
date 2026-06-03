@@ -1032,7 +1032,6 @@ useEffect(() => {
 
 useEffect(() => {
   const setupNotifications = async () => {
-    // 1. Guard: Only proceed if we have the token and keys
     const publicKey = import.meta.env.VITE_PUBLIC_KEY;
     if (!publicKey || !token) return; 
 
@@ -1050,10 +1049,12 @@ useEffect(() => {
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
+      const subData = subscription.toJSON();
+      
       const response = await secureFetch('/api/save-subscription', token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription }) 
+        body: JSON.stringify({ subscription: subData }) 
       });
 
       if (response.ok) {
@@ -1069,7 +1070,7 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, [token]); // 3. Add token as a dependency so it runs once the token is ready
+}, [token]);
 
 useEffect(() => {
   const handleVoiceUpdate = (data) => {

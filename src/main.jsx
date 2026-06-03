@@ -36,12 +36,13 @@ if (typeof window !== 'undefined' && !("AudioSession" in window)) {
   });
 }
 
-// --- 2. SERVICE WORKER REGISTRATION ---
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => console.log('SW registered with scope:', registration.scope))
-      .catch((error) => console.error('SW registration failed:', error));
+    navigator.serviceWorker.register('/sw.js').then(async (registration) => {
+      console.log('SW registered');
+      // Trigger the subscription request
+      await registerPushNotifications(registration); 
+    });
   });
 }
 
