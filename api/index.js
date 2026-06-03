@@ -2043,6 +2043,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     if (!['Agent', 'User'].includes(sanitizedModel)) {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
+
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
@@ -2089,31 +2090,33 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
             type: 'message'
         }
     });
-   await webpush.sendNotification(receiver.pushSubscription, payload);
-        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
-        newMessage.notificationSent = true;
-      } catch (pushErr) {
-        console.error("Push delivery failed:", pushErr.message);
+    console.log("DEBUG: Attempting webpush.sendNotification...");
+    await webpush.sendNotification(receiver.pushSubscription, payload);
+    await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+    console.log("✅ Push Sent Successfully");
+    
+} catch (pushErr) {
+    console.error("❌ PUSH FAILED: Check VAPID/Subscription. Error:", pushErr.message);
+
+        // Remove stale subscription
+        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
+          console.log("Stale subscription removed for user:", receiverId);
+        }
       }
     }
 if (!isOnline && receiver) {
   try {
-    const COOLDOWN = 30 * 60 * 1000; 
-    const now = Date.now();
-    const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-
-    if (now - lastEmailTime > COOLDOWN) {
-      await sendOfflineNotification(receiver, sender, text, receiverModel);
-      
-      // 3. Immediately update the database to prevent "race condition" double-sends
-      await TargetModel.findByIdAndUpdate(receiverId, { 
-        lastNotificationEmail: new Date() 
-      });
+        const COOLDOWN = 30 * 60 * 1000;
+        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+        if (Date.now() - lastEmailTime > COOLDOWN) {
+          await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
+          await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
+        }
+      } catch (mailErr) {
+        console.error("Email Throttle Error:", mailErr.message);
+      }
     }
-  } catch (mailErr) {
-    console.error("Email Throttle Error:", mailErr.message);
-  }
-}
 
     // 7. Real-Time WebSocket Emit
     if (isOnline) {
