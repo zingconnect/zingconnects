@@ -1,4 +1,3 @@
-// src/utils/api.js
 export const secureFetch = async (url, token, options = {}) => {
   // 1. Create base headers
   const headers = {
