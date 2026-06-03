@@ -33,103 +33,53 @@ const transporter = nodemailer.createTransport({
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
-export const authenticateToken = async (req, res, next) => {
-  console.log("DEBUG AUTH - Headers:", req.headers.authorization);
-  console.log("DEBUG AUTH - Cookies:", req.cookies, req.signedCookies);
-  
-  const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
 
-  if (!token) {
-    console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
-    return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
-  }
+export const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+  if (!token) return res.status(401).json({ message: "Access Denied" });
+
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+    if (err) return res.status(403).json({ message: "Invalid Token" });
+    
+    req.user = decoded; 
     req.user.id = decoded.id || decoded._id;
 
-    // ⚡ DYNAMIC MODEL LOOKUPS: Safely prevents 'undefined' drops across serverless instances
-    
-    // 1. Agent Session & Dual-Login Guard Matrix
-    if (decoded.role === 'agent') {
-      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-      
-      if (!agent) {
-        return res.status(404).json({ success: false, message: "Agent profile context not found." });
-      }
-
-      // Check for dual concurrent device logins
-      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ 
-          success: false, 
-          message: "Dual login detected. Device session terminated.", 
-          reason: "dual_login" 
-        });
+    try {
+      if (decoded.role === 'agent') {
+        const AgentModel = mongoose.models.Agent || mongoose.model('Agent');         
+        const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+        if (agent && agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+          return res.status(401).json({ success: false, message: "Session Mismatch", forceLogout: true });
+        }
+                if (agent) {
+          await AgentModel.findByIdAndUpdate(req.user.id, {
+            $set: { lastActive: new Date() }
+          });
+        }
       }
       
-      // ✅ Hardened: Uses returnDocument to silence deprecation warning
-      await AgentModel.findByIdAndUpdate(
-        req.user.id, 
-        { $set: { lastActive: new Date() } },
-        { returnDocument: 'after' }
-      );
-    }
+      if (decoded.role === 'admin') {
+        const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
+        await AdminModel.findByIdAndUpdate(req.user.id, { lastLogin: new Date() });
+      }
 
-    // 2. Admin Lifecycle Tracking
-    if (decoded.role === 'admin' || decoded.role === 'superadmin') {
-      const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
-      
-      // ✅ Hardened: Uses returnDocument to silence deprecation warning
-      await AdminModel.findByIdAndUpdate(
-        req.user.id, 
-        { $set: { lastLogin: new Date() } },
-        { returnDocument: 'after' }
-      );
+      next();
+    } catch (dbErr) {
+      console.error("🔴 Auth DB Error:", dbErr.message);
+      // Non-blocking fallback: let the route fail or succeed rather than crashing the middleware container
+      next(); 
     }
-
-    next();
-  } catch (err) {
-    console.error("DEBUG: Token verification failed:", err.message);
-    
-    // Distinguish between expired and invalid tokens for better frontend handling
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: "Token expired" });
-    }
-    
-    return res.status(403).json({ success: false, message: "Invalid or expired token" });
-  }
+  });
 };
 
-// =========================================================================
-// 🛡️ TIER 2: STANDARD ADMINISTRATIVE PRIVILEGES INTERCEPTOR
-// =========================================================================
 export const isAdmin = (req, res, next) => {
-  // Allows BOTH admin and superadmin to pass through
-  if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin')) {
-    return next();
-  } 
-  
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access denied: Administrative privileges required." 
-  });
-};
-
-// =========================================================================
-// 🛡️ TIER 3: SUPERADMIN ONLY MIDDLEWARE (System Root Operations Only)
-// =========================================================================
-export const requireSuperAdmin = (req, res, next) => {
-  // STRICT CHECK: Denies regular admins completely
-  if (req.user && req.user.role === 'superadmin') {
-    return next();
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ success: false, message: "Access denied: Admins only" });
   }
-
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access Denied: Superadmin authorization required for this operation." 
-  });
 };
 
 
