@@ -2011,10 +2011,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
-// =========================================================================
-// 🛡️ HARDENED ENDPOINT: POST /api/messages/send
-// =========================================================================
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
   const myId = req.user.id;
 
@@ -2065,11 +2061,11 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
+    // 1. ALWAYS attempt Socket emission if online
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
     if (isOnline) {
-      // 1. ONLINE: Just emit via WebSocket
       io.to(receiverId.toString()).emit("new-message", {
         id: newMessage._id,
         senderId: newMessage.senderId,
@@ -2081,58 +2077,48 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
         replyToId: newMessage.replyToId,
         createdAt: newMessage.createdAt
       });
-    } else {
-      // 2. OFFLINE: Attempt Push and/or Email
-      const baseUrl = "https://www.zingconnect.chat";
-      const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
-      const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
-      const payload = JSON.stringify({
-        title: `New Message from ${senderName}`,
-        body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
-        icon: `${baseUrl}/logo-s.png`,
-        badge: `${baseUrl}/logo-s.png`,
-        data: { url: `${baseUrl}${path}`, type: 'message' }
-      });
+    }
 
-      // Attempt Push
-      if (receiver.pushSubscription?.endpoint) {
-        try {
-          await webpush.sendNotification(receiver.pushSubscription, payload);
-          await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
-        } catch (pushErr) {
-          console.error("❌ PUSH FAILED:", pushErr.message);
-          if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-            await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
-          }
-        }
-      }
+    // 2. ALWAYS attempt Push/Email if they have a subscription, 
+    // regardless of online status (for reliability).
+    const baseUrl = "https://www.zingconnect.chat";
+    const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
+    const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
+    const payload = JSON.stringify({
+      title: `New Message from ${senderName}`,
+      body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
+      icon: `${baseUrl}/logo-s.png`,
+      badge: `${baseUrl}/logo-s.png`,
+      data: { url: `${baseUrl}${path}`, type: 'message' }
+    });
 
-      // Attempt Email
+    if (receiver.pushSubscription?.endpoint) {
       try {
-        const COOLDOWN = 30 * 60 * 1000;
-        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-        if (Date.now() - lastEmailTime > COOLDOWN) {
-          await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-          await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
+        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+      } catch (pushErr) {
+        console.error("❌ PUSH FAILED:", pushErr.message);
+        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
         }
-      } catch (mailErr) {
-        console.error("Email Error:", mailErr.message);
       }
+    }
+
+    // 3. Email remains a fallback for long-inactive users
+    try {
+      const COOLDOWN = 30 * 60 * 1000;
+      const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+      if (Date.now() - lastEmailTime > COOLDOWN) {
+        await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
+        await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
+      }
+    } catch (mailErr) {
+      console.error("Email Error:", mailErr.message);
     }
 
     return res.status(201).json({
       success: true,
-      message: {
-        id: newMessage._id,
-        senderId: newMessage.senderId,
-        senderModel: newMessage.senderModel,
-        receiverId: newMessage.receiverId,
-        receiverModel: newMessage.receiverModel,
-        content: newMessage.text,
-        fileType: newMessage.fileType,
-        replyToId: newMessage.replyToId,
-        createdAt: newMessage.createdAt
-      }
+      message: newMessage
     });
   } catch (err) {
     next(err);
