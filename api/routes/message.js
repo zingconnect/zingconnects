@@ -23,39 +23,92 @@ async function clearUserCache(app, modelName, userId) {
   }
 }
 
-// 1. GET HISTORY
+
+// 1. GET HISTORY (POLYMORPHIC REFPATH POPULATION & OFFSET CHRONOLOGY STABILIZED)
 router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
+    const myId = req.user.id;
     const { otherUserId } = req.params;
-    const { beforeId, limit } = req.query;
 
-    const query = {
-      $or: [
-        { senderId: req.user.id, receiverId: otherUserId }, 
-        { senderId: otherUserId, receiverId: req.user.id }
-      ]
-    };
-
-    if (beforeId && mongoose.isValidObjectId(beforeId)) {
-      const ref = await Message.findById(beforeId).select('createdAt');
-      if (ref) query.createdAt = { $lt: ref.createdAt };
+    // 🛡️ SECURITY FIX 1: Strict Hex-Id Parameter Structure Validation
+    if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
+      return res.status(400).json({ success: false, message: "Invalid chat target identifier structure." });
     }
 
-    const messages = await Message.find(query)
-      .sort({ createdAt: -1 })
-      .limit(Math.min(parseInt(limit) || 20, 50))
-      .lean();
+    // Dynamic constraint processing for data payloads
+    let limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    let skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-    const finalMessages = await Promise.all(messages.reverse().map(async (m) => {
-      if (m.fileUrl && ['image', 'video'].includes(m.fileType)) {
-        m.fileUrl = await getPrivateUrl(m.fileUrl);
+    // Execute dynamic multi-conditional retrieval using schema layout instructions (refPath tracking maps)
+    const messages = await Message.find({
+      $or: [
+        { senderId: myId, receiverId: otherUserId },
+        { senderId: otherUserId, receiverId: myId }
+      ]
+    })
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
+    .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
+    .lean();
+
+    // Reverse documents into chronological appearance structures
+    const chronologicalMessages = messages.reverse();
+
+    // 🛡️ SECURITY FIX 2: Explicit Data Object Mapping (DTO Format Structure)
+    const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
+      const msgDto = {
+        id: m._id,
+        content: m.text || "",
+        senderModel: m.senderModel || 'User',
+        receiverModel: m.receiverModel || 'User',
+        fileUrl: null,
+        fileType: m.fileType || 'text',
+        createdAt: m.createdAt,
+        
+        // Handle fallback parsing arrays gracefully if references point to deleted accounts
+        sender: m.senderId && typeof m.senderId === 'object' ? {
+          id: m.senderId._id,
+          firstName: m.senderId.firstName || "",
+          lastName: m.senderId.lastName || "",
+          photoUrl: m.senderId.photoUrl || ""
+        } : { id: m.senderId, firstName: "Unknown", lastName: "User", photoUrl: "" },
+        
+        receiver: m.receiverId && typeof m.receiverId === 'object' ? {
+          id: m.receiverId._id,
+          firstName: m.receiverId.firstName || "",
+          lastName: m.receiverId.lastName || ""
+        } : { id: m.receiverId, firstName: "Unknown", lastName: "User" }
+      };
+
+      // 🛡️ SECURITY FIX 3: Parse S3 Storage Path Strings & Retrieve Presigned Delivery URLs
+      if (m.fileUrl && typeof m.fileUrl === 'string') {
+        let fileKey = m.fileUrl;
+        if (fileKey.startsWith('http')) {
+          const urlParts = fileKey.split('idrivee2.com/');
+          if (urlParts.length > 1) {
+            fileKey = urlParts[1].split('/').slice(1).join('/');
+          }
+        }
+        try {
+          msgDto.fileUrl = await getPrivateUrl(fileKey);
+        } catch (s3Err) {
+          console.error(`[S3 Chat Error] URL retrieval failed for ${m._id}:`, s3Err.message);
+        }
       }
-      return m;
+      return msgDto;
     }));
 
-    res.json({ success: true, messages: finalMessages });
+    return res.json({ 
+      success: true, 
+      count: processedMessages.length, 
+      messages: processedMessages 
+    });
+
   } catch (err) {
+    // Forward traces cleanly through the central system firewall error interceptor
     next(err);
   }
 });

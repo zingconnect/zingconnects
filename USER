@@ -22,6 +22,7 @@ async function clearUserCache(app, modelName, userId) {
     await redis.del(`profile:${userId}`).catch(() => {});
   }
 }
+
 // 1. GET HISTORY (POLYMORPHIC REFPATH POPULATION & OFFSET CHRONOLOGY STABILIZED)
 router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
