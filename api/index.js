@@ -2423,29 +2423,58 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
       }
     }
 
+    // 🚀 Distributed Socket lookup using Redis adapter fetch methods
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
+    let isOnline = false;
+    if (io) {
+      const sockets = await io.in(receiverId.toString()).fetchSockets();
+      isOnline = sockets.length > 0;
+    }
 
     // Web Push Notification Routing Logic
-    if (receiver?.pushSubscription && receiver.pushSubscription.endpoint) {
+    const baseUrl = "https://www.zingconnect.chat";
+    const path = receiverModel === 'Agent' ? `/agent/dashboard?userId=${req.user.id}` : `/user/dashboard?agentId=${req.user.id}`;
+    const senderName = sender?.firstName || sender?.email?.split('@')[0] || 'Zing';
+    
+    const notificationBody = text?.trim() 
+      ? (text.length > 60 ? `${text.substring(0, 60)}...` : text) 
+      : (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo");
+
+    const payload = JSON.stringify({
+      title: `New Message from ${senderName}`,
+      body: notificationBody,
+      icon: `${baseUrl}/logo-s.png`,
+      badge: `${baseUrl}/logo-s.png`,
+      data: { url: `${baseUrl}${path}`, type: 'message' }
+    });
+
+    // ====== TEMPORARY PUSH DIAGNOSTIC LOGS ======
+    console.log("---------------- UPLOAD PUSH DIAGNOSTIC ----------------");
+    console.log("Recipient ID:", receiverId);
+    console.log("Recipient Role:", receiverModel);
+    console.log("Recipient Found in DB:", !!receiver);
+    console.log("Has pushSubscription Field:", !!receiver?.pushSubscription);
+    console.log("Target Push Endpoint:", receiver?.pushSubscription?.endpoint || "❌ MISSING/UNDEFINED");
+    console.log("---------------------------------------------------------");
+
+    if (receiver && receiver.pushSubscription && receiver.pushSubscription.endpoint) {
       try {
-        const payload = JSON.stringify({
-          title: `New ${detectedType} from ${sender?.firstName || 'Zing'}`,
-          body: text ? (text.length > 60 ? `${text.substring(0, 60)}...` : text) : (detectedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo"),
-          data: {
-            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}`
-          }
-        });
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+        console.log(`✅ Push notification sent for media upload to ${receiverId}`);
       } catch (pushErr) {
-        console.error("Media Push delivery failed:", pushErr.message);
+        console.error("❌ MEDIA PUSH FAILED:", pushErr.message);
+        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+          const TargetModel = receiverModel === 'Agent' ? getAgentModel() : (mongoose.models.User || User);
+          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
+          if (redis) await redis.del(`profile:${receiverId}`).catch(() => {});
+          console.log(`🧹 Cleared dead subscription for ${receiverId}`);
+        }
       }
     }
 
     // 🛡️ SECURITY FIX 3: Atomic Lockout Strategy (Defeats Cache Cooldown Race Conditions)
     if (!isOnline && receiver) {
-      console.log(`[DEBUG] Attempting to send offline email to: ${receiver.email}`); // ADD THIS
       try {
         const COOLDOWN = 30 * 60 * 1000; 
         const nowTimestamp = Date.now();
@@ -2460,20 +2489,19 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
           });
 
           // 🌟 CRITICAL CACHE SYNC: Evict the stale Redis profile index immediately.
-          // This forces subsequent calls to pull the updated timestamp from the DB.
           if (redis) {
             await redis.del(`profile:${receiverId}`).catch(() => {});
           }
 
           await sendOfflineNotification(receiver, sender, text || "", fileName, detectedType, receiverModel);
-          console.log(`[Email] Offline media notification sent to ${receiver.email}`);
+          console.log(`📧 Offline media email notification sent to ${receiver.email}`);
         }
       } catch (mailErr) {
-        console.error("Email Throttle Error:", mailErr.message);
+        console.error("❌ Email Throttle Error:", mailErr.message);
       }
     }
 
-    if (isOnline) {
+    if (isOnline && io) {
       io.to(receiverId.toString()).emit("new-message", {
         id: newMessage._id,
         senderId: newMessage.senderId,
@@ -2500,10 +2528,10 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     });
 
   } catch (err) {
-    // Pass errors down to the global exception boundary interceptor
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/get-upload-url
 // =========================================================================
@@ -2582,7 +2610,6 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res, nex
     }
 
     // 🛡️ SECURITY FIX 2: Path Traversal & Storage Sandbox Isolation
-    // Enforce that the provided path must strictly start with your intended namespace folder
     const sanitizedPath = String(fileUrl).trim();
     if (!sanitizedPath.startsWith('chat/') || sanitizedPath.includes('..')) {
       return res.status(400).json({ success: false, message: "Unauthorized file path routing access token." });
@@ -2645,23 +2672,53 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res, nex
       }
     }
 
+    // 🚀 Distributed Socket Lookup via Redis Adapter Cluster Polling
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
+    let isOnline = false;
+    if (io) {
+      const sockets = await io.in(receiverId.toString()).fetchSockets();
+      isOnline = sockets.length > 0;
+    }
 
-    // Web Push Notification Logic
-    if (receiver?.pushSubscription && receiver.pushSubscription.endpoint) {
+    // Web Push Notification Routing Logic
+    const baseUrl = "https://www.zingconnect.chat";
+    const path = receiverModel === 'Agent' ? `/agent/dashboard?userId=${req.user.id}` : `/user/dashboard?agentId=${req.user.id}`;
+    const senderName = sender?.firstName || sender?.email?.split('@')[0] || 'Zing';
+    
+    const notificationBody = text?.trim() 
+      ? (text.length > 60 ? `${text.substring(0, 60)}...` : text) 
+      : (sanitizedType === 'video' ? "🎥 Sent a video" : "📷 Sent a photo");
+
+    const payload = JSON.stringify({
+      title: `New Message from ${senderName}`,
+      body: notificationBody,
+      icon: `${baseUrl}/logo-s.png`,
+      badge: `${baseUrl}/logo-s.png`,
+      data: { url: `${baseUrl}${path}`, type: 'message' }
+    });
+
+    // ====== TEMPORARY PUSH DIAGNOSTIC LOGS ======
+    console.log("---------------- CONFIRM PUSH DIAGNOSTIC ----------------");
+    console.log("Recipient ID:", receiverId);
+    console.log("Recipient Role:", receiverModel);
+    console.log("Recipient Found in DB:", !!receiver);
+    console.log("Has pushSubscription Field:", !!receiver?.pushSubscription);
+    console.log("Target Push Endpoint:", receiver?.pushSubscription?.endpoint || "❌ MISSING/UNDEFINED");
+    console.log("---------------------------------------------------------");
+
+    if (receiver && receiver.pushSubscription && receiver.pushSubscription.endpoint) {
       try {
-        const payload = JSON.stringify({
-          title: `New ${sanitizedType} from ${sender?.firstName || 'Zing'}`,
-          body: text ? (text.length > 60 ? `${text.substring(0, 60)}...` : text) : `Sent an attachment`,
-          data: { 
-            url: isAgent ? `/user/dashboard` : `/agent/dashboard?userId=${req.user.id}` 
-          }
-        });
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+        console.log(`✅ Push notification sent for confirmed upload to ${receiverId}`);
       } catch (pushErr) {
-        console.error("Push delivery failed:", pushErr.message);
+        console.error("❌ CONFIRM PUSH FAILED:", pushErr.message);
+        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+          const TargetModel = receiverModel === 'Agent' ? getAgentModel() : (mongoose.models.User || User);
+          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
+          if (redis) await redis.del(`profile:${receiverId}`).catch(() => {});
+          console.log(`🧹 Cleared dead subscription for ${receiverId}`);
+        }
       }
     }
 
@@ -2686,19 +2743,19 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res, nex
           }
 
           // Step C: Trigger your long-running notification worker loop safely
-          const emailText = text ? String(text).trim() : `Sent a ${sanitizedType} attachment`;
+          const emailText = text ? String(text).trim() : "";
           await sendOfflineNotification(receiver, sender, emailText, sanitizedPath, sanitizedType, receiverModel);
-          console.log(`[Email] Offline notification for ${sanitizedType} sent to ${receiver.email}`);
+          console.log(`📧 Offline media confirmation email notification sent to ${receiver.email}`);
         }
       } catch (mailErr) {
-        console.error("Email Throttle Error:", mailErr.message);
+        console.error("❌ Email Throttle Error:", mailErr.message);
       }
     }
 
     // Construct the private delivery asset for immediate payload returns
     const signedUrlForFrontend = await getPrivateUrl(sanitizedPath);
 
-    if (isOnline) {
+    if (isOnline && io) {
       io.to(receiverId.toString()).emit("new-message", {
         id: newMessage._id,
         senderId: newMessage.senderId,
@@ -2725,7 +2782,6 @@ app.post('/api/messages/confirm-upload', authenticateToken, async (req, res, nex
     });
 
   } catch (err) {
-    // Route clean trace faults safely through the global error interception barrier
     next(err);
   }
 });
