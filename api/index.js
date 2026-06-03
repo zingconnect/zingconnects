@@ -2096,9 +2096,20 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       badge: `${baseUrl}/logo-s.png`,
       data: { url: `${baseUrl}${path}`, type: 'message' }
     });
+// ====== TEMPORARY PUSH DIAGNOSTIC LOGS ======
+    console.log("---------------- PUSH DIAGNOSTIC ----------------");
+    console.log("Recipient ID:", receiverId);
+    console.log("Recipient Role:", sanitizedModel);
+    console.log("Recipient Found in DB:", !!receiver);
+    console.log("Has pushSubscription Field:", !!receiver?.pushSubscription);
+    console.log("Target Push Endpoint:", receiver?.pushSubscription?.endpoint || "❌ MISSING/UNDEFINED");
+    if (receiver?.pushSubscription) {
+      console.log("Raw Sub Object Structure:", JSON.stringify(receiver.pushSubscription, null, 2));
+    }
+    console.log("-------------------------------------------------");
 
     // Added defensive structural checking for pushSubscription object
-    if (receiver.pushSubscription && receiver.pushSubscription.endpoint) {
+    if (receiver && receiver.pushSubscription && receiver.pushSubscription.endpoint) {
       try {
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
@@ -2107,6 +2118,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
         console.error("❌ PUSH FAILED:", pushErr.message);
         if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
           await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
+          console.log(`🧹 Cleared dead subscription for ${receiverId}`);
         }
       }
     } else {
