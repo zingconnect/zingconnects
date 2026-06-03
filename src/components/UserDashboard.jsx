@@ -1060,7 +1060,7 @@ useEffect(() => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           subscription: subData,
-          userType: 'user' // Explicitly mark as user for the backend
+          userType: 'user' 
         }) 
       });
 

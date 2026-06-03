@@ -2275,8 +2275,6 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
       console.error("DEBUG: Incomplete push payload received:", { endpoint: !!sub.endpoint, keys: !!keys });
       return res.status(400).json({ success: false, message: "Incomplete push payload: Missing endpoint or encryption keys." });
     }
-
-    // 3. Create sanitized object
     const sanitizedSubscription = {
       endpoint: String(sub.endpoint).trim(),
       expirationTime: sub.expirationTime || null,
@@ -2285,11 +2283,7 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
         auth: String(keys.auth).trim()
       }
     };
-
-    // 4. Dynamically choose model
     const TargetModel = req.user.role === 'agent' ? getAgentModel() : (mongoose.models.User || User);
-
-    // 5. Database Update
     const updated = await TargetModel.findByIdAndUpdate(
       userId,
       { $set: { pushSubscription: sanitizedSubscription } },

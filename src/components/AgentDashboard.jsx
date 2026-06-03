@@ -1753,6 +1753,9 @@ useEffect(() => {
 
 useEffect(() => {
   const setupNotifications = async () => {
+    // 1. Ensure token is available from context
+    if (!token) return;
+
     try {
       const publicKey = import.meta.env.VITE_PUBLIC_KEY;
       if (!publicKey) return;
@@ -1761,21 +1764,20 @@ useEffect(() => {
       if (permission !== 'granted') return;
 
       const registration = await navigator.serviceWorker.ready;
-            let subscription = await registration.pushManager.getSubscription();
-            if (!subscription) {
+      
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
-      const token = localStorage.getItem('agentToken');
-      if (!token) return;
       const response = await secureFetch('/api/save-subscription', token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           subscription: subscription,
-          userType: 'agent' // Best practice: distinguish user roles
+          userType: 'agent' 
         }) 
       });
 
@@ -1792,7 +1794,7 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, []);
+}, [token]); 
 
 useEffect(() => {
   const applyTheme = () => {
