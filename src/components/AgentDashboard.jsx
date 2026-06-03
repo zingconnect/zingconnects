@@ -1751,43 +1751,7 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, [selectedUser?._id, callStatus, limit]); // Only re-run if chat or status changes
 
-useEffect(() => {
-  const setupNotifications = async () => {
-    try {
-      const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-      if (!publicKey) return;
 
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
-
-      const registration = await navigator.serviceWorker.ready;
-      
-      // Get existing or new
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
-        });
-      }
-
-      // We use agentToken here because that is what your AgentDashboard uses
-      const token = localStorage.getItem('agentToken');
-      if (!token) return;
-        await secureFetch('/api/save-subscription', token,{
-      method: 'POST',
-      body: JSON.stringify({ subscription }) 
-    });
-      
-      console.log("Agent Mobile Push Synced to DB");
-    } catch (err) {
-      console.error("Agent Push setup failed:", err);
-    }
-  };
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    setupNotifications();
-  }
-}, []);
 
 useEffect(() => {
   const applyTheme = () => {

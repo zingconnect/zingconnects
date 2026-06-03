@@ -1031,48 +1031,6 @@ useEffect(() => {
 }, [socket]);
 
 useEffect(() => {
-  const setupNotifications = async () => {
-    const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-    if (!publicKey || !token) return; 
-
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
-
-      const registration = await navigator.serviceWorker.ready;
-      
-      let subscription = await registration.pushManager.getSubscription();
-      
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
-        });
-      }
-      const subData = subscription.toJSON();
-      
-      const response = await secureFetch('/api/save-subscription', token, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription: subData }) 
-      });
-
-      if (response.ok) {
-        console.log("Database synced with Push Subscription");
-      } else {
-        console.error("Failed to sync subscription, status:", response.status);
-      }
-    } catch (err) {
-      console.error("User Push setup failed:", err);
-    }
-  };
-
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    setupNotifications();
-  }
-}, [token]);
-
-useEffect(() => {
   const handleVoiceUpdate = (data) => {
     const remoteAudio = document.getElementById('remoteAudio');
     if (!remoteAudio) return;
