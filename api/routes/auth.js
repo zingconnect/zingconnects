@@ -33,132 +33,89 @@ const transporter = nodemailer.createTransport({
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
+export const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
+  if (!token) return res.status(401).json({ message: "Access Denied" });
 
-// 1. DYNAMIC TOKEN AUTHENTICATION MIDDLEWARE
-export const authenticateToken = async (req, res, next) => {
-  console.log("DEBUG AUTH - Headers:", req.headers.authorization);
-  console.log("DEBUG AUTH - Cookies:", req.cookies, req.signedCookies);
-
-  // Extract from incoming Authorization header string OR fall back to HTTP-only signed cookie configurations
-  const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
-
-  if (!token) {
-    console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
-    return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
-  }
-
-  try {
-    // Structural conversion to async/await evaluation syntax removes nested block execution scopes
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+    if (err) return res.status(403).json({ message: "Invalid Token" });
+    
+    req.user = decoded; 
     req.user.id = decoded.id || decoded._id;
 
-    // 🛡️ SECURITY FIX: Agent Session Isolation & Dual Login Verification Logic
-    if (decoded.role === 'agent') {
-      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-      
-      if (!agent) {
-        return res.status(404).json({ success: false, message: "Agent profile match not found." });
-      }
-
-      // Check for dual login: Forces termination if a newer login generated an updated cluster state signature
-      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ 
-          success: false, 
-          message: "Dual login detected across separate instances.", 
-          reason: "dual_login",
-          forceLogout: true 
-        });
+    try {
+      if (decoded.role === 'agent') {
+        const AgentModel = mongoose.models.Agent || mongoose.model('Agent');         
+        const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+        if (agent && agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+          return res.status(401).json({ success: false, message: "Session Mismatch", forceLogout: true });
+        }
+                if (agent) {
+          await AgentModel.findByIdAndUpdate(req.user.id, {
+            $set: { lastActive: new Date() }
+          });
+        }
       }
       
-      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
-    }
+      if (decoded.role === 'admin') {
+        const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
+        await AdminModel.findByIdAndUpdate(req.user.id, { lastLogin: new Date() });
+      }
 
-    // Admin Activity Logging Boundary
-    if (decoded.role === 'admin' || decoded.role === 'superadmin') {
-      const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
-      await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
+      next();
+    } catch (dbErr) {
+      console.error("🔴 Auth DB Error:", dbErr.message);
+      // Non-blocking fallback: let the route fail or succeed rather than crashing the middleware container
+      next(); 
     }
-
-    next();
-  } catch (err) {
-    console.error("DEBUG: Token verification failed:", err.message);
-    
-    // Distinguish between expired and structurally malformed signatures for precise client response triggers
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: "Token expired" });
-    }
-    
-    return res.status(403).json({ success: false, message: "Invalid or expired token structure." });
-  }
+  });
 };
 
-// 2. TIER 1: ADMINISTRATIVE AUTHORIZATION FILTER (Allows Admin AND Superadmin)
 export const isAdmin = (req, res, next) => {
-  if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin')) {
-    return next();
-  } 
-  
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access denied: Administrative privileges required." 
-  });
-};
-
-// =========================================================================
-// 🛡️ TIER 2: SUPERADMIN ONLY MIDDLEWARE (System Root Operations Only)
-// =========================================================================
-export const requireSuperAdmin = (req, res, next) => {
-  // STRICT VERIFICATION: Explicitly drops standard admins out from core cluster settings
-  if (req.user && req.user.role === 'superadmin') {
-    return next();
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ success: false, message: "Access denied: Admins only" });
   }
-
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access Denied: Superadmin authorization required for this operation." 
-  });
 };
+
 
 // --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
-router.post('/register', upload.single('photo'), async (req, res, next) => {
+router.post('/register', upload.single('photo'), async (req, res) => {
   try {
     await connectToDatabase();
-    const AgentModel = getAgentModel();
     
+const AgentModel = getAgentModel();
     const { 
       firstName, lastName, email, password, address, 
       occupation, program, bio, dob, gender, plan 
     } = req.body;
 
-    // 1. INPUT PRESENTATION CHECK
     if (!email) {
-      return res.status(400).json({ success: false, message: "Email required." });
+        return res.status(400).json({ success: false, message: "Email is required." });
     }
 
     const lowerEmail = email.toLowerCase().trim();
+
+    // 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS
     let existingAgent = await AgentModel.findOne({ email: lowerEmail });
 
-    // 🛡️ SECURITY FIX: OTP Throttling (Defends against mail gateway flooding)
-    if (existingAgent?.otpExpires && existingAgent.otpExpires > Date.now()) {
-      return res.status(429).json({ success: false, message: "Verification code already sent. Please wait." });
+    if (existingAgent && existingAgent.isVerified) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email already registered. Please login." 
+      });
     }
-
-    if (existingAgent?.isVerified) {
-      return res.status(400).json({ success: false, message: "Account already verified." });
-    }
-
-    // 2. CRYPTO PASSWORD HANDLING
     let hashedPassword = existingAgent ? existingAgent.password : "";
+
     if (password && password.trim() !== "") {
-      hashedPassword = await bcrypt.hash(password, 10);
+      const salt = await bcrypt.genSalt(10);
+      hashedPassword = await bcrypt.hash(password, salt);
     } else if (!existingAgent) {
       return res.status(400).json({ success: false, message: "Password is required for registration." });
     }
-
-    // 3. SECURE UNIQUE SLUG GENERATION
     let finalSlug = existingAgent ? existingAgent.slug : "";
     if (!existingAgent) {
       const baseSlug = `${firstName || 'agent'}${lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
@@ -170,204 +127,229 @@ router.post('/register', upload.single('photo'), async (req, res, next) => {
       }
     }
 
-    // 🛡️ SECURITY FIX: Photo Validation & S3 Object Key Sanitization
+    // 4. PHOTO UPLOAD TO IDRIVE E2
     let savedPhotoPath = existingAgent ? existingAgent.photoUrl : ""; 
     if (req.file) {
-      // Enforce 2MB file size ceiling
-      if (req.file.size > 2 * 1024 * 1024) {
-        return res.status(400).json({ success: false, message: "Photo too large. Maximum size allowed is 2MB." });
-      }
-
-      // Evict special character sequences out of original uploaded filename arrays
-      const cleanFileName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-');
-      const fileKey = `profiles/${Date.now()}-${cleanFileName}`;
-      const bucketName = process.env.IDRIVE_BUCKET_NAME;
-
+      try {
+        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
+        const fileKey = `profiles/${fileName}`;
+        const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
       await getS3Client().send(new PutObjectCommand({
-        Bucket: bucketName,
-        Key: fileKey,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-      }));
-
-      const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
-      savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
+    Bucket: bucketName,
+    Key: fileKey,
+    Body: req.file.buffer,
+    ContentType: req.file.mimetype,
+}));
+        const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+        savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
+      } catch (uploadError) {
+        console.error("Image Upload Failed:", uploadError);
+      }
     }
 
-    // 4. ATOMIC CODES GENERATION (Valid for 10 minutes)
+    // 5. OTP GENERATION (6 Digits)
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = Date.now() + (10 * 60 * 1000);
+    const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 Minutes
 
-    // 5. DATA COALESCING PERSISTENCE
+    // 6. SAVE OR UPDATE AGENT
     if (existingAgent) {
-      Object.assign(existingAgent, { 
-        firstName: firstName ? firstName.trim() : existingAgent.firstName,
-        lastName: lastName ? lastName.trim() : existingAgent.lastName,
-        password: hashedPassword, 
-        otp: otpCode, 
-        otpExpires: otpExpiry, 
-        photoUrl: savedPhotoPath,
-        dob: dob || existingAgent.dob,
-        gender: gender || existingAgent.gender,
-        occupation: occupation !== undefined ? occupation : existingAgent.occupation,
-        address: address !== undefined ? address : existingAgent.address,
-        bio: bio !== undefined ? bio : existingAgent.bio,
-        program: program !== undefined ? program : existingAgent.program,
-        plan: plan || existingAgent.plan || "BASIC"
-      });
+      // UPDATE existing unverified agent - only update fields if they are sent
+      if (firstName) existingAgent.firstName = firstName.trim();
+      if (lastName) existingAgent.lastName = lastName.trim();
+      
+      existingAgent.password = hashedPassword; // Either the new hash or the old one
+      existingAgent.address = address || existingAgent.address || "";
+      existingAgent.occupation = occupation || existingAgent.occupation || "";
+      existingAgent.program = program || existingAgent.program || "";
+      existingAgent.bio = bio || existingAgent.bio || "";
+      existingAgent.dob = dob || existingAgent.dob;
+      existingAgent.gender = gender || existingAgent.gender;
+      existingAgent.photoUrl = savedPhotoPath;
+      existingAgent.otp = otpCode;
+      existingAgent.otpExpires = otpExpiry;
+      existingAgent.plan = plan || existingAgent.plan || 'BASIC';
+      
       await existingAgent.save();
+      console.log("Existing unverified agent updated with new OTP.");
     } else {
-      await AgentModel.create({
-        firstName: (firstName || "Agent").trim(),
+      // CREATE brand new agent
+      const newAgent = new AgentModel({
+        firstName: firstName.trim(),
         lastName: (lastName || "").trim(),
         email: lowerEmail,
         password: hashedPassword,
+        address: address || "",
+        occupation: occupation || "",
+        program: program || "",
+        bio: bio || "",
+        dob,
+        gender,
         slug: finalSlug,
         photoUrl: savedPhotoPath,
-        dob: dob || null,
-        gender: gender || "",
-        occupation: occupation || "",
-        address: address || "",
-        bio: bio || "",
-        program: program || "",
+        plan: plan || 'BASIC',
         role: 'agent',
         status: 'pending',
         isVerified: false,
-        isSubscribed: false,
-        plan: plan || "BASIC",
         otp: otpCode,
         otpExpires: otpExpiry
       });
+      await newAgent.save();
+      console.log("New agent created successfully.");
     }
 
-    // 6. EMAIL DELIVERY SYSTEM
+    // 7. EMAIL DELIVERY
     const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+
     try {
-      await transporter.sendMail({
-        from: `"ZingConnect Security" <${process.env.GMAIL_USER || process.env.EMAIL_USER}>`,
-        to: lowerEmail,
-        subject: "Your Verification Code",
-        attachments: [{
-          filename: 'logo.png',
-          path: logoPath,
-          cid: 'zinglogo'
-        }],
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-              @media only screen and (max-width: 600px) {
-                .container { width: 100% !important; border-radius: 0 !important; }
-                .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
-              }
-            </style>
-          </head>
-          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-              <tr>
-                <td align="center" style="padding: 40px 10px;">
-                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                    <tr>
-                      <td align="center" style="padding: 30px 40px 10px 40px;">
-                        <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 20px 40px 40px 40px; text-align: center;">
-                        <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
-                        <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
-                          Hello <strong>${firstName || 'Agent'}</strong>,<br>
-                          Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
-                        </p>
-                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
-                          ${otpCode}
-                        </div>
-                        <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
-                          This code is valid for <strong>10 minutes</strong>.<br>
-                          If you didn't request this, you can safely ignore this email.
-                        </p>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
-                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                          &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
-                        </p>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </body>
-          </html>
-        `
-      });
+        await transporter.sendMail({
+            from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
+            to: lowerEmail,
+            subject: "Your Verification Code",
+            attachments: [{
+                filename: 'logo.png',
+                path: logoPath,
+                cid: 'zinglogo'
+            }],
+            html: `
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                  @media only screen and (max-width: 600px) {
+                    .container { width: 100% !important; border-radius: 0 !important; }
+                    .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+                  }
+                </style>
+              </head>
+              <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td align="center" style="padding: 40px 10px;">
+                      <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                        <tr>
+                          <td align="center" style="padding: 30px 40px 10px 40px;">
+                            <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                            <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                            <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                              Hello <strong>${firstName || 'Agent'}</strong>,<br>
+                              Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                            </p>
+                            <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
+                              ${otpCode}
+                            </div>
+                            <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                              This code is valid for <strong>10 minutes</strong>.<br>
+                              If you didn't request this, you can safely ignore this email.
+                            </p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                            <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                              &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </body>
+              </html>
+            `
+        });
     } catch (mailError) {
-      console.error("🔴 [Mailer Failure] Postponing email stack:", mailError.message);
+        console.error("Email Delivery Failed:", mailError);
     }
 
-    return res.status(200).json({ success: true, message: "Verification code sent." });
-
+    res.status(200).json({ 
+      success: true, 
+      message: "Registration initiated. Please check your email for the OTP." 
+    });
+    
   } catch (error) {
-    // 🛡️ SECURITY FIX: Route intercept traces out to secure error tracking engine instead of leaking system data
-    next(error);
+    console.error("Registration Logic Error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || "An unexpected error occurred during registration." 
+    });
   }
 });
 
 // --- 2. STAGE 2: VERIFY OTP ---
-router.post('/verify-otp', async (req, res, next) => {
+router.post('/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+
   try {
     await connectToDatabase();
-    const AgentModel = getAgentModel();
-    const { email, otp } = req.body;
-
+    
+const AgentModel = getAgentModel();
+if (!AgentModel) throw new Error("Agent Model not initialized");
     if (!email || !otp) {
-      return res.status(400).json({ success: false, message: "Email and OTP are required." });
-    }
-
-    const lowerEmail = email.toLowerCase().trim();
-    const agent = await AgentModel.findOne({ email: lowerEmail });
-
-    // 🛡️ SECURITY FIX: Unified validation comparison logic 
-    // Prevents identity enumeration profiles by using a generic error response string
-    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
       return res.status(400).json({ 
         success: false, 
-        message: "Invalid or expired verification code." 
+        message: "Email and verification code are required." 
       });
     }
 
-    // Clean verification status transitions
-    agent.isVerified = true;
-    agent.status = 'active';
-    agent.otp = undefined;
-    agent.otpExpires = undefined;
-    await agent.save();
-    
-    if (!process.env.JWT_SECRET) {
-      throw new Error("Security configuration error.");
+  const agent = await AgentModel.findOne({ 
+      email: email.toLowerCase().trim(),
+      otp: otp,
+      otpExpires: { $gt: Date.now() }
+    });
+
+    if (!agent) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid or expired verification code. Please try again." 
+      });
     }
 
-    // Sign payload token allocations
+    // 4. Update agent status and clear OTP fields
+    agent.isVerified = true;
+    agent.status = 'active';
+    agent.otp = undefined; 
+    agent.otpExpires = undefined;
+    
+    await agent.save();
+
+    // 5. Check if JWT_SECRET exists to avoid signing errors
+    if (!process.env.JWT_SECRET) {
+        console.error("JWT_SECRET is missing in environment variables.");
+        throw new Error("Server configuration error.");
+    }
+
+    // 6. Generate access token
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug, role: 'agent' },
-      process.env.JWT_SECRET,
+      { 
+        id: agent._id, 
+        slug: agent.slug, 
+        role: 'agent' 
+      }, 
+      process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
-    return res.status(200).json({
-      success: true,
-      token: token,
+    // 7. Success Response
+    res.status(200).json({ 
+      success: true, 
+      token, 
       slug: agent.slug,
-      message: "Your profile is now live!"
+      message: "Account verified successfully!" 
     });
 
   } catch (err) {
-    // Forward traces safely via central app intercept middleware
-    next(err); 
+    console.error("OTP VERIFICATION CRASH:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Verification failed due to a server error.",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
 
