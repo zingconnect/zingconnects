@@ -2056,13 +2056,16 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     await newMessage.save();
 
     const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId).select('+pushSubscription +lastNotificationEmail +email firstName lastName');
+    
+    // FIX 1: Cleaned up the project/select string without "+" unless explicitly hidden in Schema
+    const receiver = await TargetModel.findById(receiverId)
+      .select('pushSubscription lastNotificationEmail email firstName lastName');
     
     if (!receiver) {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // 1. ALWAYS attempt Socket emission if online
+    // 1. Socket emission if online
     const io = req.app.get('socketio');
     const sockets = await io.in(receiverId.toString()).fetchSockets();
     const isOnline = sockets.length > 0;
@@ -2081,11 +2084,11 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       });
     }
 
-    // 2. ALWAYS attempt Push/Email if they have a subscription, 
-    // regardless of online status (for reliability).
+    // 2. Push Notification
     const baseUrl = "https://www.zingconnect.chat";
     const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
+    
     const payload = JSON.stringify({
       title: `New Message from ${senderName}`,
       body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
@@ -2094,28 +2097,35 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       data: { url: `${baseUrl}${path}`, type: 'message' }
     });
 
-    if (receiver.pushSubscription?.endpoint) {
+    // Added defensive structural checking for pushSubscription object
+    if (receiver.pushSubscription && receiver.pushSubscription.endpoint) {
       try {
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+        console.log(`✅ Push notification sent to ${receiverId}`);
       } catch (pushErr) {
         console.error("❌ PUSH FAILED:", pushErr.message);
         if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
           await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
         }
       }
+    } else {
+      console.log(`⚠️ Push skipped: No valid endpoint found for user ${receiverId}`);
     }
 
-    // 3. Email remains a fallback for long-inactive users
+    // 3. Email offline fallback 
     try {
       const COOLDOWN = 30 * 60 * 1000;
       const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+      
       if (Date.now() - lastEmailTime > COOLDOWN) {
-        await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
+        // FIX 2: Fire the email service FIRST. Only update the DB tracker if it doesn't throw.
         await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
+        await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
+        console.log(`📧 Offline email notification dispatched to ${receiver.email}`);
       }
     } catch (mailErr) {
-      console.error("Email Error:", mailErr.message);
+      console.error("❌ Email Error:", mailErr.message);
     }
 
     return res.status(201).json({
