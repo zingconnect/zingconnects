@@ -65,6 +65,7 @@ app.disable('x-powered-by');
 
 const terminatingCallsCache = new Set();
 app.set('terminatingCallsCache', terminatingCallsCache);
+
 app.set('redisClient', redisClient); 
 
 const corsOptions = {
@@ -2031,10 +2032,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     
-
     const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
-
-    // 🛡️ SECURITY FIX 1 & 2
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ success: false, message: "Message text cannot be blank." });
     }
@@ -2045,8 +2043,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     if (!['Agent', 'User'].includes(sanitizedModel)) {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
-
-    // 2. Create and Save Message
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
@@ -2093,65 +2089,46 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
             type: 'message'
         }
     });
-    console.log("DEBUG: Attempting webpush.sendNotification...");
-    await webpush.sendNotification(receiver.pushSubscription, payload);
-    await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
-    console.log("✅ Push Sent Successfully");
-    
-} catch (pushErr) {
-    console.error("❌ PUSH FAILED: Check VAPID/Subscription. Error:", pushErr.message);
-
-        // Remove stale subscription
-        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
-          console.log("Stale subscription removed for user:", receiverId);
-        }
+   await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { notificationSent: true });
+        newMessage.notificationSent = true;
+      } catch (pushErr) {
+        console.error("Push delivery failed:", pushErr.message);
       }
     }
- let deliveredViaSocket = false;
-const messageData = {
-  id: newMessage._id,
-  senderId: newMessage.senderId,
-  senderModel: newMessage.senderModel,
-  receiverId: newMessage.receiverId,
-  receiverModel: newMessage.receiverModel,
-  content: newMessage.text,
-  fileType: newMessage.fileType,
-  replyToId: newMessage.replyToId,
-  createdAt: newMessage.createdAt
-};
-
-if (isOnline) {
+if (!isOnline && receiver) {
   try {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Socket ACK Timeout")), 3000);
-      
-      // Emit the message and wait for the client's callback
-      io.to(receiverId.toString()).emit("new-message", messageData, (ack) => {
-        clearTimeout(timer);
-        resolve(true);
-      });
-    });
-    deliveredViaSocket = true;
-    console.log("✅ Message confirmed received by client via WebSocket");
-  } catch (err) {
-    console.warn("⚠️ WebSocket delivery failed or timed out. Falling back to email logic.");
-  }
-}
-if (!deliveredViaSocket) {
-  try {
-    const COOLDOWN = 30 * 60 * 1000;
+    const COOLDOWN = 30 * 60 * 1000; 
+    const now = Date.now();
     const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-    
-    if (Date.now() - lastEmailTime > COOLDOWN) {
-      await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-      await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
-      console.log("📧 Email notification dispatched as fallback.");
+
+    if (now - lastEmailTime > COOLDOWN) {
+      await sendOfflineNotification(receiver, sender, text, receiverModel);
+      
+      // 3. Immediately update the database to prevent "race condition" double-sends
+      await TargetModel.findByIdAndUpdate(receiverId, { 
+        lastNotificationEmail: new Date() 
+      });
     }
   } catch (mailErr) {
-    console.error("Email Fallback Error:", mailErr.message);
+    console.error("Email Throttle Error:", mailErr.message);
   }
 }
+
+    // 7. Real-Time WebSocket Emit
+    if (isOnline) {
+      io.to(receiverId.toString()).emit("new-message", {
+        id: newMessage._id,
+        senderId: newMessage.senderId,
+        senderModel: newMessage.senderModel,
+        receiverId: newMessage.receiverId,
+        receiverModel: newMessage.receiverModel,
+        content: newMessage.text,
+        fileType: newMessage.fileType,
+        replyToId: newMessage.replyToId,
+        createdAt: newMessage.createdAt
+      });
+    }
     return res.status(201).json({
       success: true,
       message: {
@@ -2447,7 +2424,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     }
 
     const io = req.app.get('socketio');
-    const isOnline = true;
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
 
     // Web Push Notification Routing Logic
     if (receiver?.pushSubscription && receiver.pushSubscription.endpoint) {
