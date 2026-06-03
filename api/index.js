@@ -102,6 +102,7 @@ const io = new Server(server, {
 
 app.set('socketio', io);
 app.use('/api/calls', callRoutes);
+app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);
 app.use('/api/admin', adminRoutes);
 
