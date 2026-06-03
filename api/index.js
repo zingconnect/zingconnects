@@ -2138,8 +2138,6 @@ if (isOnline) {
     console.warn("⚠️ WebSocket delivery failed or timed out. Falling back to email logic.");
   }
 }
-
-// 8. Trigger Email Fallback if Socket delivery failed
 if (!deliveredViaSocket) {
   try {
     const COOLDOWN = 30 * 60 * 1000;
@@ -2449,7 +2447,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     }
 
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
+    const isOnline = true;
 
     // Web Push Notification Routing Logic
     if (receiver?.pushSubscription && receiver.pushSubscription.endpoint) {

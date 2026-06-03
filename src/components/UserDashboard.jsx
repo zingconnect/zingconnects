@@ -1007,7 +1007,10 @@ async function handleRejectCall() {
 
 useEffect(() => {
   if (!socket) return;
-  socket.on("new-message", (msg) => {
+    socket.on("new-message", (msg, callback) => {
+    if (callback) {
+      callback({ status: 'received' });
+    }
     setMessages(prev => {
       const isDuplicate = prev.some(m => m._id === msg._id || m.tempId === msg._id);
       if (isDuplicate) return prev;
@@ -1016,9 +1019,8 @@ useEffect(() => {
       }
       return [...prev, msg];
     });
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   });
-
   socket.on("message-deleted", (deletedId) => {
     setMessages(prev => prev.filter(m => (m._id || m.id) !== deletedId));
   });

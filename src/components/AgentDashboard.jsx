@@ -55,7 +55,6 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// Singleton socket instance prevents re-initialization on component changes
 const socket = io(import.meta.env.VITE_API_URL);
 
 export const AgentDashboard = () => {
@@ -1803,14 +1802,19 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
-
 useEffect(() => {
   if (!socket) return;
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
 
-  const handleIncomingMessage = (data) => {
+  // UPDATED: Added 'callback' parameter
+  const handleIncomingMessage = (data, callback) => {
+    // 1. Acknowledge receipt immediately so the server knows the agent is online
+    if (callback) {
+      callback({ status: 'received' });
+    }
+
     console.log("📥 Real-time Socket Message Detected:", data);
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
@@ -1852,12 +1856,11 @@ useEffect(() => {
       }
     }
   };
-
   socket.on('new-message', handleIncomingMessage);
   return () => {
     socket.off('new-message', handleIncomingMessage);
   };
-}, [socket, selectedUser]); 
+}, [socket, selectedUser]);
 
 useEffect(() => {
   if (!("Notification" in window)) {
