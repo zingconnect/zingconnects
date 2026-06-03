@@ -193,36 +193,187 @@ router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res, next
   }
 });
 
-// 4. UPLOAD URL GENERATION
+
+// 4. UPLOAD URL GENERATION (HARDENED SECURITY MATRIX)
 router.post('/get-upload-url', authenticateToken, async (req, res, next) => {
   try {
     const { fileName, fileType } = req.body;
-    const key = `chat/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileName.split('.').pop()}`;
-    const command = new PutObjectCommand({ Bucket: process.env.IDRIVE_BUCKET_NAME, Key: key, ContentType: fileType });
-    const uploadUrl = await getSignedUrl(getS3Client(), command, { expiresIn: 900 });
-    res.json({ success: true, uploadUrl, key });
+    
+    // 🛡️ SECURITY FIX 1: Input Presence Checking
+    if (!fileName || !fileType) {
+      return res.status(400).json({ success: false, message: "File metadata missing." });
+    }
+
+    // 🛡️ SECURITY FIX 2: Strict Server-Side Mime-Type White-list Matrix
+    // This explicitly maps acceptable content types to safe, single extensions
+    const allowedMimeTypes = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'video/mp4': 'mp4',
+      'video/quicktime': 'mov'
+    };
+
+    const sanitizedMime = String(fileType).toLowerCase().trim();
+    if (!allowedMimeTypes[sanitizedMime]) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Unsupported file type signature. Only safe images and videos are permitted." 
+      });
+    }
+
+    // Determine target extension strictly using server mappings instead of trust-matching original extensions
+    const safeExtension = allowedMimeTypes[sanitizedMime];
+    const uniqueKey = `chat/${Date.now()}-${Math.round(Math.random() * 1E9)}.${safeExtension}`;
+    
+    const client = getS3Client();
+    const command = new PutObjectCommand({
+      Bucket: process.env.IDRIVE_BUCKET_NAME,
+      Key: uniqueKey,
+      ContentType: sanitizedMime, // Forces the storage gateway to store it with the correct HTTP content type header
+    });
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 900 });
+
+    // Return the secure, pre-mapped unique reference token paths back to the client layout
+    return res.json({ 
+      success: true, 
+      uploadUrl, 
+      key: uniqueKey 
+    });
+
   } catch (err) {
+    // 🛡️ SECURITY FIX 4: Prevent raw system file path error traces from escaping out over network responses
     next(err);
   }
 });
 
-// 5. CONFIRM UPLOAD
+
+// 5. CONFIRM UPLOAD (NOW SUPPORTING FULL WEB PUSH + EMAIL NOTIFICATIONS)
 router.post('/confirm-upload', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
+    const myId = req.user.id;
     const { receiverId, text, fileUrl, fileType } = req.body;
+
+    if (!receiverId || !fileUrl) {
+      return res.status(400).json({ success: false, message: "Invalid payload: Target elements missing." });
+    }
+
+    // Determine tracking types safely
+    const sanitizedType = ['image', 'video'].includes(String(fileType).toLowerCase().trim()) 
+      ? String(fileType).toLowerCase().trim() 
+      : 'image';
+
+    let senderDoc = await Agent.findById(myId) || await User.findById(myId);
+    if (!senderDoc) {
+      return res.status(404).json({ success: false, message: "Sender identity mismatch." });
+    }
+
+    const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
+    const targetModelName = req.user.role === 'agent' ? 'User' : 'Agent';
+
+    // 1. Persist the media index message asset
     const newMessage = await Message.create({
-      senderId: req.user.id,
-      senderModel: req.user.role === 'agent' ? 'Agent' : 'User',
+      senderId: myId,
+      senderModel: senderModelName,
       receiverId,
-      receiverModel: req.user.role === 'agent' ? 'User' : 'Agent',
+      receiverModel: targetModelName,
       text: text?.trim() || "",
       fileUrl,
-      fileType,
-      status: 'sent'
+      fileType: sanitizedType,
+      status: 'sent',
+      notificationSent: false
     });
 
+    const TargetModel = targetModelName === 'Agent' ? Agent : User;
+    const receiver = await TargetModel.findById(receiverId)
+      .select('pushSubscription lastNotificationEmail email firstName lastName');
+
+    if (!receiver) {
+      return res.status(404).json({ success: false, message: "Recipient record mismatch." });
+    }
+
+    // 2. Query distributed cluster rooms safely via Redis fetchSockets
+    const io = req.app.get('socketio');
+    let isOnline = false;
+    
+    if (io) {
+      const sockets = await io.in(receiverId.toString()).fetchSockets();
+      isOnline = sockets.length > 0;
+    }
+
+    // 3. Generate fallback presentation content bodies for empty message logs
+    const dynamicNotificationBody = text?.trim() 
+      ? (text.length > 60 ? `${text.substring(0, 60)}...` : text) 
+      : (sanitizedType === 'video' ? "🎥 Sent a video attachment" : "📷 Sent an image attachment");
+
+    const baseUrl = "https://www.zingconnect.chat";
+    const path = targetModelName === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
+    const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
+
+    const payload = JSON.stringify({
+      title: `New Attachment from ${senderName}`,
+      body: dynamicNotificationBody,
+      icon: `${baseUrl}/logo-s.png`,
+      badge: `${baseUrl}/logo-s.png`,
+      data: { url: `${baseUrl}${path}`, type: 'message' }
+    });
+
+    // ====== TEMPORARY MEDIA ATTACHMENT DIAGNOSTIC LOGS ======
+    console.log("---------------- CONFIRM UPLOAD PUSH DIAGNOSTIC ----------------");
+    console.log("Recipient ID:", receiverId);
+    console.log("Target Model Name:", targetModelName);
+    console.log("Recipient Found in DB:", !!receiver);
+    console.log("Has pushSubscription:", !!receiver?.pushSubscription);
+    console.log("Target Endpoint:", receiver?.pushSubscription?.endpoint || "❌ NONE");
+    console.log("----------------------------------------------------------------");
+
+    // Execute Web Push dispatch logic
+    if (receiver.pushSubscription && receiver.pushSubscription.endpoint) {
+      try {
+        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+        console.log(`✅ Media Web Push successfully processed for user: ${receiverId}`);
+      } catch (pushErr) {
+        console.error("❌ MEDIA PUSH COURIER FAILURE:", pushErr.message);
+        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
+          console.log(`🧹 Cleaned dead subscription endpoint tracking for user: ${receiverId}`);
+        }
+      }
+    }
+
+    // 4. Trigger fallback offline email courier
+    try {
+      const COOLDOWN = 30 * 60 * 1000;
+      const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+      
+      if (Date.now() - lastEmailTime > COOLDOWN) {
+        const attachmentTextFallback = text?.trim() || `Sent an asset attachment (${sanitizedType})`;
+        await sendOfflineNotification(receiver, senderDoc, attachmentTextFallback, targetModelName);
+        await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
+        console.log(`📧 Offline media confirmation fallback mail dispatched to ${receiver.email}`);
+      }
+    } catch (mailErr) {
+      console.error("❌ Media Email Notification Tracker Error:", mailErr.message);
+    }
+
+    // 5. Broadcast live update socket streams if online status is met
     const signedUrl = await getPrivateUrl(fileUrl);
+    if (isOnline && io) {
+      io.to(receiverId.toString()).emit("new-message", {
+        id: newMessage._id,
+        senderId: newMessage.senderId,
+        senderModel: newMessage.senderModel,
+        receiverId: newMessage.receiverId,
+        receiverModel: newMessage.receiverModel,
+        content: newMessage.text,
+        fileUrl: signedUrl,
+        fileType: newMessage.fileType,
+        createdAt: newMessage.createdAt
+      });
+    }
+
     res.status(201).json({ success: true, message: { ...newMessage.toObject(), fileUrl: signedUrl } });
   } catch (err) {
     next(err);
