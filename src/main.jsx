@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { Buffer } from 'buffer';
 import App from './App.jsx'
 import './index.css'
-import { secureFetch } from "./api/utils/api";
+import { secureFetch } from "./utils/api";
 
 // --- 1. CRITICAL POLYFILLS & AUDIO HARDWARE ROUTING ---
 window.global = window;
