@@ -35,8 +35,6 @@ export const agentSchema = new mongoose.Schema({
   gender: String,
   role: { type: String, default: 'agent' },
   photoUrl: { type: String, default: '' },
-
-  // --- VERIFICATION FIELDS ---
   isVerified: { type: Boolean, default: false, index: true }, 
   otp: { type: String },
   otpExpires: { type: Date },
@@ -46,7 +44,10 @@ export const agentSchema = new mongoose.Schema({
     type: Object,
     default: null
   },
-
+lastNotificationEmail: {
+  type: Date,
+  default: null
+},
   // --- MAIN SUBSCRIPTION PLAN ---
   plan: { 
     type: String, 

@@ -73,6 +73,10 @@ const userSchema = new mongoose.Schema({
     type: Date, 
     default: Date.now 
   },
+lastNotificationEmail: {
+  type: Date,
+  default: null
+},
   connectedAgents: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Agent'

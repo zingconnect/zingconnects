@@ -2448,6 +2448,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
 
     // 🛡️ SECURITY FIX 3: Atomic Lockout Strategy (Defeats Cache Cooldown Race Conditions)
     if (!isOnline && receiver) {
+      console.log(`[DEBUG] Attempting to send offline email to: ${receiver.email}`); // ADD THIS
       try {
         const COOLDOWN = 30 * 60 * 1000; 
         const nowTimestamp = Date.now();
