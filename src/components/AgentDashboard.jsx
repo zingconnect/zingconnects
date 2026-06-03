@@ -2195,42 +2195,67 @@ return (
   </div>
 
 ) : !isSubscribed && !showSuccessOverlay ? (
-  /* --- 3. SECONDARY: SUBSCRIPTION MODAL --- */
-  <div className="absolute inset-0 z-[10000] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-6">
-    <div className="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
-      <div className="bg-blue-600 p-10 text-white md:w-1/3 flex flex-col justify-between">
+<div className="fixed inset-0 z-[10000] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[95vh]">
+      
+      {/* Sidebar - Retained for Brand Context */}
+      <div className="bg-blue-700 p-8 text-white md:w-1/3 flex flex-col justify-between">
         <div>
-          <BsShieldLockFill size={32} className="mb-4 opacity-90" />
-          <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">Account Inactive</h2>
-          <p className="text-blue-100 text-sm opacity-90">Subscription required for dashboard access.</p>
+          <BsShieldLockFill size={28} className="mb-4 opacity-80" />
+          <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">Account Inactive</h2>
+          <p className="text-blue-100 text-xs opacity-90 leading-relaxed">
+            Choose a plan to continue accessing your dashboard and secure communications.
+          </p>
         </div>
       </div>
-      <div className="p-12 md:w-2/3 bg-gray-50 flex flex-col overflow-y-auto">
-        <h3 className="text-xl font-bold text-gray-800 mb-6">Choose Your Access Tier</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+
+      {/* Main Content */}
+      <div className="p-6 md:p-8 bg-gray-50 flex flex-col overflow-y-auto">
+        <h3 className="text-lg font-bold text-gray-800 mb-6">Select Access Plan</h3>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
           {plans.map((plan) => (
             <div
               key={plan.tier}
               onClick={() => setSelectedPlan(plan.tier)}
-              className={`cursor-pointer p-5 rounded-2xl border-2 transition-all relative flex flex-col justify-between h-36 ${
-                selectedPlan === plan.tier ? 'border-blue-600 bg-white shadow-xl scale-[1.03]' : 'border-gray-200 bg-white opacity-80 hover:opacity-100'
+              className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex flex-col justify-between h-auto sm:h-40 ${
+                selectedPlan === plan.tier 
+                  ? 'border-blue-600 bg-blue-50 shadow-md' 
+                  : 'border-gray-200 bg-white hover:border-blue-300'
               }`}
             >
-              <span className={`text-[9px] font-black uppercase tracking-widest block ${selectedPlan === plan.tier ? 'text-blue-600' : 'text-gray-400'}`}>
-                {plan.tier}
-              </span>
-              <span className="text-xs font-bold text-gray-500 block mt-0.5">{plan.term} Access</span>
-              <div className="text-2xl font-black text-gray-900 leading-none">₦{plan.price}</div>
+              <div>
+                <div className="flex justify-between items-start">
+                  <span className={`text-[9px] font-black uppercase tracking-widest ${selectedPlan === plan.tier ? 'text-blue-600' : 'text-gray-400'}`}>
+                    {plan.tier}
+                  </span>
+                  {plan.popular && (
+                    <span className="bg-blue-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">POPULAR</span>
+                  )}
+                </div>
+                <div className="text-lg font-black text-gray-900 mt-2">₦{plan.price}</div>
+                <div className="text-[10px] font-semibold text-gray-400">{plan.term}</div>
+              </div>
+
+              {/* Feature List Preview - Added for Complexity */}
+              <ul className="hidden sm:block mt-3 space-y-1">
+                {plan.features.slice(0, 2).map((feat, i) => (
+                  <li key={i} className="text-[9px] text-gray-500 truncate">• {feat}</li>
+                ))}
+              </ul>
             </div>
           ))}
         </div>
+
         <button 
           disabled={paymentProcessing} 
           onClick={handlePayment} 
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-4 rounded-xl uppercase tracking-widest text-[11px] transition-colors"
+          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-3.5 rounded-lg uppercase tracking-wider text-[11px] transition-all transform active:scale-[0.98]"
         >
           {paymentProcessing ? "Processing..." : `Activate ${selectedPlan} Access`}
         </button>
+        
+        <p className="text-[10px] text-gray-400 text-center mt-4">Secure payment powered by Flutterwave.</p>
       </div>
     </div>
   </div>
