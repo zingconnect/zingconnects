@@ -175,19 +175,56 @@ router.post('/send', authenticateToken, async (req, res, next) => {
   }
 });
 
-// 3. MARK AS READ
+
+// 3. MARK AS READ (HARDENED DUAL-CHANNEL SYNCHRONIZATION)
 router.patch('/mark-read/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
-    const result = await Message.updateMany(
-      { senderId: req.params.otherUserId, receiverId: req.user.id, status: { $ne: 'seen' } },
-      { $set: { status: 'seen', seenAt: new Date() } }
-    );
     
-    const io = req.app.get('socketio');
-    if (io) io.to(req.params.otherUserId).emit("messages-seen", { readerId: req.user.id });
+    const myId = req.user?.id || req.user?._id;
+    const { otherUserId } = req.params;
 
-    res.json({ success: true, count: result.modifiedCount });
+    // 🛡️ SECURITY FIX 1: Strict Hex-Id Parameter Structure Validation
+    if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
+      return res.status(400).json({ success: false, message: "Invalid participant identifier structure." });
+    }
+
+    const targetSenderId = new mongoose.Types.ObjectId(String(otherUserId));
+    const currentReaderId = new mongoose.Types.ObjectId(String(myId));
+
+    // Execute atomic update batch query across all unread incoming documents
+    const result = await Message.updateMany(
+      { 
+        senderId: targetSenderId, 
+        receiverId: currentReaderId, 
+        status: { $ne: 'seen' } 
+      },
+      { 
+        $set: { 
+          status: 'seen', 
+          seenAt: new Date() 
+        } 
+      }
+    );
+    const io = req.app.get('socketio');
+    if (io) {
+      const senderRoom = otherUserId.toString();
+      const readerRoom = myId.toString();
+      
+      const updatePayload = { 
+        senderId: senderRoom, // The person who originally wrote the messages
+        readerId: readerRoom  // The person who just read them
+      };
+      io.to(senderRoom).emit("messages-seen", updatePayload);
+      
+      io.to(readerRoom).emit("messages-seen", updatePayload);
+    }
+
+    return res.json({ 
+      success: true, 
+      count: result.modifiedCount || 0
+    });
+
   } catch (err) {
     next(err);
   }
@@ -380,18 +417,86 @@ router.post('/confirm-upload', authenticateToken, async (req, res, next) => {
   }
 });
 
-// 6. DELETE
+
+// 6. DELETE (HARDENED ASSET PURGE & SOCKET RECOUP)
 router.delete('/:id', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
-    const msg = await Message.findOneAndDelete({ _id: req.params.id, senderId: req.user.id });
-    if (!msg) return res.status(404).json({ success: false, message: "Not found" });
     
+    const messageId = req.params.id;
+    const myId = req.user?.id || req.user?._id;
+
+    // 🛡️ SECURITY FIX 1: Strict Hex-Id Parameter Structure Validation
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ success: false, message: "Invalid message identifier structure." });
+    }
+
+    // Locate document and verify user ownership before performing operations
+    const message = await Message.findOne({ 
+      _id: new mongoose.Types.ObjectId(String(messageId)), 
+      senderId: new mongoose.Types.ObjectId(String(myId)) 
+    });
+
+    if (!message) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Message not found or you do not have permission to delete it." 
+      });
+    }
+
+    // 🛡️ SECURITY FIX 2: Storage Media Asset Purge Boundary
+    if (message.fileUrl && typeof message.fileUrl === 'string') {
+      let fileKey = message.fileUrl;
+      
+      // Parse out absolute presigned URLs if they exist, isolating the raw object storage path string
+      if (fileKey.startsWith('http')) {
+        const urlParts = fileKey.split('idrivee2.com/');
+        if (urlParts.length > 1) {
+          const pathParts = urlParts[1].split('/');
+          fileKey = pathParts.slice(1).join('/'); 
+        }
+      }
+
+      try {
+        const client = getS3Client();
+        const deleteCommand = new DeleteObjectCommand({
+          Bucket: process.env.IDRIVE_BUCKET_NAME,
+          Key: fileKey
+        });
+        
+        await client.send(deleteCommand);
+        console.log(`[S3 Cleanup] Deleted associated asset: ${fileKey}`);
+      } catch (s3Err) {
+        // Intercept storage issues gracefully so database operations still resolve
+        console.error(`[S3 Cleanup Error] Failed to drop asset ${fileKey}:`, s3Err.message);
+      }
+    }
+
+    // Atomic database execution
+    await Message.findByIdAndDelete(message._id);
+
+    // 🛡️ SECURITY FIX 3: Dual-Channel Real-Time UI Eviction Updates
     const io = req.app.get('socketio');
-    if (io) io.to(msg.receiverId.toString()).emit("message-deleted", req.params.id);
-    
-    res.json({ success: true });
+    if (io) {
+      const recipientRoom = message.receiverId.toString();
+      const senderRoom = myId.toString();
+      
+      const payload = { messageId: message._id.toString() };
+
+      // A. Evict message bubble from recipient's view immediately
+      io.to(recipientRoom).emit("message-deleted", payload);
+      
+      // B. Evict message bubble across sender's other open tabs/instances
+      io.to(senderRoom).emit("message-deleted", payload);
+    }
+
+    return res.json({ 
+      success: true, 
+      message: "Message and associated assets deleted successfully." 
+    });
+
   } catch (err) {
+    // Forward traces cleanly through the central intercept firewall boundary
     next(err);
   }
 });

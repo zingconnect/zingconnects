@@ -462,6 +462,7 @@ router.post('/confirm-upload', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // 6. DELETE (HARDENED ASSET PURGE & SOCKET RECOUP)
 router.delete('/:id', authenticateToken, async (req, res, next) => {
   try {
