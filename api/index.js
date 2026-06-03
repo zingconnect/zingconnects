@@ -2011,7 +2011,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
 // =========================================================================
@@ -2058,68 +2057,18 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     });
     await newMessage.save();
 
-    // 3. Dynamic Model resolution for Context
     const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId).select('+pushSubscription +lastNotificationEmail +email firstName lastName');
     
     if (!receiver) {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
-    console.log(`DEBUG: Target Found: ${receiver._id}`);
-    console.log(`DEBUG: Push Subscription Exists: ${!!receiver.pushSubscription}`);
-    if (receiver.pushSubscription) {
-        console.log(`DEBUG: Endpoint: ${receiver.pushSubscription.endpoint}`);
-    } else {
-        console.warn(`⚠️ WARNING: No pushSubscription found in DB for user ${receiverId}`);
-    }
 
     const io = req.app.get('socketio');
     const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
-    if (receiver.pushSubscription?.endpoint) {
-     try {
-    const baseUrl = "https://www.zingconnect.chat";
-    const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
-    const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
-    const payload = JSON.stringify({
-        title: `New Message from ${senderName}`,
-        body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
-        icon: `${baseUrl}/logo-s.png`,
-        badge: `${baseUrl}/logo-s.png`,
-        data: { 
-            url: `${baseUrl}${path}`,
-            type: 'message'
-        }
-    });
-    console.log("DEBUG: Attempting webpush.sendNotification...");
-    await webpush.sendNotification(receiver.pushSubscription, payload);
-    await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
-    console.log("✅ Push Sent Successfully");
-    
-} catch (pushErr) {
-    console.error("❌ PUSH FAILED: Check VAPID/Subscription. Error:", pushErr.message);
 
-        // Remove stale subscription
-        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
-          console.log("Stale subscription removed for user:", receiverId);
-        }
-      }
-    }
-if (!isOnline && receiver) {
-  try {
-        const COOLDOWN = 30 * 60 * 1000;
-        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-        if (Date.now() - lastEmailTime > COOLDOWN) {
-          await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-          await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
-        }
-      } catch (mailErr) {
-        console.error("Email Throttle Error:", mailErr.message);
-      }
-    }
-
-    // 7. Real-Time WebSocket Emit
     if (isOnline) {
+      // 1. ONLINE: Just emit via WebSocket
       io.to(receiverId.toString()).emit("new-message", {
         id: newMessage._id,
         senderId: newMessage.senderId,
@@ -2131,7 +2080,45 @@ if (!isOnline && receiver) {
         replyToId: newMessage.replyToId,
         createdAt: newMessage.createdAt
       });
+    } else {
+      // 2. OFFLINE: Attempt Push and/or Email
+      const baseUrl = "https://www.zingconnect.chat";
+      const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
+      const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
+      const payload = JSON.stringify({
+        title: `New Message from ${senderName}`,
+        body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
+        icon: `${baseUrl}/logo-s.png`,
+        badge: `${baseUrl}/logo-s.png`,
+        data: { url: `${baseUrl}${path}`, type: 'message' }
+      });
+
+      // Attempt Push
+      if (receiver.pushSubscription?.endpoint) {
+        try {
+          await webpush.sendNotification(receiver.pushSubscription, payload);
+          await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
+        } catch (pushErr) {
+          console.error("❌ PUSH FAILED:", pushErr.message);
+          if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+            await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
+          }
+        }
+      }
+
+      // Attempt Email
+      try {
+        const COOLDOWN = 30 * 60 * 1000;
+        const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
+        if (Date.now() - lastEmailTime > COOLDOWN) {
+          await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
+          await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
+        }
+      } catch (mailErr) {
+        console.error("Email Error:", mailErr.message);
+      }
     }
+
     return res.status(201).json({
       success: true,
       message: {
