@@ -387,6 +387,7 @@ const addDays = (date, days) => {
   result.setDate(result.getDate() + days);
   return result;
 };
+
 // ==========================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
 // ==========================================
@@ -2091,7 +2092,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     
     const payload = JSON.stringify({
       title: `New Message from ${senderName}`,
-      body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
+      body: text.length > 40 ? `${text.substring(0, 40)}...` : text,
       icon: `${baseUrl}/logo-s.png`,
       badge: `${baseUrl}/logo-s.png`,
       data: { url: `${baseUrl}${path}`, type: 'message' }
@@ -2854,6 +2855,7 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: PATCH /api/messages/mark-read/:otherUserId
 // =========================================================================
