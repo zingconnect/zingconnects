@@ -645,6 +645,46 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
   }
 });
 
+// =========================================================================
+// 🔒 UNIFIED CRYPTO REGISTRATION PATHWAY (Universal Route for Agents & Users)
+// =========================================================================
+app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    
+    const { publicKeyJwk } = req.body;
+    if (!publicKeyJwk) {
+      return res.status(400).json({ success: false, message: "Public key payload required." });
+    }
+
+    const userId = req.user.id;
+    
+    // ⚡ DYNAMIC ROUTING: Automatically resolves collection without messy URL prefixes
+    const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
+    const UserModel = mongoose.models.User || mongoose.model('User');
+    const targetModel = req.user.role === 'agent' ? AgentModel : UserModel;
+
+    const updatedProfile = await targetModel.findByIdAndUpdate(
+      userId,
+      { $set: { publicKeyJwk } },
+      { returnDocument: 'after' } // Keeps console clear of Mongoose deprecation warnings
+    );
+
+    if (!updatedProfile) {
+      return res.status(404).json({ success: false, message: "Profile matching identity token not found." });
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      message: `End-to-End Encryption active for ${req.user.role}.` 
+    });
+
+  } catch (err) {
+    console.error("❌ Cryptographic handoff failed:", err);
+    next(err);
+  }
+});
+
 app.post('/api/agents/login', async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -1917,9 +1957,8 @@ app.get('/api/agents/subscription/history', async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
-// 🛡️ HARDENED ENDPOINT: GET /api/agents/my-users
+// 🛡️ HARDENED ENDPOINT: GET /api/agents/my-users (E2EE UPGRADED)
 // =========================================================================
 app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -1936,9 +1975,9 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 
     const ActiveUserModel = mongoose.models.User || User;
     
-    // Fetch users with lean execution
+    // 🔒 Added 'publicKeyJwk' to the selected database query parameters
     const users = await ActiveUserModel.find({ connectedAgents: agentId })
-      .select('firstName lastName email phone photoUrl gender city state isVerified isProfileComplete lastLogin lastActive createdAt')
+      .select('firstName lastName email phone photoUrl gender city state isVerified isProfileComplete lastLogin lastActive createdAt publicKeyJwk')
       .sort({ lastActive: -1 })
       .lean();
 
@@ -1953,13 +1992,12 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
       },
       { 
         $group: { 
-          _id: "$senderId", // Keep as raw ObjectId for absolute mapping compatibility
+          _id: "$senderId", 
           count: { $sum: 1 } 
         } 
       }
     ]);
 
-    // Build the unread count map using clean string keys
     const unreadMap = unreadCountsData.reduce((acc, item) => {
       if (item._id) {
         acc[item._id.toString()] = item.count;
@@ -1969,7 +2007,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 
     const nowTimestamp = Date.now();
 
-    // Process users and securely map cloud storage identifiers
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
@@ -1985,7 +2022,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
             finalPhotoUrl = await getPrivateUrl(cleanKey);
           } catch (s3Err) {
             console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
-            finalPhotoUrl = null; // Let the avatar fallback take over instead of leaking raw key paths
+            finalPhotoUrl = null; 
           }
         }
       }
@@ -1999,9 +2036,10 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
       const isOnline = lastSeen && new Date(lastSeen) > new Date(nowTimestamp - 5 * 60 * 1000);
       const userStringId = user._id.toString();
 
-      // 🛡️ SECURITY FIX: Map explicit keys one by one. Do not use ...user spreading.
+      // 🛡️ SECURITY FIX: Map explicit keys one by one.
       return {
         id: userStringId,
+        _id: userStringId, // Keeps fallback schema keys accessible
         firstName: user.firstName || "",
         lastName: user.lastName || "",
         email: user.email || "",
@@ -2017,7 +2055,9 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
         isProfileComplete: !!user.isProfileComplete,
         unreadCount: unreadMap[userStringId] || 0,
         lastActive: user.lastActive || null,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
+        modelType: 'User', // Explicit model assignment for message sender configurations
+        publicKeyJwk: user.publicKeyJwk || null // 🔒 Safely expose public key object to frontend
       };
     }));
 
@@ -2028,7 +2068,6 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX: Route safely through your global interceptor
     next(err);
   }
 });
@@ -2050,7 +2089,9 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     
-    const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
+    // 🔒 Extract E2EE structural requirements directly out of request body
+    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
+    
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ success: false, message: "Message text cannot be blank." });
     }
@@ -2062,12 +2103,15 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
 
+    // Save crypto parameters safely inside MongoDB
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: sanitizedModel,
-      text: String(text).trim(),
+      text: String(text).trim(), // Stores either scrambled ciphertext base64 OR raw image URL keys
+      iv: iv || null,            // 🔒 Stores the unique 12-byte initialization vector string
+      isEncrypted: !!isEncrypted, // 🔒 Stores a boolean flag to alert frontend decrypter layers
       fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) 
                  ? new mongoose.Types.ObjectId(replyToId) 
@@ -2077,8 +2121,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     await newMessage.save();
 
     const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
-    
-    // FIX 1: Cleaned up the project/select string without "+" unless explicitly hidden in Schema
     const receiver = await TargetModel.findById(receiverId)
       .select('pushSubscription lastNotificationEmail email firstName lastName');
     
@@ -2086,50 +2128,54 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // 1. Socket emission if online
+    // 1. ⚡ Socket emission if online (Aligned to match frontend layout mapping!)
     const io = req.app.get('socketio');
     const sockets = await io.in(receiverId.toString()).fetchSockets();
     const isOnline = sockets.length > 0;
 
     if (isOnline) {
-      io.to(receiverId.toString()).emit("new-message", {
-        id: newMessage._id,
+      io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
+        _id: newMessage._id,
         senderId: newMessage.senderId,
         senderModel: newMessage.senderModel,
         receiverId: newMessage.receiverId,
         receiverModel: newMessage.receiverModel,
-        content: newMessage.text,
+        text: newMessage.text,         // 🔒 Scrambled cipher string
+        iv: newMessage.iv,             // 🔒 Needed by frontend Web Crypto API
+        isEncrypted: newMessage.isEncrypted,
         fileType: newMessage.fileType,
         replyToId: newMessage.replyToId,
         createdAt: newMessage.createdAt
       });
     }
 
-    // 2. Push Notification
+    // 2. 🛡️ Privacy-Preserving Push Notifications
     const baseUrl = "https://www.zingconnect.chat";
     const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
-    const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
+    const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'ZingConnect';
     
+    // 💡 SECURITY ARCHITECTURE NOTE: Because the text payload is encrypted ciphertext here,
+    // we mask the push notification message text body completely to prevent ugly/scrambled text banners
+    // from appearing on locked device operating systems.
+    const notificationBody = newMessage.isEncrypted 
+      ? "🔒 Sent an end-to-end encrypted message" 
+      : (text.length > 40 ? `${text.substring(0, 40)}...` : text);
+
     const payload = JSON.stringify({
       title: `New Message from ${senderName}`,
-      body: text.length > 40 ? `${text.substring(0, 40)}...` : text,
+      body: notificationBody,
       icon: `${baseUrl}/logo-s.png`,
       badge: `${baseUrl}/logo-s.png`,
       data: { url: `${baseUrl}${path}`, type: 'message' }
     });
-// ====== TEMPORARY PUSH DIAGNOSTIC LOGS ======
+
+    // ====== TEMPORARY PUSH DIAGNOSTIC LOGS ======
     console.log("---------------- PUSH DIAGNOSTIC ----------------");
     console.log("Recipient ID:", receiverId);
     console.log("Recipient Role:", sanitizedModel);
-    console.log("Recipient Found in DB:", !!receiver);
-    console.log("Has pushSubscription Field:", !!receiver?.pushSubscription);
     console.log("Target Push Endpoint:", receiver?.pushSubscription?.endpoint || "❌ MISSING/UNDEFINED");
-    if (receiver?.pushSubscription) {
-      console.log("Raw Sub Object Structure:", JSON.stringify(receiver.pushSubscription, null, 2));
-    }
     console.log("-------------------------------------------------");
 
-    // Added defensive structural checking for pushSubscription object
     if (receiver && receiver.pushSubscription && receiver.pushSubscription.endpoint) {
       try {
         await webpush.sendNotification(receiver.pushSubscription, payload);
@@ -2142,8 +2188,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
           console.log(`🧹 Cleared dead subscription for ${receiverId}`);
         }
       }
-    } else {
-      console.log(`⚠️ Push skipped: No valid endpoint found for user ${receiverId}`);
     }
 
     // 3. Email offline fallback 
@@ -2152,8 +2196,12 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       
       if (Date.now() - lastEmailTime > COOLDOWN) {
-        // FIX 2: Fire the email service FIRST. Only update the DB tracker if it doesn't throw.
-        await sendOfflineNotification(receiver, senderDoc, text, sanitizedModel);
+        // Send a generic email placeholder text if message is encrypted
+        const emailBodyPlaceholder = newMessage.isEncrypted 
+          ? "You have received a new end-to-end encrypted message. Please sign into your dashboard to view." 
+          : text;
+
+        await sendOfflineNotification(receiver, senderDoc, emailBodyPlaceholder, sanitizedModel);
         await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
         console.log(`📧 Offline email notification dispatched to ${receiver.email}`);
       }
@@ -2163,7 +2211,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 
     return res.status(201).json({
       success: true,
-      message: newMessage
+      message: newMessage // Returns full model including iv and isEncrypted back to caller
     });
   } catch (err) {
     next(err);

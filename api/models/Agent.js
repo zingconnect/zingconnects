@@ -48,6 +48,10 @@ lastNotificationEmail: {
   type: Date,
   default: null
 },
+publicKeyJwk: {
+    type: Object,
+    default: null
+  },
   // --- MAIN SUBSCRIPTION PLAN ---
   plan: { 
     type: String, 

@@ -4,6 +4,9 @@ import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { secureFetch } from "../../api/utils/api";
 
+// ⚡ IMPORT THE CRYPTO ENGINE TOOL
+import { initializeUserE2EEKeys } from '../utils/cryptoEngine';
+
 export const VerifyOTP = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -54,6 +57,10 @@ export const VerifyOTP = () => {
       const data = await response.json();
 
       if (response.ok) {
+        // 🛡️ RUN WEB CRYPTO GENERATION BEFORE COMPLETING VISUAL TRANSITION
+        // This sets the browser's local storage private key and saves the public key upstream.
+        await initializeUserE2EEKeys(data.userId, data.token);
+
         setServerSlug(data.slug);
         setIsSuccess(true);
       } else {

@@ -49,7 +49,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ""
   },
-  // --- STATUS & ROLE ---
+  publicKeyJwk: {
+    type: Object,
+    default: null
+  },
   role: { 
     type: String, 
     default: 'user' // 👈 Added: Simplifies callerModel logic in controllers

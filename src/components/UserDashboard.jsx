@@ -28,6 +28,8 @@ import {
   BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
+// 🔒 END-TO-END ENCRYPTION MODULES
+import { initializeUserE2EEKeys, encryptMessageText, decryptMessageText } from '../utils/cryptoEngine'; 
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 
@@ -169,6 +171,17 @@ const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   city: '',
   state: ''
 });
+
+// 🛡️ Device Cryptographic Identity Handshake
+useEffect(() => {
+  const provisionCryptoEnvironment = async () => {
+    if (!isLoading && token && userData?._id) {
+      console.log("🔒 Initializing device cryptographic keys...");
+      await initializeUserE2EEKeys(userData._id, token);
+    }
+  };
+  provisionCryptoEnvironment();
+}, [token, isLoading, userData?._id]);
 
     useEffect(() => {
     callStatusRef.current = callStatus;
@@ -1150,20 +1163,37 @@ useEffect(() => {
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
   const API_BASE_URL = import.meta.env.VITE_API_URL;
-    if (!targetAgentId) return;
+  if (!targetAgentId) return;
+
   const fetchMessages = async () => {
     try {
       const response = await secureFetch(`/api/messages/${targetAgentId}?limit=50`, token, {
         method: 'GET'
       });
-      
       const data = await response.json();
-      
       if (response.ok && data.success) {
-        const incomingMessages = data.messages;
-        const lastMsg = incomingMessages[incomingMessages.length - 1];
+        // 1. 🔓 DECRYPT ALL INCOMING SERVER MESSAGES LOCALLY IN PARALLEL
+        const incomingMessages = await Promise.all(
+          data.messages.map(async (msg) => {
+            if (msg.isEncrypted && agent?.publicKeyJwk) {
+              try {
+                const clearText = await decryptMessageText(
+                  msg.text,
+                  msg.iv,
+                  agent.publicKeyJwk,
+                  userData._id
+                );
+                return { ...msg, text: clearText };
+              } catch (decryptionError) {
+                console.error("Failed to decrypt incoming message:", decryptionError);
+                return { ...msg, text: "🔒 [Decryption Failed]" };
+              }
+            }
+            return msg; // Keep unencrypted or fallback text as is
+          })
+        );
 
-        // 1. Silent Notification & Seen Logic
+        const lastMsg = incomingMessages[incomingMessages.length - 1];
         if (
           lastMsg && 
           lastMsg.senderModel === 'Agent' && 
@@ -1177,22 +1207,20 @@ useEffect(() => {
           }
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
-              body: lastMsg.text || "Sent a file",
+              body: lastMsg.text || "Sent a file", // Now reads as beautiful plaintext!
               icon: '/logo-s.png',
               tag: 'zing-msg'
             });
           }
-         // Replace your old fetch block with this:
-secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, token, {
-  method: 'PATCH',
-  headers: {
-    'Content-Type': 'application/json'
-  }
-}).then(res => {
-  if (!res.ok) console.error("Mark read failed with status:", res.status);
-}).catch(err => {
-  console.error("Mark read network error:", err);
-});
+          secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, token, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }).then(res => {
+            if (!res.ok) console.error("Mark read failed with status:", res.status);
+          }).catch(err => {
+          });
         }
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
@@ -1205,6 +1233,7 @@ secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, token, {
           }
           return newCombined;
         });
+
         if (isFirstLoad.current) {
           setTimeout(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -1218,10 +1247,12 @@ secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, token, {
       if (isFirstLoad.current) setLoading(false);
     }
   };
+
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);
-}, [agent?._id, agent?.id, slugFromUrl, token]); 
+  }, [agent?._id, agent?.id, agent?.publicKeyJwk, userData?._id, slugFromUrl, token]);
+
 
   const agentStatus = getStatusInfo(agent);
 
@@ -1260,6 +1291,7 @@ useEffect(() => {
     if (sentinel) observer.unobserve(sentinel);
   };
 }, [loadingMore, hasMore]);
+
 const fetchOlderMessages = async () => {
   if (isFetchingOlder || !hasMore || !agent?._id || isAdjustingScrollRef.current) return;
   
@@ -1274,7 +1306,7 @@ const fetchOlderMessages = async () => {
   const prevScrollHeight = container?.scrollHeight || 0;
 
   try {
-    // 🛡️ Updated to use secureFetch
+    // 🛡️ Fetch using your custom secureFetch utility
     const response = await secureFetch(`/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, token, {
       method: 'GET'
     });
@@ -1285,12 +1317,33 @@ const fetchOlderMessages = async () => {
       if (data.messages.length < 30) setHasMore(false);
       
       if (data.messages.length > 0) {
+        // 1. 🔓 DECRYPT THE HISTORICAL BLOCK IN PARALLEL
+        const decryptedHistoricalMessages = await Promise.all(
+          data.messages.map(async (msg) => {
+            if (msg.isEncrypted && agent?.publicKeyJwk) {
+              try {
+                const clearText = await decryptMessageText(
+                  msg.text,
+                  msg.iv,
+                  agent.publicKeyJwk,
+                  userData._id
+                );
+                return { ...msg, text: clearText };
+              } catch (decryptionError) {
+                console.error("Historical message decryption failed:", decryptionError);
+                return { ...msg, text: "🔒 [Decryption Failed]" };
+              }
+            }
+            return msg;
+          })
+        );
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m._id));
-          const uniqueHistorical = data.messages.filter(m => !existingIds.has(m._id));
+          const uniqueHistorical = decryptedHistoricalMessages.filter(m => !existingIds.has(m._id));
           return [...uniqueHistorical, ...prev];
         });
         
+        // 3. Adjust scroll offset layout metrics safely using plaintext dimensions
         requestAnimationFrame(() => {
           if (container) {
             const newHeight = container.scrollHeight;
@@ -1517,23 +1570,23 @@ const processFile = (file) => {
   setPreviewUrl(URL.createObjectURL(file));
   setCaption("");
 };
-
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
 
   const tempId = Date.now().toString();
   const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
   
-  // Store reference to files for the upload
   const fileToUpload = previewFile;
   const currentUrl = previewUrl;
+  const rawCaption = caption; // Keep a local reference to the plaintext caption
 
+  // 1. Optimistic UI: Display the local cleartext and local file preview immediately
   const pendingMedia = {
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
     senderModel: 'User',
-    text: caption,
+    text: rawCaption, 
     fileUrl: currentUrl,
     fileType: detectedType,
     status: 'sending',
@@ -1542,12 +1595,35 @@ const handleFinalSend = async () => {
 
   setMessages(prev => [...prev, pendingMedia]);
   
-  // CLEAR STATE IMMEDIATELY: Helps the browser garbage collect the memory
+  // Clear states immediately to help garbage collection
   setPreviewUrl(null);
   setPreviewFile(null);
   setIsUploading(true);
 
   try {
+    let finalCaptionText = rawCaption.trim();
+    let captionIv = null;
+    let isCaptionEncrypted = false;
+
+    // 2. 🔒 Encrypt the text caption if E2EE keys are available
+    if (agent?.publicKeyJwk) {
+      const encryptedCaption = await encryptMessageText(
+        rawCaption.trim(),
+        agent.publicKeyJwk,
+        userData._id
+      );
+      finalCaptionText = encryptedCaption.cipherText;
+      captionIv = encryptedCaption.iv;
+      isCaptionEncrypted = encryptedCaption.isEncrypted;
+    }
+
+    // 3. 🔒 OPTIONAL: File Encryption Layer
+    // For absolute security, you would encrypt 'fileToUpload' here using AES-GCM 
+    // and upload the encrypted binary ArrayBuffer instead of the raw file object.
+    // For this implementation, we will keep your standard stream upload but pass 
+    // down the secure caption metadata parameters.
+    
+    // 4. Request signed upload URL from backend
     const urlResponse = await secureFetch('/api/messages/get-upload-url', token, {
       method: 'POST',
       body: JSON.stringify({ fileName: fileToUpload.name, fileType: fileToUpload.type })
@@ -1556,17 +1632,21 @@ const handleFinalSend = async () => {
     const urlData = await urlResponse.json();
     if (!urlData.success) throw new Error("Upload permission failed");
 
+    // 5. Binary transfer directly to your storage bucket
     await fetch(urlData.uploadUrl, {
       method: 'PUT',
-      body: fileToUpload,
+      body: fileToUpload, // If encrypting file binaries, you would pass your encrypted Blob/Buffer here
       headers: { 'Content-Type': fileToUpload.type }
     });
 
+    // 6. 🛡️ Send the encrypted metadata to MongoDB via the confirmation route
     const confirmResponse = await secureFetch('/api/messages/confirm-upload', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
-        text: caption.trim(),
+        text: finalCaptionText,       // Encrypted caption string
+        iv: captionIv,                 // IV used for the caption
+        isEncrypted: isCaptionEncrypted, // Crypto indicator flag
         fileUrl: urlData.key,
         fileType: detectedType
       })
@@ -1574,7 +1654,19 @@ const handleFinalSend = async () => {
 
     const data = await confirmResponse.json();
     if (data.success) {
-      setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+      const finalizedMessage = { ...data.message };
+      
+      // 7. 🔓 Decrypt response locally so it maps seamlessly into the active client state
+      if (finalizedMessage.isEncrypted && agent?.publicKeyJwk) {
+        finalizedMessage.text = await decryptMessageText(
+          finalizedMessage.text,
+          finalizedMessage.iv,
+          agent.publicKeyJwk,
+          userData._id
+        );
+      }
+
+      setMessages(prev => prev.map(m => m._id === tempId ? finalizedMessage : m));
       setReplyingTo(null);
       setCaption("");
     } else {
@@ -1716,50 +1808,66 @@ const handleStartCall = async () => {
     handleEndCall();
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
-  // Ensure we have necessary data
   if (!newMessage.trim() || !agent?._id) return;
-  
   const textToSend = newMessage;
   const tempId = Date.now().toString(); 
   setNewMessage(''); 
-
   const pendingMessage = {
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
     senderModel: 'User',
-    text: textToSend,
+    text: textToSend, // Kept raw so the user sees their own clear text instantly
     status: 'sending',
     createdAt: new Date().toISOString(),
     isTemp: true
   };
-
   setMessages(prev => [...prev, pendingMessage]);
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-
- try {
-    // 🛡️ Replace manual fetch with secureFetch
+  try {
+    let finalPayloadText = textToSend;
+    let encryptionIv = null;
+    let encryptionStatus = false;
+    if (agent?.publicKeyJwk) {
+      const encryptedData = await encryptMessageText(
+        textToSend,
+        agent.publicKeyJwk,
+        userData._id
+      );
+      finalPayloadText = encryptedData.cipherText; // Absolute garbage string safely across the web
+      encryptionIv = encryptedData.iv;            // Base64 Initialization Vector block
+      encryptionStatus = encryptedData.isEncrypted;
+    }
     const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
         receiverModel: 'Agent',
-        text: textToSend,
+        text: finalPayloadText,       // Encrypted payload string
+        iv: encryptionIv,             // Required parameters for key derivation
+        isEncrypted: encryptionStatus, // Flag to identify cryptographic layers
         fileType: 'text',
         replyToId: replyingTo?._id 
       })
     });
     const data = await response.json();
-    
     if (!response.ok || !data.success) throw new Error(data.message || "Failed to send");
-    setMessages(prev => prev.map(m => m._id === tempId ? data.message : m));
+    const finalizedMessage = { ...data.message };
+    if (finalizedMessage.isEncrypted) {
+      finalizedMessage.text = await decryptMessageText(
+        finalizedMessage.text,
+        finalizedMessage.iv,
+        agent.publicKeyJwk,
+        userData._id
+      );
+    }
+    setMessages(prev => prev.map(m => m._id === tempId ? finalizedMessage : m));
     setReplyingTo(null);
     
   } catch (err) {
-    console.error("Message send failed:", err);
+    console.error("🔒 Message encryption/transmission failed:", err);
     setMessages(prev => prev.map(m => 
       m._id === tempId ? { ...m, status: 'failed' } : m
     ));
@@ -1773,10 +1881,10 @@ const handleResend = (msg) => {
     setPreviewUrl(msg.fileUrl);
     setCaption(msg.text);
   } else {
+    // 🔓 Populated as unencrypted plaintext ready for editing in input box
     setNewMessage(msg.text);
   }
 };
-
 function AudioTracks({ active }) {
   const tracks = useTracks(
     [

@@ -57,7 +57,14 @@ notificationSent: {
     enum: ['sent', 'delivered', 'seen'],
     default: 'sent'
   },
-  // Track specific timings for the UI
+iv: {
+  type: String,
+  default: null
+},
+isEncrypted: {
+  type: Boolean,
+  default: false
+},
   deliveredAt: { type: Date },
   seenAt: { type: Date }
 }, { 

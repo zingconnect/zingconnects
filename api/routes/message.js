@@ -59,13 +59,14 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
-// 2. SEND TEXT + PUSH & EMAIL NOTIFICATIONS
+// 2. SEND TEXT + PUSH & EMAIL NOTIFICATIONS (E2EE UPGRADED)
 router.post('/send', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
-    const { receiverId, text, receiverModel, fileType, replyToId } = req.body;
+    
+    // 🔒 Extract E2EE payload keys directly alongside metadata variables
+    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
     
     if (!text?.trim() || !receiverId) {
       return res.status(400).json({ success: false, message: "Invalid payload: Text or Recipient missing" });
@@ -80,14 +81,17 @@ router.post('/send', authenticateToken, async (req, res, next) => {
     const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
 
-    // Create the message tracking payload
+    // Create the message tracking payload containing hardware-crypto keys
     const newMessage = await Message.create({
       senderId: myId,
       senderModel: senderModelName,
       receiverId,
       receiverModel: targetModelName,
-      text: text.trim(),
+      text: text.trim(),           // Stores the secure base64 cipher text block
+      iv: iv || null,              // 🔒 Save the initialization vector block 
+      isEncrypted: !!isEncrypted,   // 🔒 Structural cryptographic flag
       fileType: fileType || 'text',
+      replyToId: replyToId || null,
       notificationSent: false
     });
 
@@ -108,14 +112,18 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       isOnline = sockets.length > 0;
       
       if (isOnline) {
-        io.to(receiverId.toString()).emit("new-message", {
-          id: newMessage._id,
+        // ⚡ Emitting using custom payload key structure matching UserDashboard socket reader
+        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
+          _id: newMessage._id,
           senderId: newMessage.senderId,
           senderModel: newMessage.senderModel,
           receiverId: newMessage.receiverId,
           receiverModel: newMessage.receiverModel,
-          content: newMessage.text,
+          text: newMessage.text,         // 🔒 Secure cipher
+          iv: newMessage.iv,             // 🔒 Sync target vector
+          isEncrypted: newMessage.isEncrypted,
           fileType: newMessage.fileType,
+          replyToId: newMessage.replyToId,
           createdAt: newMessage.createdAt
         });
       }
@@ -126,9 +134,14 @@ router.post('/send', authenticateToken, async (req, res, next) => {
     const path = targetModelName === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
     
+    // 🛡️ Privacy Guard: Ensure OS lock screens don't render ugly raw cipher strings!
+    const displayNotificationBody = newMessage.isEncrypted
+      ? "🔒 Sent an end-to-end encrypted message"
+      : (text.length > 60 ? `${text.substring(0, 60)}...` : text);
+
     const payload = JSON.stringify({
       title: `New Message from ${senderName}`,
-      body: text.length > 60 ? `${text.substring(0, 60)}...` : text,
+      body: displayNotificationBody,
       icon: `${baseUrl}/logo-s.png`,
       badge: `${baseUrl}/logo-s.png`,
       data: { url: `${baseUrl}${path}`, type: 'message' }
@@ -161,7 +174,12 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       
       if (Date.now() - lastEmailTime > COOLDOWN) {
-        await sendOfflineNotification(receiver, senderDoc, text, targetModelName);
+        // Send safe generic copy if message data layer is zero-knowledge encrypted
+        const emailMessageFallbackText = newMessage.isEncrypted
+          ? "You have received a new end-to-end encrypted message. Securely log into your dashboard interface to view."
+          : text;
+
+        await sendOfflineNotification(receiver, senderDoc, emailMessageFallbackText, targetModelName);
         await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
         console.log(`📧 Offline fallback mail dispatched to ${receiver.email}`);
       }
@@ -169,6 +187,7 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       console.error("❌ Notification Email Fault:", mailErr.message);
     }
 
+    // Return production data model frame directly to active client context
     res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
     next(err);
