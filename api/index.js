@@ -663,7 +663,7 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
     const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
     const UserModel = mongoose.models.User || mongoose.model('User');
     const targetModel = req.user.role === 'agent' ? AgentModel : UserModel;
-
+    console.log(`🔒 Registering public key for ${req.user.role} with ID: ${userId}`);
     const updatedProfile = await targetModel.findByIdAndUpdate(
       userId,
       { $set: { publicKeyJwk } },

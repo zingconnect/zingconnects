@@ -71,13 +71,13 @@ isEncrypted: {
   timestamps: true 
 });
 
-// Keep these for your primary chat load queries
+// Keep existing indexes
 messageSchema.index({ senderId: 1, receiverId: 1, createdAt: -1 });
 messageSchema.index({ receiverId: 1, senderId: 1, createdAt: -1 });
 
-// Keep these for specific functional needs
-messageSchema.index({ receiverId: 1, status: 1 });
-messageSchema.index({ senderId: 1, receiverId: 1, fileType: 1 });
+// 🔒 ADD THIS: Optimized index for decryption-heavy queries
+// This helps the database quickly return messages that need decryption (isEncrypted: true)
+messageSchema.index({ receiverId: 1, isEncrypted: 1, createdAt: -1 });
 
 
 const Message = mongoose.models.Message || mongoose.model('Message', messageSchema);

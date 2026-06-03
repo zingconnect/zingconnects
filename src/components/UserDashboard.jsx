@@ -172,17 +172,6 @@ const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   state: ''
 });
 
-// 🛡️ Device Cryptographic Identity Handshake
-useEffect(() => {
-  const provisionCryptoEnvironment = async () => {
-    if (!isLoading && token && userData?._id) {
-      console.log("🔒 Initializing device cryptographic keys...");
-      await initializeUserE2EEKeys(userData._id, token);
-    }
-  };
-  provisionCryptoEnvironment();
-}, [token, isLoading, userData?._id]);
-
     useEffect(() => {
     callStatusRef.current = callStatus;
   }, [callStatus]);
@@ -386,6 +375,16 @@ useEffect(() => {
 }, [unlockAudio]);
 
 
+// 🛡️ Device Cryptographic Identity Handshake
+useEffect(() => {
+  const provisionCryptoEnvironment = async () => {
+    if (!isLoading && token && userData?._id) {
+      console.log("🔒 Initializing device cryptographic keys...");
+      await initializeUserE2EEKeys(userData._id, token);
+    }
+  };
+  provisionCryptoEnvironment();
+}, [token, isLoading, userData?._id]);
 
 useEffect(() => {
   if (!socket) return;
