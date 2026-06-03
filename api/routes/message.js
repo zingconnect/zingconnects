@@ -23,104 +23,39 @@ async function clearUserCache(app, modelName, userId) {
   }
 }
 
-// 1. GET HISTORY (POLYMORPHIC REFPATH & CURSOR CHRONOLOGY STABILIZED)
+// 1. GET HISTORY
 router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
-    const myId = req.user.id;
     const { otherUserId } = req.params;
-    const { beforeId } = req.query;
+    const { beforeId, limit } = req.query;
 
-    // 🛡️ SECURITY FIX 1: Strict Hex-Id Parameter Structure Validation
-    if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
-      return res.status(400).json({ success: false, message: "Invalid chat target identifier structure." });
-    }
-
-    // Dynamic constraint processing for request limits
-    let limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
-
-    // Build query base for the two participants
     const query = {
       $or: [
-        { senderId: myId, receiverId: otherUserId },
-        { senderId: otherUserId, receiverId: myId }
+        { senderId: req.user.id, receiverId: otherUserId }, 
+        { senderId: otherUserId, receiverId: req.user.id }
       ]
     };
 
-    // ⚡ CURSOR PAGINATION ENGINE: Prevents layout shifting/skipping on live infinite scroll
-    if (beforeId && mongoose.Types.ObjectId.isValid(beforeId)) {
-      const referenceMessage = await Message.findById(beforeId).select('createdAt');
-      if (referenceMessage) {
-        query.createdAt = { $lt: referenceMessage.createdAt };
-      }
+    if (beforeId && mongoose.isValidObjectId(beforeId)) {
+      const ref = await Message.findById(beforeId).select('createdAt');
+      if (ref) query.createdAt = { $lt: ref.createdAt };
     }
 
-    // Execute query with dynamic polymorphic mappings based on schema-defined refPaths
     const messages = await Message.find(query)
       .sort({ createdAt: -1 })
-      .limit(limit)
-      .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
-      .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
+      .limit(Math.min(parseInt(limit) || 20, 50))
       .lean();
 
-    // Reverse documents back into proper chronological display sequence
-    const chronologicalMessages = messages.reverse();
-
-    // 🛡️ SECURITY FIX 2: Explicit Data Object Mapping (DTO Format Structure)
-    const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      const msgDto = {
-        id: m._id,
-        content: m.text || "",
-        senderModel: m.senderModel || 'User',
-        receiverModel: m.receiverModel || 'User',
-        fileUrl: null,
-        fileType: m.fileType || 'text',
-        status: m.status || 'sent',
-        createdAt: m.createdAt,
-        
-        // Handle fallback null-safety gracefully if references point to deleted accounts
-        sender: m.senderId && typeof m.senderId === 'object' ? {
-          id: m.senderId._id,
-          firstName: m.senderId.firstName || "",
-          lastName: m.senderId.lastName || "",
-          photoUrl: m.senderId.photoUrl || ""
-        } : { id: m.senderId, firstName: "Unknown", lastName: "User", photoUrl: "" },
-        
-        receiver: m.receiverId && typeof m.receiverId === 'object' ? {
-          id: m.receiverId._id,
-          firstName: m.receiverId.firstName || "",
-          lastName: m.receiverId.lastName || ""
-        } : { id: m.receiverId, firstName: "Unknown", lastName: "User" }
-      };
-
-      // 🛡️ SECURITY FIX 3: Parse S3 Storage Path Strings & Retrieve Presigned Delivery URLs
-      if (m.fileUrl && typeof m.fileUrl === 'string') {
-        let fileKey = m.fileUrl;
-        
-        // Isolate object path if absolute URL slipped into database document string
-        if (fileKey.startsWith('http')) {
-          const urlParts = fileKey.split('idrivee2.com/');
-          if (urlParts.length > 1) {
-            fileKey = urlParts[1].split('/').slice(1).join('/');
-          }
-        }
-        try {
-          msgDto.fileUrl = await getPrivateUrl(fileKey);
-        } catch (s3Err) {
-          console.error(`[S3 Chat Error] URL retrieval failed for ${m._id}:`, s3Err.message);
-        }
+    const finalMessages = await Promise.all(messages.reverse().map(async (m) => {
+      if (m.fileUrl && ['image', 'video'].includes(m.fileType)) {
+        m.fileUrl = await getPrivateUrl(m.fileUrl);
       }
-      return msgDto;
+      return m;
     }));
 
-    return res.json({ 
-      success: true, 
-      count: processedMessages.length, 
-      messages: processedMessages 
-    });
-
+    res.json({ success: true, messages: finalMessages });
   } catch (err) {
-    // Forward traces cleanly through the central system firewall error interceptor
     next(err);
   }
 });
