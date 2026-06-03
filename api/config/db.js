@@ -1,4 +1,6 @@
 import mongoose from 'mongoose';
+
+// Disabling command buffering ensures serverless functions fail fast instead of hanging on timeouts
 mongoose.set('bufferCommands', false);
 
 let cached = global.mongoose;
@@ -12,61 +14,55 @@ if (!cached) {
 }
 
 const commonOpts = {
-  maxPoolSize: 2,   // Reduced from 10 to protect multi-instance cluster exhaustion
+  maxPoolSize: 2, // Keeps concurrent connection limits low for serverless edge scaling
   minPoolSize: 1,                  
   serverSelectionTimeoutMS: 5000, 
   socketTimeoutMS: 30000,
-  family: 4,
-  bufferCommands: false, 
-  autoIndex: false, 
+  family: 4, // Forces IPv4 resolution over IPv6 to avoid connection latency hits
+  autoIndex: false, // Prevents resource heavy index builds on every API call invocation
   connectTimeoutMS: 10000, 
 };
-/**
- * Serverless Fail-Safe Connection Handler
- */
+
 export async function connectToDatabase() {
-  // 1. Return immediately if an active, healthy connection exists
   if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
   }
 
-  // 2. Await an existing connection attempt if one is already processing
   if (cached.promise) {
-    console.log("⏳ Connection in progress, awaiting existing promise...");
     try {
       await cached.promise;
       if (mongoose.connection.readyState === 1) {
         return cached.conn;
       }
     } catch (err) {
-      cached.promise = null; // Clear out a broken promise context on error
+      cached.promise = null; // Flush broken initialization handlers
     }
   }
 
-  // 3. Define the sequential execution loop cleanly
   const attemptConnection = async () => {
+    // 🛡️ Ensure your core models are imported/compiled BEFORE connecting 
+    // to prevent your models from disappearing mid-invocation!
+    
     const primaryURI = process.env.AGENT_DB_URI || process.env.MONGODB_URI;
     const reserveURI = process.env.USER_DB_URI;
 
     try {
-      console.log("📡 Attempting connection to PRIMARY DB...");
+      console.log("📡 Connecting to Primary Database Instance Cluster...");
       const primaryConn = await mongoose.connect(primaryURI, commonOpts);
       cached.isUsingReserve = false;
-      console.log("✅ Connected to Primary Database Cluster");
       return primaryConn;
     } catch (primaryError) {
-      console.error(`⚠️ Primary DB Unreachable: ${primaryError.message}`);
+      console.error(`⚠️ Primary Cluster Unreachable: ${primaryError.message}`);
       
       if (reserveURI) {
         try {
-          console.log("📡 Attempting fallback to RESERVE DB...");
+          console.log("📡 Routing connection failover to Reserve DB Cluster...");
           const reserveConn = await mongoose.connect(reserveURI, commonOpts);
           cached.isUsingReserve = true;
-          console.log("✅ Connected to Reserve Database Cluster");
           return reserveConn;
         } catch (reserveError) {
-          console.error("❌ Reserve DB Cluster connection also failed.");
-          throw new Error("All designated database clusters are unreachable.");
+          console.error("❌ High Availability Failure: Both Database Clusters are offline.");
+          throw new Error("All database target engines are currently unreachable.");
         }
       } else {
         throw primaryError;
@@ -74,13 +70,12 @@ export async function connectToDatabase() {
     }
   };
 
-  // Assign connection execution loop to the promise cache
   cached.promise = attemptConnection();
   
   try {
     cached.conn = await cached.promise;
   } catch (err) {
-    cached.promise = null; // Reset cache states so the container can retry next invocation
+    cached.promise = null; 
     cached.conn = null;
     throw err; 
   }

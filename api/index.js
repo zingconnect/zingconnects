@@ -2326,10 +2326,10 @@ app.post('/api/save-subscription', authenticateToken, async (req, res, next) => 
     const TargetModel = mongoose.models[TargetModelName] || mongoose.model(TargetModelName);
 
     const updated = await TargetModel.findByIdAndUpdate(
-      userId,
-      { $set: { pushSubscription: sanitizedSubscription } },
-      { new: true, runValidators: true }
-    );
+  userId,
+  { $set: { pushSubscription: sanitizedSubscription } },
+  { returnDocument: 'after', runValidators: true } 
+);
 
     if (!updated) {
       return res.status(404).json({ success: false, message: "Profile matching token credentials not found." });
