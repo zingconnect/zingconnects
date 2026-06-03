@@ -124,51 +124,71 @@ const getAgentModel = () => {
 const authenticateToken = async (req, res, next) => {
   console.log("DEBUG AUTH - Headers:", req.headers.authorization);
   console.log("DEBUG AUTH - Cookies:", req.cookies, req.signedCookies);
-  const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
-
-  if (!token) {
-    console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
-    return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    req.user.id = decoded.id || decoded._id;
-
-    // 2. Agent Session Logic
-    if (decoded.role === 'agent') {
-      const AgentModel = mongoose.models.Agent || Agent;
-      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-      
-      if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
-
-      // Check for dual login
-      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
-      }
-      
-      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
-    }
-
-    // 3. Admin Activity Update
-    if (decoded.role === 'admin') {
-      const AdminModel = mongoose.models.Admin || Admin;
-      await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
-    }
-
-    next();
-  } catch (err) {
-    console.error("DEBUG: Token verification failed:", err.message);
-    
-    // Distinguish between expired and invalid tokens for better frontend handling
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: "Token expired" });
-    }
-    
-    return res.status(403).json({ success: false, message: "Invalid or expired token" });
-  }
-};
+ const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
+ 
+   if (!token) {
+     console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
+     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
+   }
+ 
+   try {
+     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+     req.user = decoded;
+     req.user.id = decoded.id || decoded._id;
+ 
+     // ⚡ DYNAMIC MODEL LOOKUPS: Safely prevents 'undefined' drops across serverless instances
+     
+     // 1. Agent Session & Dual-Login Guard Matrix
+     if (decoded.role === 'agent') {
+       const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
+       const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+       
+       if (!agent) {
+         return res.status(404).json({ success: false, message: "Agent profile context not found." });
+       }
+ 
+       // Check for dual concurrent device logins
+       if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+         return res.status(403).json({ 
+           success: false, 
+           message: "Dual login detected. Device session terminated.", 
+           reason: "dual_login" 
+         });
+       }
+       
+       // ✅ Hardened: Uses returnDocument to silence deprecation warning
+       await AgentModel.findByIdAndUpdate(
+         req.user.id, 
+         { $set: { lastActive: new Date() } },
+         { returnDocument: 'after' }
+       );
+     }
+ 
+     // 2. Admin Lifecycle Tracking
+     if (decoded.role === 'admin' || decoded.role === 'superadmin') {
+       const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
+       
+       // ✅ Hardened: Uses returnDocument to silence deprecation warning
+       await AdminModel.findByIdAndUpdate(
+         req.user.id, 
+         { $set: { lastLogin: new Date() } },
+         { returnDocument: 'after' }
+       );
+     }
+ 
+     next();
+   } catch (err) {
+     console.error("DEBUG: Token verification failed:", err.message);
+     
+     // Distinguish between expired and invalid tokens for better frontend handling
+     if (err.name === 'TokenExpiredError') {
+       return res.status(401).json({ success: false, message: "Token expired" });
+     }
+     
+     return res.status(403).json({ success: false, message: "Invalid or expired token" });
+   }
+ };
+ 
 
 const isAdmin = (req, res, next) => {
   // Allows BOTH admin and superadmin to pass through
