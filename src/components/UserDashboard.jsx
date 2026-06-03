@@ -1033,7 +1033,11 @@ useEffect(() => {
 useEffect(() => {
   const setupNotifications = async () => {
     const publicKey = import.meta.env.VITE_PUBLIC_KEY;
+    // 1. Only proceed if we have keys and token
     if (!publicKey || !token) return; 
+
+    // 2. Prevent redundant API calls if already synced this session
+    if (localStorage.getItem('pushSynced') === 'true') return;
 
     try {
       const permission = await Notification.requestPermission();
@@ -1049,15 +1053,19 @@ useEffect(() => {
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
-      const subData = subscription.toJSON();
       
+      const subData = subscription.toJSON();
       const response = await secureFetch('/api/save-subscription', token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription: subData }) 
+        body: JSON.stringify({ 
+          subscription: subData,
+          userType: 'user' // Explicitly mark as user for the backend
+        }) 
       });
 
       if (response.ok) {
+        localStorage.setItem('pushSynced', 'true');
         console.log("Database synced with Push Subscription");
       } else {
         console.error("Failed to sync subscription, status:", response.status);

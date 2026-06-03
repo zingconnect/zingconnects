@@ -1761,29 +1761,34 @@ useEffect(() => {
       if (permission !== 'granted') return;
 
       const registration = await navigator.serviceWorker.ready;
-      
-      // Get existing or new
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
+            let subscription = await registration.pushManager.getSubscription();
+            if (!subscription) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
-
-      // We use agentToken here because that is what your AgentDashboard uses
       const token = localStorage.getItem('agentToken');
       if (!token) return;
-        await secureFetch('/api/save-subscription', token,{
-      method: 'POST',
-      body: JSON.stringify({ subscription }) 
-    });
-      
-      console.log("Agent Mobile Push Synced to DB");
+      const response = await secureFetch('/api/save-subscription', token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          subscription: subscription,
+          userType: 'agent' // Best practice: distinguish user roles
+        }) 
+      });
+
+      if (response.ok) {
+        console.log("Agent Mobile Push Synced to DB");
+      } else {
+        throw new Error(`Sync failed with status: ${response.status}`);
+      }
     } catch (err) {
       console.error("Agent Push setup failed:", err);
     }
   };
+
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
