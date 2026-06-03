@@ -2011,6 +2011,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ENDPOINT: POST /api/messages/send
 // =========================================================================
@@ -2413,7 +2414,7 @@ app.post('/api/messages/upload', authenticateToken, upload.single('file'), async
     }
 
     const io = req.app.get('socketio');
-    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString()) || false;
+    const isOnline = io?.sockets.adapter.rooms.has(receiverId.toString());
 
     // Web Push Notification Routing Logic
     if (receiver?.pushSubscription && receiver.pushSubscription.endpoint) {
