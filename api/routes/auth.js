@@ -14,6 +14,7 @@ import { getS3Client, getPrivateUrl, PutObjectCommand, GetObjectCommand } from '
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import Agent from '../models/Agent.js';
 import User from '../models/User.js'; 
+import Message from '../models/Message.js'; // 👈 ADD THIS LINE
 import { authenticateToken } from '../middlewares/auth.js'; // Ensure the path matches your folder structure
 
 
