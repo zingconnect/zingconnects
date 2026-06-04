@@ -2029,25 +2029,34 @@ const handleResend = async (failedMsg) => {
 };
 const handleSendMessage = async (e) => {
   e.preventDefault();
+  
+  // 🛡️ MODIFICATION 1: HARD GUARD
+  // If we have a user, we MUST have their public key. If not, block the send.
+  if (selectedUser && !selectedUser.publicKeyJwk) {
+    console.error("🔒 Security Block: Cannot send message, User public key missing.");
+    alert("Secure channel not established. Please wait for the user's profile to load.");
+    return;
+  }
+
   if (!newMessage.trim() || !selectedUser || isUploading) return;
 
   const textToSend = newMessage;
   const tempId = Date.now().toString();
   setNewMessage('');
 
-  // 1. Optimistic UI update: Render plaintext immediately for the typing agent
   const optimisticMsg = {
     _id: tempId,
     tempId: tempId,
-    text: textToSend, // Aligned parameter name to 'text' across your codebase
+    text: textToSend,
     senderId: agentData._id,
     senderModel: 'Agent',
     receiverId: selectedUser._id,
-    receiverModel: selectedUser.modelType || 'User', 
+    receiverModel: selectedUser.modelType || 'User',
     status: 'sending',
     createdAt: new Date().toISOString(),
     fileType: 'text'
   };
+
   setMessages(prev => [...prev, optimisticMsg]);
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
@@ -2056,28 +2065,32 @@ const handleSendMessage = async (e) => {
     let encryptionIv = null;
     let encryptionStatus = false;
 
-    // 2. 🔒 Cryptographic Shielding: Scramble the text using the user's signature profile
+    // 2. 🔒 Cryptographic Shielding
     if (selectedUser?.publicKeyJwk) {
       const encryptedData = await encryptMessageText(
         textToSend,
-        selectedUser.publicKeyJwk, // Target recipient's public channel key
-        agentData._id              // Sender's private verification id lookup
+        selectedUser.publicKeyJwk,
+        agentData._id
       );
       
-      finalPayloadText = encryptedData.cipherText; // Garbled base64 tracking string
-      encryptionIv = encryptedData.iv;            // 12-byte cryptographic vector block
-      encryptionStatus = encryptedData.isEncrypted;
+      // 🛡️ MODIFICATION 2: VALIDATE ENCRYPTION SUCCESS
+      if (encryptedData.isEncrypted) {
+        finalPayloadText = encryptedData.cipherText;
+        encryptionIv = encryptedData.iv;
+        encryptionStatus = true;
+      } else {
+        throw new Error("Encryption process failed to produce a secure payload.");
+      }
     }
 
-    // 3. 🛡️ Ship encrypted strings upstream via secureFetch
     const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: selectedUser._id,
         receiverModel: selectedUser.modelType || 'User',
-        text: finalPayloadText,       // Secure encrypted message body
-        iv: encryptionIv,             // IV wrapper data
-        isEncrypted: encryptionStatus, // Crypto layout activation flag
+        text: finalPayloadText,
+        iv: encryptionIv,
+        isEncrypted: encryptionStatus,
         fileType: 'text'
       })
     });
@@ -2085,23 +2098,28 @@ const handleSendMessage = async (e) => {
     const data = await response.json();
 
     if (data.success) {
-      const finalizedMessage = { ...data.message };
+      let finalizedMessage = { ...data.message };
       
-      // 4. 🔓 Local runtime decryption right before updating screen frames
-      if (finalizedMessage.isEncrypted && selectedUser?.publicKeyJwk) {
-        finalizedMessage.text = await decryptMessageText(
-          finalizedMessage.text,
-          finalizedMessage.iv,
-          selectedUser.publicKeyJwk,
-          agentData._id
-        );
+      // 4. 🔓 Local runtime decryption
+      if (finalizedMessage.isEncrypted) {
+        try {
+          finalizedMessage.text = await decryptMessageText(
+            finalizedMessage.text,
+            finalizedMessage.iv,
+            selectedUser.publicKeyJwk,
+            agentData._id
+          );
+        } catch (decErr) {
+          console.error("Agent-side decryption failed:", decErr);
+          finalizedMessage.text = "🔒 [Encrypted Message - Decryption Failed]";
+        }
       }
 
       setMessages(prev => 
         prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
       );
     } else {
-      throw new Error(data.message);
+      throw new Error(data.message || "Transmission failed");
     }
   } catch (err) {
     console.error("🔒 Agent transmission crypto block exception:", err);
