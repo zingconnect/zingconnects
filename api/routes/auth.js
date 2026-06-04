@@ -36,6 +36,27 @@ const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
 
+// utils/cache.js
+export const getCachedData = async (redisClient, key) => {
+  if (!redisClient?.isOpen) return null;
+  try {
+    const data = await redisClient.get(key);
+    return data ? JSON.parse(data) : null;
+  } catch (err) {
+    console.error(`Cache Read Error [${key}]:`, err.message);
+    return null;
+  }
+};
+
+export const setCachedData = async (redisClient, key, data, ttl = 300) => {
+  if (!redisClient?.isOpen) return;
+  try {
+    await redisClient.setEx(key, ttl, JSON.stringify(data));
+  } catch (err) {
+    console.error(`Cache Write Error [${key}]:`, err.message);
+  }
+};
+
 // --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
 router.post('/register', upload.single('photo'), async (req, res, next) => {
   try {

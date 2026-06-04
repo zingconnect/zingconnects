@@ -1815,14 +1815,11 @@ const handleStartCall = async () => {
     handleEndCall();
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
-  
-  // 🛡️ MODIFICATION 1: HARD GUARD
-  // If we have an agent, we MUST have a key. If not, block the send.
+
   if (agent && !agent.publicKeyJwk) {
-    console.error("🔒 Security Block: Cannot send message, Agent public key missing.");
+    console.error("Security Block: Cannot send message, Agent public key missing.");
     alert("Secure channel not established. Please refresh or try again.");
     return;
   }
@@ -1830,8 +1827,8 @@ const handleSendMessage = async (e) => {
   if (!newMessage.trim() || !agent?._id) return;
 
   const textToSend = newMessage;
-  const tempId = Date.now().toString(); 
-  setNewMessage(''); 
+  const tempId = Date.now().toString();
+  setNewMessage('');
 
   const pendingMessage = {
     _id: tempId,
@@ -1846,26 +1843,21 @@ const handleSendMessage = async (e) => {
 
   setMessages(prev => [...prev, pendingMessage]);
 
- try {
-  let finalPayloadText = textToSend;
-  let encryptionIv = null;
-  let encryptionStatus = false;
+  try {
+    let finalPayloadText = textToSend;
+    let encryptionIv = null;
+    let encryptionStatus = false;
 
-  if (agent?.publicKeyJwk) {
-    const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, userData._id);
-        if (encryptedData && encryptedData.cipherText && encryptedData.iv) {
-      finalPayloadText = encryptedData.cipherText;
-      encryptionIv = encryptedData.iv;
-      encryptionStatus = true;
-    } else {
-      throw new Error("Encryption failed: Missing IV or Ciphertext.");
+    if (agent?.publicKeyJwk) {
+      const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, userData._id);
+      if (encryptedData && encryptedData.cipherText && encryptedData.iv) {
+        finalPayloadText = encryptedData.cipherText;
+        encryptionIv = encryptedData.iv;
+        encryptionStatus = true;
+      } else {
+        throw new Error("Encryption failed: Missing IV or Ciphertext.");
+      }
     }
-  }
-  console.log("SENDING PAYLOAD:", { 
-    finalPayloadText, 
-    encryptionIv, 
-    encryptionStatus 
-});
 
     const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
@@ -1876,31 +1868,24 @@ const handleSendMessage = async (e) => {
         iv: encryptionIv,
         isEncrypted: encryptionStatus,
         fileType: 'text',
-        replyToId: replyingTo?._id 
+        replyToId: replyingTo?._id
       })
     });
 
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message);
 
-    let finalizedMessage = { ...data.message };
-
-    // 🛡️ MODIFICATION 2: SAFE DECRYPTION
-    // Only attempt decryption if the server confirms it is encrypted
-    if (finalizedMessage.isEncrypted) {
-      finalizedMessage.text = await decryptMessageText(
-        finalizedMessage.text,
-        finalizedMessage.iv,
-        agent.publicKeyJwk,
-        userData._id
-      );
-    }
+    const finalizedMessage = { 
+      ...data.message, 
+      text: textToSend,
+      status: 'sent' 
+    };
 
     setMessages(prev => prev.map(m => m._id === tempId ? finalizedMessage : m));
     setReplyingTo(null);
-    
+
   } catch (err) {
-    console.error("🔒 Message encryption/transmission failed:", err);
+    console.error("Message encryption/transmission failed:", err);
     setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
   }
 };

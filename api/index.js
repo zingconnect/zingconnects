@@ -131,6 +131,7 @@ const syncBilling = (agent, amount) => {
   agent.paymentDetails.amountNgn = amount;
   agent.paymentDetails.currency = 'NGN';
 };
+
 // --- REDIS CACHE HELPERS (Defined in index.js) ---
 const getCachedData = async (key) => {
   if (!redisClient?.isOpen) return null;
@@ -2087,7 +2088,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     
-    // 🔒 Extract E2EE structural requirements directly out of request body
+    // 🔒 Extract E2EE structural requirements
     const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
     
     if (!text || typeof text !== 'string' || !text.trim()) {
@@ -2100,12 +2101,12 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     if (!['Agent', 'User'].includes(sanitizedModel)) {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
-if (isEncrypted && (!iv || typeof iv !== 'string')) {
-  return res.status(400).json({ 
-    success: false, 
-    message: "Security violation: IV required for encrypted payloads." 
-  });
-}
+    if (isEncrypted && (!iv || typeof iv !== 'string')) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Security violation: IV required for encrypted payloads." 
+      });
+    }
 
     // Save crypto parameters safely inside MongoDB
     const newMessage = new Message({
@@ -2113,9 +2114,9 @@ if (isEncrypted && (!iv || typeof iv !== 'string')) {
       senderModel: senderRole,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: sanitizedModel,
-      text: String(text).trim(), // Stores either scrambled ciphertext base64 OR raw image URL keys
-      iv: iv || null,            // 🔒 Stores the unique 12-byte initialization vector string
-      isEncrypted: !!isEncrypted, // 🔒 Stores a boolean flag to alert frontend decrypter layers
+      text: String(text).trim(), 
+      iv: iv || null,
+      isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) 
                  ? new mongoose.Types.ObjectId(replyToId) 
@@ -2132,25 +2133,26 @@ if (isEncrypted && (!iv || typeof iv !== 'string')) {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // 1. ⚡ Socket emission if online (Aligned to match frontend layout mapping!)
-    const io = req.app.get('socketio');
-    const sockets = await io.in(receiverId.toString()).fetchSockets();
-    const isOnline = sockets.length > 0;
-
-    if (isOnline) {
-      io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
-        _id: newMessage._id,
-        senderId: newMessage.senderId,
-        senderModel: newMessage.senderModel,
-        receiverId: newMessage.receiverId,
-        receiverModel: newMessage.receiverModel,
-        text: newMessage.text,         // 🔒 Scrambled cipher string
-        iv: newMessage.iv,             // 🔒 Needed by frontend Web Crypto API
-        isEncrypted: newMessage.isEncrypted,
-        fileType: newMessage.fileType,
-        replyToId: newMessage.replyToId,
-        createdAt: newMessage.createdAt
-      });
+    // 1. ⚡ Socket emission (Fault-Tolerant)
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
+          _id: newMessage._id,
+          senderId: newMessage.senderId,
+          senderModel: newMessage.senderModel,
+          receiverId: newMessage.receiverId,
+          receiverModel: newMessage.receiverModel,
+          text: newMessage.text,
+          iv: newMessage.iv,
+          isEncrypted: newMessage.isEncrypted,
+          fileType: newMessage.fileType,
+          replyToId: newMessage.replyToId,
+          createdAt: newMessage.createdAt
+        });
+      }
+    } catch (socketErr) {
+      console.error("⚠️ Socket emission warning (non-fatal):", socketErr.message);
     }
 
     // 2. 🛡️ Privacy-Preserving Push Notifications
@@ -2158,9 +2160,6 @@ if (isEncrypted && (!iv || typeof iv !== 'string')) {
     const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'ZingConnect';
     
-    // 💡 SECURITY ARCHITECTURE NOTE: Because the text payload is encrypted ciphertext here,
-    // we mask the push notification message text body completely to prevent ugly/scrambled text banners
-    // from appearing on locked device operating systems.
     const notificationBody = newMessage.isEncrypted 
       ? "🔒 Sent an end-to-end encrypted message" 
       : (text.length > 40 ? `${text.substring(0, 40)}...` : text);
@@ -2173,23 +2172,14 @@ if (isEncrypted && (!iv || typeof iv !== 'string')) {
       data: { url: `${baseUrl}${path}`, type: 'message' }
     });
 
-    // ====== TEMPORARY PUSH DIAGNOSTIC LOGS ======
-    console.log("---------------- PUSH DIAGNOSTIC ----------------");
-    console.log("Recipient ID:", receiverId);
-    console.log("Recipient Role:", sanitizedModel);
-    console.log("Target Push Endpoint:", receiver?.pushSubscription?.endpoint || "❌ MISSING/UNDEFINED");
-    console.log("-------------------------------------------------");
-
     if (receiver && receiver.pushSubscription && receiver.pushSubscription.endpoint) {
       try {
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
-        console.log(`✅ Push notification sent to ${receiverId}`);
       } catch (pushErr) {
         console.error("❌ PUSH FAILED:", pushErr.message);
         if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
           await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
-          console.log(`🧹 Cleared dead subscription for ${receiverId}`);
         }
       }
     }
@@ -2200,14 +2190,12 @@ if (isEncrypted && (!iv || typeof iv !== 'string')) {
       const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       
       if (Date.now() - lastEmailTime > COOLDOWN) {
-        // Send a generic email placeholder text if message is encrypted
         const emailBodyPlaceholder = newMessage.isEncrypted 
           ? "You have received a new end-to-end encrypted message. Please sign into your dashboard to view." 
           : text;
 
         await sendOfflineNotification(receiver, senderDoc, emailBodyPlaceholder, sanitizedModel);
         await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-        console.log(`📧 Offline email notification dispatched to ${receiver.email}`);
       }
     } catch (mailErr) {
       console.error("❌ Email Error:", mailErr.message);
@@ -2215,7 +2203,7 @@ if (isEncrypted && (!iv || typeof iv !== 'string')) {
 
     return res.status(201).json({
       success: true,
-      message: newMessage // Returns full model including iv and isEncrypted back to caller
+      message: newMessage
     });
   } catch (err) {
     next(err);

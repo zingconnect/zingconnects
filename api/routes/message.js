@@ -59,14 +59,12 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
-// 2. SEND TEXT + PUSH & EMAIL NOTIFICATIONS (E2EE UPGRADED)
 router.post('/send', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     const myId = req.user.id;
     
-    // 🔒 Extract E2EE payload keys directly alongside metadata variables
+    // 🔒 Extract E2EE payload keys
     const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
     
     if (!text?.trim() || !receiverId) {
@@ -90,15 +88,15 @@ router.post('/send', authenticateToken, async (req, res, next) => {
     const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
 
-    // Create the message tracking payload containing hardware-crypto keys
+    // Create the message tracking payload
     const newMessage = await Message.create({
       senderId: myId,
       senderModel: senderModelName,
       receiverId,
       receiverModel: targetModelName,
-      text: text.trim(),           // Stores the secure base64 cipher text block
-      iv: iv || null,              // 🔒 Save the initialization vector block 
-      isEncrypted: !!isEncrypted,   // 🔒 Structural cryptographic flag
+      text: text.trim(),
+      iv: iv || null,
+      isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
       replyToId: replyToId || null,
       notificationSent: false
@@ -112,38 +110,34 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // Distributed Socket handling via Redis adapter checking
-    const io = req.app.get('socketio');
-    let isOnline = false;
-    
-    if (io) {
-      const sockets = await io.in(receiverId.toString()).fetchSockets();
-      isOnline = sockets.length > 0;
-      
-      if (isOnline) {
-        // ⚡ Emitting using custom payload key structure matching UserDashboard socket reader
+    // ⚡ Socket emission (Fault-Tolerant)
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        // Emitting directly to the room is the standard non-blocking approach
         io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
           _id: newMessage._id,
           senderId: newMessage.senderId,
           senderModel: newMessage.senderModel,
           receiverId: newMessage.receiverId,
           receiverModel: newMessage.receiverModel,
-          text: newMessage.text,         // 🔒 Secure cipher
-          iv: newMessage.iv,             // 🔒 Sync target vector
+          text: newMessage.text,
+          iv: newMessage.iv,
           isEncrypted: newMessage.isEncrypted,
           fileType: newMessage.fileType,
           replyToId: newMessage.replyToId,
           createdAt: newMessage.createdAt
         });
       }
+    } catch (socketErr) {
+      console.error("⚠️ Socket relay non-fatal warning:", socketErr.message);
     }
 
-    // ====== WEB PUSH NOTIFICATION DISPATCHER ======
+    // 🛡️ WEB PUSH NOTIFICATION DISPATCHER
     const baseUrl = "https://www.zingconnect.chat";
     const path = targetModelName === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
     
-    // 🛡️ Privacy Guard: Ensure OS lock screens don't render ugly raw cipher strings!
     const displayNotificationBody = newMessage.isEncrypted
       ? "🔒 Sent an end-to-end encrypted message"
       : (text.length > 60 ? `${text.substring(0, 60)}...` : text);
@@ -156,48 +150,36 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       data: { url: `${baseUrl}${path}`, type: 'message' }
     });
 
-    console.log("---------------- PUSH DIAGNOSTIC ----------------");
-    console.log("Recipient ID:", receiverId);
-    console.log("Recipient Found in DB:", !!receiver);
-    console.log("Has pushSubscription:", !!receiver?.pushSubscription);
-    console.log("Target Endpoint:", receiver?.pushSubscription?.endpoint || "❌ NONE");
-    console.log("-------------------------------------------------");
-
-    if (receiver.pushSubscription && receiver.pushSubscription.endpoint) {
+    if (receiver.pushSubscription?.endpoint) {
       try {
         await webpush.sendNotification(receiver.pushSubscription, payload);
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
-        console.log(`✅ Push notification sent successfully to ${receiverId}`);
       } catch (pushErr) {
         console.error("❌ PUSH FAILED:", pushErr.message);
         if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
           await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
-          console.log(`🧹 Cleaned expired subscription out for user ${receiverId}`);
         }
       }
     }
 
-    // ====== OFFLINE EMAIL FALLBACK ROUTINE ======
+    // 📧 OFFLINE EMAIL FALLBACK ROUTINE
     try {
       const COOLDOWN = 30 * 60 * 1000;
       const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
       
       if (Date.now() - lastEmailTime > COOLDOWN) {
-        // Send safe generic copy if message data layer is zero-knowledge encrypted
         const emailMessageFallbackText = newMessage.isEncrypted
           ? "You have received a new end-to-end encrypted message. Securely log into your dashboard interface to view."
           : text;
 
         await sendOfflineNotification(receiver, senderDoc, emailMessageFallbackText, targetModelName);
         await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-        console.log(`📧 Offline fallback mail dispatched to ${receiver.email}`);
       }
     } catch (mailErr) {
       console.error("❌ Notification Email Fault:", mailErr.message);
     }
 
-    // Return production data model frame directly to active client context
-    res.status(201).json({ success: true, message: newMessage });
+    return res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
     next(err);
   }
