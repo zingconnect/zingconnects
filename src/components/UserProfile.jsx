@@ -109,9 +109,8 @@ const handleUpdate = async () => {
   try {
     // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
     // Authorization header removed to prevent token exposure
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/update-profile`, { 
+    const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/users/update-profile`, token, { 
       method: 'PUT',
-      credentials: 'include',
       body: data
     });
 

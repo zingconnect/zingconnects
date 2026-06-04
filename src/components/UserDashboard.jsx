@@ -1391,6 +1391,7 @@ const handleFileChange = (e) => {
   }
   e.target.value = ""; 
 };
+
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
   
@@ -1419,14 +1420,10 @@ const handleProfileSubmit = async (e) => {
   });
 
   try {
-    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
-    // Authorization header removed to prevent token exposure
-    const res = await fetch('/api/users/update-profile', {
+    const res = await secureFetch('/api/users/update-user-onboarding', token, {
       method: 'PUT',
-      credentials: 'include',
-      body: data
+      body: data // Note: secureFetch will handle the headers
     });
-
     const result = await res.json();
 
     if (res.ok && result.success) {
