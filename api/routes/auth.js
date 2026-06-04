@@ -35,94 +35,6 @@ const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
 
-
-// 1. DYNAMIC TOKEN AUTHENTICATION MIDDLEWARE
-export const authenticateToken = async (req, res, next) => {
-  console.log("DEBUG AUTH - Headers:", req.headers.authorization);
-  console.log("DEBUG AUTH - Cookies:", req.cookies, req.signedCookies);
-
-  // Extract from incoming Authorization header string OR fall back to HTTP-only signed cookie configurations
-  const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
-
-  if (!token) {
-    console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
-    return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
-  }
-
-  try {
-    // Structural conversion to async/await evaluation syntax removes nested block execution scopes
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    req.user.id = decoded.id || decoded._id;
-
-    // 🛡️ SECURITY FIX: Agent Session Isolation & Dual Login Verification Logic
-    if (decoded.role === 'agent') {
-      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-      
-      if (!agent) {
-        return res.status(404).json({ success: false, message: "Agent profile match not found." });
-      }
-
-      // Check for dual login: Forces termination if a newer login generated an updated cluster state signature
-      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ 
-          success: false, 
-          message: "Dual login detected across separate instances.", 
-          reason: "dual_login",
-          forceLogout: true 
-        });
-      }
-      
-      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
-    }
-
-    // Admin Activity Logging Boundary
-    if (decoded.role === 'admin' || decoded.role === 'superadmin') {
-      const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
-      await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
-    }
-
-    next();
-  } catch (err) {
-    console.error("DEBUG: Token verification failed:", err.message);
-    
-    // Distinguish between expired and structurally malformed signatures for precise client response triggers
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: "Token expired" });
-    }
-    
-    return res.status(403).json({ success: false, message: "Invalid or expired token structure." });
-  }
-};
-
-// 2. TIER 1: ADMINISTRATIVE AUTHORIZATION FILTER (Allows Admin AND Superadmin)
-export const isAdmin = (req, res, next) => {
-  if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin')) {
-    return next();
-  } 
-  
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access denied: Administrative privileges required." 
-  });
-};
-
-// =========================================================================
-// 🛡️ TIER 2: SUPERADMIN ONLY MIDDLEWARE (System Root Operations Only)
-// =========================================================================
-export const requireSuperAdmin = (req, res, next) => {
-  // STRICT VERIFICATION: Explicitly drops standard admins out from core cluster settings
-  if (req.user && req.user.role === 'superadmin') {
-    return next();
-  }
-
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access Denied: Superadmin authorization required for this operation." 
-  });
-};
-
 // --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
 router.post('/register', upload.single('photo'), async (req, res, next) => {
   try {
@@ -134,7 +46,6 @@ router.post('/register', upload.single('photo'), async (req, res, next) => {
       occupation, program, bio, dob, gender, plan 
     } = req.body;
 
-    // 1. INPUT PRESENTATION CHECK
     if (!email) {
       return res.status(400).json({ success: false, message: "Email required." });
     }
