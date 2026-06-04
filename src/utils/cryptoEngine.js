@@ -119,6 +119,7 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
 
     // 2. Retrieve Private Key
     const storageKey = `zing_secure_pk_${myUserId}`;
+    console.log("🔍 Attempting to retrieve key with:", storageKey); // ADD THIS
     const rawSavedPrivate = localStorage.getItem(storageKey);
     
     if (!rawSavedPrivate) {

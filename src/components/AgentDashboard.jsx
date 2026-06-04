@@ -108,7 +108,7 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
   const [previewFile, setPreviewFile] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");          
-  
+
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
@@ -658,23 +658,38 @@ const handleAcceptCall = async () => {
 // 🛡️ Hardware Device Identity Handshake for the Agent
 useEffect(() => {
   const provisionAgentCryptoEnvironment = async () => {
+    console.log("🔍 [Crypto] Checking provisioning dependencies:", {
+      isLoading,
+      hasToken: !!token,
+      agentId: agentData?._id
+    });
+
     if (!isLoading && token && agentData?._id) {
-      console.log("🔒 Initializing agent cryptographic keys...");
-      
+      console.log("🔒 [Crypto] Initializing agent cryptographic keys for ID:", agentData._id);      
       try {
-        const privateKey = await initializeUserE2EEKeys(agentData._id, token);
-                if (privateKey) {
-          setAgentPrivateKey(privateKey);
-          console.log("✅ Agent private key successfully loaded into memory.");
+        const agentId = String(agentData._id);
+        const success = await initializeUserE2EEKeys(agentId, token);
+        
+        if (success) {
+          const savedKey = localStorage.getItem(`zing_secure_pk_${agentId}`);
+          
+          if (savedKey) {
+            setAgentPrivateKey(JSON.parse(savedKey));
+            console.log("✅ [Crypto] Agent private key confirmed in storage and loaded to state.");
+          } else {
+            console.error("❌ [Crypto] initializeUserE2EEKeys returned success, but key was NOT found in storage!");
+          }
+        } else {
+          console.error("❌ [Crypto] initializeUserE2EEKeys returned false.");
         }
       } catch (err) {
-        console.error("❌ Failed to load agent crypto keys:", err);
+        console.error("❌ [Crypto] Failed to load agent crypto keys:", err);
       }
     }
   };
   
   provisionAgentCryptoEnvironment();
-}, [token, isLoading, agentData?._id]); // Only runs when dependencies are ready
+}, [token, isLoading, agentData?._id]);
 
   useEffect(() => {
     if (!room) return;
