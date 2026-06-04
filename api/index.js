@@ -2249,8 +2249,6 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
       const msgDto = {
         id: m._id,
         content: m.text || "",
-        isEncrypted: !!m.isEncrypted,   
-        iv: m.iv || null,
         senderModel: m.senderModel || 'User',
         receiverModel: m.receiverModel || 'User',
         fileUrl: null,

@@ -53,26 +53,21 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     // Map to DTO, ensuring E2EE metadata is preserved
     const finalMessages = await Promise.all(messages.reverse().map(async (m) => {
       const msgDto = {
-           id: m._id,
-        content: m.text || "",
-        isEncrypted: !!m.isEncrypted,   
-        iv: m.iv || null,
+        _id: m._id,
+        text: m.text || "",
+        isEncrypted: !!m.isEncrypted, // 🛡️ Mandatory for E2EE detection
+        iv: m.iv || null,             // 🛡️ Mandatory for Decryption
+        senderId: m.senderId?._id || m.senderId,
         senderModel: m.senderModel || 'User',
+        receiverId: m.receiverId?._id || m.receiverId,
         receiverModel: m.receiverModel || 'User',
-        fileUrl: null,
+        fileType: m.fileType || 'text',
         createdAt: m.createdAt,
-        // Ensure null-safety if populate() returned null (e.g., deleted account)
-        sender: m.senderId && typeof m.senderId === 'object' ? {
-          id: m.senderId._id,
-          firstName: m.senderId.firstName || "",
-          lastName: m.senderId.lastName || "",
-          photoUrl: m.senderId.photoUrl || ""
-        } : { id: m.senderId, firstName: "Unknown", lastName: "User" },
-        receiver: m.receiverId && typeof m.receiverId === 'object' ? {
-          id: m.receiverId._id,
-          firstName: m.receiverId.firstName || "",
-          lastName: m.receiverId.lastName || ""
-        } : { id: m.receiverId, firstName: "Unknown", lastName: "User" }
+        senderName: m.senderId && typeof m.senderId === 'object' 
+          ? `${m.senderId.firstName} ${m.senderId.lastName}` 
+          : "Unknown",
+        senderPhoto: m.senderId?.photoUrl || "",
+        fileUrl: null
       };
 
       // Handle secure S3 URLs
