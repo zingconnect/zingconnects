@@ -375,18 +375,20 @@ useEffect(() => {
 }, [unlockAudio]);
 
 
+// Add this logic to your UserDashboard useEffect
 useEffect(() => {
-  console.log("DEBUG: E2EE Hook State ->", { isLoading, hasToken: !!token, hasUserId: !!userData?._id });
-  
   const provisionCryptoEnvironment = async () => {
-    if (!isLoading && token && userData?._id) {
-      console.log("🔒 Initializing device cryptographic keys...");
-      const success = await initializeUserE2EEKeys(userData._id, token);
-      console.log("🔒 Handshake success status:", success);
+    if (!isLoading && token && userData?._id && userData?.isProfileComplete) {
+            if (!userData?.publicKeyJwk) {
+        console.log("🔒 Missing publicKeyJwk detected. Triggering registration...");
+        await initializeUserE2EEKeys(userData._id, token);
+      } else {
+        console.log("🔒 Identity already synced.");
+      }
     }
   };
   provisionCryptoEnvironment();
-}, [token, isLoading, userData?._id]);
+}, [token, isLoading, userData?._id, userData?.isProfileComplete, userData?.publicKeyJwk]);
 
 useEffect(() => {
   if (!socket) return;
