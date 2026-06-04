@@ -59,7 +59,7 @@ import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
 import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
-import { authenticateToken, isAdmin, requireSuperAdmin } from './middleware/auth.js';
+import { authenticateToken, isAdmin, requireSuperAdmin } from './middlewares/auth.js';
 
 const app = express();
 app.use(cookieParser(process.env.COOKIE_SECRET));
