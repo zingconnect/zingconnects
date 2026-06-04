@@ -283,33 +283,32 @@ router.post('/verify-otp', async (req, res, next) => {
   }
 });
 router.post('/login', async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+
   try {
     await connectToDatabase();
     
     const { email, password, targetSlug } = req.body;
 
-    // 1. Basic Validation
     if (!email || typeof email !== 'string' || !password) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
     const AgentModel = getAgentModel();
+    // Fetch profile fields along with auth data
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
-    }).select('slug currentSessionId +password isVerified isSubscribed plan'); 
+    }).select('slug currentSessionId firstName lastName email occupation bio +password isVerified isSubscribed plan'); 
     
-    // 🛡️ SECURITY: Unified "Invalid credentials" response
     if (!agent) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 2. Credential Verification
     const isMatch = await bcrypt.compare(password, agent.password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    // 3. Authorization Gates
     if (!agent.isVerified) {
       return res.status(403).json({ success: false, message: "Please verify your email first" });
     }
@@ -321,10 +320,25 @@ router.post('/login', async (req, res, next) => {
       });
     }
 
-    // 4. Secure Session Management
     const newSessionId = crypto.randomBytes(16).toString('hex');
     agent.currentSessionId = newSessionId;
     await agent.save();
+
+    // 🚀 PRIME THE CACHE: Store the profile data in Redis now
+    // We store the data needed for the dashboard to load without hitting the DB
+    const cacheKey = `agent:profile:${agent._id}`;
+    const cacheableAgent = {
+      id: agent._id,
+      firstName: agent.firstName,
+      lastName: agent.lastName,
+      email: agent.email,
+      occupation: agent.occupation,
+      bio: agent.bio,
+      slug: agent.slug,
+      isSubscribed: !!agent.isSubscribed,
+      plan: agent.plan || 'BASIC'
+    };
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(cacheableAgent));
 
     const token = jwt.sign(
       { 
@@ -337,7 +351,6 @@ router.post('/login', async (req, res, next) => {
       { expiresIn: '24h' }
     );
 
-    // 5. Hardened Cookie Injection
     res.cookie('token', token, {
       httpOnly: true,
       secure: true, 
@@ -360,6 +373,7 @@ router.post('/login', async (req, res, next) => {
     next(err);
   }
 });
+
 router.get('/profile', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -406,13 +420,21 @@ router.get('/profile', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 router.get('/profile/me', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  const cacheKey = `agent:profile:full:${req.user.id}`;
+
   try {
+    // 1. ATTEMPT CACHE HIT
+    const cachedProfile = await redisClient.get(cacheKey);
+    if (cachedProfile) {
+      return res.status(200).json({ success: true, agent: JSON.parse(cachedProfile) });
+    }
+
+    // 2. FALLBACK TO DATABASE (Cache Miss)
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    
-    // 1. Single query touch: Fetch and Update lastActive
+
     const agent = await AgentModel.findByIdAndUpdate(
       req.user.id,
       { $set: { lastActive: new Date() } },
@@ -423,19 +445,13 @@ router.get('/profile/me', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // 2. Dual Login Security Check
+    // 3. Security & Business Logic (Keep these live/DB-focused)
     if (req.user.sessionId && agent.currentSessionId && req.user.sessionId !== agent.currentSessionId) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Dual login detected.",
-        reason: "dual_login" 
-      });
+      return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
     }
 
-    // 3. Expiration Logic
     const now = new Date();
     let mutationNeeded = false;
-
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
       mutationNeeded = true;
@@ -444,56 +460,53 @@ router.get('/profile/me', authenticateToken, async (req, res, next) => {
       agent.voicePackageActive = false;
       mutationNeeded = true;
     }
-    
     if (mutationNeeded) await agent.save();
 
     // 4. Photo Signing
     let signedPhotoUrl = null;
     if (agent.photoUrl) {
       try {
-        // Use your centralized signing helper
         signedPhotoUrl = await getPrivateUrl(agent.photoUrl);
       } catch (s3Error) {
-        console.error("Non-blocking S3 URL signing failure:", s3Error.message);
-        signedPhotoUrl = null; 
+        signedPhotoUrl = null;
       }
     }
-
     if (!signedPhotoUrl) {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-    // 5. Response
+    // 5. Build Response Object
     const isOnline = (now - new Date(agent.lastActive)) < 120000;
-
-    return res.status(200).json({
-      success: true,
-      agent: {
-        _id: agent._id,
-        email: agent.email || "",
-        firstName: agent.firstName || "",
-        lastName: agent.lastName || "",
-        occupation: agent.occupation || "",
-        program: agent.program || "",
-        bio: agent.bio || "",
-        address: agent.address || "",
-        photoUrl: signedPhotoUrl,
-        slug: agent.slug || "",
-        plan: agent.plan || "BASIC",
-        isSubscribed: !!agent.isSubscribed,
-        subscriptionAmount: agent.subscriptionAmount || 0,
-        subscriptionDate: agent.subscriptionDate || null,
-        expiryDate: agent.expiryDate || null,
-        voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
-        voicePackageActive: !!agent.voicePackageActive,
-        status: isOnline ? 'online' : 'offline',
-        lastActive: agent.lastActive,
-        paymentDetails: {
-          amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0,
-          currency: agent.paymentDetails?.currency || "NGN"
-        }
+    const responseData = {
+      _id: agent._id,
+      email: agent.email || "",
+      firstName: agent.firstName || "",
+      lastName: agent.lastName || "",
+      occupation: agent.occupation || "",
+      program: agent.program || "",
+      bio: agent.bio || "",
+      address: agent.address || "",
+      photoUrl: signedPhotoUrl,
+      slug: agent.slug || "",
+      plan: agent.plan || "BASIC",
+      isSubscribed: !!agent.isSubscribed,
+      subscriptionAmount: agent.subscriptionAmount || 0,
+      subscriptionDate: agent.subscriptionDate || null,
+      expiryDate: agent.expiryDate || null,
+      voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
+      voicePackageActive: !!agent.voicePackageActive,
+      status: isOnline ? 'online' : 'offline',
+      lastActive: agent.lastActive,
+      paymentDetails: {
+        amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0,
+        currency: agent.paymentDetails?.currency || "NGN"
       }
-    });
+    };
+
+    // 6. CACHE RESULT (Set for 1 hour)
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(responseData));
+
+    return res.status(200).json({ success: true, agent: responseData });
 
   } catch (err) {
     next(err);
@@ -541,6 +554,9 @@ router.post('/heartbeat', authenticateToken, async (req, res, next) => {
   }
 });
 router.post('/verify', authenticateToken, async (req, res, next) => {
+  // 1. Access Redis from the app context
+  const redisClient = req.app.get('redisClient');
+
   try {
     await connectToDatabase();
     const { transaction_id, plan } = req.body;
@@ -561,7 +577,7 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
     }
     const expectedNairaPrice = planPricesInNGN[targetPlan];
 
-    // 1. Verify with Flutterwave
+    // 2. Verify with Flutterwave
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
 
@@ -573,7 +589,7 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
         return res.status(404).json({ success: false, message: "Agent profile mapping context missing." });
       }
 
-      // 2. Calculate Expiry with Stacking Logic
+      // 3. Calculate Expiry with Stacking Logic
       const now = new Date();
       let baseDate = (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate) > now) 
         ? new Date(agent.expiryDate) 
@@ -591,7 +607,7 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
         calculatedMonths = 12;
       }
 
-      // 3. Persist Updates
+      // 4. Persist Updates
       const finalNumericAmount = Number(data.amount);
       
       agent.isSubscribed = true;
@@ -608,9 +624,12 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
         verifiedAt: now
       };
 
-      // Ensure billing sync and save
       syncBilling(agent, finalNumericAmount);
       await agent.save();
+
+      // 🚀 CACHE INVALIDATION: Force remove the cached profile 
+      // This ensures the next GET /profile call fetches the fresh DB state
+      await redisClient.del(`agent:profile:${req.user.id}`);
 
       return res.status(200).json({
         success: true,

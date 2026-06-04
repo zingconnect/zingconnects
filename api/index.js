@@ -590,8 +590,9 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 app.post('/api/agents/login', async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+
   try {
     await connectToDatabase();
     const { email, password, targetSlug } = req.body;
@@ -601,9 +602,10 @@ app.post('/api/agents/login', async (req, res, next) => {
     }
 
     const AgentModel = getAgentModel();
+    // Fetch necessary fields for cache priming while keeping password secret
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
-    }).select('slug currentSessionId +password'); 
+    }).select('slug currentSessionId firstName lastName email occupation bio isSubscribed +password'); 
     
     if (!agent) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
@@ -625,6 +627,20 @@ app.post('/api/agents/login', async (req, res, next) => {
     agent.currentSessionId = newSessionId;
     await agent.save();
 
+    // 🚀 PRIME THE CACHE: Store the profile data in Redis immediately after login
+    const cacheKey = `agent:profile:${agent._id}`;
+    const cacheableAgent = {
+      id: agent._id,
+      firstName: agent.firstName,
+      lastName: agent.lastName,
+      email: agent.email,
+      occupation: agent.occupation,
+      bio: agent.bio,
+      slug: agent.slug,
+      isSubscribed: !!agent.isSubscribed
+    };
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(cacheableAgent));
+
     const token = jwt.sign(
       { 
         id: agent._id, 
@@ -635,14 +651,15 @@ app.post('/api/agents/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
-res.cookie('token', token, {
-  httpOnly: true,
-  secure: true, 
-  sameSite: 'None',
-  signed: true, // IMPORTANT: Matches the middleware configuration
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/'
-});
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true, 
+      sameSite: 'None',
+      signed: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
 
     return res.json({ 
       success: true, 
@@ -656,14 +673,23 @@ res.cookie('token', token, {
 });
 
 // ==========================================
-// 🛡️ HARDENED ROUTE 1: GET /api/agents/profile
+// 🛡️ HARDENED ROUTE 1: GET /api/agents/profile (Redis Cached)
 // ==========================================
 app.get('/api/agents/profile', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  const cacheKey = `agent:profile:${req.user.id}`;
+
   try {
+    // 1. ATTEMPT CACHE HIT (Instant response)
+    const cachedProfile = await redisClient.get(cacheKey);
+    if (cachedProfile) {
+      return res.status(200).json({ success: true, agent: JSON.parse(cachedProfile), cached: true });
+    }
+
+    // 2. DATABASE FALLBACK (Cache Miss)
     await connectToDatabase();
-    const AgentModel = getAgentModel(); 
+    const AgentModel = getAgentModel();
     
-    // 🛡️ SECURITY FIX: Combined into a single database touch and limited return fields
     const agent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
       { $set: { lastActive: new Date() } },
@@ -675,45 +701,54 @@ app.get('/api/agents/profile', authenticateToken, async (req, res, next) => {
     }
 
     // Logic for expiry check
+    let mutationNeeded = false;
     if (agent.isSubscribed && agent.expiryDate && new Date() > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
-      await agent.save();
+      mutationNeeded = true;
     }
+    if (mutationNeeded) await agent.save();
 
-    // 🛡️ SECURITY FIX: Clean presentation wrapper mapping. Never pass raw database models.
-    return res.json({
-      success: true,
-      agent: {
-        id: agent._id,
-        firstName: agent.firstName,
-        lastName: agent.lastName,
-        email: agent.email,
-        occupation: agent.occupation,
-        bio: agent.bio,
-        slug: agent.slug,
-        isSubscribed: !!agent.isSubscribed
-      }
-    });
+    const presentationAgent = {
+      id: agent._id,
+      firstName: agent.firstName,
+      lastName: agent.lastName,
+      email: agent.email,
+      occupation: agent.occupation,
+      bio: agent.bio,
+      slug: agent.slug,
+      isSubscribed: !!agent.isSubscribed
+    };
+
+    // 3. SET CACHE (Expire after 1 hour / 3600 seconds)
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(presentationAgent));
+
+    return res.status(200).json({ success: true, agent: presentationAgent });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX: Pipe safely out via next channel
     next(err);
   }
 });
-
 // ==========================================
-// 🛡️ HARDENED ROUTE 2: GET /api/agents/profile/me
+// 🛡️ HARDENED ROUTE 2: GET /api/agents/profile/me (Redis Cached)
 // ==========================================
 app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  const cacheKey = `agent:profile:full:${req.user.id}`;
+
   try {
+    // 1. ATTEMPT CACHE HIT
+    const cachedProfile = await redisClient.get(cacheKey);
+    if (cachedProfile) {
+      return res.status(200).json({ success: true, agent: JSON.parse(cachedProfile) });
+    }
+
+    // 2. FALLBACK TO DATABASE
     await connectToDatabase();
-    
     if (!req.user || !req.user.id) {
         return res.status(401).json({ success: false, message: "Invalid session" });
     }
 
     const AgentModel = getAgentModel();
-    
     const agent = await AgentModel.findById(req.user.id)
       .select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive lastActive createdAt');
 
@@ -721,7 +756,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // 1. Dual Login Security Check
+    // 3. Dual Login Security Check
     if (req.user.sessionId && agent.currentSessionId && req.user.sessionId !== agent.currentSessionId) {
       return res.status(403).json({ 
         success: false, 
@@ -761,7 +796,6 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
         }
       } catch (s3Error) {
         console.error("Non-blocking S3 URL signing failure:", s3Error.message);
-        signedPhotoUrl = null; 
       }
     }
 
@@ -769,34 +803,37 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
       signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-    return res.status(200).json({
-      success: true,
-      agent: {
-        _id: agent._id,
-        email: agent.email || "",
-        firstName: agent.firstName || "",
-        lastName: agent.lastName || "",
-        occupation: agent.occupation || "",
-        program: agent.program || "",         
-        bio: agent.bio || "",                 
-        address: agent.address || "",         
-        photoUrl: signedPhotoUrl, 
-        slug: agent.slug || "",
-        plan: agent.plan || "BASIC",
-        isSubscribed: !!agent.isSubscribed, 
-        subscriptionAmount: agent.subscriptionAmount || 0, 
-        subscriptionDate: agent.subscriptionDate || null,
-        expiryDate: agent.expiryDate || null,
-        voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
-        voicePackageActive: !!agent.voicePackageActive, 
-        status: isOnline ? 'online' : 'offline',
-        lastActive: agent.lastActive,
-        paymentDetails: {
-          amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0,
-          currency: agent.paymentDetails?.currency || "NGN"
-        }
+    // 4. PREPARE RESPONSE OBJECT
+    const responseData = {
+      _id: agent._id,
+      email: agent.email || "",
+      firstName: agent.firstName || "",
+      lastName: agent.lastName || "",
+      occupation: agent.occupation || "",
+      program: agent.program || "",         
+      bio: agent.bio || "",                 
+      address: agent.address || "",         
+      photoUrl: signedPhotoUrl, 
+      slug: agent.slug || "",
+      plan: agent.plan || "BASIC",
+      isSubscribed: !!agent.isSubscribed, 
+      subscriptionAmount: agent.subscriptionAmount || 0, 
+      subscriptionDate: agent.subscriptionDate || null,
+      expiryDate: agent.expiryDate || null,
+      voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
+      voicePackageActive: !!agent.voicePackageActive, 
+      status: isOnline ? 'online' : 'offline',
+      lastActive: agent.lastActive,
+      paymentDetails: {
+        amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0,
+        currency: agent.paymentDetails?.currency || "NGN"
       }
-    });
+    };
+
+    // 5. SET CACHE (3600 seconds = 1 hour)
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(responseData));
+
+    return res.status(200).json({ success: true, agent: responseData });
 
   } catch (err) {
     next(err);
@@ -1579,11 +1616,12 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
-// 🛡️ HARDENED ROUTE 1: POST /api/subscriptions/verify
+// 🛡️ HARDENED ROUTE 1: POST /api/subscriptions/verify (With Cache Invalidation)
 // =========================================================================
 app.post('/api/subscriptions/verify', async (req, res, next) => {
+  const redisClient = req.app.get('redisClient'); // Access Redis
+
   try {
     await connectToDatabase();
 
@@ -1666,28 +1704,28 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
 
       const finalNumericAmount = Number(data.amount);
 
-      // Persist values cleanly to the document instance
       agent.isSubscribed = true;
       agent.plan = targetPlan;
       agent.status = 'active';
-      if (!agent.subscriptionDate) {
-        agent.subscriptionDate = now;
-      }
+      if (!agent.subscriptionDate) agent.subscriptionDate = now;
       agent.expiryDate = baseDate;
       agent.expiryNotificationSent = false;
       agent.lastTransactionId = String(transaction_id);
-      
-      // ✨ FIXED: Cast cleanly to guarantees identical data values across properties
       agent.subscriptionAmount = finalNumericAmount; 
       agent.paymentDetails = {
         amountNgn: finalNumericAmount,
         currency: "NGN",
         verifiedAt: now
       };
+      
       syncBilling(agent, finalNumericAmount);
       await agent.save();
 
-      console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Amount: ₦${finalNumericAmount}`);
+      // 🚀 CACHE INVALIDATION: Force remove the cached profile so 
+      // the next request fetches the new subscription status from DB
+      await redisClient.del(`agent:profile:${agent._id}`);
+
+      console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Cache cleared.`);
 
       return res.json({
         success: true,
@@ -1705,19 +1743,19 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
     } else {
       return res.status(400).json({
         success: false,
-        message: "Payment verification failed. Paid amount does not match plan price index expectations."
+        message: "Payment verification failed."
       });
     }
-
   } catch (err) {
     next(err);
   }
 });
-
 // =========================================================================
-// 💳 EXTEND/UPGRADE SUBSCRIPTION PIPELINE (WITH GATEWAY ENFORCEMENT)
+// 💳 EXTEND/UPGRADE SUBSCRIPTION PIPELINE (WITH CACHE INVALIDATION)
 // =========================================================================
 app.put('/api/agents/update-subscription', async (req, res, next) => {
+  const redisClient = req.app.get('redisClient'); // Access Redis
+
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
@@ -1800,7 +1838,6 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
 
     const finalUpgradeAmount = Number(flwData.amount);
 
-    // Persist completely synchronized state fields together
     agent.plan = targetPlan;
     agent.isSubscribed = true;
     agent.status = 'active';
@@ -1820,6 +1857,10 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
   
     syncBilling(agent, finalUpgradeAmount);
     await agent.save();
+
+    // 🚀 CACHE INVALIDATION: Force remove the cached profile 
+    // This ensures the next GET /api/agents/profile request fetches the updated data from MongoDB
+    await redisClient.del(`agent:profile:${agentId}`);
 
     return res.status(200).json({
       success: true,
