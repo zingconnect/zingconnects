@@ -375,12 +375,14 @@ useEffect(() => {
 }, [unlockAudio]);
 
 
-// 🛡️ Device Cryptographic Identity Handshake
 useEffect(() => {
+  console.log("DEBUG: E2EE Hook State ->", { isLoading, hasToken: !!token, hasUserId: !!userData?._id });
+  
   const provisionCryptoEnvironment = async () => {
     if (!isLoading && token && userData?._id) {
       console.log("🔒 Initializing device cryptographic keys...");
-      await initializeUserE2EEKeys(userData._id, token);
+      const success = await initializeUserE2EEKeys(userData._id, token);
+      console.log("🔒 Handshake success status:", success);
     }
   };
   provisionCryptoEnvironment();
