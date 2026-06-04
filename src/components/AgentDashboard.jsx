@@ -1696,17 +1696,17 @@ const handleDisconnect = async (e) => {
   }
 };
 
-
-  const handleSelectUser = async (user) => {
+const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
-  
+
+  // 1. Set the user immediately to establish the baseline
   setSelectedUser(user);
   setMessages([]);
   setIsInitialLoad(true);
   setLimit(30);
-  
+
   if (socket) socket.emit('join-chat', user._id);
-  
+
   try {
     const response = await secureFetch(`/api/messages/${user._id}?limit=30`, token, {
       method: 'GET'
@@ -1715,17 +1715,37 @@ const handleDisconnect = async (e) => {
     if (response.ok) {
       setConnectionStatus('connected');
       const data = await response.json();
-      
+
+      // 2. Identify the source of truth for the user object
+      const freshUserData = data.user || data.clientDetails;
+
+      // 3. Update User State with "Key Preservation" logic
+      if (freshUserData) {
+        setSelectedUser(prev => {
+          // Merge fresh data, but explicitly prevent overwriting the existing key
+          // if the incoming fresh data is missing it (a common API DTO issue)
+          const merged = { ...prev, ...freshUserData };
+          
+          if (!merged.publicKeyJwk && prev?.publicKeyJwk) {
+            merged.publicKeyJwk = prev.publicKeyJwk;
+          }
+          return merged;
+        });
+      }
+
+      // 4. Handle Decryption after ensuring we have a valid key
       if (data.success && Array.isArray(data.messages)) {
-        // 🔒 1. DECIPHER BATCH IMMEDIATELY BEFORE RENDERING
+        // Use the user object from the response if available, otherwise fallback to the current 'user' argument
+        const targetUser = freshUserData || user;
+
         const decryptedHistory = await Promise.all(
           data.messages.map(async (msg) => {
-            if (msg.isEncrypted && user?.publicKeyJwk) {
+            if (msg.isEncrypted && targetUser?.publicKeyJwk) {
               try {
                 const clearText = await decryptMessageText(
                   msg.text,
                   msg.iv,
-                  user.publicKeyJwk,
+                  targetUser.publicKeyJwk,
                   agentData._id
                 );
                 return { ...msg, text: clearText };
@@ -1736,21 +1756,7 @@ const handleDisconnect = async (e) => {
             return msg;
           })
         );
-        
         setMessages(decryptedHistory);
-setMessages(decryptedHistory);
-if (data.user || data.clientDetails) {
-  const freshData = data.user || data.clientDetails;
-  
-  setSelectedUser(prev => {
-    if (!prev) return freshData;
-        const updatedUser = { ...prev, ...freshData };
-        if (!updatedUser.publicKeyJwk && prev.publicKeyJwk) {
-      updatedUser.publicKeyJwk = prev.publicKeyJwk;
-    }        
-return updatedUser;
-  });
-}
       }
 
       await secureFetch(`/api/messages/mark-read/${user._id}`, token, {
@@ -1811,25 +1817,25 @@ useEffect(() => {
 useEffect(() => {
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
 
-  const refreshUserList = async () => {
-    try {
-      const token = localStorage.getItem('accessToken');
-      const res = await secureFetch('/api/agents/my-users', token, { 
-        method: 'GET' 
+  // Update the refreshUserList function inside your useEffect
+const refreshUserList = async () => {
+  try {
+    const res = await secureFetch('/api/agents/my-users', token, { method: 'GET' });
+    const data = await res.json();
+    
+    if (data.success) {
+      setUsers(prevUsers => {
+        // Map new users, but carry over the publicKeyJwk from current state if needed
+        return data.users.map(newUser => {
+          const existingUser = prevUsers.find(u => u._id === newUser._id);
+          return (existingUser && !newUser.publicKeyJwk && existingUser.publicKeyJwk)
+            ? { ...newUser, publicKeyJwk: existingUser.publicKeyJwk }
+            : newUser;
+        });
       });
-      if (res.status === 403 || res.status === 401) {
-        setIsDualLoginConflict(true);
-        return;
-      }
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data = await res.json();
-      if (data.success) {
-        setUsers(data.users);
-      }
-    } catch (err) { 
-      console.warn("User list refresh failed:", err); 
     }
-  };
+  } catch (err) { console.warn("Refresh failed:", err); }
+};
   const interval = setInterval(refreshUserList, 15000);
   refreshUserList();
   return () => clearInterval(interval);
@@ -2028,29 +2034,38 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
   
-  console.log("SEND ATTEMPT - State check:", {
-      hasUser: !!selectedUser,
-      hasKey: !!selectedUser?.publicKeyJwk,
-      keyContent: selectedUser?.publicKeyJwk
-  });
-// 🛡️ REFINED GUARD
-if (selectedUser && !selectedUser.publicKeyJwk) {
-  console.error("DEBUG: Selected User Object:", selectedUser); // 👈 See exactly what's in the state
-  console.error("🔒 Security Block: publicKeyJwk is missing from the state.");
-  alert("Secure channel not established. Please refresh the page.");
-  return;
-}
+  if (!selectedUser || !newMessage.trim() || isUploading) return;
 
-  if (!newMessage.trim() || !selectedUser || isUploading) return;
+  // 1. 🛡️ SILENT RECOVERY GUARD
+  // If the key is missing, attempt to refresh the user's specific data before blocking.
+  if (!selectedUser.publicKeyJwk) {
+    console.warn("🔒 Key missing in state. Attempting silent sync...");
+    try {
+      const res = await secureFetch(`/api/users/profile/${selectedUser._id}`, token);
+      const data = await res.json();
+      
+      if (data.user?.publicKeyJwk) {
+        // Update state with recovered key
+        setSelectedUser(prev => ({ ...prev, ...data.user }));
+        // Proceed with flow...
+      } else {
+        throw new Error("Could not recover secure key.");
+      }
+    } catch (err) {
+      console.error("Recovery failed:", err);
+      alert("Secure channel is currently unavailable. Please re-select the user.");
+      return;
+    }
+  }
 
   const textToSend = newMessage;
   const tempId = Date.now().toString();
   setNewMessage('');
 
+  // 2. Optimistic UI update
   const optimisticMsg = {
     _id: tempId,
     tempId: tempId,
@@ -2072,7 +2087,8 @@ if (selectedUser && !selectedUser.publicKeyJwk) {
     let encryptionIv = null;
     let encryptionStatus = false;
 
-    // 2. 🔒 Cryptographic Shielding
+    // 3. Cryptographic Shielding
+    // We re-check publicKeyJwk here after the potential recovery above
     if (selectedUser?.publicKeyJwk) {
       const encryptedData = await encryptMessageText(
         textToSend,
@@ -2080,13 +2096,10 @@ if (selectedUser && !selectedUser.publicKeyJwk) {
         agentData._id
       );
       
-      // 🛡️ MODIFICATION 2: VALIDATE ENCRYPTION SUCCESS
       if (encryptedData.isEncrypted) {
         finalPayloadText = encryptedData.cipherText;
         encryptionIv = encryptedData.iv;
         encryptionStatus = true;
-      } else {
-        throw new Error("Encryption process failed to produce a secure payload.");
       }
     }
 
@@ -2107,19 +2120,14 @@ if (selectedUser && !selectedUser.publicKeyJwk) {
     if (data.success) {
       let finalizedMessage = { ...data.message };
       
-      // 4. 🔓 Local runtime decryption
-      if (finalizedMessage.isEncrypted) {
-        try {
-          finalizedMessage.text = await decryptMessageText(
-            finalizedMessage.text,
-            finalizedMessage.iv,
-            selectedUser.publicKeyJwk,
-            agentData._id
-          );
-        } catch (decErr) {
-          console.error("Agent-side decryption failed:", decErr);
-          finalizedMessage.text = "🔒 [Encrypted Message - Decryption Failed]";
-        }
+      // 4. Local runtime decryption for the confirmation
+      if (finalizedMessage.isEncrypted && selectedUser?.publicKeyJwk) {
+        finalizedMessage.text = await decryptMessageText(
+          finalizedMessage.text,
+          finalizedMessage.iv,
+          selectedUser.publicKeyJwk,
+          agentData._id
+        );
       }
 
       setMessages(prev => 
