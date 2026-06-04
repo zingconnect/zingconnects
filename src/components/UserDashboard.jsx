@@ -1432,7 +1432,9 @@ const handleProfileSubmit = async (e) => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
       if (setUserData) setUserData(result.user);
-      
+      console.log("🛡️ Onboarding complete. Initiating cryptographic registration...");
+      await initializeUserE2EEKeys(result.user.id, token);
+
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);

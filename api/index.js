@@ -954,9 +954,7 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
 app.post('/api/users/handshake', async (req, res, next) => {
   try {
     await connectToDatabase();
-    
-    // 1. We only need email and agentSlug from the request body
-    const { email, agentSlug } = req.body;
+        const { email, agentSlug } = req.body;
     
     if (!email) return res.status(400).json({ success: false, message: "Email required" });
     if (!agentSlug) return res.status(400).json({ success: false, message: "Agent context is required" });
@@ -1012,11 +1010,15 @@ res.cookie('token', token, {
   maxAge: 7 * 24 * 60 * 60 * 1000
 });
     return res.json({ 
-      success: true, 
-      isNewUser, 
-      isProfileComplete: user.isProfileComplete,
-      token: token
-    });
+  success: true, 
+  isNewUser, 
+  isProfileComplete: user.isProfileComplete,
+  token: token,
+  user: { // 👈 ADD THIS: Return the full profile
+    _id: user._id,
+    publicKeyJwk: user.publicKeyJwk // Ensure this is sent to the frontend
+  }
+});
     
   } catch (err) {
     next(err);
@@ -1234,17 +1236,18 @@ const updatedUser = await User.findByIdAndUpdate(
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
     }
-    return res.json({ 
-      success: true, 
-      message: "Onboarding complete", 
-      user: {
-        id: updatedUser._id,
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        isProfileComplete: updatedUser.isProfileComplete,
-        photoUrl: updatedUser.photoUrl
-      }
-    });
+   return res.json({ 
+  success: true, 
+  message: "Onboarding complete", 
+  user: {
+    id: updatedUser._id,
+    firstName: updatedUser.firstName,
+    lastName: updatedUser.lastName,
+    isProfileComplete: updatedUser.isProfileComplete,
+    photoUrl: updatedUser.photoUrl,
+    publicKeyJwk: updatedUser.publicKeyJwk // 👈 ADD THIS: Must be included here!
+  }
+});
 
   } catch (err) {
     // 🛡️ SECURITY FIX 5: Hand the exception details to the bottom centralized error handler
@@ -1256,13 +1259,9 @@ const updatedUser = await User.findByIdAndUpdate(
 app.get('/api/agents/:slug', async (req, res, next) => {
   try {
     console.log("--- Profile Request Start --- for:", req.params.slug);
-    
-    // 🛡️ SECURITY FIX 2: Strict parameter validation
-    // Block any attempt to send objects, regex wildcards, or malicious long vectors
-    if (!req.params.slug || typeof req.params.slug !== 'string' || req.params.slug.length > 60) {
+        if (!req.params.slug || typeof req.params.slug !== 'string' || req.params.slug.length > 60) {
       return res.status(400).json({ success: false, message: "Invalid lookup identifier syntax." });
     }
-
     await connectToDatabase();
     const AgentModel = getAgentModel(); 
 
