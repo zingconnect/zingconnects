@@ -82,8 +82,12 @@ export const AgentDashboard = () => {
   const activeCallerRef = useRef(null);
   const pollingRef = useRef(null); 
   const aiMediaRecorderRef = useRef(null);
+  const selectedUserRef = useRef(selectedUser);
+const agentDataRef = useRef(agentData);
+const agentPrivateKeyRef = useRef(agentPrivateKey);
 
   const [agentData, setAgentData] = useState(null);
+  const [agentPrivateKey, setAgentPrivateKey] = useState(null); // Key material
   const [users, setUsers] = useState([]); 
   const [selectedUser, setSelectedUser] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -649,17 +653,26 @@ const handleAcceptCall = async () => {
     return () => clearInterval(interval);
   }, []);
   
-  // 🛡️ Hardware Device Identity Handshake for the Agent
+// 🛡️ Hardware Device Identity Handshake for the Agent
 useEffect(() => {
   const provisionAgentCryptoEnvironment = async () => {
     if (!isLoading && token && agentData?._id) {
       console.log("🔒 Initializing agent cryptographic keys...");
-      // Initializes agent keys locally using their unique Agent ID
-      await initializeUserE2EEKeys(agentData._id, token);
+      
+      try {
+        const privateKey = await initializeUserE2EEKeys(agentData._id, token);
+                if (privateKey) {
+          setAgentPrivateKey(privateKey);
+          console.log("✅ Agent private key successfully loaded into memory.");
+        }
+      } catch (err) {
+        console.error("❌ Failed to load agent crypto keys:", err);
+      }
     }
   };
+  
   provisionAgentCryptoEnvironment();
-}, [token, isLoading, agentData?._id]);
+}, [token, isLoading, agentData?._id]); // Only runs when dependencies are ready
 
   useEffect(() => {
     if (!room) return;
@@ -1337,6 +1350,12 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
+  selectedUserRef.current = selectedUser;
+  agentDataRef.current = agentData;
+  agentPrivateKeyRef.current = agentPrivateKey;
+}, [selectedUser, agentData, agentPrivateKey]);
+
+useEffect(() => {
   if (isDualLoginConflict) return;
 
   const heartBeat = setInterval(async () => {
@@ -1699,7 +1718,6 @@ const handleDisconnect = async (e) => {
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
 
-  // 1. Set the user immediately to establish the baseline
   setSelectedUser(user);
   setMessages([]);
   setIsInitialLoad(true);
@@ -1715,17 +1733,11 @@ const handleSelectUser = async (user) => {
     if (response.ok) {
       setConnectionStatus('connected');
       const data = await response.json();
-
-      // 2. Identify the source of truth for the user object
       const freshUserData = data.user || data.clientDetails;
 
-      // 3. Update User State with "Key Preservation" logic
       if (freshUserData) {
         setSelectedUser(prev => {
-          // Merge fresh data, but explicitly prevent overwriting the existing key
-          // if the incoming fresh data is missing it (a common API DTO issue)
           const merged = { ...prev, ...freshUserData };
-          
           if (!merged.publicKeyJwk && prev?.publicKeyJwk) {
             merged.publicKeyJwk = prev.publicKeyJwk;
           }
@@ -1733,22 +1745,25 @@ const handleSelectUser = async (user) => {
         });
       }
 
-      // 4. Handle Decryption after ensuring we have a valid key
       if (data.success && Array.isArray(data.messages)) {
-        // Use the user object from the response if available, otherwise fallback to the current 'user' argument
         const targetUser = freshUserData || user;
+        
+        // Use the Ref for the private key
+        const currentKey = agentPrivateKeyRef.current;
 
         const decryptedHistory = await Promise.all(
           data.messages.map(async (msg) => {
             if (msg.isEncrypted && targetUser?.publicKeyJwk) {
               try {
-                const clearText = await decryptMessageText(
+                // MODIFIED: Pass currentKey (from ref) to ensure fast, 
+                // in-memory decryption
+                return await decryptMessageText(
                   msg.text,
                   msg.iv,
                   targetUser.publicKeyJwk,
-                  agentData._id
+                  agentData._id,
+                  currentKey // Assuming your function signature supports this
                 );
-                return { ...msg, text: clearText };
               } catch (e) {
                 return { ...msg, text: "🔒 [Decryption Failed]" };
               }
@@ -1933,8 +1948,11 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
+
 useEffect(() => {
   if (!socket) return;
+  
+  // Ensure notification permission is handled once
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
@@ -1947,36 +1965,46 @@ useEffect(() => {
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
-    // 2. 🔓 CRYPTO DECRYPTION LAYER
+    // 2. 🔓 CRYPTO DECRYPTION LAYER (Using Refs for latest state)
+    const currentUser = selectedUserRef.current;
+    const currentAgent = agentDataRef.current;
+    const currentKey = agentPrivateKeyRef.current;
+
     let processedData = { ...data };
-    if (processedData.isEncrypted && selectedUser?.publicKeyJwk) {
-      try {
-        processedData.text = await decryptMessageText(
-          processedData.text,
-          processedData.iv,
-          selectedUser.publicKeyJwk,
-          agentData._id
-        );
-      } catch (err) {
-        console.error("🔒 Socket decryption error:", err);
-        processedData.text = "🔒 [Decryption Failed]";
+    if (processedData.isEncrypted) {
+      if (currentUser?.publicKeyJwk && currentKey) {
+        try {
+          processedData.text = await decryptMessageText(
+            processedData.text,
+            processedData.iv,
+            currentUser.publicKeyJwk,
+            currentAgent?._id // Passing Agent ID to resolve the private key
+          );
+        } catch (err) {
+          console.error("🔒 Socket decryption error:", err);
+          processedData.text = "🔒 [Decryption Failed]";
+        }
+      } else {
+        processedData.text = "🔒 [Secure Channel Not Ready]";
       }
     }
 
-    const isChattingWithSender = selectedUser && (processedData.senderId === selectedUser._id || processedData.senderId === selectedUser.id);
-    
     // 3. Update state with decrypted content
+    const isChattingWithSender = currentUser && 
+      (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
+    
     if (isChattingWithSender) {
       setMessages((prev) => {
         if (prev.some(m => m._id === processedData._id)) return prev;
         return [...prev, processedData];
       });
-      secureFetch(`/api/messages/mark-read/${selectedUser._id}`, token, {
+      
+      secureFetch(`/api/messages/mark-read/${currentUser._id}`, token, {
         method: 'PATCH'
       }).catch(err => console.error("Mark read error:", err));
     }
 
-    // 4. Notifications (Masking encrypted content)
+    // 4. Notifications
     if (processedData.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
@@ -1985,13 +2013,10 @@ useEffect(() => {
         );
       }
       
-      if ('vibrate' in navigator) {
-        navigator.vibrate([200, 100, 200]);
-      }
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
 
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
       if (Notification.permission === "granted" && shouldShowPopup) {
-        // Mask the body if it was encrypted to avoid showing garbage
         const notificationBody = processedData.isEncrypted 
           ? "You received an encrypted message." 
           : (processedData.text || "Sent a file");
@@ -2007,12 +2032,9 @@ useEffect(() => {
     }
   };
 
-  // Ensure you listen to the updated socket event name: 'RECEIVE_PRIVATE_MESSAGE'
   socket.on('RECEIVE_PRIVATE_MESSAGE', handleIncomingMessage);
-  return () => {
-    socket.off('RECEIVE_PRIVATE_MESSAGE', handleIncomingMessage);
-  };
-}, [socket, selectedUser, agentData?._id, token]);
+  return () => socket.off('RECEIVE_PRIVATE_MESSAGE', handleIncomingMessage);
+}, [socket]); // Only re-bind if the socket connection itself changes
 
 useEffect(() => {
   if (!("Notification" in window)) {
@@ -2038,23 +2060,22 @@ const handleSendMessage = async (e) => {
   if (!selectedUser || !newMessage.trim() || isUploading) return;
 
   // 1. 🛡️ SILENT RECOVERY GUARD
-  // If the key is missing, attempt to refresh the user's specific data before blocking.
-  if (!selectedUser.publicKeyJwk) {
+  let activeUser = selectedUser;
+  if (!activeUser.publicKeyJwk) {
     console.warn("🔒 Key missing in state. Attempting silent sync...");
     try {
-      const res = await secureFetch(`/api/users/profile/${selectedUser._id}`, token);
+      const res = await secureFetch(`/api/users/profile/${activeUser._id}`, token);
       const data = await res.json();
       
       if (data.user?.publicKeyJwk) {
-        // Update state with recovered key
-        setSelectedUser(prev => ({ ...prev, ...data.user }));
-        // Proceed with flow...
+        activeUser = { ...activeUser, ...data.user };
+        setSelectedUser(activeUser);
       } else {
         throw new Error("Could not recover secure key.");
       }
     } catch (err) {
       console.error("Recovery failed:", err);
-      alert("Secure channel is currently unavailable. Please re-select the user.");
+      alert("Secure channel is currently unavailable. Please ensure the user has initialized their session.");
       return;
     }
   }
@@ -2070,8 +2091,8 @@ const handleSendMessage = async (e) => {
     text: textToSend,
     senderId: agentData._id,
     senderModel: 'Agent',
-    receiverId: selectedUser._id,
-    receiverModel: selectedUser.modelType || 'User',
+    receiverId: activeUser._id,
+    receiverModel: activeUser.modelType || 'User',
     status: 'sending',
     createdAt: new Date().toISOString(),
     fileType: 'text'
@@ -2081,34 +2102,29 @@ const handleSendMessage = async (e) => {
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    let finalPayloadText = textToSend;
-    let encryptionIv = null;
-    let encryptionStatus = false;
+    // 3. STRICT CRYPTOGRAPHIC SHIELDING
+    if (!activeUser.publicKeyJwk) {
+      throw new Error("Encryption key missing. Transmission aborted for security.");
+    }
 
-    // 3. Cryptographic Shielding
-    // We re-check publicKeyJwk here after the potential recovery above
-    if (selectedUser?.publicKeyJwk) {
-      const encryptedData = await encryptMessageText(
-        textToSend,
-        selectedUser.publicKeyJwk,
-        agentData._id
-      );
-      
-      if (encryptedData.isEncrypted) {
-        finalPayloadText = encryptedData.cipherText;
-        encryptionIv = encryptedData.iv;
-        encryptionStatus = true;
-      }
+    const encryptedData = await encryptMessageText(
+      textToSend,
+      activeUser.publicKeyJwk,
+      agentData._id
+    );
+    
+    if (!encryptedData.isEncrypted) {
+      throw new Error("Encryption failed: Payload remains insecure.");
     }
 
     const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
       body: JSON.stringify({
-        receiverId: selectedUser._id,
-        receiverModel: selectedUser.modelType || 'User',
-        text: finalPayloadText,
-        iv: encryptionIv,
-        isEncrypted: encryptionStatus,
+        receiverId: activeUser._id,
+        receiverModel: activeUser.modelType || 'User',
+        text: encryptedData.cipherText,
+        iv: encryptedData.iv,
+        isEncrypted: true,
         fileType: 'text'
       })
     });
@@ -2118,15 +2134,15 @@ const handleSendMessage = async (e) => {
     if (data.success) {
       let finalizedMessage = { ...data.message };
       
-      // 4. Local runtime decryption for the confirmation
-      if (finalizedMessage.isEncrypted && selectedUser?.publicKeyJwk) {
-        finalizedMessage.text = await decryptMessageText(
-          finalizedMessage.text,
-          finalizedMessage.iv,
-          selectedUser.publicKeyJwk,
-          agentData._id
-        );
-      }
+      // 4. Local runtime decryption for confirmation
+      // Using the agentPrivateKeyRef for high-performance in-memory access
+      finalizedMessage.text = await decryptMessageText(
+        finalizedMessage.text,
+        finalizedMessage.iv,
+        activeUser.publicKeyJwk,
+        agentData._id,
+        agentPrivateKeyRef.current 
+      );
 
       setMessages(prev => 
         prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
@@ -2141,7 +2157,6 @@ const handleSendMessage = async (e) => {
     );
   }
 };
-
   
 if (loading) return (
   <div className="h-screen flex items-center justify-center bg-page-bg text-[10px] font-bold uppercase tracking-widest text-text-secondary">
