@@ -1493,11 +1493,14 @@ const handlePayment = async () => {
       amount: finalNairaAmount,
       currency: "NGN",
       payment_options: "card, account, transfer, ussd",
-      customer: {
-        email: agentData?.email,
-        name: `${agentData?.firstName} ${agentData?.lastName}`,
-        phone_number: agentData?.phone,
-      },
+     customer: {
+  email: agentData?.email,
+  name: `${agentData?.firstName || ''} ${agentData?.lastName || ''}`.trim(),
+  // Only add phone_number if it exists and is a valid string
+  ...(agentData?.phone && typeof agentData.phone === 'string' 
+      ? { phone_number: agentData.phone } 
+      : {}) 
+},
       customizations: {
         title: "ZingConnect",
         description: `Activation for ${activePlan.tier} Plan (₦${activePlan.price})`,
