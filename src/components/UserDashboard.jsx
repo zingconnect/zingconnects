@@ -1609,11 +1609,16 @@ const handleFinalSend = async () => {
 
     // 2. 🔒 Encrypt the text caption if E2EE keys are available
     if (agent?.publicKeyJwk) {
+      console.log("🔑 Encrypting with Public Key:", agent.publicKeyJwk);
       const encryptedCaption = await encryptMessageText(
         rawCaption.trim(),
         agent.publicKeyJwk,
         userData._id
       );
+      if (!encryptedData.isEncrypted) {
+      console.error("⚠️ Encryption failed internally. Check your keys or UserID mapping.");
+      return; // Do not send if encryption was expected but failed
+  }
       finalCaptionText = encryptedCaption.cipherText;
       captionIv = encryptedCaption.iv;
       isCaptionEncrypted = encryptedCaption.isEncrypted;
@@ -1813,51 +1818,67 @@ const handleStartCall = async () => {
 
 const handleSendMessage = async (e) => {
   e.preventDefault();
+  
+  // 🛡️ MODIFICATION 1: HARD GUARD
+  // If we have an agent, we MUST have a key. If not, block the send.
+  if (agent && !agent.publicKeyJwk) {
+    console.error("🔒 Security Block: Cannot send message, Agent public key missing.");
+    alert("Secure channel not established. Please refresh or try again.");
+    return;
+  }
+
   if (!newMessage.trim() || !agent?._id) return;
+
   const textToSend = newMessage;
   const tempId = Date.now().toString(); 
   setNewMessage(''); 
+
   const pendingMessage = {
     _id: tempId,
     tempId: tempId,
     senderId: userData._id,
     senderModel: 'User',
-    text: textToSend, // Kept raw so the user sees their own clear text instantly
+    text: textToSend,
     status: 'sending',
     createdAt: new Date().toISOString(),
     isTemp: true
   };
+
   setMessages(prev => [...prev, pendingMessage]);
-  setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+
   try {
     let finalPayloadText = textToSend;
     let encryptionIv = null;
     let encryptionStatus = false;
+
+    // Encryption logic only runs if the key exists
     if (agent?.publicKeyJwk) {
-      const encryptedData = await encryptMessageText(
-        textToSend,
-        agent.publicKeyJwk,
-        userData._id
-      );
-      finalPayloadText = encryptedData.cipherText; // Absolute garbage string safely across the web
-      encryptionIv = encryptedData.iv;            // Base64 Initialization Vector block
-      encryptionStatus = encryptedData.isEncrypted;
+      const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, userData._id);
+      finalPayloadText = encryptedData.cipherText;
+      encryptionIv = encryptedData.iv;
+      encryptionStatus = true; // Force true if we successfully encrypted
     }
+
     const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
         receiverModel: 'Agent',
-        text: finalPayloadText,       // Encrypted payload string
-        iv: encryptionIv,             // Required parameters for key derivation
-        isEncrypted: encryptionStatus, // Flag to identify cryptographic layers
+        text: finalPayloadText,
+        iv: encryptionIv,
+        isEncrypted: encryptionStatus,
         fileType: 'text',
         replyToId: replyingTo?._id 
       })
     });
+
     const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || "Failed to send");
-    const finalizedMessage = { ...data.message };
+    if (!response.ok || !data.success) throw new Error(data.message);
+
+    let finalizedMessage = { ...data.message };
+
+    // 🛡️ MODIFICATION 2: SAFE DECRYPTION
+    // Only attempt decryption if the server confirms it is encrypted
     if (finalizedMessage.isEncrypted) {
       finalizedMessage.text = await decryptMessageText(
         finalizedMessage.text,
@@ -1866,14 +1887,13 @@ const handleSendMessage = async (e) => {
         userData._id
       );
     }
+
     setMessages(prev => prev.map(m => m._id === tempId ? finalizedMessage : m));
     setReplyingTo(null);
     
   } catch (err) {
     console.error("🔒 Message encryption/transmission failed:", err);
-    setMessages(prev => prev.map(m => 
-      m._id === tempId ? { ...m, status: 'failed' } : m
-    ));
+    setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
   }
 };
 

@@ -112,39 +112,60 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myUse
     return { cipherText: clearText, iv: null, isEncrypted: false };
   }
 };
-
-/**
- * 🔓 DECRYPT: Takes cipher base64 token, IV string, and sender's public key.
- * Rebuilds the symmetric key block locally and outputs the original text string.
- */
 export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myUserId) => {
   try {
-    // If message isn't encrypted, or missing keys, render the raw payload text directly
-    if (!ivBase64 || !senderPublicKeyJwk) return cipherTextBase64;
+    // 1. Validation
+    if (!ivBase64 || !senderPublicKeyJwk || !cipherTextBase64) return cipherTextBase64;
 
-    const rawSavedPrivate = JSON.parse(localStorage.getItem(`zing_secure_pk_${myUserId}`));
-    if (!rawSavedPrivate) return "🔒 [Encrypted Message - Key Missing]";
+    // 2. Retrieve Private Key
+    const storageKey = `zing_secure_pk_${myUserId}`;
+    const rawSavedPrivate = localStorage.getItem(storageKey);
+    
+    if (!rawSavedPrivate) {
+      console.error("Decryption failed: Private key not found in storage.");
+      return "🔒 [Encrypted Message - Key Missing]";
+    }
 
-    const myPrivateKey = await window.crypto.subtle.importKey("jwk", rawSavedPrivate, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
-    const peerPublicKey = await window.crypto.subtle.importKey("jwk", senderPublicKeyJwk, { name: "ECDH", namedCurve: "P-256" }, true, []);
+    const myPrivateKeyJwk = JSON.parse(rawSavedPrivate);
 
+    // 3. Import Keys
+    // Ensure the curves and names match your encryption setup perfectly
+    const myPrivateKey = await window.crypto.subtle.importKey(
+      "jwk", myPrivateKeyJwk, 
+      { name: "ECDH", namedCurve: "P-256" }, 
+      false, ["deriveKey"]
+    );
+
+    const peerPublicKey = await window.crypto.subtle.importKey(
+      "jwk", senderPublicKeyJwk, 
+      { name: "ECDH", namedCurve: "P-256" }, 
+      true, []
+    );
+
+    // 4. Derive Shared Secret
     const sharedSecretKey = await window.crypto.subtle.deriveKey(
       { name: "ECDH", public: peerPublicKey },
       myPrivateKey,
       { name: "AES-GCM", length: 256 },
-      false,
-      ["decrypt"]
+      false, ["decrypt"]
     );
 
+    // 5. Decrypt
+    // Ensure you are passing the iv as a Uint8Array (AES-GCM requires 12 bytes)
+    const iv = base64ToArrayBuffer(ivBase64);
+    const data = base64ToArrayBuffer(cipherTextBase64);
+
     const decryptedBuffer = await window.crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: base64ToArrayBuffer(ivBase64) },
+      { name: "AES-GCM", iv: iv },
       sharedSecretKey,
-      base64ToArrayBuffer(cipherTextBase64)
+      data
     );
 
     return new TextDecoder().decode(decryptedBuffer);
+
   } catch (err) {
-    console.error("Decryption error:", err.message);
+    console.error("Decryption runtime error:", err);
+    // Return a clear indicator so the UI knows to show a "failed to decrypt" icon
     return "🔒 [Encrypted Message - Decryption Failed]";
   }
 };
