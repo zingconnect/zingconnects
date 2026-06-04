@@ -26,18 +26,20 @@ import cookieParser from 'cookie-parser'; // Add this import
 import { createAdapter } from '@socket.io/redis-adapter';
 
 const redisClient = createClient({
-  url: process.env.REDIS_URL
+  url: process.env.REDIS_URL,
+  socket: {
+    connectTimeout: 5000, // Wait 5s before failing
+    reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
+  }
 });
 
-redisClient.on('error', (err) => console.error('🔴 Redis Cache Client Error:', err));
-redisClient.on('connect', () => console.log('⚡ Connected to Redis Cache Cloud successfully!'));
-
-// Establish the connection instantly on execution context startup
+redisClient.on('error', (err) => console.error('🔴 Redis Error:', err));
 (async () => {
   try {
     await redisClient.connect();
+    console.log('⚡ Connected to Redis successfully!');
   } catch (err) {
-    console.error('⚠️ Could not initialize Redis connection:', err.message);
+    console.error('⚠️ Redis connection failed:', err.message);
   }
 })();
 
@@ -92,15 +94,15 @@ app.use(express.json());
 const server = http.createServer(app);
 const pubClient = redisClient;
 const subClient = redisClient.duplicate();
-
+await subClient.connect();
 const io = new Server(server, {
   path: '/api/socket.io',
   cors: corsOptions,
   transports: ['polling', 'websocket'],
   allowEIO3: true,
-  // 🚀 THIS IS THE MISSING KEY
-  adapter: createAdapter(pubClient, subClient)
 });
+
+io.adapter(createAdapter(pubClient, subClient));
 
 app.set('socketio', io);
 app.use('/api/calls', callRoutes);
@@ -1939,29 +1941,31 @@ app.get('/api/agents/subscription/history', async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
-// 🛡️ OPTIMIZED ENDPOINT: GET /api/agents/my-users (Redis Caching Enabled)
+// 🛡️ HARDENED ENDPOINT: GET /api/agents/my-users (Fault-Tolerant Redis)
 // =========================================================================
 app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
-  const redisClient = req.app.get('redisClient');
   const agentId = req.user?.id || req.user?._id;
-  
   if (!agentId) {
     return res.status(401).json({ success: false, message: "Unauthorized" });
   }
 
-  // Unique cache key for this agent's user list
+  // Safely attempt to get the client
+  const redisClient = req.app.get('redisClient');
   const cacheKey = `agent:users:list:${agentId}`;
 
   try {
-    // 1. ATTEMPT CACHE HIT
-    const cachedData = await redisClient.get(cacheKey);
-    if (cachedData) {
-      return res.status(200).json(JSON.parse(cachedData));
+    // 1. ATTEMPT CACHE HIT (Only if client is active and open)
+    if (redisClient?.isOpen) {
+      try {
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) return res.status(200).json(JSON.parse(cachedData));
+      } catch (cacheErr) {
+        console.error("Cache read error, proceeding to DB:", cacheErr.message);
+      }
     }
 
-    // 2. FALLBACK TO DATABASE (Cache Miss)
+    // 2. FALLBACK TO DATABASE
     await connectToDatabase();
     const ActiveUserModel = mongoose.models.User || User;
     
@@ -2037,8 +2041,14 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
       users: processedUsers
     };
 
-    // 4. SET CACHE (5-minute TTL to balance performance and real-time message status)
-    await redisClient.setEx(cacheKey, 300, JSON.stringify(responsePayload));
+    // 4. SET CACHE (Best Effort)
+    if (redisClient?.isOpen) {
+      try {
+        await redisClient.setEx(cacheKey, 300, JSON.stringify(responsePayload));
+      } catch (cacheErr) {
+        console.error("Cache write error, skipping:", cacheErr.message);
+      }
+    }
 
     return res.json(responsePayload);
 

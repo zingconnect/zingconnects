@@ -854,21 +854,24 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
 });
 
 router.get('/my-users', authenticateToken, async (req, res, next) => {
-  const redisClient = req.app.get('redisClient');
-  const agentId = req.user?.id || req.user?._id;
-
+ const agentId = req.user?.id || req.user?._id;
   if (!agentId) {
     return res.status(401).json({ success: false, message: "Unauthorized" });
   }
 
-  // Define a unique key for this specific agent's user list
+  // Safely attempt to get the client
+  const redisClient = req.app.get('redisClient');
   const cacheKey = `agent:users:list:${agentId}`;
 
   try {
-    // 1. ATTEMPT CACHE HIT
-    const cachedData = await redisClient.get(cacheKey);
-    if (cachedData) {
-      return res.status(200).json(JSON.parse(cachedData));
+    // 1. ATTEMPT CACHE HIT (Only if client is active and open)
+    if (redisClient?.isOpen) {
+      try {
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) return res.status(200).json(JSON.parse(cachedData));
+      } catch (cacheErr) {
+        console.error("Cache read error, proceeding to DB:", cacheErr.message);
+      }
     }
 
     // 2. FALLBACK TO DATABASE (Cache Miss)
@@ -949,10 +952,15 @@ router.get('/my-users', authenticateToken, async (req, res, next) => {
       users: processedUsers
     };
 
-    // 4. SET CACHE (5-minute TTL)
-    await redisClient.setEx(cacheKey, 300, JSON.stringify(responsePayload));
+    if (redisClient?.isOpen) {
+      try {
+        await redisClient.setEx(cacheKey, 300, JSON.stringify(responsePayload));
+      } catch (cacheErr) {
+        console.error("Cache write error, skipping:", cacheErr.message);
+      }
+    }
 
-    return res.status(200).json(responsePayload);
+    return res.json(responsePayload);
 
   } catch (err) {
     next(err);
