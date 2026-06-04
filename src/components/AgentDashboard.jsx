@@ -1395,10 +1395,11 @@ useEffect(() => {
   return () => clearInterval(heartBeat);
   }, [isDualLoginConflict]);
 
-  useEffect(() => {
+ useEffect(() => {
   let isMounted = true;
   const token = localStorage.getItem('accessToken'); 
 
+  // Load external dependency safely
   if (!document.querySelector('script[src*="flutterwave"]')) {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
@@ -1407,8 +1408,9 @@ useEffect(() => {
   }
 
   const fetchInitialData = async () => {
+    // 🛡️ Ensure redirect uses the agent-specific slug
     if (!token) {
-      navigate(`/agent/dashboard/${slug}`);
+      navigate(`/agent/login/${slug}`);
       return;
     }
 
@@ -1421,26 +1423,23 @@ useEffect(() => {
 
       if (!isMounted) return;
 
-      if (profileResponse.status === 'rejected') {
-        throw new Error("Profile network request failed completely");
-      }
-      
-      const profileRes = profileResponse.value;
-
-      if (profileRes.status === 401 || profileRes.status === 403) {
-        const errorData = await profileRes.json().catch(() => ({}));
-        if (errorData.reason === 'dual_login') {
-          setIsDualLoginConflict(true);
-        } else {
-          localStorage.removeItem('accessToken'); 
-          navigate(`/agent/dashboard/${slug}`);
+      // Handle Profile Request
+      if (profileResponse.status === 'rejected' || !profileResponse.value.ok) {
+        const res = profileResponse.value;
+        if (res?.status === 401 || res?.status === 403) {
+          const errorData = await res.json().catch(() => ({}));
+          if (errorData.reason === 'dual_login') {
+            setIsDualLoginConflict(true);
+          } else {
+            localStorage.removeItem('accessToken'); 
+            navigate(`/agent/login/${slug}`);
+          }
+          return;
         }
-        return; 
+        throw new Error("Profile data retrieval failed");
       }
-
-      if (!profileRes.ok) throw new Error("Profile data retrieval failed");
       
-      const profileData = await profileRes.json();
+      const profileData = await profileResponse.value.json();
       
       if (profileData.agent) {
         setAgentData(profileData.agent);
@@ -1448,16 +1447,20 @@ useEffect(() => {
         setIsSubscribed(subscribed); 
         if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
 
-        // 🔒 If subscribed and verified, load users (including their exposed public keys)
-        if (subscribed && usersResponse.status === 'fulfilled' && usersResponse.value.ok) {
-          const userData = await usersResponse.value.json();
-          if (userData.success) {
-            setUsers(userData.users);
+        // Handle User Request separately to prevent cascading failure
+        if (subscribed && usersResponse.status === 'fulfilled') {
+          const uRes = usersResponse.value;
+          if (uRes.ok) {
+            const userData = await uRes.json();
+            if (userData.success) setUsers(userData.users);
+          } else if (uRes.status === 403) {
+            console.warn("User list access forbidden.");
+            setIsDualLoginConflict(true);
           }
         }
       }
     } catch (err) {
-      console.error("Initialization speed-error:", err);
+      console.error("Initialization error:", err);
     } finally {
       if (isMounted) setLoading(false);
     }
@@ -1465,7 +1468,7 @@ useEffect(() => {
 
   fetchInitialData();
   return () => { isMounted = false; };
-}, [navigate, slug]);
+}, [navigate, slug, localStorage.getItem('accessToken')]); // Added dependency for safety
 
 const handlePayment = async () => {
   if (!agentData || !agentData.email) {
@@ -1848,29 +1851,53 @@ useEffect(() => {
 }, [messages, isInitialLoad]);
 
 useEffect(() => {
+  // 1. Guard clause: Do not run if we are in an invalid state
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
-const refreshUserList = async () => {
-  try {
-    const res = await secureFetch('/api/agents/my-users', token, { method: 'GET' });
-    const data = await res.json();
-    
-    if (data.success) {
-      setUsers(prevUsers => {
-        // Map new users, but carry over the publicKeyJwk from current state if needed
-        return data.users.map(newUser => {
-          const existingUser = prevUsers.find(u => u._id === newUser._id);
-          return (existingUser && !newUser.publicKeyJwk && existingUser.publicKeyJwk)
-            ? { ...newUser, publicKeyJwk: existingUser.publicKeyJwk }
-            : newUser;
+
+  const refreshUserList = async () => {
+    try {
+      // 🛡️ Pass current token explicitly
+      const res = await secureFetch('/api/agents/my-users', token, { method: 'GET' });
+
+      // 2. Explicit Auth Handling
+      if (res.status === 401 || res.status === 403) {
+        console.warn("⛔ Session invalid (403/401). Stopping auto-refresh.");
+        setIsDualLoginConflict(true); 
+        return; 
+      }
+
+      if (!res.ok) {
+        console.error(`Refresh failed with status: ${res.status}`);
+        return;
+      }
+
+      const data = await res.json();
+      
+      if (data.success && data.users) {
+        setUsers(prevUsers => {
+          return data.users.map(newUser => {
+            const existingUser = prevUsers.find(u => u._id === newUser._id);
+            // Carry over existing public keys if the API response is missing them
+            return (existingUser && !newUser.publicKeyJwk && existingUser.publicKeyJwk)
+              ? { ...newUser, publicKeyJwk: existingUser.publicKeyJwk }
+              : newUser;
+          });
         });
-      });
+      }
+    } catch (err) { 
+      console.warn("Network error during user list refresh:", err); 
     }
-  } catch (err) { console.warn("Refresh failed:", err); }
-};
-  const interval = setInterval(refreshUserList, 15000);
+  };
+
+  // 3. Initialize immediately
   refreshUserList();
+
+  // 4. Set interval
+  const interval = setInterval(refreshUserList, 15000);
+
+  // 5. Cleanup: Clear interval on unmount or dependency change
   return () => clearInterval(interval);
-}, [isSubscribed, agentData?._id, isDualLoginConflict]);
+}, [isSubscribed, agentData?._id, isDualLoginConflict, token]); // Added 'token' dependency
 
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
