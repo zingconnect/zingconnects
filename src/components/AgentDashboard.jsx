@@ -1738,21 +1738,19 @@ const handleDisconnect = async (e) => {
         );
         
         setMessages(decryptedHistory);
-
-        // Update user details logic...
-        if (data.user || data.clientDetails) {
-          const freshData = data.user || data.clientDetails;
-          setSelectedUser(prev => {
-            if (!prev) return freshData;
-            const updatedUser = { ...prev };
-            Object.keys(freshData).forEach(key => {
-              if (freshData[key] !== undefined && freshData[key] !== null && freshData[key] !== "") {
-                updatedUser[key] = freshData[key];
-              }
-            });
-            return updatedUser;
-          });
-        }
+setMessages(decryptedHistory);
+if (data.user || data.clientDetails) {
+  const freshData = data.user || data.clientDetails;
+  
+  setSelectedUser(prev => {
+    if (!prev) return freshData;
+        const updatedUser = { ...prev, ...freshData };
+        if (!updatedUser.publicKeyJwk && prev.publicKeyJwk) {
+      updatedUser.publicKeyJwk = prev.publicKeyJwk;
+    }        
+return updatedUser;
+  });
+}
       }
 
       await secureFetch(`/api/messages/mark-read/${user._id}`, token, {
@@ -2034,6 +2032,11 @@ const handleResend = async (failedMsg) => {
 const handleSendMessage = async (e) => {
   e.preventDefault();
   
+  console.log("SEND ATTEMPT - State check:", {
+      hasUser: !!selectedUser,
+      hasKey: !!selectedUser?.publicKeyJwk,
+      keyContent: selectedUser?.publicKeyJwk
+  });
 // 🛡️ REFINED GUARD
 if (selectedUser && !selectedUser.publicKeyJwk) {
   console.error("DEBUG: Selected User Object:", selectedUser); // 👈 See exactly what's in the state
