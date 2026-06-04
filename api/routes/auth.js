@@ -863,7 +863,7 @@ router.get('/my-users', authenticateToken, async (req, res, next) => {
     // 1. ATTEMPT CACHE HIT (Only if client is active and open)
     if (redisClient?.isOpen) {
       try {
-        const cachedData = await redisClient.get(cacheKey);
+        const cachedData = await getCachedData(cacheKey);
         if (cachedData) return res.status(200).json(JSON.parse(cachedData));
       } catch (cacheErr) {
         console.error("Cache read error, proceeding to DB:", cacheErr.message);

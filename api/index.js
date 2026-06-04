@@ -131,6 +131,26 @@ const syncBilling = (agent, amount) => {
   agent.paymentDetails.amountNgn = amount;
   agent.paymentDetails.currency = 'NGN';
 };
+// --- REDIS CACHE HELPERS (Defined in index.js) ---
+const getCachedData = async (key) => {
+  if (!redisClient?.isOpen) return null;
+  try {
+    const data = await redisClient.get(key);
+    return data ? JSON.parse(data) : null;
+  } catch (err) {
+    console.error(`Cache Read Error [${key}]:`, err.message);
+    return null;
+  }
+};
+
+const setCachedData = async (key, data, ttl = 300) => {
+  if (!redisClient?.isOpen) return;
+  try {
+    await redisClient.setEx(key, ttl, JSON.stringify(data));
+  } catch (err) {
+    console.error(`Cache Write Error [${key}]:`, err.message);
+  }
+};
 
 io.on("connection", (socket) => {
   console.log("Socket Connected:", socket.id);
@@ -1410,7 +1430,7 @@ app.get('/api/users/me', authenticateToken, async (req, res, next) => {
 
   try {
     // 1. ATTEMPT CACHE HIT
-    const cachedData = await redisClient.get(cacheKey);
+const cachedData = await getCachedData(cacheKey);
     if (cachedData) {
       return res.status(200).json(JSON.parse(cachedData));
     }
@@ -1951,8 +1971,8 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     // 1. ATTEMPT CACHE HIT (Only if client is active and open)
     if (redisClient?.isOpen) {
       try {
-        const cachedData = await redisClient.get(cacheKey);
-        if (cachedData) return res.status(200).json(JSON.parse(cachedData));
+        const cachedData = await getCachedData(cacheKey);
+        if (cachedData) return res.status(200).json(cachedData);
       } catch (cacheErr) {
         console.error("Cache read error, proceeding to DB:", cacheErr.message);
       }
