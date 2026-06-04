@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from './auth.js'; 
+import { authenticateToken } from '../middlewares/auth.js';
 import { 
   startCall, 
   checkIncomingCall, 

@@ -7,7 +7,7 @@ import Agent from '../models/Agent.js';
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { connectToDatabase } from '../config/db.js';
 import { getS3Client, getPrivateUrl, PutObjectCommand } from '../config/s3.js';
-import { authenticateToken } from './auth.js'; 
+import { authenticateToken } from '../middlewares/auth.js';
 import { sendOfflineNotification } from '../utils/mailer.js';
 
 const router = express.Router();
