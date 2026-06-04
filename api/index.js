@@ -1226,11 +1226,11 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       
       console.log(`[Storage] Clean Photo uploaded for User: ${userId}`);
     }
-    const updatedUser = await User.findByIdAndUpdate(
-      userId, 
-      updateData,
-      { new: true, runValidators: true }
-    ).select('email firstName lastName isProfileComplete city state photoUrl phone');
+   const updatedUser = await User.findByIdAndUpdate(
+  userId, 
+  updateData,
+  { new: true, runValidators: true }
+).select('email firstName lastName isProfileComplete city state photoUrl phone publicKeyJwk'); 
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
