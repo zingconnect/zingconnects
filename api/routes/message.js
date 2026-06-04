@@ -23,17 +23,18 @@ async function clearUserCache(app, modelName, userId) {
   }
 }
 
-// 1. GET HISTORY
+// 1. GET HISTORY (STABILIZED FOR E2EE)
 router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
+    const myId = req.user.id;
     const { otherUserId } = req.params;
     const { beforeId, limit } = req.query;
 
     const query = {
       $or: [
-        { senderId: req.user.id, receiverId: otherUserId }, 
-        { senderId: otherUserId, receiverId: req.user.id }
+        { senderId: myId, receiverId: otherUserId }, 
+        { senderId: otherUserId, receiverId: myId }
       ]
     };
 
@@ -45,13 +46,45 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     const messages = await Message.find(query)
       .sort({ createdAt: -1 })
       .limit(Math.min(parseInt(limit) || 20, 50))
+      .populate({ path: 'senderId', select: 'firstName lastName photoUrl', refPath: 'senderModel' })
+      .populate({ path: 'receiverId', select: 'firstName lastName photoUrl', refPath: 'receiverModel' })
       .lean();
 
+    // Map to DTO, ensuring E2EE metadata is preserved
     const finalMessages = await Promise.all(messages.reverse().map(async (m) => {
+      const msgDto = {
+           id: m._id,
+        content: m.text || "",
+        isEncrypted: !!m.isEncrypted,   
+        iv: m.iv || null,
+        senderModel: m.senderModel || 'User',
+        receiverModel: m.receiverModel || 'User',
+        fileUrl: null,
+        createdAt: m.createdAt,
+        // Ensure null-safety if populate() returned null (e.g., deleted account)
+        sender: m.senderId && typeof m.senderId === 'object' ? {
+          id: m.senderId._id,
+          firstName: m.senderId.firstName || "",
+          lastName: m.senderId.lastName || "",
+          photoUrl: m.senderId.photoUrl || ""
+        } : { id: m.senderId, firstName: "Unknown", lastName: "User" },
+        receiver: m.receiverId && typeof m.receiverId === 'object' ? {
+          id: m.receiverId._id,
+          firstName: m.receiverId.firstName || "",
+          lastName: m.receiverId.lastName || ""
+        } : { id: m.receiverId, firstName: "Unknown", lastName: "User" }
+      };
+
+      // Handle secure S3 URLs
       if (m.fileUrl && ['image', 'video'].includes(m.fileType)) {
-        m.fileUrl = await getPrivateUrl(m.fileUrl);
+        try {
+          msgDto.fileUrl = await getPrivateUrl(m.fileUrl);
+        } catch (s3Err) {
+          console.error(`[S3 Error] Failed to fetch URL for ${m._id}:`, s3Err.message);
+        }
       }
-      return m;
+      
+      return msgDto;
     }));
 
     res.json({ success: true, messages: finalMessages });
