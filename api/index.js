@@ -1175,8 +1175,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     if (!userId) {
       return res.status(401).json({ success: false, message: "User identity not found in token" });
     }
-
-    // --- PARSE AND SAFE-GUARD PHONE SUB-OBJECT ---
     let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
     
     if (phone) {

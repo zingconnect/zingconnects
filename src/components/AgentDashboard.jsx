@@ -1816,8 +1816,6 @@ useEffect(() => {
 
 useEffect(() => {
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
-
-  // Update the refreshUserList function inside your useEffect
 const refreshUserList = async () => {
   try {
     const res = await secureFetch('/api/agents/my-users', token, { method: 'GET' });
