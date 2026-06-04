@@ -1810,6 +1810,7 @@ const handleStartCall = async () => {
     handleEndCall();
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!newMessage.trim() || !agent?._id) return;

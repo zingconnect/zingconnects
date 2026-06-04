@@ -1101,8 +1101,8 @@ app.get('/api/users/my-session', authenticateToken, async (req, res) => {
 
     // 3. Single User retrieval (Optimize query to prevent slow population)
     const user = await User.findById(userId)
-      .select('email isProfileComplete lastActive connectedAgents')
-      .populate('connectedAgents', 'firstName lastName photoUrl occupation program bio slug lastActive gender dob');
+      .select('email isProfileComplete lastActive connectedAgents publicKeyJwk')
+      .populate('connectedAgents', 'firstName lastName photoUrl occupation program bio slug lastActive gender dob publicKeyJwk');
 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
@@ -1139,11 +1139,22 @@ app.get('/api/users/my-session', authenticateToken, async (req, res) => {
                        `https://ui-avatars.com/api/?name=${activeAgent.firstName}+${activeAgent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-    res.json({
-      success: true,
-      user: { id: user._id, email: user.email, isProfileComplete: user.isProfileComplete },
-      agent: activeAgent ? { ...activeAgent.toObject(), photoUrl: signedPhotoUrl, status: isOnline ? 'online' : 'offline', lastSeenText: lastSeenDisplay } : null
-    });
+   res.json({
+  success: true,
+  user: { 
+    id: user._id, 
+    email: user.email, 
+    isProfileComplete: user.isProfileComplete,
+    publicKeyJwk: user.publicKeyJwk // 👈 ADDED
+  },
+  agent: activeAgent ? { 
+    ...activeAgent.toObject(), 
+    photoUrl: signedPhotoUrl, 
+    status: isOnline ? 'online' : 'offline', 
+    lastSeenText: lastSeenDisplay,
+    publicKeyJwk: activeAgent.publicKeyJwk // 👈 ADDED
+  } : null
+});
 
   } catch (err) {
     console.error("CRITICAL SESSION ERROR:", err);
@@ -1222,7 +1233,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       };
-
       await s3Client.send(new PutObjectCommand(uploadParams));
       updateData.photoUrl = fileKey; 
       
@@ -2100,6 +2110,12 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     if (!['Agent', 'User'].includes(sanitizedModel)) {
       return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
     }
+if (isEncrypted && (!iv || typeof iv !== 'string')) {
+  return res.status(400).json({ 
+    success: false, 
+    message: "Security violation: IV required for encrypted payloads." 
+  });
+}
 
     // Save crypto parameters safely inside MongoDB
     const newMessage = new Message({

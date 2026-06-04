@@ -59,6 +59,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // 2. SEND TEXT + PUSH & EMAIL NOTIFICATIONS (E2EE UPGRADED)
 router.post('/send', authenticateToken, async (req, res, next) => {
   try {
@@ -72,6 +73,14 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid payload: Text or Recipient missing" });
     }
 
+    // 🔒 SECURITY VIOLATION CHECK: Ensure IV exists if message claims to be encrypted
+    if (isEncrypted && (!iv || typeof iv !== 'string')) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Security violation: IV is required for encrypted messages." 
+      });
+    }
+    
     // Determine target roles dynamically
     let senderDoc = await Agent.findById(myId) || await User.findById(myId);
     if (!senderDoc) {
