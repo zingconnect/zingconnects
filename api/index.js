@@ -794,6 +794,7 @@ app.get('/api/agents/profile', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // ==========================================
 // 🛡️ HARDENED ROUTE 2: GET /api/agents/profile/me
 // ==========================================
@@ -1318,6 +1319,7 @@ app.get('/api/agents/:slug', async (req, res, next) => {
     next(err);
   }
 });
+
 // 🛡️ SECURITY FIX 1: Add 'next' parameter to leverage the central interceptor
 app.put('/api/agents/update-profile', authenticateToken, async (req, res, next) => {
   try {
@@ -1673,6 +1675,7 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ROUTE 1: POST /api/subscriptions/verify
 // =========================================================================

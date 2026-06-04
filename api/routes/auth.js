@@ -34,89 +34,131 @@ const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
 
-export const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) return res.status(401).json({ message: "Access Denied" });
+// 1. DYNAMIC TOKEN AUTHENTICATION MIDDLEWARE
+export const authenticateToken = async (req, res, next) => {
+  console.log("DEBUG AUTH - Headers:", req.headers.authorization);
+  console.log("DEBUG AUTH - Cookies:", req.cookies, req.signedCookies);
 
-  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-    if (err) return res.status(403).json({ message: "Invalid Token" });
-    
-    req.user = decoded; 
+  // Extract from incoming Authorization header string OR fall back to HTTP-only signed cookie configurations
+  const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
+
+  if (!token) {
+    console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
+    return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
+  }
+
+  try {
+    // Structural conversion to async/await evaluation syntax removes nested block execution scopes
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    try {
-      if (decoded.role === 'agent') {
-        const AgentModel = mongoose.models.Agent || mongoose.model('Agent');         
-        const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-        if (agent && agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-          return res.status(401).json({ success: false, message: "Session Mismatch", forceLogout: true });
-        }
-                if (agent) {
-          await AgentModel.findByIdAndUpdate(req.user.id, {
-            $set: { lastActive: new Date() }
-          });
-        }
+    // 🛡️ SECURITY FIX: Agent Session Isolation & Dual Login Verification Logic
+    if (decoded.role === 'agent') {
+      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
+      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+      
+      if (!agent) {
+        return res.status(404).json({ success: false, message: "Agent profile match not found." });
+      }
+
+      // Check for dual login: Forces termination if a newer login generated an updated cluster state signature
+      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+        return res.status(403).json({ 
+          success: false, 
+          message: "Dual login detected across separate instances.", 
+          reason: "dual_login",
+          forceLogout: true 
+        });
       }
       
-      if (decoded.role === 'admin') {
-        const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
-        await AdminModel.findByIdAndUpdate(req.user.id, { lastLogin: new Date() });
-      }
-
-      next();
-    } catch (dbErr) {
-      console.error("🔴 Auth DB Error:", dbErr.message);
-      // Non-blocking fallback: let the route fail or succeed rather than crashing the middleware container
-      next(); 
+      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
     }
-  });
-};
 
-export const isAdmin = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
+    // Admin Activity Logging Boundary
+    if (decoded.role === 'admin' || decoded.role === 'superadmin') {
+      const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
+      await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
+    }
+
     next();
-  } else {
-    res.status(403).json({ success: false, message: "Access denied: Admins only" });
+  } catch (err) {
+    console.error("DEBUG: Token verification failed:", err.message);
+    
+    // Distinguish between expired and structurally malformed signatures for precise client response triggers
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: "Token expired" });
+    }
+    
+    return res.status(403).json({ success: false, message: "Invalid or expired token structure." });
   }
 };
 
+// 2. TIER 1: ADMINISTRATIVE AUTHORIZATION FILTER (Allows Admin AND Superadmin)
+export const isAdmin = (req, res, next) => {
+  if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin')) {
+    return next();
+  } 
+  
+  return res.status(403).json({ 
+    success: false, 
+    message: "Access denied: Administrative privileges required." 
+  });
+};
+
+// =========================================================================
+// 🛡️ TIER 2: SUPERADMIN ONLY MIDDLEWARE (System Root Operations Only)
+// =========================================================================
+export const requireSuperAdmin = (req, res, next) => {
+  // STRICT VERIFICATION: Explicitly drops standard admins out from core cluster settings
+  if (req.user && req.user.role === 'superadmin') {
+    return next();
+  }
+
+  return res.status(403).json({ 
+    success: false, 
+    message: "Access Denied: Superadmin authorization required for this operation." 
+  });
+};
 
 // --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
-router.post('/register', upload.single('photo'), async (req, res) => {
+router.post('/register', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
+    const AgentModel = getAgentModel();
     
-const AgentModel = getAgentModel();
     const { 
       firstName, lastName, email, password, address, 
       occupation, program, bio, dob, gender, plan 
     } = req.body;
 
+    // 1. INPUT PRESENTATION CHECK
     if (!email) {
-        return res.status(400).json({ success: false, message: "Email is required." });
+      return res.status(400).json({ success: false, message: "Email required." });
     }
 
     const lowerEmail = email.toLowerCase().trim();
-
-    // 1. CHECK IF EMAIL EXISTS & VERIFICATION STATUS
     let existingAgent = await AgentModel.findOne({ email: lowerEmail });
 
-    if (existingAgent && existingAgent.isVerified) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email already registered. Please login." 
-      });
+    // 🛡️ SECURITY FIX: OTP Throttling (Defends against mail gateway flooding)
+    if (existingAgent?.otpExpires && existingAgent.otpExpires > Date.now()) {
+      return res.status(429).json({ success: false, message: "Verification code already sent. Please wait." });
     }
-    let hashedPassword = existingAgent ? existingAgent.password : "";
 
+    if (existingAgent?.isVerified) {
+      return res.status(400).json({ success: false, message: "Account already verified." });
+    }
+
+    // 2. CRYPTO PASSWORD HANDLING
+    let hashedPassword = existingAgent ? existingAgent.password : "";
     if (password && password.trim() !== "") {
-      const salt = await bcrypt.genSalt(10);
-      hashedPassword = await bcrypt.hash(password, salt);
+      hashedPassword = await bcrypt.hash(password, 10);
     } else if (!existingAgent) {
       return res.status(400).json({ success: false, message: "Password is required for registration." });
     }
+
+    // 3. SECURE UNIQUE SLUG GENERATION
     let finalSlug = existingAgent ? existingAgent.slug : "";
     if (!existingAgent) {
       const baseSlug = `${firstName || 'agent'}${lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
@@ -128,256 +170,247 @@ const AgentModel = getAgentModel();
       }
     }
 
-    // 4. PHOTO UPLOAD TO IDRIVE E2
+    // 🛡️ SECURITY FIX: Photo Validation & S3 Object Key Sanitization
     let savedPhotoPath = existingAgent ? existingAgent.photoUrl : ""; 
     if (req.file) {
-      try {
-        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s+/g, '-')}`;
-        const fileKey = `profiles/${fileName}`;
-        const bucketName = process.env.IDRIVE_BUCKET_NAME || "livechat";
-      await getS3Client().send(new PutObjectCommand({
-    Bucket: bucketName,
-    Key: fileKey,
-    Body: req.file.buffer,
-    ContentType: req.file.mimetype,
-}));
-        const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
-        savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
-      } catch (uploadError) {
-        console.error("Image Upload Failed:", uploadError);
+      // Enforce 2MB file size ceiling
+      if (req.file.size > 2 * 1024 * 1024) {
+        return res.status(400).json({ success: false, message: "Photo too large. Maximum size allowed is 2MB." });
       }
+
+      // Evict special character sequences out of original uploaded filename arrays
+      const cleanFileName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-');
+      const fileKey = `profiles/${Date.now()}-${cleanFileName}`;
+      const bucketName = process.env.IDRIVE_BUCKET_NAME;
+
+      await getS3Client().send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      }));
+
+      const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+      savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
     }
 
-    // 5. OTP GENERATION (6 Digits)
+    // 4. ATOMIC CODES GENERATION (Valid for 10 minutes)
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 Minutes
+    const otpExpiry = Date.now() + (10 * 60 * 1000);
 
-    // 6. SAVE OR UPDATE AGENT
+    // 5. DATA COALESCING PERSISTENCE
     if (existingAgent) {
-      // UPDATE existing unverified agent - only update fields if they are sent
-      if (firstName) existingAgent.firstName = firstName.trim();
-      if (lastName) existingAgent.lastName = lastName.trim();
-      
-      existingAgent.password = hashedPassword; // Either the new hash or the old one
-      existingAgent.address = address || existingAgent.address || "";
-      existingAgent.occupation = occupation || existingAgent.occupation || "";
-      existingAgent.program = program || existingAgent.program || "";
-      existingAgent.bio = bio || existingAgent.bio || "";
-      existingAgent.dob = dob || existingAgent.dob;
-      existingAgent.gender = gender || existingAgent.gender;
-      existingAgent.photoUrl = savedPhotoPath;
-      existingAgent.otp = otpCode;
-      existingAgent.otpExpires = otpExpiry;
-      existingAgent.plan = plan || existingAgent.plan || 'BASIC';
-      
+      Object.assign(existingAgent, { 
+        firstName: firstName ? firstName.trim() : existingAgent.firstName,
+        lastName: lastName ? lastName.trim() : existingAgent.lastName,
+        password: hashedPassword, 
+        otp: otpCode, 
+        otpExpires: otpExpiry, 
+        photoUrl: savedPhotoPath,
+        dob: dob || existingAgent.dob,
+        gender: gender || existingAgent.gender,
+        occupation: occupation !== undefined ? occupation : existingAgent.occupation,
+        address: address !== undefined ? address : existingAgent.address,
+        bio: bio !== undefined ? bio : existingAgent.bio,
+        program: program !== undefined ? program : existingAgent.program,
+        plan: plan || existingAgent.plan || "BASIC"
+      });
       await existingAgent.save();
-      console.log("Existing unverified agent updated with new OTP.");
     } else {
-      // CREATE brand new agent
-      const newAgent = new AgentModel({
-        firstName: firstName.trim(),
+      await AgentModel.create({
+        firstName: (firstName || "Agent").trim(),
         lastName: (lastName || "").trim(),
         email: lowerEmail,
         password: hashedPassword,
-        address: address || "",
-        occupation: occupation || "",
-        program: program || "",
-        bio: bio || "",
-        dob,
-        gender,
         slug: finalSlug,
         photoUrl: savedPhotoPath,
-        plan: plan || 'BASIC',
+        dob: dob || null,
+        gender: gender || "",
+        occupation: occupation || "",
+        address: address || "",
+        bio: bio || "",
+        program: program || "",
         role: 'agent',
         status: 'pending',
         isVerified: false,
+        isSubscribed: false,
+        plan: plan || "BASIC",
         otp: otpCode,
         otpExpires: otpExpiry
       });
-      await newAgent.save();
-      console.log("New agent created successfully.");
     }
 
-    // 7. EMAIL DELIVERY
+    // 6. EMAIL DELIVERY SYSTEM
     const logoPath = path.join(process.cwd(), 'public', 'logo.png');
-
     try {
-        await transporter.sendMail({
-            from: `"ZingConnect Security" <${process.env.EMAIL_USER}>`,
-            to: lowerEmail,
-            subject: "Your Verification Code",
-            attachments: [{
-                filename: 'logo.png',
-                path: logoPath,
-                cid: 'zinglogo'
-            }],
-            html: `
-              <!DOCTYPE html>
-              <html>
-              <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <style>
-                  @media only screen and (max-width: 600px) {
-                    .container { width: 100% !important; border-radius: 0 !important; }
-                    .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
-                  }
-                </style>
-              </head>
-              <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                  <tr>
-                    <td align="center" style="padding: 40px 10px;">
-                      <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                        <tr>
-                          <td align="center" style="padding: 30px 40px 10px 40px;">
-                            <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style="padding: 20px 40px 40px 40px; text-align: center;">
-                            <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
-                            <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
-                              Hello <strong>${firstName || 'Agent'}</strong>,<br>
-                              Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
-                            </p>
-                            <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
-                              ${otpCode}
-                            </div>
-                            <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
-                              This code is valid for <strong>10 minutes</strong>.<br>
-                              If you didn't request this, you can safely ignore this email.
-                            </p>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
-                            <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                              &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
-                            </p>
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                </table>
-              </body>
-              </html>
-            `
-        });
+      await transporter.sendMail({
+        from: `"ZingConnect Security" <${process.env.GMAIL_USER || process.env.EMAIL_USER}>`,
+        to: lowerEmail,
+        subject: "Your Verification Code",
+        attachments: [{
+          filename: 'logo.png',
+          path: logoPath,
+          cid: 'zinglogo'
+        }],
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              @media only screen and (max-width: 600px) {
+                .container { width: 100% !important; border-radius: 0 !important; }
+                .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+              }
+            </style>
+          </head>
+          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td align="center" style="padding: 40px 10px;">
+                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                    <tr>
+                      <td align="center" style="padding: 30px 40px 10px 40px;">
+                        <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                        <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                        <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                          Hello <strong>${firstName || 'Agent'}</strong>,<br>
+                          Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                        </p>
+                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
+                          ${otpCode}
+                        </div>
+                        <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                          This code is valid for <strong>10 minutes</strong>.<br>
+                          If you didn't request this, you can safely ignore this email.
+                        </p>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                          &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                        </p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </body>
+          </html>
+        `
+      });
     } catch (mailError) {
-        console.error("Email Delivery Failed:", mailError);
+      console.error("🔴 [Mailer Failure] Postponing email stack:", mailError.message);
     }
 
-    res.status(200).json({ 
-      success: true, 
-      message: "Registration initiated. Please check your email for the OTP." 
-    });
-    
+    return res.status(200).json({ success: true, message: "Verification code sent." });
+
   } catch (error) {
-    console.error("Registration Logic Error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || "An unexpected error occurred during registration." 
-    });
+    // 🛡️ SECURITY FIX: Route intercept traces out to secure error tracking engine instead of leaking system data
+    next(error);
   }
 });
 
 // --- 2. STAGE 2: VERIFY OTP ---
-router.post('/verify-otp', async (req, res) => {
-  const { email, otp } = req.body;
-
+router.post('/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
-    
-const AgentModel = getAgentModel();
-if (!AgentModel) throw new Error("Agent Model not initialized");
+    const AgentModel = getAgentModel();
+    const { email, otp } = req.body;
+
     if (!email || !otp) {
+      return res.status(400).json({ success: false, message: "Email and OTP are required." });
+    }
+
+    const lowerEmail = email.toLowerCase().trim();
+    const agent = await AgentModel.findOne({ email: lowerEmail });
+
+    // 🛡️ SECURITY FIX: Unified validation comparison logic 
+    // Prevents identity enumeration profiles by using a generic error response string
+    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
       return res.status(400).json({ 
         success: false, 
-        message: "Email and verification code are required." 
+        message: "Invalid or expired verification code." 
       });
     }
 
-  const agent = await AgentModel.findOne({ 
-      email: email.toLowerCase().trim(),
-      otp: otp,
-      otpExpires: { $gt: Date.now() }
-    });
-
-    if (!agent) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid or expired verification code. Please try again." 
-      });
-    }
-
-    // 4. Update agent status and clear OTP fields
+    // Clean verification status transitions
     agent.isVerified = true;
     agent.status = 'active';
-    agent.otp = undefined; 
+    agent.otp = undefined;
     agent.otpExpires = undefined;
-    
     await agent.save();
-
-    // 5. Check if JWT_SECRET exists to avoid signing errors
+    
     if (!process.env.JWT_SECRET) {
-        console.error("JWT_SECRET is missing in environment variables.");
-        throw new Error("Server configuration error.");
+      throw new Error("Security configuration error.");
     }
 
-    // 6. Generate access token
+    // Sign payload token allocations
     const token = jwt.sign(
-      { 
-        id: agent._id, 
-        slug: agent.slug, 
-        role: 'agent' 
-      }, 
-      process.env.JWT_SECRET, 
+      { id: agent._id, slug: agent.slug, role: 'agent' },
+      process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    // 7. Success Response
-    res.status(200).json({ 
-      success: true, 
-      token, 
+    return res.status(200).json({
+      success: true,
+      token: token,
       slug: agent.slug,
-      message: "Account verified successfully!" 
+      message: "Your profile is now live!"
     });
 
   } catch (err) {
-    console.error("OTP VERIFICATION CRASH:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Verification failed due to a server error.",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
+    // Forward traces safely via central app intercept middleware
+    next(err); 
   }
 });
-
-router.post('/login', async (req, res) => {
+router.post('/login', async (req, res, next) => {
   try {
-    // 🚀 CRITICAL FIX: Explicitly open the database connection tunnel first!
     await connectToDatabase();
+    
+    const { email, password, targetSlug } = req.body;
 
-    const AgentModel = getAgentModel();
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Email and password are required" });
+    // 1. Basic Validation
+    if (!email || typeof email !== 'string' || !password) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
+    const AgentModel = getAgentModel();
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
-    }).select('+password');
+    }).select('slug currentSessionId +password isVerified isSubscribed plan'); 
     
-    if (!agent) return res.status(401).json({ success: false, message: "Invalid credentials" });
-    
-    if (!agent.isVerified) return res.status(403).json({ success: false, message: "Please verify your email first" });
+    // 🛡️ SECURITY: Unified "Invalid credentials" response
+    if (!agent) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
 
+    // 2. Credential Verification
     const isMatch = await bcrypt.compare(password, agent.password);
-    if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
 
-    const newSessionId = crypto.randomUUID();
+    // 3. Authorization Gates
+    if (!agent.isVerified) {
+      return res.status(403).json({ success: false, message: "Please verify your email first" });
+    }
+
+    if (agent.slug !== targetSlug) {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Unauthorized: Access denied for this URL." 
+      });
+    }
+
+    // 4. Secure Session Management
+    const newSessionId = crypto.randomBytes(16).toString('hex');
     agent.currentSessionId = newSessionId;
     await agent.save();
 
@@ -386,15 +419,25 @@ router.post('/login', async (req, res) => {
         id: agent._id, 
         slug: agent.slug, 
         role: 'agent',
-        sessionId: newSessionId 
+        sessionId: newSessionId
       }, 
       process.env.JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
-    return res.json({ 
+    // 5. Hardened Cookie Injection
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true, 
+      sameSite: 'None',
+      signed: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
+
+    return res.status(200).json({ 
       success: true, 
-      token, 
+      token: token,
       slug: agent.slug,
       role: 'agent',
       isSubscribed: !!agent.isSubscribed, 
@@ -402,124 +445,115 @@ router.post('/login', async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Login Error:", err);
-    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+    next(err);
   }
 });
-
-router.get('/profile', authenticateToken, async (req, res) => {
+router.get('/profile', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     
-    // Ensure the model is retrieved correctly using your helper
     const AgentModel = getAgentModel();
-if (!AgentModel) throw new Error("Agent Model not initialized");
+    if (!AgentModel) throw new Error("Agent Model not initialized");
 
-let agent = await AgentModel.findByIdAndUpdate(
+    // 🛡️ SECURITY FIX: Explicit selection of returned fields
+    const agent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
-      { lastActive: new Date() }, 
-      { returnDocument: 'after' } 
-    ).select('-password');
+      { $set: { lastActive: new Date() } }, 
+      { new: true } 
+    ).select('firstName lastName email occupation bio photoUrl slug plan isSubscribed expiryDate voiceId voicePackageActive lastActive');
     
     if (!agent) {
-      console.error(`Agent ID ${req.user.id} not found.`);
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
     // 2. Auto-lock logic for expired subscriptions
     const now = new Date();
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
-      console.log(`Auto-locking: Plan expired for ${agent.email}`);
       agent.isSubscribed = false;
       await agent.save();
     }
 
-    // 3. Send clean JSON response
-    res.json(agent);
+    // 🛡️ SECURITY FIX: Clean presentation wrapper mapping.
+    // This ensures your frontend receives a consistent object structure.
+    return res.status(200).json({
+      success: true,
+      agent: {
+        id: agent._id,
+        firstName: agent.firstName || "",
+        lastName: agent.lastName || "",
+        email: agent.email || "",
+        occupation: agent.occupation || "",
+        bio: agent.bio || "",
+        slug: agent.slug || "",
+        isSubscribed: !!agent.isSubscribed
+      }
+    });
 
   } catch (err) {
-    // This detailed log will show up in your Vercel/Terminal logs
-    console.error("DETAILED PROFILE ERROR:", err);
-    
-    // Returning JSON here prevents the "Unexpected token A" error on the frontend
-    res.status(500).json({ 
-      success: false, 
-      message: "Profile fetch error", 
-      error: err.message 
-    });
+    // 🛡️ SECURITY FIX: Pass to error-handling middleware
+    next(err);
   }
 });
-
-router.get('/profile/me', authenticateToken, async (req, res) => {
+router.get('/profile/me', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-
-    // 1. FETCH AGENT FIRST (Do not update yet)
-    const agent = await AgentModel.findById(req.user.id);
+    
+    // 1. Single query touch: Fetch and Update lastActive
+    const agent = await AgentModel.findByIdAndUpdate(
+      req.user.id,
+      { $set: { lastActive: new Date() } },
+      { new: true }
+    ).select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive lastActive createdAt');
 
     if (!agent) {
-      return res.status(404).json({
-        success: false,
-        message: "Agent not found"
-      });
+      return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // --- DUAL LOGIN SECURITY GATE ---
+    // 2. Dual Login Security Check
     if (req.user.sessionId && agent.currentSessionId && req.user.sessionId !== agent.currentSessionId) {
       return res.status(403).json({ 
         success: false, 
-        message: "Session expired: Logged in from another device", 
+        message: "Dual login detected.",
         reason: "dual_login" 
       });
     }
 
-    // 2. SAFE UPDATE: lastActive status
-    agent.lastActive = new Date();
-    
-    // 3. CHECK EXPIRATIONS
+    // 3. Expiration Logic
     const now = new Date();
+    let mutationNeeded = false;
+
     if (agent.isSubscribed && agent.expiryDate && now > new Date(agent.expiryDate)) {
       agent.isSubscribed = false;
+      mutationNeeded = true;
     }
-
     if (agent.voicePackageActive && agent.voicePackageExpiry && now > new Date(agent.voicePackageExpiry)) {
       agent.voicePackageActive = false;
+      mutationNeeded = true;
     }
+    
+    if (mutationNeeded) await agent.save();
 
-    await agent.save();
-
-    // 4. HANDLE PHOTO SIGNING
-      let finalPhotoUrl = await getPrivateUrl(agent.photoUrl);
-    if (agent.photoUrl && agent.photoUrl.includes('idrivee2.com')) {
+    // 4. Photo Signing
+    let signedPhotoUrl = null;
+    if (agent.photoUrl) {
       try {
-        const urlParts = agent.photoUrl.split('/');
-        const profileIndex = urlParts.indexOf('profiles');
-        
-        if (profileIndex !== -1 && typeof GetObjectCommand !== 'undefined' && typeof s3Client !== 'undefined') {
-          const fileKey = urlParts.slice(profileIndex).join('/');
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: decodeURIComponent(fileKey),
-          });
-          finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-        }
-      } catch (signErr) {
-        console.error("Image Signing Failed:", signErr.message);
-        finalPhotoUrl = agent.photoUrl; 
+        // Use your centralized signing helper
+        signedPhotoUrl = await getPrivateUrl(agent.photoUrl);
+      } catch (s3Error) {
+        console.error("Non-blocking S3 URL signing failure:", s3Error.message);
+        signedPhotoUrl = null; 
       }
     }
 
-    if (!finalPhotoUrl) {
-      finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
+    if (!signedPhotoUrl) {
+      signedPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-    // 5. CALCULATE ONLINE STATUS
-    const lastActiveDate = agent.lastActive || agent.createdAt;
-    const isOnline = (now - new Date(lastActiveDate)) < 120000;
+    // 5. Response
+    const isOnline = (now - new Date(agent.lastActive)) < 120000;
 
-    // 6. Clean JSON Response
-    res.json({
+    return res.status(200).json({
       success: true,
       agent: {
         _id: agent._id,
@@ -529,305 +563,185 @@ router.get('/profile/me', authenticateToken, async (req, res) => {
         occupation: agent.occupation || "",
         program: agent.program || "",
         bio: agent.bio || "",
-        gender: agent.gender || "", 
-        dob: agent.dob || "",
         address: agent.address || "",
-        photoUrl: finalPhotoUrl,
+        photoUrl: signedPhotoUrl,
         slug: agent.slug || "",
-        
         plan: agent.plan || "BASIC",
-        isSubscribed: !!agent.isSubscribed, 
-        subscriptionDate: agent.subscriptionDate || null,
+        isSubscribed: !!agent.isSubscribed,
         subscriptionAmount: agent.subscriptionAmount || 0,
+        subscriptionDate: agent.subscriptionDate || null,
         expiryDate: agent.expiryDate || null,
-        paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" },
-
-        // --- UPDATED VOICE IDENTITY FIELDS ---
-        // We use the stored voiceId (which could be null for Natural) 
-        // and include the list of voices they have actually paid for.
-        voiceId: agent.voiceId, 
-        unlockedVoiceIds: agent.unlockedVoiceIds || [], 
-        voiceDisplayName: agent.voiceDisplayName || "",
-        voicePackageActive: !!agent.voicePackageActive, 
-        voicePackageExpiry: agent.voicePackageExpiry || null,
-
+        voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
+        voicePackageActive: !!agent.voicePackageActive,
         status: isOnline ? 'online' : 'offline',
-        lastActive: agent.lastActive
+        lastActive: agent.lastActive,
+        paymentDetails: {
+          amountNgn: agent.paymentDetails?.amountNgn || agent.subscriptionAmount || 0,
+          currency: agent.paymentDetails?.currency || "NGN"
+        }
       }
     });
 
   } catch (err) {
-    console.error("Profile Fetch Error:", err.stack);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error",
-      error: err.message 
-    });
+    next(err);
   }
 });
-// This is the route the client/user calls to see Lawrence's profile
-router.get('/agent-public-profile/:id', async (req, res) => {
+
+router.post('/heartbeat', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    
-    const agent = await AgentModel.findById(req.params.id).select('-password').lean();
 
+    // 1. Fetch to verify Dual Login
+    const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
-    const now = new Date();
-    const lastActive = agent.lastActive || agent.createdAt;    
-    const isOnline = lastActive && (now - new Date(lastActive)) < (2 * 60 * 1000);
 
-    // --- PHOTO SIGNING (Same logic as your /me route) ---
-    let finalPhotoUrl = agent.photoUrl;
-    // ... insert your existing S3 signing logic here ...
-
-    res.json({
-      success: true,
-      agent: {
-        ...agent,
-        photoUrl: finalPhotoUrl,
-        status: isOnline ? 'online' : 'offline', 
-        lastSeenText: isOnline ? 'Online' : 'Offline'
-      }
-    });
-
-  } catch (err) {
-    console.error("Public Profile Fetch Error:", err);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
-});
-
-// --- GET PUBLIC AGENT PROFILE (FOR USER DASHBOARD) ---
-router.get('/agent-public-profile/:id', async (req, res) => {
-  try {
-    await connectToDatabase();
-    const AgentModel = getAgentModel();
-    
-    // 1. Fetch the agent by ID
-    const agent = await AgentModel.findById(req.params.id).select('-password').lean();
-
-    if (!agent) {
-      return res.status(404).json({ 
+    if (req.user.sessionId && agent.currentSessionId && req.user.sessionId !== agent.currentSessionId) {
+      return res.status(403).json({ 
         success: false, 
-        message: "Agent not found" 
+        message: "Session expired due to dual login",
+        reason: "dual_login"
       });
     }
-    const now = new Date();
-    const lastActive = agent.lastActive || agent.createdAt;
-    const isOnline = lastActive && (now - new Date(lastActive)) < (2 * 60 * 1000);
-    let finalPhotoUrl = agent.photoUrl;
-        if (agent.photoUrl && (agent.photoUrl.includes('idrivee2.com') || agent.photoUrl.includes('s3.'))) {
-      try {
-        const urlParts = agent.photoUrl.split('/');
-        const profileIndex = urlParts.indexOf('profiles');
-        
-        if (profileIndex !== -1) {
-          const fileKey = urlParts.slice(profileIndex).join('/');
-          
-          if (s3Client) {
-            const command = new GetObjectCommand({
-              Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-              Key: decodeURIComponent(fileKey),
-            });
-            
-            finalPhotoUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-          }
-        }
-      } catch (signErr) {
-        console.error(`Image Signing Failed for ${agent.firstName}:`, signErr.message);
-        // Fallback is already the original photoUrl
-      }
-    }
 
-    // If no photo at all, use a nice UI Avatar
-    if (!finalPhotoUrl) {
-      finalPhotoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=random&color=fff&size=128`;
-    }
-
-    // 4. GENERATE LAST SEEN TEXT
-    let lastSeenDisplay = "Offline";
-    if (isOnline) {
-      lastSeenDisplay = "Online";
-    } else if (lastActive) {
-      const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
-      if (diffMins < 60) {
-        lastSeenDisplay = `${diffMins}m ago`;
-      } else if (diffMins < 1440) {
-        lastSeenDisplay = `${Math.floor(diffMins / 60)}h ago`;
-      } else {
-        lastSeenDisplay = new Date(lastActive).toLocaleDateString();
-      }
-    }
-
-    // 5. SEND RESPONSE
-    res.json({
-      success: true,
-      agent: {
-        ...agent,
-        photoUrl: finalPhotoUrl,
-        status: isOnline ? 'online' : 'offline', 
-        lastSeenText: lastSeenDisplay
-      }
-    });
-
-  } catch (err) {
-    console.error("Public Profile Fetch Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error while fetching agent status" 
-    });
-  }
-});
-
-// This route is specifically for the setInterval pulse from the Agent Dashboard
-router.post('/heartbeat', authenticateToken, async (req, res) => {
-  try {
-    await connectToDatabase();
-    const AgentModel = getAgentModel();
+    // 2. Atomic Update
     const updatedAgent = await AgentModel.findByIdAndUpdate(
       req.user.id, 
-      { lastActive: new Date() }, 
-      { new: true, select: 'lastActive' } // Only return what we need
+      { $set: { lastActive: new Date() } }, 
+      { new: true, select: 'lastActive' } 
     );
 
     if (!updatedAgent) {
-      return res.status(404).json({ success: false, message: "Agent not found" });
+      return res.status(404).json({ success: false, message: "Agent status mapping failed." });
     }
+
     res.json({ 
       success: true, 
-      lastActive: updatedAgent.lastActive 
+      lastActive: updatedAgent.lastActive,
+      status: 'online' 
     });
 
   } catch (err) {
-    console.error("HEARTBEAT ERROR:", err);
-    res.status(500).json({ success: false });
+    next(err);
   }
 });
-// --- 4. UPDATE AGENT PLAN ---
-router.post('/update-plan', authenticateToken, async (req, res) => {
+router.post('/verify', authenticateToken, async (req, res, next) => {
   try {
-    const AgentModel = getAgentModel();
-    const { plan } = req.body;
-    const updatedAgent = await AgentModel.findByIdAndUpdate(
-      req.user.id,
-      { plan: plan },
-      { new: true }
-    ).select('-password');
-    res.json({ success: true, plan: updatedAgent.plan });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Plan update failed" });
-  }
-});
-// --- 5. VERIFY SUBSCRIPTION (FIXED RATE LOGIC + Expiry Calculation) ---
-router.post('/verify', authenticateToken, async (req, res) => {
-  const { transaction_id, plan, usdAmount } = req.body;
-  const agentId = req.user.id;
-  const AgentModel = getAgentModel();
-
-  try {
-    const currentRate = Number(process.env.USD_TO_NGN_RATE) || 1550;
-
-    // 2. Verify with Flutterwave
-    const response = await flw.Transaction.verify({ id: transaction_id });
-
-    if (response.data.status === "successful") {
-      const amountPaid = response.data.amount;
-      const expectedNaira = usdAmount * currentRate;
-
-      // Allow 2% fluctuation margin (Safety buffer)
-      if (amountPaid >= (expectedNaira * 0.98)) {
-        
-        // 3. CALCULATE EXPIRY DATE
-        const now = new Date();
-        let expiry = new Date();
-
-        if (plan === 'BASIC') {
-          expiry.setMonth(now.getMonth() + 1); // 1 Month
-        } else if (plan === 'GROWTH') {
-          expiry.setMonth(now.getMonth() + 6); // 6 Months
-        } else if (plan === 'PROFESSIONAL') {
-          expiry.setFullYear(now.getFullYear() + 1); // 1 Year
-        }
-
-        const updatedAgent = await AgentModel.findByIdAndUpdate(
-          agentId, 
-          {
-            $set: {
-              isSubscribed: true,
-              plan: plan,
-              subscriptionDate: now,
-              subscriptionAmount: usdAmount, // Store the USD cost
-              expiryDate: expiry,
-              expiryNotificationSent: false, // Reset warning tracker for new sub
-              lastTransactionId: transaction_id,
-              // Updated to match your schema's paymentDetails field
-              paymentDetails: {
-                amountNgn: amountPaid,
-                rateUsed: currentRate,
-                currency: "NGN"
-              }
-            }
-          }, 
-          { new: true }
-        ).select('-password');
-
-        console.log(`[FIXED RATE: ${currentRate}] Subscription ACTIVATED for: ${updatedAgent.email}`);
-
-        return res.status(200).json({ 
-          success: true, 
-          message: "Subscription activated. Secure node online.", 
-          agent: updatedAgent 
-        });
-      } else {
-        return res.status(400).json({ 
-          success: false, 
-          message: `Insufficient amount. Expected approx ₦${expectedNaira.toLocaleString()}` 
-        });
-      }
-    } else {
-      return res.status(400).json({ success: false, message: "Transaction failed at gateway." });
-    }
-  } catch (error) {
-    console.error("Verification Error:", error);
-    res.status(500).json({ success: false, error: "System verification failed" });
-  }
-});
-
-// --- 6. UPDATE AGENT PROFILE & SECURITY (STABILIZED) ---
-router.put('/update-profile', authenticateToken, async (req, res) => {
-  try {
-    const AgentModel = getAgentModel();
-
-    // 1. Find the Agent Document with password for comparison
-    // We select('+password') because the schema usually hides it by default
-    const agent = await AgentModel.findById(req.user.id).select('+password');
+    await connectToDatabase();
+    const { transaction_id, plan } = req.body;
     
+    if (!transaction_id || !plan) {
+      return res.status(400).json({ success: false, message: "Transaction ID and target plan choice are required" });
+    }
+
+    const planPricesInNGN = {
+      'BASIC': 8500,
+      'GROWTH': 51000,
+      'PROFESSIONAL': 102000
+    };
+
+    const targetPlan = String(plan).toUpperCase().trim();
+    if (!planPricesInNGN[targetPlan]) {
+      return res.status(400).json({ success: false, message: "Invalid tier classification choice." });
+    }
+    const expectedNairaPrice = planPricesInNGN[targetPlan];
+
+    // 1. Verify with Flutterwave
+    const response = await flw.Transaction.verify({ id: transaction_id });
+    const data = response.data;
+
+    if (data.status === "successful" && data.currency === "NGN" && Number(data.amount) >= expectedNairaPrice) {
+      const AgentModel = getAgentModel();
+      const agent = await AgentModel.findById(req.user.id);
+
+      if (!agent) {
+        return res.status(404).json({ success: false, message: "Agent profile mapping context missing." });
+      }
+
+      // 2. Calculate Expiry with Stacking Logic
+      const now = new Date();
+      let baseDate = (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate) > now) 
+        ? new Date(agent.expiryDate) 
+        : new Date();
+
+      let calculatedMonths = 1;
+      if (targetPlan === 'BASIC') {
+        baseDate.setMonth(baseDate.getMonth() + 1);
+        calculatedMonths = 1;
+      } else if (targetPlan === 'GROWTH') {
+        baseDate.setMonth(baseDate.getMonth() + 6);
+        calculatedMonths = 6;
+      } else if (targetPlan === 'PROFESSIONAL') {
+        baseDate.setFullYear(baseDate.getFullYear() + 1);
+        calculatedMonths = 12;
+      }
+
+      // 3. Persist Updates
+      const finalNumericAmount = Number(data.amount);
+      
+      agent.isSubscribed = true;
+      agent.plan = targetPlan;
+      agent.status = 'active';
+      if (!agent.subscriptionDate) agent.subscriptionDate = now;
+      agent.expiryDate = baseDate;
+      agent.expiryNotificationSent = false;
+      agent.lastTransactionId = String(transaction_id);
+      agent.subscriptionAmount = finalNumericAmount;
+      agent.paymentDetails = {
+        amountNgn: finalNumericAmount,
+        currency: "NGN",
+        verifiedAt: now
+      };
+
+      // Ensure billing sync and save
+      syncBilling(agent, finalNumericAmount);
+      await agent.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Payment verified successfully. Secure node activated.",
+        agent: {
+          id: agent._id,
+          email: agent.email,
+          plan: agent.plan,
+          isSubscribed: !!agent.isSubscribed,
+          expiryDate: agent.expiryDate,
+          subscriptionAmount: agent.subscriptionAmount,
+          paymentDetails: agent.paymentDetails
+        }
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Payment verification failed. Paid amount does not match plan price index."
+      });
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/update-profile', authenticateToken, async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    const AgentModel = getAgentModel();
+
+    // 1. Fetch with required sensitive fields for validation
+    const agent = await AgentModel.findById(req.user.id).select('+password +unlockedVoiceIds');
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent account not found" });
     }
 
-    // 2. Extract Data from Body
     const { 
-      firstName, 
-      lastName, 
-      occupation, 
-      program, 
-      bio, 
-      gender, 
-      dob, 
-      address, 
-      voiceId, 
-      voiceDisplayName, 
-      voiceSettings,
-      oldPassword, 
-      newPassword 
+      firstName, lastName, occupation, program, bio, address, 
+      gender, dob, voiceId, voiceDisplayName, voiceSettings,
+      oldPassword, newPassword 
     } = req.body;
 
-    // 3. Handle Password Security Update
-    if (newPassword && newPassword.trim() !== "") {
+    // 2. Handle Password Updates
+    if (newPassword && String(newPassword).trim() !== "") {
       if (!oldPassword) {
         return res.status(400).json({ 
           success: false, 
@@ -844,343 +758,337 @@ router.put('/update-profile', authenticateToken, async (req, res) => {
       }
 
       const salt = await bcrypt.genSalt(10);
-      agent.password = await bcrypt.hash(newPassword, salt);
+      agent.password = await bcrypt.hash(String(newPassword), salt);
     }
 
-    // 4. Update Profile Information (General)
-    agent.firstName = firstName || agent.firstName;
-    agent.lastName = lastName || agent.lastName;
-    agent.occupation = occupation || agent.occupation;
-    agent.program = program || agent.program;
-    agent.bio = bio || agent.bio;
-    agent.gender = gender || agent.gender;
-    agent.dob = dob || agent.dob;
-    agent.address = address || agent.address;
+    // 3. Strict Explicit Mutate Assignment (Protects against payload injection)
+    if (firstName !== undefined) agent.firstName = String(firstName).trim();
+    if (lastName !== undefined) agent.lastName = String(lastName).trim();
+    if (occupation !== undefined) agent.occupation = String(occupation).trim();
+    if (program !== undefined) agent.program = String(program).trim();
+    if (bio !== undefined) agent.bio = String(bio).trim();
+    if (address !== undefined) agent.address = String(address).trim();
+    if (gender !== undefined) agent.gender = String(gender).toLowerCase().trim();
+    if (dob !== undefined) agent.dob = dob;
+
+    // 4. Voice Licensing Access Control Layer
+    if (voiceId !== undefined) {
+      if (voiceId === null) {
+        agent.voiceId = null;
+      } else {
+        const hasLicense = agent.unlockedVoiceIds && agent.unlockedVoiceIds.includes(String(voiceId));
+        if (hasLicense) {
+          agent.voiceId = String(voiceId);
+        } else {
+          return res.status(403).json({ 
+            success: false, 
+            message: "Unauthorized: Active license configuration required for this voice identity." 
+          });
+        }
+      }
+    }
+
+    if (voiceDisplayName !== undefined) {
+      agent.voiceDisplayName = String(voiceDisplayName).trim();
+    }
     
-    // 5. Update Voice Settings
-    if (voiceId !== undefined) agent.voiceId = voiceId;
-    if (voiceDisplayName !== undefined) agent.voiceDisplayName = voiceDisplayName;
-    if (voiceSettings !== undefined) {
-      agent.voiceSettings = { 
-        ...agent.voiceSettings, 
-        ...voiceSettings 
-      };
+    if (voiceSettings && typeof voiceSettings === 'object') {
+      agent.voiceSettings = { ...agent.voiceSettings, ...voiceSettings };
     }
 
-    // Save changes to MongoDB
     await agent.save();
 
-    console.log(`[SECURITY] Profile & Voice synchronized for: ${agent.email}`);
-
-    // 6. PREPARE THE FULL RESPONSE
-    // This ensures your React frontend doesn't lose the NGN amount or dates
-    const updatedAgent = agent.toObject();
-    delete updatedAgent.password;
-
-    res.json({
+    // 5. Strict Response Whitelisting DTO
+    return res.status(200).json({
       success: true,
       message: "Identity, Voice, and Security synchronized successfully.",
       agent: {
-        ...updatedAgent,
-        // Explicitly ensuring these reach the frontend cards
+        id: agent._id,
+        firstName: agent.firstName,
+        lastName: agent.lastName,
+        email: agent.email,
+        occupation: agent.occupation,
+        program: agent.program,
+        bio: agent.bio,
+        address: agent.address,
+        gender: agent.gender,
+        dob: agent.dob,
         plan: agent.plan || "BASIC",
         isSubscribed: !!agent.isSubscribed,
-        subscriptionDate: agent.subscriptionDate || null, // For Activation Date card
-        expiryDate: agent.expiryDate || null,
-        // For the ₦ Amount display
-        paymentDetails: agent.paymentDetails || { amountNgn: 0, currency: "NGN" }
+        voiceId: agent.voiceId,
+        voiceDisplayName: agent.voiceDisplayName,
+        voiceSettings: agent.voiceSettings || {}
       }
     });
 
   } catch (err) {
-    console.error("Update Profile Error:", err.stack);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error during profile sync",
-      error: err.message 
-    });
+    next(err);
   }
 });
 
-router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res) => {
+router.put('/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
     
-    // Safety check for user identity
     const userId = req.user?.id || req.user?._id;
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized: No user ID found" });
+      return res.status(401).json({ success: false, message: "User identity not found in token" });
     }
 
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
-    
+
+    // 1. Safe-Guard Phone Object
+    let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
+    if (phone) {
+      try {
+        const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
+        parsedPhone = {
+          raw: parsed.raw ? String(parsed.raw).trim() : "",
+          formatted: parsed.formatted ? String(parsed.formatted).trim() : "",
+          countryCode: parsed.countryCode ? String(parsed.countryCode).toLowerCase().trim() : "",
+          dialCode: parsed.dialCode ? String(parsed.dialCode).trim() : ""
+        };
+      } catch (e) {
+        parsedPhone.raw = String(phone).trim();
+      }
+    }
+
     const updateData = {
-      firstName: firstName?.trim(),
-      lastName: lastName?.trim(),
-      phone: phone?.toString().trim(),
+      firstName: firstName ? String(firstName).trim() : "",
+      lastName: lastName ? String(lastName).trim() : "",
+      phone: parsedPhone,
       dob,
-      gender: gender ? gender.toLowerCase().trim() : "", 
-      city: city?.trim(),
-      state: state?.trim(),
+      gender: gender && typeof gender === 'string' ? gender.toLowerCase().trim() : undefined,
+      city: city ? String(city).trim() : "",
+      state: state ? String(state).trim() : "",
       isProfileComplete: true,
       isVerified: true
     };
 
+    // 2. Hardened File Handling
     if (req.file) {
-      const s3Client = getS3Client(); 
-      const sanitizedName = req.file.originalname.replace(/\s+/g, '_');
-      const fileKey = `users/${userId}-${Date.now()}-${sanitizedName}`;
+      const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      const allowedExtensions = /.(jpg|jpeg|png|webp)$/i;
+
+      if (!allowedMimeTypes.includes(req.file.mimetype) || !allowedExtensions.test(req.file.originalname)) {
+        return res.status(400).json({ success: false, message: "Security Violation: Unsupported file type." });
+      }
+
+      const s3Client = getS3Client();
+      const cryptoKey = crypto.randomBytes(16).toString('hex');
+      const fileExtension = req.file.originalname.split('.').pop();
+      const fileKey = `users/${userId}-${cryptoKey}.${fileExtension}`;
       
-      const uploadParams = {
+      await s3Client.send(new PutObjectCommand({
         Bucket: process.env.IDRIVE_BUCKET_NAME,
         Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
-      };
-
-      await s3Client.send(new PutObjectCommand(uploadParams));      
-      updateData.photoUrl = fileKey; 
+      }));
+      updateData.photoUrl = fileKey;
     }
 
+    // 3. Atomic Update with Field Projection
     const updatedUser = await User.findByIdAndUpdate(
       userId, 
-      updateData,
+      { $set: updateData },
       { new: true, runValidators: true }
-    );
+    ).select('firstName lastName isProfileComplete photoUrl publicKeyJwk');
 
     if (!updatedUser) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res.status(404).json({ success: false, message: "User account not found" });
     }
 
-    res.json({ success: true, user: updatedUser });
+    // 4. Return Whitelisted Response
+    return res.json({ 
+      success: true, 
+      message: "Onboarding complete", 
+      user: {
+        id: updatedUser._id,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
+        isProfileComplete: updatedUser.isProfileComplete,
+        photoUrl: updatedUser.photoUrl,
+        publicKeyJwk: updatedUser.publicKeyJwk // 🔒 Persistence preserved
+      }
+    });
 
   } catch (err) {
-    console.error("ONBOARDING ERROR:", err.message);
-    // Return detailed error only if it's a validation error, otherwise generic
-    res.status(500).json({ 
-        success: false, 
-        message: err.name === 'ValidationError' ? err.message : "Internal server error during onboarding" 
-    });
+    next(err);
   }
 });
-
-// --- GET AGENT'S CONNECTED USERS (ROUTER VERSION) ---
-router.get('/my-users', authenticateToken, async (req, res) => {
-  // Clear cache to ensure real-time status updates
+router.get('/my-users', authenticateToken, async (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
 
   try {
-    // 🚀 1. Enforce active database connection tunnel instantly
     await connectToDatabase();
-    
-    // Get agent ID from the token (provided by authenticateToken middleware)
     const agentId = req.user?.id || req.user?._id;
 
     if (!agentId) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized: Missing agent session metadata." 
-      });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    // 🚀 2. SERVERLESS SAFEGUARD: Dynamically resolve User model to prevent context loss
     const ActiveUserModel = mongoose.models.User || User;
 
-    // Fetch users linked to this agent (Keeping all select fields intact for layout)
+    // 1. Fetch users with explicit projection
     const users = await ActiveUserModel.find({ connectedAgents: agentId })
-      .select('firstName lastName email phone photoUrl city state isVerified isProfileComplete lastLogin lastActive createdAt')
+      .select('firstName lastName email phone photoUrl gender city state isVerified isProfileComplete lastLogin lastActive createdAt publicKeyJwk')
       .sort({ lastActive: -1 })
       .lean();
 
+    // 2. Aggregate unread message counts
+    const unreadCountsData = await Message.aggregate([
+      { 
+        $match: { 
+          receiverId: new mongoose.Types.ObjectId(String(agentId)),
+          receiverModel: 'Agent', 
+          status: { $in: ['sent', 'delivered'] }
+        } 
+      },
+      { 
+        $group: { 
+          _id: "$senderId", 
+          count: { $sum: 1 } 
+        } 
+      }
+    ]);
+
+    const unreadMap = unreadCountsData.reduce((acc, item) => {
+      if (item._id) acc[item._id.toString()] = item.count;
+      return acc;
+    }, {});
+
+    const nowTimestamp = Date.now();
+
+    // 3. Process and map DTOs
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
-      // 3. Handle S3 Image Signing (IDrive e2 / AWS S3)
       if (user.photoUrl && typeof user.photoUrl === 'string') {
         try {
-          let fileKey = user.photoUrl;
-
-          // If the DB stores a full URL, strip it to get the Key
-          if (fileKey.includes('.com/')) {
-            fileKey = fileKey.split('.com/')[1].split('?')[0];
-          }
-          
-          // FIX: Clean leading slashes and safely handle spaces/special characters
-          let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
-          
-          // Decode first to prevent double-encoding, then decode raw spaces if any exist safely
-          cleanKey = decodeURIComponent(cleanKey);
-
-          // 🚀 4. Use constructors safely since they are imported at the top of your router file
-          const client = getS3Client(); 
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: cleanKey, 
-          });
-
-          finalPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
+          finalPhotoUrl = await getPrivateUrl(user.photoUrl);
         } catch (s3Err) {
-          console.error(`[S3 Error] Photo failed for ${user.email}:`, s3Err.message);
+          console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
         }
       }
 
-      // 5. Fallback to UI Avatars if signing fails or photo doesn't exist
       if (!finalPhotoUrl) {
-        const nameParam = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
-        finalPhotoUrl = `https://ui-avatars.com/api/?name=${nameParam}&background=random&color=fff&size=128`;
+        const name = encodeURIComponent(`${user.firstName || 'U'} ${user.lastName || ''}`);
+        finalPhotoUrl = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff&size=128`;
       }
 
-      // 6. Presence Calculation
       const lastSeen = user.lastActive || user.lastLogin;
-      const now = new Date();
-      const isOnline = lastSeen && (now - new Date(lastSeen)) < (5 * 60 * 1000);
-
-      // 7. Human-Readable Status
-      let lastSeenText = "Offline";
-      if (lastSeen) {
-        const diffMins = Math.floor((now - new Date(lastSeen)) / 60000);
-        
-        if (isOnline) {
-          lastSeenText = "Online";
-        } else if (diffMins < 60) {
-          lastSeenText = `${diffMins}m ago`;
-        } else if (diffMins < 1440) {
-          lastSeenText = `${Math.floor(diffMins / 60)}h ago`;
-        } else {
-          lastSeenText = new Date(lastSeen).toLocaleDateString();
-        }
-      }
+      const isOnline = lastSeen && (nowTimestamp - new Date(lastSeen).getTime()) < (5 * 60 * 1000);
+      const userStringId = user._id.toString();
 
       return {
-        ...user,
+        id: userStringId,
+        _id: userStringId,
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        email: user.email || "",
+        phone: user.phone || {},
         photoUrl: finalPhotoUrl,
-        avatar: finalPhotoUrl,     // Fallback frontend object data property
-        avatarUrl: finalPhotoUrl,  // Fallback frontend object data property
+        avatar: finalPhotoUrl,
+        avatarUrl: finalPhotoUrl,
         status: isOnline ? 'online' : 'offline',
-        lastSeenText: lastSeenText
+        gender: user.gender || "Not Specified",
+        city: user.city || "",
+        state: user.state || "",
+        isVerified: !!user.isVerified,
+        isProfileComplete: !!user.isProfileComplete,
+        unreadCount: unreadMap[userStringId] || 0,
+        lastActive: user.lastActive || null,
+        createdAt: user.createdAt,
+        modelType: 'User',
+        publicKeyJwk: user.publicKeyJwk || null
       };
     }));
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       count: processedUsers.length,
       users: processedUsers
     });
 
   } catch (err) {
-    console.error("AGENT USERS FETCH ERROR:", err);
-    return res.status(500).json({ 
-      success: false, 
-      message: "Server failed to retrieve user list",
-      error: err.message
-    });
+    next(err);
   }
 });
-
-// --- GET USER'S CURRENT ACTIVE SESSION ENGINE ---
-router.get('/my-session', authenticateToken, async (req, res) => {
+router.get('/my-session', authenticateToken, async (req, res, next) => {
   try {
-    // 🚀 1. Enforce active database connection tunnel instantly
     await connectToDatabase();
-    
-    // Get user ID straight from the verified token middleware
     const userId = req.user?.id || req.user?._id;
+    const { agentId, slug } = req.query;
+
     if (!userId) {
-      return res.status(401).json({ message: "No secure user context found." });
+      return res.status(401).json({ success: false, message: "Unauthorized: No secure user context." });
     }
 
-    // Update active heartbeat marker and populate connected agents list
-    const user = await User.findByIdAndUpdate(
-      userId, 
-      { lastActive: new Date() },
-      { returnDocument: 'after' } 
-    ).populate({
-      path: 'connectedAgents',
-      select: 'firstName lastName photoUrl occupation program bio slug lastActive gender dob'
-    });
+    // 1. Optimized User Retrieval with JWK projection
+    const user = await User.findById(userId)
+      .select('email isProfileComplete lastActive connectedAgents publicKeyJwk')
+      .populate('connectedAgents', 'firstName lastName photoUrl occupation program bio slug lastActive gender dob publicKeyJwk');
 
-    if (!user) return res.status(404).json({ message: "User account not found" });
+    if (!user) return res.status(404).json({ success: false, message: "User account not found" });
 
-    // Track down the last connected agent profile block
-    let activeAgent = user.connectedAgents && user.connectedAgents.length > 0 
-      ? user.connectedAgents[user.connectedAgents.length - 1] 
-      : null;
-    
-    let isOnline = false;
-    let lastSeenDisplay = "Offline";
-    let signedPhotoUrl = null;
+    // Update activity
+    await User.updateOne({ _id: userId }, { $set: { lastActive: new Date() } });
+
+    // 2. Resolve Active Agent
+    let activeAgent = null;
+    if (slug || agentId) {
+      activeAgent = user.connectedAgents.find(a => a.slug === slug || a._id.toString() === agentId);
+      
+      if (!activeAgent) {
+        const freshAgent = await Agent.findOne(slug ? { slug } : { _id: agentId });
+        if (freshAgent) {
+          await User.updateOne({ _id: userId }, { $addToSet: { connectedAgents: freshAgent._id } });
+          activeAgent = freshAgent;
+        }
+      }
+    } else {
+      activeAgent = user.connectedAgents[user.connectedAgents.length - 1] || null;
+    }
+
+    // 3. Status and Signing
+    let isOnline = false, lastSeenDisplay = "Offline", signedPhotoUrl = null;
 
     if (activeAgent) {
-      const freshAgent = await Agent.findById(activeAgent._id).lean();
-      
-      if (freshAgent) {
-        const now = new Date();
-        const lastActive = freshAgent.lastActive || freshAgent.createdAt;
-        isOnline = lastActive && (now - new Date(lastActive)) < 120000;
+      const lastActive = activeAgent.lastActive || activeAgent.createdAt;
+      isOnline = lastActive && (new Date() - new Date(lastActive)) < 120000;
+      lastSeenDisplay = isOnline ? "Online" : "Offline";
 
-        if (isOnline) {
-          lastSeenDisplay = "Online";
-        } else if (lastActive) {
-          const diffMins = Math.floor((now - new Date(lastActive)) / 60000);
-          if (diffMins < 60) {
-            lastSeenDisplay = `Last seen ${diffMins}m ago`;
-          } else if (diffMins < 1440) {
-            lastSeenDisplay = `Last seen ${Math.floor(diffMins / 60)}h ago`;
-          } else {
-            lastSeenDisplay = "Offline";
-          }
-        }
-      }
-
-      // 🚀 2. Handle Cloud Infrastructure Image Signing (IDrive e2 / AWS S3)
-      if (activeAgent.photoUrl && typeof activeAgent.photoUrl === 'string') {
-        try {
-          let fileKey = activeAgent.photoUrl;
-
-          if (fileKey.includes('.com/')) {
-            fileKey = fileKey.split('.com/')[1].split('?')[0];
-          }
-          
-          let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
-          cleanKey = decodeURIComponent(cleanKey);
-
-          const client = getS3Client(); 
-          const command = new GetObjectCommand({
-            Bucket: process.env.IDRIVE_BUCKET_NAME || "livechat",
-            Key: cleanKey, 
-          });
-
-          signedPhotoUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
-        } catch (s3Err) {
-          console.error(`[S3 Session Error] Signing failed for agent image:`, s3Err.message);
-        }
+      try {
+        signedPhotoUrl = activeAgent.photoUrl ? await getPrivateUrl(activeAgent.photoUrl) : 
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(activeAgent.firstName)}+${encodeURIComponent(activeAgent.lastName)}&background=0D1117&color=fff&size=128`;
+      } catch (s3Err) {
+        console.error("S3 Session Signing Error:", s3Err.message);
       }
     }
-    if (!signedPhotoUrl && activeAgent) {
-      signedPhotoUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(activeAgent.firstName)}+${encodeURIComponent(activeAgent.lastName)}&background=0D1117&color=fff&size=128`;
-    }
 
-    res.json({
+    // 4. Return Whitelisted Response
+    return res.status(200).json({
       success: true,
-      user: {
-        id: user._id,
-        email: user.email,
+      user: { 
+        id: user._id, 
+        email: user.email, 
         isProfileComplete: user.isProfileComplete,
-        lastActive: user.lastActive
+        publicKeyJwk: user.publicKeyJwk // 🔒 Persistence preserved
       },
-      agent: activeAgent ? {
-        ...(activeAgent.toObject ? activeAgent.toObject() : activeAgent),
-        photoUrl: signedPhotoUrl,
-        status: isOnline ? 'online' : 'offline',
-        lastSeenText: lastSeenDisplay
+      agent: activeAgent ? { 
+        ...(activeAgent.toObject ? activeAgent.toObject() : activeAgent), 
+        photoUrl: signedPhotoUrl, 
+        status: isOnline ? 'online' : 'offline', 
+        lastSeenText: lastSeenDisplay,
+        publicKeyJwk: activeAgent.publicKeyJwk // 🔒 Persistence preserved
       } : null
     });
 
   } catch (err) {
-    console.error("Session Processing Error:", err);
-    res.status(500).json({ message: "Session Error", error: err.message });
+    next(err);
   }
 });
 
