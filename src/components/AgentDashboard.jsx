@@ -63,29 +63,7 @@ export const AgentDashboard = () => {
   const { token, isLoading, setToken } = useAuth();
   const { slug } = useParams();
 
-  const messagesEndRef = useRef(null);
-  const connectionTimeoutRef = useRef(null);
-  const localAudioRef = useRef(null);
-  const scrollRef = useRef(null);
-  const userStreamRef = useRef(null);
-  const peerConnectedRef = useRef(false);
-  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
-  const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
-  const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing
-  const lastNotifiedId = useRef(null);
-  const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
-  const timerRef = useRef(null);
-  const isTransitioningRef = useRef(false);
-  const pollingIntervalRef = useRef(null);
-  const activeCallRef = useRef(null);
-  const activeCallerRef = useRef(null);
-  const pollingRef = useRef(null); 
-  const aiMediaRecorderRef = useRef(null);
-  const selectedUserRef = useRef(selectedUser);
-const agentDataRef = useRef(agentData);
-const agentPrivateKeyRef = useRef(agentPrivateKey);
-
+  
   const [agentData, setAgentData] = useState(null);
   const [agentPrivateKey, setAgentPrivateKey] = useState(null); // Key material
   const [users, setUsers] = useState([]); 
@@ -130,6 +108,30 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
   const [previewFile, setPreviewFile] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");          
+  
+  const messagesEndRef = useRef(null);
+  const connectionTimeoutRef = useRef(null);
+  const localAudioRef = useRef(null);
+  const scrollRef = useRef(null);
+  const userStreamRef = useRef(null);
+  const peerConnectedRef = useRef(false);
+  const notificationSound = useRef(new Audio('/sounds/notification.mp3'));  
+  const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
+  const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing
+  const lastNotifiedId = useRef(null);
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const timerRef = useRef(null);
+  const isTransitioningRef = useRef(false);
+  const pollingIntervalRef = useRef(null);
+  const activeCallRef = useRef(null);
+  const activeCallerRef = useRef(null);
+  const pollingRef = useRef(null); 
+  const aiMediaRecorderRef = useRef(null);
+  const selectedUserRef = useRef(selectedUser);
+const agentDataRef = useRef(agentData);
+const agentPrivateKeyRef = useRef(agentPrivateKey);
+
     const slugFromUrl = slug || agentData?.slug || '';
 
 
