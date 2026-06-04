@@ -6,7 +6,7 @@ import Admin from '../models/Admin.js';
 import Agent from '../models/Agent.js'; 
 import { connectToDatabase } from '../config/db.js';
 import { getPrivateUrl } from '../config/s3.js';
-import { authenticateToken } from '../middlewares/auth.js';
+import { authenticateToken, isAdmin, requireSuperAdmin } from '../middlewares/auth.js';
 import SupportMessage from '../models/Support.js';
 import { sendOfflineNotification } from '../utils/mailer.js';
 
