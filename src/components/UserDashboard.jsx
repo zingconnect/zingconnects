@@ -1846,18 +1846,26 @@ const handleSendMessage = async (e) => {
 
   setMessages(prev => [...prev, pendingMessage]);
 
-  try {
-    let finalPayloadText = textToSend;
-    let encryptionIv = null;
-    let encryptionStatus = false;
+ try {
+  let finalPayloadText = textToSend;
+  let encryptionIv = null;
+  let encryptionStatus = false;
 
-    // Encryption logic only runs if the key exists
-    if (agent?.publicKeyJwk) {
-      const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, userData._id);
+  if (agent?.publicKeyJwk) {
+    const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, userData._id);
+        if (encryptedData && encryptedData.cipherText && encryptedData.iv) {
       finalPayloadText = encryptedData.cipherText;
       encryptionIv = encryptedData.iv;
-      encryptionStatus = true; // Force true if we successfully encrypted
+      encryptionStatus = true;
+    } else {
+      throw new Error("Encryption failed: Missing IV or Ciphertext.");
     }
+  }
+  console.log("SENDING PAYLOAD:", { 
+    finalPayloadText, 
+    encryptionIv, 
+    encryptionStatus 
+});
 
     const response = await secureFetch('/api/messages/send', token, {
       method: 'POST',

@@ -303,6 +303,7 @@ const startStatusPolling = (roomName) => {
     }, 500);
   }
 };
+
 const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
   if (isFetching) return null; 
   isFetching = true;
@@ -1694,6 +1695,8 @@ const handleDisconnect = async (e) => {
     window.location.replace(targetUrl);
   }
 };
+
+
   const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
   
@@ -2027,16 +2030,17 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
   
-  // 🛡️ MODIFICATION 1: HARD GUARD
-  // If we have a user, we MUST have their public key. If not, block the send.
-  if (selectedUser && !selectedUser.publicKeyJwk) {
-    console.error("🔒 Security Block: Cannot send message, User public key missing.");
-    alert("Secure channel not established. Please wait for the user's profile to load.");
-    return;
-  }
+// 🛡️ REFINED GUARD
+if (selectedUser && !selectedUser.publicKeyJwk) {
+  console.error("DEBUG: Selected User Object:", selectedUser); // 👈 See exactly what's in the state
+  console.error("🔒 Security Block: publicKeyJwk is missing from the state.");
+  alert("Secure channel not established. Please refresh the page.");
+  return;
+}
 
   if (!newMessage.trim() || !selectedUser || isUploading) return;
 
