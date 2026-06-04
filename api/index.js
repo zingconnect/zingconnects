@@ -59,6 +59,8 @@ import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
 import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
+import { authenticateToken, isAdmin, requireSuperAdmin } from './middleware/auth.js';
+
 const app = express();
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
@@ -104,7 +106,7 @@ app.set('socketio', io);
 app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', authenticateToken, isAdmin, adminRoutes); // Protected by default
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
 webpush.setVapidDetails(
@@ -119,102 +121,6 @@ console.log("DEBUG: Public Key defined:", !!process.env.VITE_PUBLIC_KEY);
 const upload = multer({ storage: multer.memoryStorage() });
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
-};
-
-const authenticateToken = async (req, res, next) => {
-  console.log("DEBUG AUTH - Headers:", req.headers.authorization);
-  console.log("DEBUG AUTH - Cookies:", req.cookies, req.signedCookies);
- const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
- 
-   if (!token) {
-     console.warn("DEBUG: Auth failed, no token found in headers or signed cookies.");
-     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
-   }
- 
-   try {
-     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-     req.user = decoded;
-     req.user.id = decoded.id || decoded._id;
- 
-     // ⚡ DYNAMIC MODEL LOOKUPS: Safely prevents 'undefined' drops across serverless instances
-     
-     // 1. Agent Session & Dual-Login Guard Matrix
-     if (decoded.role === 'agent') {
-       const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-       const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-       
-       if (!agent) {
-         return res.status(404).json({ success: false, message: "Agent profile context not found." });
-       }
- 
-       // Check for dual concurrent device logins
-       if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-         return res.status(403).json({ 
-           success: false, 
-           message: "Dual login detected. Device session terminated.", 
-           reason: "dual_login" 
-         });
-       }
-       
-       // ✅ Hardened: Uses returnDocument to silence deprecation warning
-       await AgentModel.findByIdAndUpdate(
-         req.user.id, 
-         { $set: { lastActive: new Date() } },
-         { returnDocument: 'after' }
-       );
-     }
- 
-     // 2. Admin Lifecycle Tracking
-     if (decoded.role === 'admin' || decoded.role === 'superadmin') {
-       const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
-       
-       // ✅ Hardened: Uses returnDocument to silence deprecation warning
-       await AdminModel.findByIdAndUpdate(
-         req.user.id, 
-         { $set: { lastLogin: new Date() } },
-         { returnDocument: 'after' }
-       );
-     }
- 
-     next();
-   } catch (err) {
-     console.error("DEBUG: Token verification failed:", err.message);
-     
-     // Distinguish between expired and invalid tokens for better frontend handling
-     if (err.name === 'TokenExpiredError') {
-       return res.status(401).json({ success: false, message: "Token expired" });
-     }
-     
-     return res.status(403).json({ success: false, message: "Invalid or expired token" });
-   }
- };
- 
-
-const isAdmin = (req, res, next) => {
-  // Allows BOTH admin and superadmin to pass through
-  if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin')) {
-    return next();
-  } 
-  
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access denied: Administrative privileges required." 
-  });
-};
-
-// =========================================================================
-// 🛡️ TIER 2: SUPERADMIN ONLY MIDDLEWARE (System Root Operations Only)
-// =========================================================================
-const requireSuperAdmin = (req, res, next) => {
-  // STRICT CHECK: Denies regular admins completely
-  if (req.user && req.user.role === 'superadmin') {
-    return next();
-  }
-
-  return res.status(403).json({ 
-    success: false, 
-    message: "Access Denied: Superadmin authorization required for this operation." 
-  });
 };
 
 const syncBilling = (agent, amount) => {

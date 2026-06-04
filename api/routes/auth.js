@@ -14,6 +14,7 @@ import { getS3Client, getPrivateUrl, PutObjectCommand, GetObjectCommand } from '
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import Agent from '../models/Agent.js';
 import User from '../models/User.js'; 
+import { authenticateToken } from '../middleware/auth.js'; // Ensure the path matches your folder structure
 
 
 const router = express.Router();
@@ -494,6 +495,7 @@ router.get('/profile', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 router.get('/profile/me', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
