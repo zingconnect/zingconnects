@@ -1437,7 +1437,6 @@ useEffect(() => {
   return () => { isMounted = false; };
 }, [navigate, slug]);
 
-
 const handlePayment = async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
@@ -1473,7 +1472,6 @@ const handlePayment = async () => {
       },
       callback: async (response) => {
         try {
-          // 🛡️ FIX: Fetch the actual string token dynamically from localStorage
           const token = localStorage.getItem('accessToken');
 
           const verifyRes = await secureFetch('/api/subscriptions/verify', token, {
@@ -1487,22 +1485,31 @@ const handlePayment = async () => {
 
           if (verifyRes.status === 401 || verifyRes.status === 403) {
             setIsDualLoginConflict(true);
+            setPaymentProcessing(false);
             return;
           }
 
           if (verifyRes.ok) {
+            const data = await verifyRes.json();
+            
+            // ✅ CORRECTION: Update React state immediately instead of reloading
+            setIsSubscribed(true);
+            setAgentData(prev => ({ 
+              ...prev, 
+              ...data.agent,
+              isSubscribed: true 
+            }));
+            
             setShowSuccessOverlay(true);
-            setTimeout(() => {
-              window.location.reload(); 
-            }, 4000);
+            setPaymentProcessing(false);
           } else {
             const errData = await verifyRes.json();
             alert(errData.message || "Verification failed");
+            setPaymentProcessing(false);
           }
         } catch (err) {
           console.error("Verification error:", err);
           alert("Connection error during verification.");
-        } vanished: {
           setPaymentProcessing(false);
         }
       },
