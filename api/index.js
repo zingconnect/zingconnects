@@ -1135,8 +1135,9 @@ app.get('/api/users/my-session', authenticateToken, async (req, res, next) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
+
 // ==============================================================================
-// 🛡️ HARDENED ROUTE: PUT /api/users/update-user-onboarding (with Redis Invalidation)
+// 🛡️ HARDENED ROUTE: PUT /api/users/update-user-onboarding (Corrected Mapping)
 // ==============================================================================
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
@@ -1152,6 +1153,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       return res.status(401).json({ success: false, message: "User identity not found in token" });
     }
 
+    // 1. Process Phone Data
     let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
     if (phone) {
       try {
@@ -1167,23 +1169,20 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       }
     }
 
+    // 2. Prepare Update Object
     const updateData = {
       firstName: firstName ? String(firstName).trim() : "",
       lastName: lastName ? String(lastName).trim() : "",
       phone: parsedPhone, 
-      dob,
-      gender: gender && typeof gender === 'string' ? gender.toLowerCase().trim() : undefined,
+      dob: dob || null,      // Ensure DOB is mapped
+      gender: gender ? String(gender).toLowerCase().trim() : undefined,
       city: city ? String(city).trim() : "",
       state: state ? String(state).trim() : "",
       isProfileComplete: true,
       isVerified: true
     };
 
-    if (req.body.profileImage) {
-      delete req.body.profileImage;
-    }
-
-    // File Processing
+    // 3. Handle File Upload (Only update if a new file is present)
     if (req.file) {
       const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
       const allowedExtensions = /.(jpg|jpeg|png|webp)$/i;
@@ -1191,7 +1190,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       if (!allowedMimeTypes.includes(req.file.mimetype) || !allowedExtensions.test(req.file.originalname)) {
         return res.status(400).json({ 
           success: false, 
-          message: "Security Violation: Unsupported file type payload dropped." 
+          message: "Security Violation: Unsupported file type." 
         });
       }
 
@@ -1209,35 +1208,29 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       updateData.photoUrl = fileKey; 
     }
 
-    // 1. DATABASE UPDATE
+    // 4. Update Database
     const updatedUser = await User.findByIdAndUpdate(
       userId, 
       { $set: updateData }, 
       { new: true, runValidators: true }
-    ).select('email firstName lastName isProfileComplete city state photoUrl phone publicKeyJwk');
+    ).select('email firstName lastName dob gender isProfileComplete city state photoUrl phone publicKeyJwk');
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
     }
 
-    // 2. CACHE INVALIDATION: Force remove all session keys for this user
-    // This forces the dashboard to re-fetch fresh data from MongoDB next time
-    const keys = await redisClient.keys(`user:session:${userId}:*`);
-    if (keys.length > 0) {
-      await redisClient.del(keys);
+    // 5. CACHE INVALIDATION
+    if (redisClient?.isOpen) {
+      const keys = await redisClient.keys(`user:session:${userId}:*`);
+      if (keys.length > 0) {
+        await redisClient.del(keys);
+      }
     }
 
     return res.json({ 
       success: true, 
       message: "Onboarding complete", 
-      user: {
-        id: updatedUser._id,
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        isProfileComplete: updatedUser.isProfileComplete,
-        photoUrl: updatedUser.photoUrl,
-        publicKeyJwk: updatedUser.publicKeyJwk
-      }
+      user: updatedUser 
     });
 
   } catch (err) {

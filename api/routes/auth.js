@@ -785,7 +785,7 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       firstName: firstName ? String(firstName).trim() : "",
       lastName: lastName ? String(lastName).trim() : "",
       phone: parsedPhone,
-      dob,
+      dob: dob || null, 
       gender: gender && typeof gender === 'string' ? gender.toLowerCase().trim() : undefined,
       city: city ? String(city).trim() : "",
       state: state ? String(state).trim() : "",
@@ -813,7 +813,7 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       }));
-      updateData.photoUrl = fileKey;
+      updateData.photoUrl = fileKey; // Only add photoUrl if a file exists
     }
 
     // 3. Atomic Update
@@ -821,31 +821,27 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       userId, 
       { $set: updateData },
       { new: true, runValidators: true }
-    ).select('firstName lastName isProfileComplete photoUrl publicKeyJwk');
+    ).select('firstName lastName isProfileComplete photoUrl publicKeyJwk dob gender city state phone'); 
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
     }
 
-    // 4. 🚀 CACHE INVALIDATION
-    // Remove all cached session variations for this user so they don't see stale data
-    const keys = await redisClient.keys(`user:session:${userId}:*`);
-    if (keys.length > 0) {
-      await redisClient.del(keys);
+    // 4. CACHE INVALIDATION
+    if (redisClient?.isOpen) {
+      try {
+        const keys = await redisClient.keys(`user:session:${userId}:*`);
+        if (keys.length > 0) await redisClient.del(keys);
+      } catch (cacheErr) {
+        console.error("Cache invalidation failed:", cacheErr.message);
+      }
     }
 
     // 5. Return Whitelisted Response
     return res.json({ 
       success: true, 
       message: "Onboarding complete", 
-      user: {
-        id: updatedUser._id,
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        isProfileComplete: updatedUser.isProfileComplete,
-        photoUrl: updatedUser.photoUrl,
-        publicKeyJwk: updatedUser.publicKeyJwk
-      }
+      user: updatedUser 
     });
 
   } catch (err) {
