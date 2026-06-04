@@ -309,9 +309,10 @@ const startStatusPolling = (roomName) => {
     }, 500);
   }
 };
-
 const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
-  if (isFetching) return null; 
+  // 🛡️ HARD GUARD: If we already know the session is conflicted, don't even try
+  if (isFetching || isDualLoginConflict) return null; 
+  
   isFetching = true;
   
   try {
@@ -319,41 +320,41 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
       method: 'GET'
     });
     
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
-        setIsDualLoginConflict(true);
-      }
-      throw new Error(`HTTP error! status: ${res.status}`);
+    // 🛡️ HANDLE 403/401 EXPLICITLY
+    if (res.status === 403 || res.status === 401) {
+      console.error("⛔ Authentication session invalid. Aborting further fetches.");
+      setIsDualLoginConflict(true); // This state should trigger a UI redirect or modal
+      return null;
     }
+
+    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
     
     const data = await res.json();
     
     if (data.success && data.messages) {
-      // 🔒 1. DECRYPT RECOVERED HISTORY IN PARALLEL USING THE TARGET USER'S KEYS
       const decryptedMessages = await Promise.all(
         data.messages.map(async (msg) => {
-          // Verify encryption status and make sure we have a valid key to decrypt with
-          if (msg.isEncrypted && targetUserCryptoProfile?.publicKeyJwk) {
+          // Check if we have the private key BEFORE attempting to decrypt
+          const myKey = localStorage.getItem(`zing_secure_pk_${agentData._id}`);
+          
+          if (msg.isEncrypted && targetUserCryptoProfile?.publicKeyJwk && myKey) {
             try {
               const clearText = await decryptMessageText(
                 msg.text,
                 msg.iv,
-                targetUserCryptoProfile.publicKeyJwk, // Recipient public channel key
-                agentData._id                         // Agent's private key look-up mapping
+                targetUserCryptoProfile.publicKeyJwk,
+                agentData._id
               );
               return { ...msg, text: clearText };
             } catch (decryptionError) {
-              console.error(`🔒 Decryption failed for message ${msg._id}:`, decryptionError);
               return { ...msg, text: "🔒 [Decryption Failed]" };
             }
           }
-          return msg; // Return standard unencrypted string or fallback gracefully
+          return msg; 
         })
       );
-      
       return decryptedMessages;
     }
-    
     return null;
   } catch (err) {
     console.error("Fetch error:", err);
