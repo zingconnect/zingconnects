@@ -839,15 +839,16 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 // ==========================================
 // 🛡️ RECONFIGURED ROUTE: POST /api/agents/update-plan
 // ==========================================
 app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+
   try {
     await connectToDatabase();
     const { plan } = req.body; 
-    const allowedPlans = ['BASIC', 'GROWTH', 'PROFESSIONAL']; // ✨ FIXED: Restructured to match schema enums
+    const allowedPlans = ['BASIC', 'GROWTH', 'PROFESSIONAL'];
     const sanitizedPlan = plan ? String(plan).toUpperCase().trim() : null;
 
     if (!sanitizedPlan || !allowedPlans.includes(sanitizedPlan)) {
@@ -866,7 +867,6 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
     const targetPrice = planPricesInNGN[sanitizedPlan];
     const AgentModel = getAgentModel(); 
 
-    // ✨ FIXED: Sync both fields safely together during manual updates
     const updatedAgent = await AgentModel.findByIdAndUpdate(
       req.user.id,
       { 
@@ -884,6 +884,10 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
       return res.status(404).json({ success: false, message: "Agent account context mismatch." });
     }
 
+    // 🚀 CACHE INVALIDATION: Force clear the profile cache
+    // This ensures the next GET /api/agents/profile/me call retrieves the fresh plan info from MongoDB
+    await redisClient.del(`agent:profile:full:${req.user.id}`);
+
     return res.json({ 
       success: true, 
       plan: updatedAgent.plan,
@@ -894,27 +898,27 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
     next(err);
   }
 });
-
 app.post('/api/users/handshake', async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+
   try {
     await connectToDatabase();
-        const { email, agentSlug } = req.body;
+    const { email, agentSlug } = req.body;
     
     if (!email) return res.status(400).json({ success: false, message: "Email required" });
     if (!agentSlug) return res.status(400).json({ success: false, message: "Agent context is required" });
 
-    // 2. Dynamically find the Agent to get the correct agentId
+    // 1. Find Agent (This could also be cached if agents are read-heavy)
     const agent = await Agent.findOne({ slug: agentSlug.toLowerCase().trim() });
-    
     if (!agent) {
       return res.status(400).json({ success: false, message: "Agent not found" });
     }
     
     const agentId = agent._id;
-
-    // 3. Proceed with User logic
     const normalizedEmail = email.toLowerCase().trim();
-    let user = await User.findOne({ email: normalizedEmail }).select('email connectedAgents isProfileComplete');
+    
+    // 2. User Logic
+    let user = await User.findOne({ email: normalizedEmail });
     let isNewUser = false;
 
     if (!user) {
@@ -932,56 +936,65 @@ app.post('/api/users/handshake', async (req, res, next) => {
       
       if (!hasAgent) {
         user.connectedAgents.push(agentId);
+        await user.save();
       }
-      user.lastLogin = new Date();
-      await user.save();
     }
 
+    // 3. PRIME THE USER CACHE: Cache the user profile for 1 hour
+    const cacheKey = `user:profile:${user._id}`;
+    const cacheableUser = {
+      _id: user._id,
+      email: user.email,
+      isProfileComplete: !!user.isProfileComplete,
+      publicKeyJwk: user.publicKeyJwk || null
+    };
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(cacheableUser));
+
+    // 4. Token & Cookie
     const token = jwt.sign(
-      { 
-        id: user._id, 
-        role: 'user',
-        activeAgentSlug: agent.slug // Use the slug from the DB for consistency
-      },
+      { id: user._id, role: 'user', activeAgentSlug: agent.slug },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
-res.cookie('token', token, {
-  httpOnly: true,
-  secure: true, 
-  sameSite: 'None',
-  signed: true, // IMPORTANT: Matches the middleware configuration
-  maxAge: 7 * 24 * 60 * 60 * 1000
-});
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true, 
+      sameSite: 'None',
+      signed: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
     return res.json({ 
-  success: true, 
-  isNewUser, 
-  isProfileComplete: user.isProfileComplete,
-  token: token,
-  user: { // 👈 ADD THIS: Return the full profile
-    _id: user._id,
-    publicKeyJwk: user.publicKeyJwk // Ensure this is sent to the frontend
-  }
-});
+      success: true, 
+      isNewUser, 
+      isProfileComplete: user.isProfileComplete,
+      token: token,
+      user: cacheableUser
+    });
     
   } catch (err) {
     next(err);
   }
 });
-
-// 🛡️ SECURITY FIX 1: Ensure 'next' is included in your routing arguments
+// ==========================================
+// 🛡️ OPTIMIZED HEARTBEAT ROUTE (Redis Presence)
+// ==========================================
 app.post('/api/agents/heartbeat', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  const presenceKey = `agent:online:${req.user.id}`;
+
   try {
+    // 1. DUAL LOGIN SECURITY CHECK 
+    // We keep this database-bound for security to ensure the session hasn't been revoked.
     await connectToDatabase();
     const AgentModel = getAgentModel();
-
     const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
     }
 
-    // --- DUAL LOGIN SECURITY CHECK ---
     if (req.user.sessionId && agent.currentSessionId && req.user.sessionId !== agent.currentSessionId) {
       return res.status(403).json({ 
         success: false, 
@@ -990,38 +1003,44 @@ app.post('/api/agents/heartbeat', authenticateToken, async (req, res, next) => {
       });
     }
 
-    // 🛡️ SECURITY FIX 2: Explicitly query and return only the targeted parameter
-    const updatedAgent = await AgentModel.findByIdAndUpdate(
-      req.user.id, 
-      { $set: { lastActive: new Date() } }, 
-      { new: true, select: 'lastActive' } 
-    );
+    // 2. REDIS PRESENCE TRACKING
+    // We store the status in Redis only, with a 120-second TTL.
+    // If the heartbeat stops, Redis automatically expires the key.
+    await redisClient.setEx(presenceKey, 120, 'online');
 
-    // 🛡️ SECURITY FIX 3: Add a safety fallback guard to avoid Null Pointer crashes
-    if (!updatedAgent) {
-      return res.status(404).json({ success: false, message: "Agent status mapping failed." });
-    }
-
+    // 3. RESPOND
+    // We return 'online' and the current timestamp without writing to MongoDB.
     res.json({ 
       success: true, 
-      lastActive: updatedAgent.lastActive,
+      lastActive: new Date(), 
       status: 'online' 
     });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX 4: Send the breakdown smoothly to the bottom global safety filter
     next(err);
   }
 });
-
+// ==========================================
+// 🛡️ OPTIMIZED LOGOUT ROUTE (Redis Cleanup)
+// ==========================================
 app.post('/api/agents/logout', async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+
   try {
-    // res.clearCookie must match the settings used to set the cookie originally.
-    // Ensure 'path', 'sameSite', 'secure', and 'domain' (if applicable) are identical.
+    const token = req.signedCookies.token;
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const agentId = decoded.id;
+      // Remove online presence and cached profile
+      await redisClient.del(`agent:online:${agentId}`);
+      await redisClient.del(`agent:profile:full:${agentId}`);
+    }
+
+    // 3. Clear the cookie
     res.clearCookie('token', {
       httpOnly: true,
-      secure: true,      // Must be true for HTTPS (Vercel)
-      sameSite: 'None',  // Must match the SameSite attribute used during login
+      secure: true,
+      sameSite: 'None',
       path: '/'
     });
 
@@ -1030,34 +1049,40 @@ app.post('/api/agents/logout', async (req, res, next) => {
       message: "Session successfully terminated." 
     });
   } catch (err) {
-    next(err);
+    // If the token is invalid or expired, just clear the cookie anyway
+    res.clearCookie('token', { path: '/' });
+    return res.json({ success: true, message: "Session terminated." });
   }
 });
+app.get('/api/users/my-session', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  const userId = req.user.id || req.user._id;
+  const { agentId, slug } = req.query;
+  
+  // Create a unique key based on the user and the requested agent context
+  const cacheKey = `user:session:${userId}:${agentId || slug || 'default'}`;
 
-app.get('/api/users/my-session', authenticateToken, async (req, res) => {
   try {
-    // 1. Connect database locally (prevents global middleware timeouts)
-    await connectToDatabase();
-    
-    // 2. Use req.user provided by the authenticateToken middleware
-    const userId = req.user.id || req.user._id;
-    const { agentId, slug } = req.query;
+    // 1. ATTEMPT CACHE HIT
+    const cachedSession = await redisClient.get(cacheKey);
+    if (cachedSession) {
+      return res.status(200).json(JSON.parse(cachedSession));
+    }
 
-    // 3. Single User retrieval (Optimize query to prevent slow population)
+    // 2. FALLBACK TO DATABASE (Cache Miss)
+    await connectToDatabase();
     const user = await User.findById(userId)
       .select('email isProfileComplete lastActive connectedAgents publicKeyJwk')
       .populate('connectedAgents', 'firstName lastName photoUrl occupation program bio slug lastActive gender dob publicKeyJwk');
 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    // Update activity
-    await User.updateOne({ _id: userId }, { lastActive: new Date() });
+    // Update activity in background
+    User.updateOne({ _id: userId }, { lastActive: new Date() }).catch(console.error);
 
-    // 4. Resolve Active Agent
     let activeAgent = null;
     if (slug || agentId) {
        activeAgent = user.connectedAgents.find(a => a.slug === slug || a._id.toString() === agentId);
-       
        if (!activeAgent) {
           const freshAgent = await Agent.findOne(slug ? { slug } : { _id: agentId });
           if (freshAgent) {
@@ -1069,57 +1094,63 @@ app.get('/api/users/my-session', authenticateToken, async (req, res) => {
        activeAgent = user.connectedAgents[user.connectedAgents.length - 1] || null;
     }
 
-    // 5. Final processing logic
-    let isOnline = false, lastSeenDisplay = "Offline", signedPhotoUrl = null;
+    let isOnline = false, signedPhotoUrl = null;
 
     if (activeAgent) {
-      // Determine status
-      const lastActive = activeAgent.lastActive || activeAgent.createdAt;
-      isOnline = lastActive && (new Date() - new Date(lastActive)) < 120000;
-      lastSeenDisplay = isOnline ? "Online" : "Offline"; // Add your time diff logic here
+      // Check Redis for "Online" status (Presence Pattern)
+      // This is much faster than date math on activeAgent.lastActive
+      const onlineStatus = await redisClient.get(`agent:online:${activeAgent._id}`);
+      isOnline = !!onlineStatus;
 
-      // Signing URL
       signedPhotoUrl = activeAgent.photoUrl ? await getPrivateUrl(activeAgent.photoUrl) : 
-                       `https://ui-avatars.com/api/?name=${activeAgent.firstName}+${activeAgent.lastName}&background=0D1117&color=fff&size=128`;
+                        `https://ui-avatars.com/api/?name=${activeAgent.firstName}+${activeAgent.lastName}&background=0D1117&color=fff&size=128`;
     }
 
-   res.json({
-  success: true,
-  user: { 
-    id: user._id, 
-    email: user.email, 
-    isProfileComplete: user.isProfileComplete,
-    publicKeyJwk: user.publicKeyJwk // 👈 ADDED
-  },
-  agent: activeAgent ? { 
-    ...activeAgent.toObject(), 
-    photoUrl: signedPhotoUrl, 
-    status: isOnline ? 'online' : 'offline', 
-    lastSeenText: lastSeenDisplay,
-    publicKeyJwk: activeAgent.publicKeyJwk // 👈 ADDED
-  } : null
-});
+    const responsePayload = {
+      success: true,
+      user: { 
+        id: user._id, 
+        email: user.email, 
+        isProfileComplete: user.isProfileComplete, 
+        publicKeyJwk: user.publicKeyJwk 
+      },
+      agent: activeAgent ? { 
+        ...activeAgent.toObject(), 
+        photoUrl: signedPhotoUrl, 
+        status: isOnline ? 'online' : 'offline', 
+        lastSeenText: isOnline ? "Online" : "Offline",
+        publicKeyJwk: activeAgent.publicKeyJwk 
+      } : null
+    };
+
+    // 3. SET CACHE (Set for 1 hour)
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(responsePayload));
+
+    return res.json(responsePayload);
 
   } catch (err) {
     console.error("CRITICAL SESSION ERROR:", err);
-    // Explicitly send 500 so frontend catches the error and hides loading screen
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
-// 🛡️ SECURITY FIX 1: Include 'next' in route parameters for global safety interception
+// ==============================================================================
+// 🛡️ HARDENED ROUTE: PUT /api/users/update-user-onboarding (with Redis Invalidation)
+// ==============================================================================
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  
   try {
     await connectToDatabase();
     const s3Client = getS3Client(); 
 
     const { firstName, lastName, dob, gender, city, state, phone } = req.body;
     const userId = req.user?.id || req.user?._id;
+    
     if (!userId) {
       return res.status(401).json({ success: false, message: "User identity not found in token" });
     }
+
     let parsedPhone = { raw: "", formatted: "", countryCode: "", dialCode: "" };
-    
     if (phone) {
       try {
         const parsed = typeof phone === 'string' ? JSON.parse(phone) : phone;
@@ -1134,7 +1165,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       }
     }
 
-    // Safety fallback parsing checks to prevent invalid schemas crashing Mongoose validation engine
     const updateData = {
       firstName: firstName ? String(firstName).trim() : "",
       lastName: lastName ? String(lastName).trim() : "",
@@ -1151,12 +1181,11 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       delete req.body.profileImage;
     }
 
-    // 🛡️ SECURITY FIX 2: Hardened File Type & Extension Verification
+    // File Processing
     if (req.file) {
       const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
       const allowedExtensions = /.(jpg|jpeg|png|webp)$/i;
 
-      // Verify mimetype and clean file extension naming structures
       if (!allowedMimeTypes.includes(req.file.mimetype) || !allowedExtensions.test(req.file.originalname)) {
         return res.status(400).json({ 
           success: false, 
@@ -1164,7 +1193,6 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
         });
       }
 
-      // Completely random key filename to prevent directory path traversal injection tricks
       const fileExtension = req.file.originalname.split('.').pop();
       const cryptoKey = crypto.randomBytes(16).toString('hex');
       const fileKey = `users/${userId}-${cryptoKey}.${fileExtension}`;
@@ -1177,97 +1205,122 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       };
       await s3Client.send(new PutObjectCommand(uploadParams));
       updateData.photoUrl = fileKey; 
-      
-      console.log(`[Storage] Clean Photo uploaded for User: ${userId}`);
     }
-const updatedUser = await User.findByIdAndUpdate(
-  userId, 
-  { $set: updateData }, // Using $set protects fields not included in updateData
-  { new: true, runValidators: true }
-).select('email firstName lastName isProfileComplete city state photoUrl phone publicKeyJwk');
+
+    // 1. DATABASE UPDATE
+    const updatedUser = await User.findByIdAndUpdate(
+      userId, 
+      { $set: updateData }, 
+      { new: true, runValidators: true }
+    ).select('email firstName lastName isProfileComplete city state photoUrl phone publicKeyJwk');
+
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
     }
-   return res.json({ 
-  success: true, 
-  message: "Onboarding complete", 
-  user: {
-    id: updatedUser._id,
-    firstName: updatedUser.firstName,
-    lastName: updatedUser.lastName,
-    isProfileComplete: updatedUser.isProfileComplete,
-    photoUrl: updatedUser.photoUrl,
-    publicKeyJwk: updatedUser.publicKeyJwk // 👈 ADD THIS: Must be included here!
-  }
-});
 
-  } catch (err) {
-    // 🛡️ SECURITY FIX 5: Hand the exception details to the bottom centralized error handler
-    next(err);
-  }
-});
-
-// 🛡️ SECURITY FIX 1: Add 'next' parameter to route arguments
-app.get('/api/agents/:slug', async (req, res, next) => {
-  try {
-    console.log("--- Profile Request Start --- for:", req.params.slug);
-        if (!req.params.slug || typeof req.params.slug !== 'string' || req.params.slug.length > 60) {
-      return res.status(400).json({ success: false, message: "Invalid lookup identifier syntax." });
-    }
-    await connectToDatabase();
-    const AgentModel = getAgentModel(); 
-
-    if (!AgentModel) {
-      return res.status(500).json({ message: "Configuration Error: Agent Model not found" });
+    // 2. CACHE INVALIDATION: Force remove all session keys for this user
+    // This forces the dashboard to re-fetch fresh data from MongoDB next time
+    const keys = await redisClient.keys(`user:session:${userId}:*`);
+    if (keys.length > 0) {
+      await redisClient.del(keys);
     }
 
-    // 🛡️ SECURITY FIX 3: Removed RegExp object instantiation completely to defeat ReDoS attacks.
-    // Instead, look up using standard matching, and force select only public assets.
-    const cleanSlug = req.params.slug.trim();
-    const agent = await AgentModel.findOne({ 
-      slug: cleanSlug 
-    })
-    .select('firstName lastName photoUrl occupation program bio slug lastActive gender dob createdAt')
-    .lean();
-    if (!agent) {
-      return res.status(404).json({ message: "Agent not found" });
-    }
-    if (agent.photoUrl) {
-      agent.photoUrl = await getPrivateUrl(agent.photoUrl);
-    } else {
-      agent.photoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
-    }
-
-    console.log("--- Profile Request Success ---");
-    
-    // 🛡️ SECURITY FIX 5: Explicitly hand back an insulated layout package
-    return res.json({
-      success: true,
-      agent: {
-        id: agent._id,
-        firstName: agent.firstName || "",
-        lastName: agent.lastName || "",
-        photoUrl: agent.photoUrl,
-        occupation: agent.occupation || "",
-        program: agent.program || "",
-        bio: agent.bio || "",
-        slug: agent.slug
+    return res.json({ 
+      success: true, 
+      message: "Onboarding complete", 
+      user: {
+        id: updatedUser._id,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
+        isProfileComplete: updatedUser.isProfileComplete,
+        photoUrl: updatedUser.photoUrl,
+        publicKeyJwk: updatedUser.publicKeyJwk
       }
     });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX 6: Hand error management over to the centralized interceptor wall
     next(err);
   }
 });
+// ==========================================
+// 🛡️ OPTIMIZED PUBLIC PROFILE ROUTE (Redis Cached)
+// ==========================================
+app.get('/api/agents/:slug', async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  const cleanSlug = req.params.slug ? req.params.slug.trim() : "";
+  const cacheKey = `agent:public:${cleanSlug}`;
 
-// 🛡️ SECURITY FIX 1: Add 'next' parameter to leverage the central interceptor
+  try {
+    // 1. ATTEMPT CACHE HIT
+    const cachedProfile = await redisClient.get(cacheKey);
+    if (cachedProfile) {
+      return res.status(200).json({ success: true, agent: JSON.parse(cachedProfile) });
+    }
+
+    // 2. INPUT VALIDATION
+    if (!cleanSlug || cleanSlug.length > 60) {
+      return res.status(400).json({ success: false, message: "Invalid lookup identifier syntax." });
+    }
+
+    await connectToDatabase();
+    const AgentModel = getAgentModel(); 
+    if (!AgentModel) {
+      return res.status(500).json({ message: "Configuration Error: Agent Model not found" });
+    }
+
+    // 3. DATABASE LOOKUP
+    const agent = await AgentModel.findOne({ slug: cleanSlug })
+      .select('firstName lastName photoUrl occupation program bio slug')
+      .lean();
+
+    if (!agent) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    // 4. PREPARE RESPONSE OBJECT
+    let photoUrl = null;
+    if (agent.photoUrl) {
+      try {
+        photoUrl = await getPrivateUrl(agent.photoUrl);
+      } catch (err) {
+        console.error("S3 signing error:", err.message);
+      }
+    }
+    
+    if (!photoUrl) {
+      photoUrl = `https://ui-avatars.com/api/?name=${agent.firstName}+${agent.lastName}&background=0D1117&color=fff&size=128`;
+    }
+
+    const agentData = {
+      id: agent._id,
+      firstName: agent.firstName || "",
+      lastName: agent.lastName || "",
+      photoUrl: photoUrl,
+      occupation: agent.occupation || "",
+      program: agent.program || "",
+      bio: agent.bio || "",
+      slug: agent.slug
+    };
+
+    // 5. SET CACHE (Set for 1 hour)
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(agentData));
+
+    return res.json({ success: true, agent: agentData });
+
+  } catch (err) {
+    next(err);
+  }
+});
+// ==========================================
+// 🛡️ HARDENED ROUTE: PUT /api/agents/update-profile (with Redis Invalidation)
+// ==========================================
 app.put('/api/agents/update-profile', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     
-    // Explicitly load only the verification flags and password hashes required for validation loops
     const agent = await AgentModel.findById(req.user.id).select('+password +unlockedVoiceIds');
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent account not found" });
@@ -1279,28 +1332,20 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res, next) 
       oldPassword, newPassword 
     } = req.body;
 
-    // Handle Password Updates
+    // Handle Password Updates...
     if (newPassword && String(newPassword).trim() !== "") {
       if (!oldPassword) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "Current password is required to authorize security changes." 
-        });
+        return res.status(400).json({ success: false, message: "Current password is required." });
       }
-
       const isMatch = await bcrypt.compare(oldPassword, agent.password);
       if (!isMatch) {
-        return res.status(401).json({ 
-          success: false, 
-          message: "Current password incorrect. Security sync blocked." 
-        });
+        return res.status(401).json({ success: false, message: "Current password incorrect." });
       }
-
       const salt = await bcrypt.genSalt(10);
       agent.password = await bcrypt.hash(String(newPassword), salt);
     }
 
-    // 🛡️ SECURITY FIX 2: Strict Explicit Mutate Assignment (Protects against Mass Assignment payload injections)
+    // Explicit Mutate Assignments...
     if (firstName !== undefined) agent.firstName = String(firstName).trim();
     if (lastName !== undefined) agent.lastName = String(lastName).trim();
     if (occupation !== undefined) agent.occupation = String(occupation).trim();
@@ -1310,40 +1355,34 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res, next) 
     if (gender !== undefined) agent.gender = String(gender).toLowerCase().trim();
     if (dob !== undefined) agent.dob = dob;
 
-    // Voice Licensing Access Control Layer
+    // Voice Licensing Access Control...
     if (voiceId !== undefined) {
       if (voiceId === null) {
         agent.voiceId = null;
       } else {
         const hasLicense = agent.unlockedVoiceIds && agent.unlockedVoiceIds.includes(String(voiceId));
-        
         if (hasLicense) {
           agent.voiceId = String(voiceId);
         } else {
-          return res.status(403).json({ 
-            success: false, 
-            message: "Unauthorized: Active license configuration required for this voice identity." 
-          });
+          return res.status(403).json({ success: false, message: "Unauthorized: Active license required." });
         }
       }
     }
 
-    if (voiceDisplayName !== undefined) {
-      agent.voiceDisplayName = String(voiceDisplayName).trim();
-    }
+    if (voiceDisplayName !== undefined) agent.voiceDisplayName = String(voiceDisplayName).trim();
     
     if (voiceSettings && typeof voiceSettings === 'object') {
-      agent.voiceSettings = {
-        ...agent.voiceSettings,
-        ...voiceSettings
-      };
+      agent.voiceSettings = { ...agent.voiceSettings, ...voiceSettings };
     }
 
     await agent.save();
-    console.log(`[SECURITY SYNC] Profile synchronized for: ${agent.email}`);
 
-    // 🛡️ SECURITY FIX 3: Strict Response Whitelisting DTO
-    // Completely replaces raw object spreading so internal database structures never leak over network calls.
+    // 🚀 CACHE INVALIDATION:
+    // 1. Invalidate Private Profile Cache (used by dashboard)
+    await redisClient.del(`agent:profile:full:${req.user.id}`);
+    // 2. Invalidate Public Profile Cache (used by public profile page)
+    await redisClient.del(`agent:public:${agent.slug}`);
+
     return res.json({
       success: true,
       message: "Identity, Voice, and Security synchronized successfully.",
@@ -1367,18 +1406,22 @@ app.put('/api/agents/update-profile', authenticateToken, async (req, res, next) 
     });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX 4: Route exceptions through next to strip out unhandled database crashes
     next(err);
   }
 });
-// =========================================================================
-// 🛡️ HARDENED ROUTE 1: GET /api/users/me
-// =========================================================================
 app.get('/api/users/me', authenticateToken, async (req, res, next) => {
+  const redisClient = req.app.get('redisClient');
+  const cacheKey = `user:profile:full:${req.user.id}`;
+
   try {
+    // 1. ATTEMPT CACHE HIT
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(JSON.parse(cachedData));
+    }
+
+    // 2. FALLBACK TO DATABASE
     await connectToDatabase();
-    
-    // 1. Explicitly pull only required properties from the database layer
     const user = await User.findById(req.user.id)
       .select('firstName lastName email phone dob gender city state photoUrl isProfileComplete connectedAgents')
       .populate({
@@ -1390,45 +1433,24 @@ app.get('/api/users/me', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    // Process URLs (The heavy lifting)
     let signedPhotoUrl = user.photoUrl || null;
-
     if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
-      try {
-        signedPhotoUrl = await getPrivateUrl(signedPhotoUrl);
-      } catch (err) {
-        console.error("Failed to sign user photo URL:", err.message);
-        signedPhotoUrl = user.photoUrl; 
-      }
+      try { signedPhotoUrl = await getPrivateUrl(signedPhotoUrl); } catch (e) { console.error(e); }
     }
-
-    if (!signedPhotoUrl) {
-      signedPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName || 'User'}+${user.lastName || ''}&background=0D1117&color=fff&size=128`;
-    }
+    if (!signedPhotoUrl) signedPhotoUrl = `https://ui-avatars.com/api/?name=${user.firstName || 'User'}+${user.lastName || ''}&background=0D1117&color=fff&size=128`;
 
     const userObj = user.toObject();
-
-    if (userObj.connectedAgents && userObj.connectedAgents.length > 0) {
-      userObj.connectedAgents = await Promise.all(
-        userObj.connectedAgents.map(async (agent) => {
-          const rawAgentImage = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
-
-          if (rawAgentImage && !rawAgentImage.startsWith('http') && !rawAgentImage.startsWith('data:')) {
-            try {
-              agent.photoUrl = await getPrivateUrl(rawAgentImage);
-            } catch (err) {
-              console.error(`Failed to sign URL for agent ${agent._id}:`, err.message);
-              agent.photoUrl = rawAgentImage; 
-            }
-          } else {
-            agent.photoUrl = rawAgentImage; 
-          }
-          return agent;
-        })
-      );
+    if (userObj.connectedAgents?.length > 0) {
+      userObj.connectedAgents = await Promise.all(userObj.connectedAgents.map(async (agent) => {
+        const raw = agent.profileImage || agent.avatarUrl || agent.photoUrl || "";
+        agent.photoUrl = (raw && !raw.startsWith('http') && !raw.startsWith('data:')) ? await getPrivateUrl(raw).catch(() => raw) : raw;
+        return agent;
+      }));
     }
 
-    // 2. 🛡️ SECURITY FIX: Explicit Whitelist Presentation Mapping (No raw leak)
-    return res.json({ 
+    // 3. CONSTRUCT RESPONSE
+    const responsePayload = { 
       success: true, 
       user: {
         id: userObj._id,
@@ -1444,10 +1466,14 @@ app.get('/api/users/me', authenticateToken, async (req, res, next) => {
         photoUrl: signedPhotoUrl,
         connectedAgents: userObj.connectedAgents || []
       } 
-    });
+    };
+
+    // 4. SET CACHE (Expires in 1 hour)
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(responsePayload));
+
+    return res.json(responsePayload);
 
   } catch (err) {
-    // Pipe smoothly down to the absolute bottom global error interceptor
     next(err);
   }
 });
@@ -1913,57 +1939,49 @@ app.get('/api/agents/subscription/history', async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
-// 🛡️ HARDENED ENDPOINT: GET /api/agents/my-users (E2EE UPGRADED)
+// 🛡️ OPTIMIZED ENDPOINT: GET /api/agents/my-users (Redis Caching Enabled)
 // =========================================================================
 app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+  const redisClient = req.app.get('redisClient');
+  const agentId = req.user?.id || req.user?._id;
+  
+  if (!agentId) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+
+  // Unique cache key for this agent's user list
+  const cacheKey = `agent:users:list:${agentId}`;
 
   try {
-    await connectToDatabase();
-    
-    const agentId = req.user?.id || req.user?._id;
-    if (!agentId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+    // 1. ATTEMPT CACHE HIT
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(JSON.parse(cachedData));
     }
 
+    // 2. FALLBACK TO DATABASE (Cache Miss)
+    await connectToDatabase();
     const ActiveUserModel = mongoose.models.User || User;
     
-    // 🔒 Added 'publicKeyJwk' to the selected database query parameters
     const users = await ActiveUserModel.find({ connectedAgents: agentId })
       .select('firstName lastName email phone photoUrl gender city state isVerified isProfileComplete lastLogin lastActive createdAt publicKeyJwk')
       .sort({ lastActive: -1 })
       .lean();
 
-    // Compile unread counts across messages safely
     const unreadCountsData = await Message.aggregate([
-      { 
-        $match: { 
-          receiverId: new mongoose.Types.ObjectId(String(agentId)),
-          receiverModel: 'Agent', 
-          status: { $in: ['sent', 'delivered'] }
-        } 
-      },
-      { 
-        $group: { 
-          _id: "$senderId", 
-          count: { $sum: 1 } 
-        } 
-      }
+      { $match: { receiverId: new mongoose.Types.ObjectId(String(agentId)), receiverModel: 'Agent', status: { $in: ['sent', 'delivered'] } } },
+      { $group: { _id: "$senderId", count: { $sum: 1 } } }
     ]);
 
     const unreadMap = unreadCountsData.reduce((acc, item) => {
-      if (item._id) {
-        acc[item._id.toString()] = item.count;
-      }
+      if (item._id) acc[item._id.toString()] = item.count;
       return acc;
     }, {});
 
     const nowTimestamp = Date.now();
 
+    // 3. PROCESS USERS & SIGN URLS
     const processedUsers = await Promise.all(users.map(async (user) => {
       let finalPhotoUrl = null;
 
@@ -1972,14 +1990,10 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
           finalPhotoUrl = user.photoUrl;
         } else {
           try {
-            let fileKey = user.photoUrl;
-            if (fileKey.includes('.com/')) fileKey = fileKey.split('.com/')[1].split('?')[0];
-            let cleanKey = fileKey.startsWith('/') ? fileKey.slice(1) : fileKey;
-            
-            finalPhotoUrl = await getPrivateUrl(cleanKey);
+            let fileKey = user.photoUrl.includes('.com/') ? user.photoUrl.split('.com/')[1].split('?')[0] : user.photoUrl;
+            finalPhotoUrl = await getPrivateUrl(fileKey.startsWith('/') ? fileKey.slice(1) : fileKey);
           } catch (s3Err) {
             console.error(`[S3 Error] Failed to sign photo for ${user._id}:`, s3Err.message);
-            finalPhotoUrl = null; 
           }
         }
       }
@@ -1989,21 +2003,19 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
         finalPhotoUrl = `https://ui-avatars.com/api/?name=${name}&background=random&color=fff&size=128`;
       }
 
-      const lastSeen = user.lastActive || user.lastLogin;
-      const isOnline = lastSeen && new Date(lastSeen) > new Date(nowTimestamp - 5 * 60 * 1000);
+      const isOnline = user.lastActive && new Date(user.lastActive) > new Date(nowTimestamp - 5 * 60 * 1000);
       const userStringId = user._id.toString();
 
-      // 🛡️ SECURITY FIX: Map explicit keys one by one.
       return {
         id: userStringId,
-        _id: userStringId, // Keeps fallback schema keys accessible
+        _id: userStringId,
         firstName: user.firstName || "",
         lastName: user.lastName || "",
         email: user.email || "",
         phone: user.phone || {},
-        photoUrl: finalPhotoUrl,   
-        avatar: finalPhotoUrl,    
-        avatarUrl: finalPhotoUrl,  
+        photoUrl: finalPhotoUrl, 
+        avatar: finalPhotoUrl,
+        avatarUrl: finalPhotoUrl,
         status: isOnline ? 'online' : 'offline',
         gender: user.gender || "Not Specified", 
         city: user.city || "",
@@ -2013,16 +2025,21 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
         unreadCount: unreadMap[userStringId] || 0,
         lastActive: user.lastActive || null,
         createdAt: user.createdAt,
-        modelType: 'User', // Explicit model assignment for message sender configurations
-        publicKeyJwk: user.publicKeyJwk || null // 🔒 Safely expose public key object to frontend
+        modelType: 'User',
+        publicKeyJwk: user.publicKeyJwk || null
       };
     }));
 
-    return res.json({
+    const responsePayload = {
       success: true,
       count: processedUsers.length,
       users: processedUsers
-    });
+    };
+
+    // 4. SET CACHE (5-minute TTL to balance performance and real-time message status)
+    await redisClient.setEx(cacheKey, 300, JSON.stringify(responsePayload));
+
+    return res.json(responsePayload);
 
   } catch (err) {
     next(err);

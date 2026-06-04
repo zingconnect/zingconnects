@@ -933,25 +933,18 @@ useEffect(() => {
 useEffect(() => {
   if (!socket) return;
   
-  const handleStatusUpdate = ({ userId, isOnline, lastSeen, lastActive }) => {
-    const activeTimestamp = lastActive || lastSeen;
-
+  const handleStatusUpdate = ({ userId, status }) => {
+    // 1. Update the main list
     setUsers(prevUsers => prevUsers.map(u => 
-      u._id === userId ? { ...u, isOnline, lastActive: activeTimestamp } : u
+      u.id === userId ? { ...u, status } : u
     ));
     
-    setSelectedUser(prev => {
-      if (prev?._id === userId) {
-        return { ...prev, isOnline, lastActive: activeTimestamp }; // ✨ Fixed state key mutation
-      }
-      return prev;
-    });
+    // 2. Update the selected user (if they are currently open)
+    setSelectedUser(prev => (prev?.id === userId ? { ...prev, status } : prev));
   };
 
   socket.on('user_status_update', handleStatusUpdate);
-  return () => {
-    socket.off('user_status_update', handleStatusUpdate);
-  };
+  return () => socket.off('user_status_update', handleStatusUpdate);
 }, [socket]);
 
 useEffect(() => {
