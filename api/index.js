@@ -84,7 +84,9 @@ const corsOptions = {
 
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ limit: '5mb', extended: true }));
+
 
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
@@ -92,6 +94,7 @@ const terminatingCallsCache = new Set();
 app.set('terminatingCallsCache', terminatingCallsCache);
 
 app.set('redisClient', redisClient); 
+
 
 const server = http.createServer(app);
 const pubClient = redisClient;
@@ -122,7 +125,14 @@ console.log("DEBUG: VAPID Configured for:", process.env.VITE_EMAIL);
 console.log("DEBUG: Public Key defined:", !!process.env.VITE_PUBLIC_KEY);
 
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB limit (adjust based on your needs)
+    files: 1                  // Only allow 1 file upload
+  }
+});
+
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
