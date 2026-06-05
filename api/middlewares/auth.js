@@ -15,8 +15,10 @@ export const authenticateToken = async (req, res, next) => {
     req.user.id = decoded.id || decoded._id;
 
     const redisClient = req.app.get('redisClient');
-
-    // 2. Optimized Agent Logic (Using Redis Cache)
+if (!redisClient) {
+  console.error("Redis client not found in app context!");
+  return res.status(503).json({ success: false, message: "Service temporarily unavailable" });
+}
     if (decoded.role === 'agent') {
       const cacheKey = `agent:profile:${req.user.id}`;
       
@@ -49,9 +51,10 @@ export const authenticateToken = async (req, res, next) => {
 
     next();
   } catch (err) {
-    if (err.name === 'TokenExpiredError') return res.status(401).json({ success: false, message: "Token expired" });
-    return res.status(403).json({ success: false, message: "Invalid token" });
-  }
+  console.error("AUTH MIDDLEWARE CRASH:", err); // Log the actual stack trace
+  if (err.name === 'TokenExpiredError') return res.status(401).json({ success: false, message: "Token expired" });
+  return res.status(403).json({ success: false, message: "Invalid token" });
+}
 };
 
 

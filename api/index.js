@@ -3880,21 +3880,26 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
     next(err);
   }
 });
-
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
-    const role = req.user.role;
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    
+    if (!userId || !role) {
+      return res.status(400).json({ success: false, message: "Invalid session data" });
+    }
     
     let profile = null;
     
-    // Use your existing Mongoose models
+    // Use imported models directly rather than mongoose.models
     if (role === 'agent') {
-      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-      profile = await AgentModel.findById(userId).select('firstName lastName email slug role isSubscribed plan');
+      profile = await Agent.findById(userId)
+        .select('firstName lastName email slug role isSubscribed plan')
+        .lean(); // .lean() is faster for read-only operations
     } else {
-      const UserModel = mongoose.models.User || mongoose.model('User');
-      profile = await UserModel.findById(userId).select('email role isProfileComplete');
+      profile = await User.findById(userId)
+        .select('email role isProfileComplete')
+        .lean();
     }
 
     if (!profile) {

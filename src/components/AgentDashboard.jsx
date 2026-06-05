@@ -371,7 +371,7 @@ const handleAcceptCall = async () => {
     ringtoneAudio.current.currentTime = 0;
   }
   
-  const token = localStorage.getItem('agentToken');
+
   const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId || activeCaller?._id;
   const remoteUserId = activeCaller?.fromId || activeCaller?.callerId || activeCall?.fromId || activeCall?.caller;
 
@@ -498,7 +498,6 @@ const handleAcceptCall = async () => {
     if (activeCallRef) activeCallRef.current = null;
     if (activeCallerRef) activeCallerRef.current = null;
     
-    const token = localStorage.getItem('agentToken');
     if (currentCallId) {
     try {
       await secureFetch(`/api/calls/end/${currentCallId}`,  {
@@ -799,7 +798,6 @@ useEffect(() => {
 useEffect(() => {
   const currentCallId = activeCall?.roomName || activeCall?.callId;
   if (!socket || !currentCallId) return;
-  const token = localStorage.getItem('agentToken');
  const onCallAccepted = (data) => {
   console.log("🔊 User picked up. Switching Agent to connected mode.");
     peerConnectedRef.current = true; 
@@ -1037,7 +1035,6 @@ useEffect(() => {
     }
 
     const callId = data.callId || data._id;
-    const token = localStorage.getItem('agentToken'); 
 
     try {
       const res = await secureFetch(`/api/calls/status/${callId}`, {
@@ -1113,7 +1110,6 @@ useEffect(() => {
 ]);
 
 useEffect(() => {
-  const token = localStorage.getItem('agentToken');
     if (!token || !agentData?._id || callStatus !== 'idle') {
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
