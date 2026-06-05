@@ -129,8 +129,6 @@ const [hasMore, setHasMore] = useState(true);
 const [loadingMore, setLoadingMore] = useState(false);
 const [isFetchingOlder, setIsFetchingOlder] = useState(false);
 
-
-
   const [callStatus, setCallStatus] = useState('idle'); 
   const [activeCall, setActiveCall] = useState(null); 
   const [activeCaller, setActiveCaller] = useState(null); 
@@ -791,14 +789,12 @@ useEffect(() => {
   callingAudio.current.loop = true;
   const handleAudioLogic = async () => {
     try {
-      // Incoming Call Logic
       if (callStatus === 'ringing' && isIncomingCall) {
         callingAudio.current.pause();
         callingAudio.current.currentTime = 0;
                 await ringtoneAudio.current.play();
         console.log("🔊 Playing Ringtone");
       } 
-      // Outgoing Call Logic
       else if (callStatus === 'calling' || (callStatus === 'ringing' && !isIncomingCall)) {
         ringtoneAudio.current.pause();
         ringtoneAudio.current.currentTime = 0;
