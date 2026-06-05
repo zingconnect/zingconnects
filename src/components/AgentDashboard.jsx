@@ -108,7 +108,7 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
   const [previewFile, setPreviewFile] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");  
-          
+
 const hasProcessedDeepLink = useRef(false);
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
@@ -164,18 +164,17 @@ const agentPrivateKeyRef = useRef(agentPrivateKey);
     },
   ];
 
-  const handleLogout = async (e) => {
-    e.preventDefault();
-    try {
-      await secureFetch('/api/agents/logout', token, { method: 'POST' });
-    } catch (err) {
-      console.error("Logout failed:", err);
-    } finally {
-      const targetUrl = slug ? `/${slug}` : '/';
-      window.location.replace(targetUrl); 
-    }
-  };
-
+ const handleLogout = async (e) => {
+  e.preventDefault();
+  try {
+    await secureFetch('/api/agents/logout', { method: 'POST' });
+  } catch (err) {
+    console.error("Logout failed:", err);
+  } finally {
+    const targetUrl = slug ? `/${slug}` : '/';
+    window.location.replace(targetUrl); 
+  }
+};
 
   const getStatusIcon = (status) => {
     switch (status) {
@@ -187,94 +186,93 @@ const agentPrivateKeyRef = useRef(agentPrivateKey);
         return <BsCheck className="text-gray-400" size={16} />;
     }
   };
+const handleStartCall = async (targetUserId) => {
+  if (!targetUserId || !agentData) return;
+  peerConnectedRef.current = false; 
+  setPeerConnected(false);
+  
+  setIsEnding(true); 
+  if (isTransitioningRef) isTransitioningRef.current = true;
+  
+  setCallStatus('ringing'); 
+  setIsIncomingCall(false);
+  setShowFullScreenCall(true); 
+  
+  if (callingAudio.current) {
+    callingAudio.current.loop = true;
+    callingAudio.current.play().catch(e => console.warn("Audio play blocked:", e));
+  }
 
-  const handleStartCall = async (targetUserId) => {
-    if (!targetUserId || !agentData) return;
-    peerConnectedRef.current = false; 
-    setPeerConnected(false);
-    const token = localStorage.getItem('agentToken');
-    
-    setIsEnding(true); 
-    if (isTransitioningRef) isTransitioningRef.current = true;
-    
-    setCallStatus('ringing'); 
-    setIsIncomingCall(false);
-    setShowFullScreenCall(true); 
-    
-    if (callingAudio.current) {
-      callingAudio.current.loop = true;
-      callingAudio.current.play().catch(e => console.warn("Audio play blocked:", e));
+  try {
+    // UPDATED: Use secureFetch instead of manual fetch.
+    // Cookies are automatically attached via credentials: 'include'.
+    const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/start`, {
+      method: 'POST',
+      body: JSON.stringify({
+        receiverId: targetUserId,
+        receiverModel: 'User',
+        voiceId: selectedVoiceId || "natural" 
+      })
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.error || data.message || "Failed to initiate call");
     }
 
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          receiverId: targetUserId,
-          receiverModel: 'User',
-          voiceId: selectedVoiceId || "natural" 
-        })
+    const callMetadata = { 
+      callId: data.callId || data.roomName, 
+      roomName: data.roomName, 
+      toId: targetUserId.toString(),
+      fromId: agentData._id.toString()
+    };
+
+    setActiveCall(callMetadata);
+    if (activeCallRef) activeCallRef.current = callMetadata;
+    
+    if (socket) {
+      socket.emit("call-user", { 
+        userToCall: targetUserId.toString(),
+        fromId: agentData._id.toString(),
+        fromName: `${agentData.firstName} ${agentData.lastName}`,
+        photoUrl: agentData.photoUrl,
+        roomName: data.roomName
       });
-
-      const data = await res.json();
-
-      if (!data.success) {
-        throw new Error(data.error || data.message || "Failed to initiate call");
-      }
-
-      const callMetadata = { 
-        callId: data.callId || data.roomName, 
-        roomName: data.roomName, 
-        toId: targetUserId.toString(),
-        fromId: agentData._id.toString()
-      };
-
-      setActiveCall(callMetadata);
-      if (activeCallRef) activeCallRef.current = callMetadata;
-      
-      if (socket) {
-        socket.emit("call-user", { 
-          userToCall: targetUserId.toString(),
-          fromId: agentData._id.toString(),
-          fromName: `${agentData.firstName} ${agentData.lastName}`,
-          photoUrl: agentData.photoUrl,
-          roomName: data.roomName
-        });
-      }
-      
-      setLkToken(data.lkToken);
-      console.log("✅ ZingConnect: Outbound call routing successfully. Poller active.");
-
-      startStatusPolling(data.roomName);
-      setIsEnding(false); 
-      if (isTransitioningRef.current) isTransitioningRef.current = false;
-
-    } catch (err) {
-      console.error("❌ LiveKit Setup Error:", err);
-      setIsEnding(false);
-      if (isTransitioningRef) isTransitioningRef.current = false;
-
-      if (callingAudio.current) {
-        callingAudio.current.pause();
-        callingAudio.current.currentTime = 0;
-      }
-      alert(`Could not start call: ${err.message}`);
-      handleEndCall();
     }
-  };
-const startStatusPolling = (roomName) => {
+    
+    setLkToken(data.lkToken);
+    console.log("✅ ZingConnect: Outbound call routing successfully. Poller active.");
+
+    startStatusPolling(data.roomName);
+    setIsEnding(false); 
+    if (isTransitioningRef.current) isTransitioningRef.current = false;
+
+  } catch (err) {
+    console.error("❌ LiveKit Setup Error:", err);
+    setIsEnding(false);
+    if (isTransitioningRef) isTransitioningRef.current = false;
+
+    if (callingAudio.current) {
+      callingAudio.current.pause();
+      callingAudio.current.currentTime = 0;
+    }
+    alert(`Could not start call: ${err.message}`);
+    handleEndCall();
+  }
+};
+
+  const startStatusPolling = (roomName) => {
   const startTime = Date.now(); 
 
   const pollInterval = setInterval(async () => {
     try {
-      const res = await secureFetch(`/api/calls/status/${roomName}`, token, { 
+      const res = await secureFetch(`/api/calls/status/${roomName}`, { 
         method: 'GET' 
-      });
-      
+      });      
+      if (res.status === 401 || res.status === 403) {
+        throw new Error('Unauthorized');
+      }
       const data = await res.json();
       const isTimeout = (Date.now() - startTime) > 45000; 
       
@@ -296,6 +294,7 @@ const startStatusPolling = (roomName) => {
   if (pollingIntervalRef) pollingIntervalRef.current = pollInterval;
 };
 
+
   const handleScroll = async (e) => {
   const container = e.target;
     if (container.scrollTop < 50 && !isFetchingMore && messages.length >= limit) {
@@ -310,21 +309,21 @@ const startStatusPolling = (roomName) => {
     }, 500);
   }
 };
+
 const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
-  // 🛡️ HARD GUARD: If we already know the session is conflicted, don't even try
   if (isFetching || isDualLoginConflict) return null; 
   
   isFetching = true;
   
   try {
-    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, token, {
+    // UPDATED: Removed token argument. secureFetch handles cookie-based auth.
+    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, {
       method: 'GET'
     });
     
-    // 🛡️ HANDLE 403/401 EXPLICITLY
     if (res.status === 403 || res.status === 401) {
       console.error("⛔ Authentication session invalid. Aborting further fetches.");
-      setIsDualLoginConflict(true); // This state should trigger a UI redirect or modal
+      setIsDualLoginConflict(true);
       return null;
     }
 
@@ -335,8 +334,8 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
     if (data.success && data.messages) {
       const decryptedMessages = await Promise.all(
         data.messages.map(async (msg) => {
-          // Check if we have the private key BEFORE attempting to decrypt
-          const myKey = localStorage.getItem(`zing_secure_pk_${agentData._id}`);
+          // Use agentPrivateKeyRef instead of localStorage for better security
+          const myKey = agentPrivateKeyRef.current;
           
           if (msg.isEncrypted && targetUserCryptoProfile?.publicKeyJwk && myKey) {
             try {
@@ -344,7 +343,8 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
                 msg.text,
                 msg.iv,
                 targetUserCryptoProfile.publicKeyJwk,
-                agentData._id
+                agentData._id,
+                myKey // Pass the private key directly from the ref
               );
               return { ...msg, text: clearText };
             } catch (decryptionError) {
@@ -383,7 +383,7 @@ const handleAcceptCall = async () => {
  try {
     setCallStatus('connecting'); 
     setShowFullScreenCall(true);
-        const res = await secureFetch(`/api/calls/accept/${callId}`, token, {
+        const res = await secureFetch(`/api/calls/accept/${callId}`, {
       method: 'POST'
     });
     
@@ -501,7 +501,7 @@ const handleAcceptCall = async () => {
     const token = localStorage.getItem('agentToken');
     if (currentCallId) {
     try {
-      await secureFetch(`/api/calls/end/${currentCallId}`, token, {
+      await secureFetch(`/api/calls/end/${currentCallId}`,  {
         method: 'POST',
         body: JSON.stringify({ callId: currentCallId })
       });
@@ -827,7 +827,7 @@ useEffect(() => {
   const fallbackCheck = setInterval(async () => {
     if (callStatus === 'calling' && !peerConnected) {
       try {
-        const res = await secureFetch(`/api/calls/status/${currentCallId}`, token, {
+        const res = await secureFetch(`/api/calls/status/${currentCallId}`, {
           method: 'GET'
         });
         const data = await res.json();
@@ -1040,7 +1040,7 @@ useEffect(() => {
     const token = localStorage.getItem('agentToken'); 
 
     try {
-      const res = await secureFetch(`/api/calls/status/${callId}`, token, {
+      const res = await secureFetch(`/api/calls/status/${callId}`, {
         method: 'GET'
       });
       const statusData = await res.json();
@@ -1123,7 +1123,7 @@ useEffect(() => {
   }
   const pollForCalls = async () => {
     try {
-      const res = await secureFetch(`/api/calls/check-incoming`, token, {
+      const res = await secureFetch(`/api/calls/check-incoming`,  {
         method: 'GET'
       });
       const data = await res.json();
@@ -1164,7 +1164,6 @@ useEffect(() => {
       console.log("📱 ZingConnect: App returned to foreground.");
       
       if (callStatus !== 'idle') {
-        console.log("📞 Call active. Skipping re-sync to maintain connection.");
         return; 
       }
 
@@ -1177,7 +1176,7 @@ useEffect(() => {
 
       if (selectedUser?._id && agentData?._id) {
         try {
-          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, token, {
+          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, {
             method: 'GET'
           });
           
@@ -1185,7 +1184,6 @@ useEffect(() => {
           const data = await response.json();
           
           if (data.success && data.messages) {
-            // 🔓 Decrypt the batch on-the-fly when resuming visibility
             const decryptedMessages = await Promise.all(
               data.messages.map(async (msg) => {
                 if (msg.isEncrypted && selectedUser?.publicKeyJwk) {
@@ -1194,7 +1192,8 @@ useEffect(() => {
                       msg.text,
                       msg.iv,
                       selectedUser.publicKeyJwk,
-                      agentData._id
+                      agentData._id,
+                      agentPrivateKeyRef.current
                     );
                     return { ...msg, text: clearText };
                   } catch (e) {
@@ -1215,37 +1214,39 @@ useEffect(() => {
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-}, [agentData?._id, selectedUser?._id, callStatus, socket, token]);
+}, [agentData?._id, selectedUser?._id, callStatus, socket]);
 
 useEffect(() => {
   const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
 
-  // 1. Guard Clause: Stop if no ID, idle, or already in a security conflict
   if (!currentCallId || typeof currentCallId !== 'string' || callStatus === 'idle' || isDualLoginConflict) {
     return;
   }
 
   const syncStatus = async () => {
     if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
+    
     try {
-      // 2. Use secureFetch (token = null for cookie auth)
-      const res = await secureFetch(`/api/calls/status/${currentCallId}`, token, {
+      const res = await secureFetch(`/api/calls/status/${currentCallId}`, {
         method: 'GET'
       });
-      // 3. Handle Unauthorized/Forbidden (Conflict)
+      
       if (res.status === 401 || res.status === 403) {
-        setIsDualLoginConflict(true); // This stops the interval via the dependency below
+        setIsDualLoginConflict(true);
         return;
       }
+      
       if (!res.ok) {
         if (res.status === 404) handleEndCall();
         return;
       }
+      
       const data = await res.json(); 
-      // 4. Update status based on data
+      
       if (data?.status === 'ringing' && callStatus === 'calling') {
         setCallStatus('ringing');
       }
+      
       if (data?.status === 'connected' && callStatus !== 'connected') {
         if (isIncomingCall) {
           setCallStatus('connected');
@@ -1254,6 +1255,7 @@ useEffect(() => {
           console.log("📡 DB connected, awaiting socket acceptance.");
         }
       }
+      
       if (data && ['ended', 'declined', 'missed', 'rejected'].includes(data.status)) {
         handleEndCall();
       }
@@ -1261,9 +1263,11 @@ useEffect(() => {
       console.warn("ZingConnect Sync Jitter:", e.message);
     }
   };
+
   const interval = setInterval(syncStatus, 3000);
   return () => clearInterval(interval);
 }, [callStatus, activeCall?.roomName, activeCall?.callId, activeCall?._id, handleEndCall, isIncomingCall, isDualLoginConflict]);
+
 
 useEffect(() => {
   if (!socket) return;
@@ -1367,7 +1371,6 @@ useEffect(() => {
     window.removeEventListener('offline', handleOffline);
   };
 }, []);
-
 useEffect(() => {
   selectedUserRef.current = selectedUser;
   agentDataRef.current = agentData;
@@ -1379,10 +1382,11 @@ useEffect(() => {
 
   const heartBeat = setInterval(async () => {
     try {
-      const response = await secureFetch('/api/agents/heartbeat', token, {
-        method: 'POST' 
+      const response = await secureFetch('/api/agents/heartbeat', {
+        method: 'POST'
       });
-            if (response.status === 403) {
+          
+      if (response.status === 403) {
         const data = await response.json();
         if (data.reason === 'dual_login') {
           setIsDualLoginConflict(true); 
@@ -1394,11 +1398,10 @@ useEffect(() => {
   }, 60000); 
 
   return () => clearInterval(heartBeat);
-  }, [isDualLoginConflict]);
+}, [isDualLoginConflict]);
 
  useEffect(() => {
   let isMounted = true;
-  const token = localStorage.getItem('accessToken'); 
 
   // Load external dependency safely
   if (!document.querySelector('script[src*="flutterwave"]')) {
@@ -1409,17 +1412,13 @@ useEffect(() => {
   }
 
   const fetchInitialData = async () => {
-    // 🛡️ Ensure redirect uses the agent-specific slug
-    if (!token) {
-      navigate(`/agent/login/${slug}`);
-      return;
-    }
-
     setLoading(true);
     try {
+      // UPDATED: Removed 'token' arguments. 
+      // secureFetch handles the cookie-based session automatically.
       const [profileResponse, usersResponse] = await Promise.allSettled([
-        secureFetch('/api/agents/profile/me', token, { method: 'GET' }),
-        secureFetch('/api/agents/my-users', token, { method: 'GET' })
+        secureFetch('/api/agents/profile/me', { method: 'GET' }),
+        secureFetch('/api/agents/my-users', { method: 'GET' })
       ]);
 
       if (!isMounted) return;
@@ -1432,7 +1431,7 @@ useEffect(() => {
           if (errorData.reason === 'dual_login') {
             setIsDualLoginConflict(true);
           } else {
-            localStorage.removeItem('accessToken'); 
+            // No need to clear local tokens; session is server-managed
             navigate(`/agent/login/${slug}`);
           }
           return;
@@ -1448,7 +1447,7 @@ useEffect(() => {
         setIsSubscribed(subscribed); 
         if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
 
-        // Handle User Request separately to prevent cascading failure
+        // Handle User Request
         if (subscribed && usersResponse.status === 'fulfilled') {
           const uRes = usersResponse.value;
           if (uRes.ok) {
@@ -1469,8 +1468,7 @@ useEffect(() => {
 
   fetchInitialData();
   return () => { isMounted = false; };
-}, [navigate, slug, localStorage.getItem('accessToken')]); // Added dependency for safety
-
+}, [navigate, slug]); // Removed localStorage dependency
 const handlePayment = async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
@@ -1505,9 +1503,9 @@ const handlePayment = async () => {
       },
       callback: async (response) => {
         try {
-          const token = localStorage.getItem('accessToken');
-
-          const verifyRes = await secureFetch('/api/subscriptions/verify', token, {
+          // UPDATED: Removed 'token' argument.
+          // secureFetch uses 'credentials: include' to verify the authenticated session.
+          const verifyRes = await secureFetch('/api/subscriptions/verify', {
             method: 'POST',
             body: JSON.stringify({
               transaction_id: response.transaction_id,
@@ -1525,7 +1523,6 @@ const handlePayment = async () => {
           if (verifyRes.ok) {
             const data = await verifyRes.json();
             
-            // ✅ CORRECTION: Update React state immediately instead of reloading
             setIsSubscribed(true);
             setAgentData(prev => ({ 
               ...prev, 
@@ -1609,14 +1606,12 @@ const handleDownload = async (fileUrl, detectedType) => {
     console.error("Download failed:", error);
   }
 };
-
 const handleDeleteMessage = async (msgId) => {
   const originalMessages = [...messages];
-  // Standardized on _id
   setMessages(prev => prev.filter(m => m._id !== msgId));
 
   try {
-    const res = await secureFetch(`/api/messages/${msgId}`, token, {
+    const res = await secureFetch(`/api/messages/${msgId}`, {
       method: 'DELETE'
     });
 
@@ -1644,7 +1639,6 @@ const handleFinalSend = async () => {
     const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
     const rawCaption = caption;
 
-    // 1. 🔒 Encrypt the caption if the target user has a public key profile
     let finalCaption = rawCaption.trim();
     let encryptionIv = null;
     let isEncrypted = false;
@@ -1660,8 +1654,8 @@ const handleFinalSend = async () => {
       isEncrypted = true;
     }
 
-    // 2. Get Signed URL
-    const urlResponse = await secureFetch('/api/messages/get-upload-url', token, {
+    // UPDATED: secureFetch handles cookie-based auth for signing requests
+    const urlResponse = await secureFetch('/api/messages/get-upload-url', {
       method: 'POST',
       body: JSON.stringify({ fileName: previewFile.name, fileType: previewFile.type })
     });
@@ -1669,7 +1663,6 @@ const handleFinalSend = async () => {
     if (!urlResponse.ok) throw new Error("Failed to retrieve upload signature");
     const { uploadUrl, key } = await urlResponse.json();
 
-    // 3. Direct upload to Cloud
     const directUpload = await fetch(uploadUrl, {
       method: 'PUT',
       body: previewFile,
@@ -1678,15 +1671,15 @@ const handleFinalSend = async () => {
 
     if (!directUpload.ok) throw new Error("Cloud upload failed");
 
-    // 4. Confirm to DB with encrypted metadata
-    const confirmResponse = await secureFetch('/api/messages/confirm-upload', token, {
+    // UPDATED: secureFetch handles cookie-based auth for confirmation
+    const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: selectedUser._id,
         receiverModel: selectedUser.modelType || 'User',
-        text: finalCaption,      // 🔒 Encrypted
-        iv: encryptionIv,        // 🔒 IV
-        isEncrypted: isEncrypted,// 🔒 Flag
+        text: finalCaption,
+        iv: encryptionIv,
+        isEncrypted: isEncrypted,
         fileUrl: key,
         fileType: detectedType
       })
@@ -1694,20 +1687,19 @@ const handleFinalSend = async () => {
 
     const finalData = await confirmResponse.json();
     if (finalData.success) {
-      // 5. 🔓 Decrypt locally for the UI layer
       let finalMsg = finalData.message;
       if (finalMsg.isEncrypted && selectedUser?.publicKeyJwk) {
         finalMsg.text = await decryptMessageText(
           finalMsg.text, 
           finalMsg.iv, 
           selectedUser.publicKeyJwk, 
-          agentData._id
+          agentData._id,
+          agentPrivateKeyRef.current
         );
       }
 
       setMessages(prev => [...prev, finalMsg]);
       
-      // Cleanup
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
       setPreviewFile(null);
@@ -1735,7 +1727,6 @@ const handleDisconnect = async (e) => {
     window.location.replace(targetUrl);
   }
 };
-
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
 
@@ -1747,7 +1738,8 @@ const handleSelectUser = async (user) => {
   if (socket) socket.emit('join-chat', user._id);
 
   try {
-    const response = await secureFetch(`/api/messages/${user._id}?limit=30`, token, {
+    // UPDATED: Removed 'token'. secureFetch handles session auth via cookies.
+    const response = await secureFetch(`/api/messages/${user._id}?limit=30`, {
       method: 'GET'
     });
 
@@ -1768,22 +1760,18 @@ const handleSelectUser = async (user) => {
 
       if (data.success && Array.isArray(data.messages)) {
         const targetUser = freshUserData || user;
-        
-        // Use the Ref for the private key
         const currentKey = agentPrivateKeyRef.current;
 
         const decryptedHistory = await Promise.all(
           data.messages.map(async (msg) => {
             if (msg.isEncrypted && targetUser?.publicKeyJwk) {
               try {
-                // MODIFIED: Pass currentKey (from ref) to ensure fast, 
-                // in-memory decryption
                 return await decryptMessageText(
                   msg.text,
                   msg.iv,
                   targetUser.publicKeyJwk,
                   agentData._id,
-                  currentKey // Assuming your function signature supports this
+                  currentKey
                 );
               } catch (e) {
                 return { ...msg, text: "🔒 [Decryption Failed]" };
@@ -1795,7 +1783,8 @@ const handleSelectUser = async (user) => {
         setMessages(decryptedHistory);
       }
 
-      await secureFetch(`/api/messages/mark-read/${user._id}`, token, {
+      // UPDATED: secureFetch handles cookie-based auth for PATCH request
+      await secureFetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH'
       });
     }
@@ -1804,9 +1793,8 @@ const handleSelectUser = async (user) => {
     console.error("Failed to load chat history:", err);
   }
 };
-
 useEffect(() => {
-  // 1. Exit if already processed or data isn't ready
+  // Exit if already processed or data isn't ready
   if (hasProcessedDeepLink.current || users.length === 0) return;
 
   const params = new URLSearchParams(window.location.search);
@@ -1817,10 +1805,8 @@ useEffect(() => {
     
     if (userToSelect) {
       handleSelectUser(userToSelect);
-      hasProcessedDeepLink.current = true; // 2. Mark as done
-      
-      // 3. Clean up the URL so it doesn't trigger on refresh
-      navigate('/agent/dashboard', { replace: true });
+      hasProcessedDeepLink.current = true;
+            navigate('/agent/dashboard', { replace: true });
     }
   }
 }, [users, navigate]);
@@ -1860,20 +1846,14 @@ useEffect(() => {
 
   const refreshUserList = async () => {
     try {
-      // 🛡️ Pass current token explicitly
-      const res = await secureFetch('/api/agents/my-users', token, { method: 'GET' });
+      const res = await secureFetch('/api/agents/my-users', { method: 'GET' });
 
-      // 2. Explicit Auth Handling
       if (res.status === 401 || res.status === 403) {
-        console.warn("⛔ Session invalid (403/401). Stopping auto-refresh.");
-        setIsDualLoginConflict(true); 
-        return; 
-      }
-
-      if (!res.ok) {
-        console.error(`Refresh failed with status: ${res.status}`);
+        setIsDualLoginConflict(true);
         return;
       }
+
+      if (!res.ok) return;
 
       const data = await res.json();
       
@@ -1881,7 +1861,6 @@ useEffect(() => {
         setUsers(prevUsers => {
           return data.users.map(newUser => {
             const existingUser = prevUsers.find(u => u._id === newUser._id);
-            // Carry over existing public keys if the API response is missing them
             return (existingUser && !newUser.publicKeyJwk && existingUser.publicKeyJwk)
               ? { ...newUser, publicKeyJwk: existingUser.publicKeyJwk }
               : newUser;
@@ -1893,15 +1872,13 @@ useEffect(() => {
     }
   };
 
-  // 3. Initialize immediately
   refreshUserList();
 
-  // 4. Set interval
   const interval = setInterval(refreshUserList, 15000);
 
-  // 5. Cleanup: Clear interval on unmount or dependency change
   return () => clearInterval(interval);
-}, [isSubscribed, agentData?._id, isDualLoginConflict, token]); // Added 'token' dependency
+}, [isSubscribed, agentData?._id, isDualLoginConflict]);
+
 
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
@@ -1997,22 +1974,19 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
-
 useEffect(() => {
   if (!socket) return;
-    if ("Notification" in window && Notification.permission === "default") {
+  if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
 
   const handleIncomingMessage = async (data, callback) => {
-    // 1. Acknowledge receipt
     if (callback) callback({ status: 'received' });
 
     console.log("📥 Real-time Socket Message Detected:", data);
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
-    // 2. 🔓 CRYPTO DECRYPTION LAYER (Using Refs for latest state)
     const currentUser = selectedUserRef.current;
     const currentAgent = agentDataRef.current;
     const currentKey = agentPrivateKeyRef.current;
@@ -2025,7 +1999,8 @@ useEffect(() => {
             processedData.text,
             processedData.iv,
             currentUser.publicKeyJwk,
-            currentAgent?._id // Passing Agent ID to resolve the private key
+            currentAgent?._id,
+            currentKey // Using the secure Ref
           );
         } catch (err) {
           console.error("🔒 Socket decryption error:", err);
@@ -2036,7 +2011,6 @@ useEffect(() => {
       }
     }
 
-    // 3. Update state with decrypted content
     const isChattingWithSender = currentUser && 
       (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
     
@@ -2046,12 +2020,12 @@ useEffect(() => {
         return [...prev, processedData];
       });
       
-      secureFetch(`/api/messages/mark-read/${currentUser._id}`, token, {
+      // UPDATED: No token needed; session is managed via cookies
+      secureFetch(`/api/messages/mark-read/${currentUser._id}`, {
         method: 'PATCH'
       }).catch(err => console.error("Mark read error:", err));
     }
 
-    // 4. Notifications
     if (processedData.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
@@ -2081,7 +2055,7 @@ useEffect(() => {
 
   socket.on('RECEIVE_PRIVATE_MESSAGE', handleIncomingMessage);
   return () => socket.off('RECEIVE_PRIVATE_MESSAGE', handleIncomingMessage);
-}, [socket]); // Only re-bind if the socket connection itself changes
+}, [socket]);
 
 useEffect(() => {
   if (!("Notification" in window)) {
@@ -2101,17 +2075,17 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
   
   if (!selectedUser || !newMessage.trim() || isUploading) return;
 
-  // 1. 🛡️ SILENT RECOVERY GUARD
   let activeUser = selectedUser;
   if (!activeUser.publicKeyJwk) {
-    console.warn("🔒 Key missing in state. Attempting silent sync...");
+    console.warn("Key missing in state. Attempting silent sync...");
     try {
-      const res = await secureFetch(`/api/users/profile/${activeUser._id}`, token);
+      const res = await secureFetch(`/api/users/profile/${activeUser._id}`, { method: 'GET' });
       const data = await res.json();
       
       if (data.user?.publicKeyJwk) {
@@ -2131,7 +2105,6 @@ const handleSendMessage = async (e) => {
   const tempId = Date.now().toString();
   setNewMessage('');
 
-  // 2. Optimistic UI update
   const optimisticMsg = {
     _id: tempId,
     tempId: tempId,
@@ -2149,7 +2122,6 @@ const handleSendMessage = async (e) => {
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    // 3. STRICT CRYPTOGRAPHIC SHIELDING
     if (!activeUser.publicKeyJwk) {
       throw new Error("Encryption key missing. Transmission aborted for security.");
     }
@@ -2164,7 +2136,7 @@ const handleSendMessage = async (e) => {
       throw new Error("Encryption failed: Payload remains insecure.");
     }
 
-    const response = await secureFetch('/api/messages/send', token, {
+    const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: activeUser._id,
@@ -2181,8 +2153,6 @@ const handleSendMessage = async (e) => {
     if (data.success) {
       let finalizedMessage = { ...data.message };
       
-      // 4. Local runtime decryption for confirmation
-      // Using the agentPrivateKeyRef for high-performance in-memory access
       finalizedMessage.text = await decryptMessageText(
         finalizedMessage.text,
         finalizedMessage.iv,
@@ -2198,7 +2168,7 @@ const handleSendMessage = async (e) => {
       throw new Error(data.message || "Transmission failed");
     }
   } catch (err) {
-    console.error("🔒 Agent transmission crypto block exception:", err);
+    console.error("Agent transmission crypto block exception:", err);
     setMessages(prev => 
       prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg)
     );

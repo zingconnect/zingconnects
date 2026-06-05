@@ -23,15 +23,16 @@ export const VerifyOTP = () => {
   useEffect(() => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
-
-  const handleResend = async () => {
+const handleResend = async () => {
     if (isResending) return;
     setIsResending(true);
 
     try {
-      await secureFetch('/api/agents/register', null, {
+      // Remove 'null' token argument, add credentials: 'include'
+      await secureFetch('/api/agents/register', {
         method: 'POST',
         body: JSON.stringify({ email, firstName, resend: true }),
+        credentials: 'include' 
       });
 
       alert("A new security code has been sent to your email.");
@@ -49,17 +50,20 @@ export const VerifyOTP = () => {
     setIsVerifying(true);
 
     try {
-      const response = await secureFetch('/api/agents/verify-otp', null, {
+      // Remove 'null' token argument, add credentials: 'include'
+      const response = await secureFetch('/api/agents/verify-otp', {
         method: 'POST',
         body: JSON.stringify({ email, otp }),
+        credentials: 'include'
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        // 🛡️ RUN WEB CRYPTO GENERATION BEFORE COMPLETING VISUAL TRANSITION
-        // This sets the browser's local storage private key and saves the public key upstream.
-        await initializeUserE2EEKeys(data.userId, data.token);
+        // 🛡️ E2EE Initialization
+        // Note: Check if initializeUserE2EEKeys still requires the 'token' argument.
+        // If it was only used for auth headers, you can now remove it.
+        await initializeUserE2EEKeys(data.userId);
 
         setServerSlug(data.slug);
         setIsSuccess(true);
@@ -73,7 +77,6 @@ export const VerifyOTP = () => {
       setIsVerifying(false);
     }
   };
-
   const fullLink = `${window.location.origin}/${serverSlug}`;
 
   const copyToClipboard = () => {

@@ -432,6 +432,7 @@ useEffect(() => {
   socket.on("ai-audio-chunk", handleAiAudioChunk);
   return () => socket.off("ai-audio-chunk", handleAiAudioChunk);
 }, [socket, callStatus, isSpeakerOn, activeCall?.voiceId]);
+
 const handleEndCall = useCallback(async () => {
   console.log("📴 Initiating Call End Sequence...");
   
@@ -453,10 +454,10 @@ const handleEndCall = useCallback(async () => {
 
   try {
     if (currentCallId) {
-     await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, token, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' }
-});
+      // UPDATED: Removed 'token' argument. secureFetch automatically handles the HttpOnly cookie.
+      await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/end/${currentCallId}`, {
+        method: 'POST'
+      });
       console.log("✅ Server notified: Call marked as inactive.");
     }
     if (socket && targetId) {
@@ -472,7 +473,6 @@ const handleEndCall = useCallback(async () => {
     terminateLocalSession();
   }
 }, [socket, userData, activeCall, terminateLocalSession]);
-
 
 useEffect(() => {
   if (!socket || !userData?._id) return;
@@ -639,6 +639,7 @@ const formatTime = (seconds) => {
   const secs = seconds % 60;
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
+
 useEffect(() => {
   const currentCallId = activeCall?.callId || activeCall?._id;
   
@@ -650,11 +651,11 @@ useEffect(() => {
     if (isEnding || callStatus === 'connected') return;
     
     try {
-      // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
+      // UPDATED: Using secureFetch to maintain consistency across the app.
+      // This automatically includes 'credentials: include' and sets JSON headers.
+      const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
         method: 'GET',
-        headers: { 'Cache-Control': 'no-cache' },
-        credentials: 'include'
+        headers: { 'Cache-Control': 'no-cache' }
       });
       
       if (res.status === 404) {
@@ -664,8 +665,10 @@ useEffect(() => {
         }
         return;
       }
+      
       const data = await res.json();
       if (!data) return;
+      
       const terminalStates = ['ended', 'declined', 'missed', 'rejected'];
       if (terminalStates.includes(data.status) || data.active === false) {
         const timeElapsed = Date.now() - syncSessionStart;
@@ -688,7 +691,7 @@ useEffect(() => {
   
   const interval = setInterval(syncStatus, 5000); 
   return () => clearInterval(interval);
-}, [callStatus, activeCall?.callId, activeCall?._id, isEnding]);
+}, [callStatus, activeCall?.callId, activeCall?._id, isEnding, handleEndCall]);
 
 useEffect(() => {
   if (!socket) return;
@@ -733,7 +736,6 @@ useEffect(() => {
     }
   }
 }, [isSpeakerOn, activeCall?.voiceId, callStatus]);
-
 const checkCalls = async () => {
   if (
     callStatusRef.current !== 'idle' || 
@@ -744,14 +746,12 @@ const checkCalls = async () => {
   }
 
   try {
-   const response = await secureFetch(
-  `${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, 
-  token, // Ensure the token is passed here
-  {
-    method: 'GET',
-    headers: { 'Cache-Control': 'no-cache' }
-  }
-);
+    // UPDATED: Removed 'token' argument.
+    // 'Cache-Control' is passed in the options object for secureFetch.
+    const response = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/check-incoming`, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     
     if (response.status === 401 || response.status === 403) {
       console.warn("Session expired. Redirecting to agent entry...");
@@ -847,6 +847,7 @@ const toggleMute = () => {
     return newState;
   });
 };
+
 const handleAcceptCall = async () => {
   // 1. Audio Pipeline Wake-up
   const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -876,10 +877,10 @@ const handleAcceptCall = async () => {
     setCallStatus('connecting');
     setShowFullScreenCall(true);
 
-   const response = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, token, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' }
-});
+    // UPDATED: Removed 'token' argument. secureFetch handles cookie-based auth.
+    const response = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/accept/${callId}`, {
+      method: 'POST'
+    });
 
     const data = await response.json();    
     if (data.success && data.lkToken) {
@@ -909,7 +910,6 @@ const handleAcceptCall = async () => {
     handleEndCall();
   }
 };
-
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
@@ -933,13 +933,12 @@ useEffect(() => {
     }
 
     try {
-    const res = await secureFetch(
-  `${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, token, 
-  {
-    method: 'GET',
-    headers: { 'Cache-Control': 'no-cache' } // Maintain your specific headers
-  }
-);
+      // UPDATED: Removed 'token' argument.
+      const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      
       const statusData = await res.json();
       
       if (statusData && ['rejected', 'declined', 'ended'].includes(statusData.status)) {
@@ -957,6 +956,7 @@ useEffect(() => {
     const incomingId = data?.callId || data?.roomName || data?._id;
 
     console.log("📴 Signal Received:", { incomingId, currentId });
+    
     if (!currentId) {
       if (callStatus !== 'idle') {
         console.log("Cleaning up zombie UI session");
@@ -964,6 +964,7 @@ useEffect(() => {
       }
       return;
     }
+    
     if (incomingId && currentId && String(incomingId) !== String(currentId)) {
       console.warn("⏭️ Ignoring end signal: Session mismatch", { incomingId, currentId });
       return;
@@ -973,12 +974,14 @@ useEffect(() => {
     handleEndCall();
   };
 
+  // Socket Event Registration
   socket.on("incoming-call", onIncoming);
   socket.on("call-ended", onRemoteEnd);
   socket.on("end-call", onRemoteEnd);
   socket.on("call-rejected", onRemoteEnd);
-  socket.on("call-accepted", (data) => {});
+  socket.on("call-accepted", () => {});
 
+  // Cleanup
   return () => {
     socket.off("incoming-call", onIncoming);
     socket.off("call-ended", onRemoteEnd);
@@ -986,7 +989,7 @@ useEffect(() => {
     socket.off("call-rejected", onRemoteEnd);
     socket.off("call-accepted");
   };
-}, [socket, userData?._id, handleEndCall]);
+}, [socket, userData?._id, handleEndCall, isEnding, callStatus]);
 
 async function handleRejectCall() {
   console.log("🚫 User rejecting Agent call...");
@@ -1045,8 +1048,9 @@ useEffect(() => {
 useEffect(() => {
   const setupNotifications = async () => {
     const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-    // 1. Only proceed if we have keys and token
-    if (!publicKey || !token) return; 
+    
+    // 1. Only proceed if we have keys
+    if (!publicKey) return; 
 
     // 2. Prevent redundant API calls if already synced this session
     if (localStorage.getItem('pushSynced') === 'true') return;
@@ -1067,9 +1071,10 @@ useEffect(() => {
       }
       
       const subData = subscription.toJSON();
-      const response = await secureFetch('/api/save-subscription', token, {
+      
+      // UPDATED: Removed 'token'. secureFetch handles authentication via HttpOnly cookies.
+      const response = await secureFetch('/api/save-subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           subscription: subData,
           userType: 'user' 
@@ -1090,7 +1095,7 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, [token]);
+}, []); 
 
 useEffect(() => {
   const handleVoiceUpdate = (data) => {
@@ -1112,7 +1117,6 @@ useEffect(() => {
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
 
-
 useEffect(() => {
   if (isLoading) return;
 
@@ -1125,10 +1129,12 @@ useEffect(() => {
         ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
       
-      const response = await secureFetch(endpoint, token);
+      // UPDATED: Removed 'token' argument and added credentials: 'include'
+      const response = await secureFetch(endpoint, {
+        method: 'GET',
+        credentials: 'include' 
+      });
 
-      // If session is invalid, let the AuthProvider or the parent Route 
-      // handle the redirect. Don't navigate here to avoid race conditions.
       if (!response.ok) {
         console.warn("Session expired or invalid. Status:", response.status);
         return;
@@ -1166,12 +1172,13 @@ useEffect(() => {
 
   const fetchMessages = async () => {
     try {
-      const response = await secureFetch(`/api/messages/${targetAgentId}?limit=50`, token, {
+      const response = await secureFetch(`/api/messages/${targetAgentId}?limit=50`, {
         method: 'GET'
       });
+      
       const data = await response.json();
       if (response.ok && data.success) {
-        // 1. 🔓 DECRYPT ALL INCOMING SERVER MESSAGES LOCALLY IN PARALLEL
+        // 1. 🔓 DECRYPT ALL INCOMING SERVER MESSAGES
         const incomingMessages = await Promise.all(
           data.messages.map(async (msg) => {
             if (msg.isEncrypted && agent?.publicKeyJwk) {
@@ -1184,14 +1191,15 @@ useEffect(() => {
                 );
                 return { ...msg, text: clearText };
               } catch (decryptionError) {
-                console.error("Failed to decrypt incoming message:", decryptionError);
+                console.error("Failed to decrypt:", decryptionError);
                 return { ...msg, text: "🔒 [Decryption Failed]" };
               }
             }
-            return msg; // Keep unencrypted or fallback text as is
+            return msg;
           })
         );
 
+        // 2. Notification & Auto-Read logic
         const lastMsg = incomingMessages[incomingMessages.length - 1];
         if (
           lastMsg && 
@@ -1200,27 +1208,27 @@ useEffect(() => {
           lastMsg._id !== lastNotifiedId.current
         ) {
           lastNotifiedId.current = lastMsg._id;
+          
           if (notificationSound.current) {
             notificationSound.current.currentTime = 0;
-            notificationSound.current.play().catch(() => console.log("Audio blocked"));
+            notificationSound.current.play().catch(() => {});
           }
+          
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
-              body: lastMsg.text || "Sent a file", // Now reads as beautiful plaintext!
+              body: lastMsg.text || "Sent a file",
               icon: '/logo-s.png',
               tag: 'zing-msg'
             });
           }
-          secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, token, {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          }).then(res => {
-            if (!res.ok) console.error("Mark read failed with status:", res.status);
-          }).catch(err => {
-          });
+
+          // UPDATED: 'mark-read' call also uses secureFetch without manual token
+          secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
+            method: 'PATCH'
+          }).catch(console.error);
         }
+
+        // 3. Update Message State
         setMessages(prev => {
           const inFlight = prev.filter(m => m.status === 'sending' || m.status === 'failed' || m.isTemp);
           const serverMessageIds = new Set(incomingMessages.map(msg => msg._id));
@@ -1234,9 +1242,7 @@ useEffect(() => {
         });
 
         if (isFirstLoad.current) {
-          setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-          }, 100);
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' }), 100);
           isFirstLoad.current = false;
         }
       }
@@ -1250,8 +1256,9 @@ useEffect(() => {
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);
-  }, [agent?._id, agent?.id, agent?.publicKeyJwk, userData?._id, slugFromUrl, token]);
-
+  
+  // Dependency array updated: Removed 'token'
+}, [agent?._id, agent?.id, agent?.publicKeyJwk, userData?._id, slugFromUrl]);
 
   const agentStatus = getStatusInfo(agent);
 
@@ -1305,8 +1312,8 @@ const fetchOlderMessages = async () => {
   const prevScrollHeight = container?.scrollHeight || 0;
 
   try {
-    // 🛡️ Fetch using your custom secureFetch utility
-    const response = await secureFetch(`/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, token, {
+    // UPDATED: Removed 'token' argument. secureFetch handles credentials: 'include'.
+    const response = await secureFetch(`/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
       method: 'GET'
     });
     
@@ -1316,7 +1323,7 @@ const fetchOlderMessages = async () => {
       if (data.messages.length < 30) setHasMore(false);
       
       if (data.messages.length > 0) {
-        // 1. 🔓 DECRYPT THE HISTORICAL BLOCK IN PARALLEL
+        // 1. 🔓 DECRYPT THE HISTORICAL BLOCK
         const decryptedHistoricalMessages = await Promise.all(
           data.messages.map(async (msg) => {
             if (msg.isEncrypted && agent?.publicKeyJwk) {
@@ -1336,13 +1343,14 @@ const fetchOlderMessages = async () => {
             return msg;
           })
         );
+        
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m._id));
           const uniqueHistorical = decryptedHistoricalMessages.filter(m => !existingIds.has(m._id));
           return [...uniqueHistorical, ...prev];
         });
         
-        // 3. Adjust scroll offset layout metrics safely using plaintext dimensions
+        // 2. Adjust scroll offset safely
         requestAnimationFrame(() => {
           if (container) {
             const newHeight = container.scrollHeight;
@@ -1389,7 +1397,6 @@ const handleFileChange = (e) => {
   }
   e.target.value = ""; 
 };
-
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
   
@@ -1418,9 +1425,10 @@ const handleProfileSubmit = async (e) => {
   });
 
   try {
-    const res = await secureFetch('/api/users/update-user-onboarding', token, {
+    // UPDATED: Removed 'token' argument. secureFetch handles credentials: 'include'.
+    const res = await secureFetch('/api/users/update-user-onboarding', {
       method: 'PUT',
-      body: data // Note: secureFetch will handle the headers
+      body: data
     });
     const result = await res.json();
 
@@ -1428,8 +1436,9 @@ const handleProfileSubmit = async (e) => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
       if (setUserData) setUserData(result.user);
+      
       console.log("🛡️ Onboarding complete. Initiating cryptographic registration...");
-      await initializeUserE2EEKeys(result.user.id, token);
+      await initializeUserE2EEKeys(result.user.id);
 
       setShowOnboarding(false);
       setOnboardingFile(null);
@@ -1568,6 +1577,8 @@ const processFile = (file) => {
   setPreviewUrl(URL.createObjectURL(file));
   setCaption("");
 };
+
+
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
 
@@ -1576,9 +1587,8 @@ const handleFinalSend = async () => {
   
   const fileToUpload = previewFile;
   const currentUrl = previewUrl;
-  const rawCaption = caption; // Keep a local reference to the plaintext caption
+  const rawCaption = caption;
 
-  // 1. Optimistic UI: Display the local cleartext and local file preview immediately
   const pendingMedia = {
     _id: tempId,
     tempId: tempId,
@@ -1593,7 +1603,6 @@ const handleFinalSend = async () => {
 
   setMessages(prev => [...prev, pendingMedia]);
   
-  // Clear states immediately to help garbage collection
   setPreviewUrl(null);
   setPreviewFile(null);
   setIsUploading(true);
@@ -1603,31 +1612,25 @@ const handleFinalSend = async () => {
     let captionIv = null;
     let isCaptionEncrypted = false;
 
-    // 2. 🔒 Encrypt the text caption if E2EE keys are available
     if (agent?.publicKeyJwk) {
-      console.log("🔑 Encrypting with Public Key:", agent.publicKeyJwk);
       const encryptedCaption = await encryptMessageText(
         rawCaption.trim(),
         agent.publicKeyJwk,
         userData._id
       );
-      if (!encryptedData.isEncrypted) {
-      console.error("⚠️ Encryption failed internally. Check your keys or UserID mapping.");
-      return; // Do not send if encryption was expected but failed
-  }
+      
+      // FIXED: Corrected reference from 'encryptedData' to 'encryptedCaption'
+      if (!encryptedCaption.isEncrypted) {
+        console.error("⚠️ Encryption failed internally.");
+        return; 
+      }
       finalCaptionText = encryptedCaption.cipherText;
       captionIv = encryptedCaption.iv;
       isCaptionEncrypted = encryptedCaption.isEncrypted;
     }
 
-    // 3. 🔒 OPTIONAL: File Encryption Layer
-    // For absolute security, you would encrypt 'fileToUpload' here using AES-GCM 
-    // and upload the encrypted binary ArrayBuffer instead of the raw file object.
-    // For this implementation, we will keep your standard stream upload but pass 
-    // down the secure caption metadata parameters.
-    
-    // 4. Request signed upload URL from backend
-    const urlResponse = await secureFetch('/api/messages/get-upload-url', token, {
+    // UPDATED: Removed 'token', secureFetch uses credentials: 'include'
+    const urlResponse = await secureFetch('/api/messages/get-upload-url', {
       method: 'POST',
       body: JSON.stringify({ fileName: fileToUpload.name, fileType: fileToUpload.type })
     });
@@ -1635,21 +1638,20 @@ const handleFinalSend = async () => {
     const urlData = await urlResponse.json();
     if (!urlData.success) throw new Error("Upload permission failed");
 
-    // 5. Binary transfer directly to your storage bucket
     await fetch(urlData.uploadUrl, {
       method: 'PUT',
-      body: fileToUpload, // If encrypting file binaries, you would pass your encrypted Blob/Buffer here
+      body: fileToUpload,
       headers: { 'Content-Type': fileToUpload.type }
     });
 
-    // 6. 🛡️ Send the encrypted metadata to MongoDB via the confirmation route
-    const confirmResponse = await secureFetch('/api/messages/confirm-upload', token, {
+    // UPDATED: Removed 'token'
+    const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
-        text: finalCaptionText,       // Encrypted caption string
-        iv: captionIv,                 // IV used for the caption
-        isEncrypted: isCaptionEncrypted, // Crypto indicator flag
+        text: finalCaptionText,
+        iv: captionIv,
+        isEncrypted: isCaptionEncrypted,
         fileUrl: urlData.key,
         fileType: detectedType
       })
@@ -1659,7 +1661,6 @@ const handleFinalSend = async () => {
     if (data.success) {
       const finalizedMessage = { ...data.message };
       
-      // 7. 🔓 Decrypt response locally so it maps seamlessly into the active client state
       if (finalizedMessage.isEncrypted && agent?.publicKeyJwk) {
         finalizedMessage.text = await decryptMessageText(
           finalizedMessage.text,
@@ -1702,18 +1703,20 @@ const handleDownload = async (url, type) => {
 const startStatusPolling = (roomName) => {
   const startTime = Date.now();
 
+  // Clear existing polling session if present
   if (pollingRef.current) clearInterval(pollingRef.current);
 
   const pollInterval = setInterval(async () => {
-    // 1. Guard clauses
+    // 1. Guard clauses: Skip if not in an active call state
     if (callStatus === 'idle' || isEnding || isTransitioningRef.current) return;
 
     try {
-      // 2. Use secureFetch instead of raw fetch
-      const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, token, {
+      // 2. UPDATED: Removed 'token' argument. secureFetch handles cookie-based auth.
+      const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${roomName}`, {
         method: 'GET'
       });
 
+      // 3. Handle missing call records (e.g., race conditions on startup)
       if (res.status === 404) {
         if (Date.now() - startTime > 8000) {
           console.warn("Polling: Call record missing.");
@@ -1725,6 +1728,7 @@ const startStatusPolling = (roomName) => {
       const data = await res.json();
       const terminalStates = ['ended', 'rejected', 'missed', 'declined'];
 
+      // 4. Terminate if call state reached terminal phase on server
       if (terminalStates.includes(data.status) || data.active === false) {
         if (Date.now() - startTime > 5000) {
           console.log("Polling: Remote side terminated call.");
@@ -1753,10 +1757,10 @@ const handleStartCall = async () => {
   setShowFullScreenCall(true);
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/calls/start`, {
+    // UPDATED: Now using secureFetch for consistency.
+    // secureFetch handles the 'credentials: include' and JSON headers automatically.
+    const res = await secureFetch(`${API_BASE_URL}/api/calls/start`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ 
         receiverId: currentAgentId, 
         receiverModel: 'Agent',
@@ -1811,6 +1815,7 @@ const handleStartCall = async () => {
     handleEndCall();
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
 
@@ -1854,8 +1859,7 @@ const handleSendMessage = async (e) => {
         throw new Error("Encryption failed: Missing IV or Ciphertext.");
       }
     }
-
-    const response = await secureFetch('/api/messages/send', token, {
+    const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
@@ -1867,7 +1871,6 @@ const handleSendMessage = async (e) => {
         replyToId: replyingTo?._id
       })
     });
-
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message);
 
@@ -1885,7 +1888,6 @@ const handleSendMessage = async (e) => {
     setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
   }
 };
-
 const handleResend = (msg) => {
   setMessages(prev => prev.filter(m => m._id !== msg._id));
   if (msg.fileType === 'image' || msg.fileType === 'video') {

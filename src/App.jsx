@@ -104,16 +104,18 @@ function App() {
             <Route path="/verify-otp" element={<VerifyOTP />} />
             <Route path="/:slug" element={<AgentSlug />} />
 
-            {/* --- 2. PROTECTED ROUTES (Requires Token) --- */}
-            <Route element={<ProtectedRoute />}>
-              {/* Agent Routes */}
+            {/* --- 2. PROTECTED ROUTES --- */}
+            {/* AGENT PROTECTED ROUTES */}
+            <Route element={<ProtectedRoute requiredRole="agent" />}>
               <Route element={<AgentLayoutWrapper />}>
                 <Route path="/agent/dashboard/:slug" element={<AgentDashboard />} />
                 <Route path="/agent/profile/:slug" element={<AgentProfile />} />
                 <Route path="/agent/call-settings/:slug" element={<CallSetting />} />
               </Route>
+            </Route>
 
-              {/* User Routes */}
+            {/* USER PROTECTED ROUTES */}
+            <Route element={<ProtectedRoute requiredRole="user" />}>
               <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
                 <Route path="/user/dashboard/:agentId" element={<UserDashboard />} />
                 <Route path="/user/profile/:agentId" element={<UserProfile />} />
@@ -121,6 +123,7 @@ function App() {
             </Route>
 
             {/* --- 3. ADMINISTRATOR ROUTES --- */}
+            {/* You can add a role="admin" check here if needed */}
             <Route path="/admin/terminal" element={<ZingAdmin />} /> 
             <Route path="/admin/dashboard" element={<ZingDashboard />} />
             

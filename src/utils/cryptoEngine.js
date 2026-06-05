@@ -37,7 +37,7 @@ export const initializeUserE2EEKeys = async (userId, token) => {
     // 1. Generate an ECDH Key Pair on the secure P-256 Elliptic Curve
     const keyPair = await window.crypto.subtle.generateKey(
       { name: "ECDH", namedCurve: "P-256" },
-      true, 
+      false, 
       ["deriveKey", "deriveBits"]
     );
 

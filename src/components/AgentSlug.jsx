@@ -131,7 +131,6 @@ React.useEffect(() => {
   return () => { isMounted.current = false; };
 }, []);
 
-
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -147,18 +146,26 @@ const handleUserInquiry = async (e) => {
       body: JSON.stringify({ 
         email: userEmail.trim(), 
         agentSlug: slug 
-      })
+      }),
+      // CRITICAL: This tells the browser to include the HttpOnly cookie in the request
+      // and process the Set-Cookie header in the response.
+      credentials: 'include' 
     });
 
     const data = await response.json();
 
-    if (response.ok && data.token) {
-      setToken(data.token, slug);
+    if (response.ok) {
+      // Token is now managed by the browser cookie.
+      // Update your local auth state (e.g., isAuthenticated = true)
+      if (typeof login === 'function') {
+        login(slug); // Using the login function from AuthContext
+      }
       
       if (rememberUser) {
         localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
       }
-            navigate(`/user/dashboard/${slug}`);
+      
+      navigate(`/user/dashboard/${slug}`);
     } else {
       alert(`Connection failed: ${data.message || "Unknown error"}`);
     }
@@ -169,50 +176,56 @@ const handleUserInquiry = async (e) => {
     setIsProcessing(false); 
   }
 };
-
 const handleAgentLogin = async (e) => {
-    e.preventDefault();
-    setIsProcessing(true);
+  e.preventDefault();
+  setIsProcessing(true);
 
-    const payload = {
-      email: loginEmail.toLowerCase().trim(),
-      password: loginPassword,
-      targetSlug: slug.toLowerCase().trim(),
-      force: true
-    };
-
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agents/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await response.json();
-
-      // Only proceed if component is still mounted
-      if (!isMounted.current) return;
-
-      if (response.ok && data.token) {
-        localStorage.setItem('accessToken', data.token);
-        setToken(data.token, payload.targetSlug);
-        
-        if (rememberAgent) {
-          localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
-        }
-        
-        navigate(`/agent/dashboard/${payload.targetSlug}`);
-      } else {
-        console.error("Login Server Error:", data.message);
-        alert(data.message || "Invalid Credentials");
-      }
-    } catch (err) {
-      console.error("Network Error:", err);
-      if (isMounted.current) alert("Connection error. Please try again.");
-    } finally {
-      if (isMounted.current) setIsProcessing(false);
-    }
+  const payload = {
+    email: loginEmail.toLowerCase().trim(),
+    password: loginPassword,
+    targetSlug: slug.toLowerCase().trim(),
+    force: true
   };
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agents/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      // CRITICAL: Must be 'include' to send/receive HttpOnly cookies
+      credentials: 'include' 
+    });
+
+    const data = await response.json();
+
+    if (!isMounted.current) return;
+
+    if (response.ok) {
+      // The token is now stored securely in the browser's cookie jar.
+      // We no longer access it via JavaScript or store it in localStorage.
+      
+      // Update AuthContext state to reflect that the user is now authenticated
+      if (typeof login === 'function') {
+        login(payload.targetSlug);
+      }
+      
+      if (rememberAgent) {
+        localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
+      }
+      
+      navigate(`/agent/dashboard/${payload.targetSlug}`);
+    } else {
+      console.error("Login Server Error:", data.message);
+      alert(data.message || "Invalid Credentials");
+    }
+  } catch (err) {
+    console.error("Network Error:", err);
+    if (isMounted.current) alert("Connection error. Please try again.");
+  } finally {
+    if (isMounted.current) setIsProcessing(false);
+  }
+};
+
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white">

@@ -519,9 +519,6 @@ async function sendVerificationEmail(email, firstName, otpCode) {
   });
 }
 
-// ==========================================
-// 🛡️ HARDENED ENDPOINT: POST /api/agents/verify-otp
-// ==========================================
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -535,9 +532,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const lowerEmail = email.toLowerCase().trim();
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
-    // 🛡️ SECURITY FIX 1: Brute-Force & Validation Check
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      // 🛡️ SECURITY FIX 2: Generic Error Message to prevent enumeration
       return res.status(400).json({ 
         success: false, 
         message: "Invalid or expired verification code." 
@@ -551,25 +546,30 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     agent.otpExpires = undefined;
     await agent.save();
     
-    if (!process.env.JWT_SECRET) {
-      throw new Error("Security configuration error.");
-    }
-
+    // Create Session Token
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' } // Extended to 7d to match cookie age
     );
+
+    // 🛡️ Set Secure HttpOnly Cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true, 
+      sameSite: 'Lax', 
+      signed: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
 
     return res.status(200).json({
       success: true,
-      token: token,
       slug: agent.slug,
       message: "Your profile is now live!"
     });
 
   } catch (err) {
-    // 🛡️ SECURITY FIX 4: Prevent leaking internal DB details via fallback global handling
     next(err); 
   }
 });
@@ -625,17 +625,11 @@ app.post('/api/agents/login', async (req, res, next) => {
     }
 
     const AgentModel = getAgentModel();
-    // Fetch necessary fields for cache priming while keeping password secret
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('slug currentSessionId firstName lastName email occupation bio isSubscribed +password'); 
     
-    if (!agent) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
-    }
-
-    const isMatch = await bcrypt.compare(password, agent.password);
-    if (!isMatch) {
+    if (!agent || !(await bcrypt.compare(password, agent.password))) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
@@ -650,7 +644,7 @@ app.post('/api/agents/login', async (req, res, next) => {
     agent.currentSessionId = newSessionId;
     await agent.save();
 
-    // 🚀 PRIME THE CACHE: Store the profile data in Redis immediately after login
+    // PRIME THE CACHE
     const cacheKey = `agent:profile:${agent._id}`;
     const cacheableAgent = {
       id: agent._id,
@@ -672,21 +666,22 @@ app.post('/api/agents/login', async (req, res, next) => {
         sessionId: newSessionId
       }, 
       process.env.JWT_SECRET, 
-      { expiresIn: '24h' }
+      { expiresIn: '7d' } 
     );
 
+    // Set Secure HttpOnly Cookie
     res.cookie('token', token, {
       httpOnly: true,
       secure: true, 
-      sameSite: 'None',
+      sameSite: 'Lax', // Changed to Lax as frontend/backend share same domain
       signed: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/'
     });
 
+    // Successfully logged in; token is now in the HttpOnly cookie
     return res.json({ 
       success: true, 
-      token: token,
       slug: agent.slug 
     });
 
@@ -931,7 +926,7 @@ app.post('/api/users/handshake', async (req, res, next) => {
     if (!email) return res.status(400).json({ success: false, message: "Email required" });
     if (!agentSlug) return res.status(400).json({ success: false, message: "Agent context is required" });
 
-    // 1. Find Agent (This could also be cached if agents are read-heavy)
+    // 1. Find Agent
     const agent = await Agent.findOne({ slug: agentSlug.toLowerCase().trim() });
     if (!agent) {
       return res.status(400).json({ success: false, message: "Agent not found" });
@@ -963,7 +958,7 @@ app.post('/api/users/handshake', async (req, res, next) => {
       }
     }
 
-    // 3. PRIME THE USER CACHE: Cache the user profile for 1 hour
+    // 3. PRIME THE USER CACHE
     const cacheKey = `user:profile:${user._id}`;
     const cacheableUser = {
       _id: user._id,
@@ -973,7 +968,7 @@ app.post('/api/users/handshake', async (req, res, next) => {
     };
     await redisClient.setEx(cacheKey, 3600, JSON.stringify(cacheableUser));
 
-    // 4. Token & Cookie
+    // 4. Token & Secure Cookie
     const token = jwt.sign(
       { id: user._id, role: 'user', activeAgentSlug: agent.slug },
       process.env.JWT_SECRET,
@@ -983,16 +978,17 @@ app.post('/api/users/handshake', async (req, res, next) => {
     res.cookie('token', token, {
       httpOnly: true,
       secure: true, 
-      sameSite: 'None',
+      sameSite: 'Lax', // Updated from None to Lax
       signed: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
     });
 
+    // 5. Clean Response (Removed token from JSON body)
     return res.json({ 
       success: true, 
       isNewUser, 
       isProfileComplete: user.isProfileComplete,
-      token: token,
       user: cacheableUser
     });
     
@@ -1000,6 +996,7 @@ app.post('/api/users/handshake', async (req, res, next) => {
     next(err);
   }
 });
+
 // ==========================================
 // 🛡️ OPTIMIZED HEARTBEAT ROUTE (Redis Presence)
 // ==========================================
@@ -1054,16 +1051,19 @@ app.post('/api/agents/logout', async (req, res, next) => {
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const agentId = decoded.id;
-      // Remove online presence and cached profile
+      
+      // Cleanup: Remove online presence and cached profile
+      // Using pipeline is more efficient if you have multiple keys to delete
       await redisClient.del(`agent:online:${agentId}`);
       await redisClient.del(`agent:profile:full:${agentId}`);
+      await redisClient.del(`agent:profile:${agentId}`); // Ensure consistency with handshake/login cache keys
     }
 
-    // 3. Clear the cookie
+    // 3. Clear the cookie with identical settings used during creation
     res.clearCookie('token', {
       httpOnly: true,
       secure: true,
-      sameSite: 'None',
+      sameSite: 'Lax', // Must match the sameSite used in your login/handshake
       path: '/'
     });
 
@@ -1072,11 +1072,17 @@ app.post('/api/agents/logout', async (req, res, next) => {
       message: "Session successfully terminated." 
     });
   } catch (err) {
-    // If the token is invalid or expired, just clear the cookie anyway
-    res.clearCookie('token', { path: '/' });
+    // If token is invalid/expired, still attempt to clear cookie
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      path: '/'
+    });
     return res.json({ success: true, message: "Session terminated." });
   }
 });
+
 app.get('/api/users/my-session', authenticateToken, async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
   const userId = req.user.id || req.user._id;
@@ -3909,6 +3915,37 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
     });
   } catch (err) {
     next(err);
+  }
+});
+
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const role = req.user.role;
+    
+    let profile = null;
+    
+    // Use your existing Mongoose models
+    if (role === 'agent') {
+      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
+      profile = await AgentModel.findById(userId).select('firstName lastName email slug role isSubscribed plan');
+    } else {
+      const UserModel = mongoose.models.User || mongoose.model('User');
+      profile = await UserModel.findById(userId).select('email role isProfileComplete');
+    }
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: "User/Agent not found" });
+    }
+
+    return res.json({ 
+      success: true, 
+      role: role,
+      profile: profile 
+    });
+  } catch (err) {
+    console.error("Session verification error:", err);
+    return res.status(500).json({ success: false, message: "Server error during session verification" });
   }
 });
 

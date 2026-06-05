@@ -31,34 +31,34 @@ export const UserProfile = () => {
   const [previewUrl, setPreviewUrl] = useState(null);
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        // Use credentials: 'include' to automatically send the HttpOnly cookie
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
-          method: 'GET',
-          headers: { 
-            'Cache-Control': 'no-cache', 
-            'Pragma': 'no-cache' 
-          },
-          credentials: 'include' 
-        });
-        
-        const result = await res.json();
-        
-        if (res.ok && result.success) {
-          setUserData(result.user);
-        } else {
-          console.error("API Error:", result.message || "Failed to fetch user");
+  const fetchUserData = async () => {
+    try {
+      // UPDATED: Use your global secureFetch utility.
+      // It handles 'credentials: include' and headers internally.
+      const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/users/me`, {
+        method: 'GET',
+        headers: { 
+          'Cache-Control': 'no-cache', 
+          'Pragma': 'no-cache' 
         }
-      } catch (err) {
-        console.error("Network or parsing error:", err);
-      } finally {
-        setLoading(false);
+      });
+      
+      const result = await res.json();
+      
+      if (res.ok && result.success) {
+        setUserData(result.user);
+      } else {
+        console.error("API Error:", result.message || "Failed to fetch user");
       }
-    };
+    } catch (err) {
+      console.error("Network or parsing error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchUserData();
-  }, [setUserData]);
+  fetchUserData();
+}, [setUserData]);
 
   useEffect(() => {
     if (userData) {
@@ -91,7 +91,7 @@ export const UserProfile = () => {
       setPreviewUrl(URL.createObjectURL(file));
     }
   };
-const handleUpdate = async () => {
+  const handleUpdate = async () => {
   setIsUpdating(true);
   
   const data = new FormData();
@@ -107,9 +107,9 @@ const handleUpdate = async () => {
   if (selectedFile) data.append('photo', selectedFile);
 
   try {
-    // 🛡️ SECURITY FIX: Use credentials: 'include' for cookie-based auth
-    // Authorization header removed to prevent token exposure
-    const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/users/update-profile`, token, { 
+    // UPDATED: Removed 'token'. 
+    // secureFetch uses 'credentials: include' to handle the HttpOnly cookie.
+    const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/users/update-profile`, { 
       method: 'PUT',
       body: data
     });

@@ -76,10 +76,11 @@ const handleSubmit = async (e) => {
       data.append('photo', selectedFile);
     }
 
-    // Using secureFetch with null token
-    const response = await secureFetch('/api/agents/register-init',null, {
+    // UPDATED: Removed 'null' token argument. 
+    // secureFetch will now use 'credentials: include' automatically.
+    const response = await secureFetch('/api/agents/register-init', {
       method: 'POST',
-      body: data // secureFetch now detects this is FormData
+      body: data 
     });
 
     const result = await response.json();

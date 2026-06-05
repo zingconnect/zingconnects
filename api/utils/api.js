@@ -1,7 +1,6 @@
-export const secureFetch = async (url, token, options = {}) => {
-  // 1. Create base headers
+export const secureFetch = async (url, options = {}) => {
+  // 1. Headers: Removed the 'token' argument and manual Authorization header
   const headers = {
-    ...(token && !options.headers?.Authorization ? { 'Authorization': `Bearer ${token}` } : {}),
     ...options.headers,
   };
 
@@ -9,9 +8,10 @@ export const secureFetch = async (url, token, options = {}) => {
   if (!(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   } 
-  // Note: If options.body IS FormData, we leave 'Content-Type' completely undefined.
-  // This lets the browser auto-generate the correct 'multipart/form-data; boundary=...' header.
 
+  // 3. Credentials: 'include' is critical.
+  // This tells the browser to send cookies (your HttpOnly token) 
+  // along with requests to the same origin.
   const config = {
     ...options,
     credentials: 'include',
@@ -20,8 +20,6 @@ export const secureFetch = async (url, token, options = {}) => {
 
   const response = await fetch(url, config);
 
-  // 🛡️ FIX: Instead of throwing an error and crashing the runtime flow,
-  // we just return the raw response object. This allows components to read 
-  // response.status (401, 403) and inspect custom error JSON bodies safely.
+  // Return the raw response so components can handle 401/403/500 errors
   return response;
 };

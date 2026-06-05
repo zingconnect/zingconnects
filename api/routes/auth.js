@@ -250,7 +250,6 @@ router.post('/register', upload.single('photo'), async (req, res, next) => {
     next(error);
   }
 });
-
 // --- 2. STAGE 2: VERIFY OTP ---
 router.post('/verify-otp', async (req, res, next) => {
   try {
@@ -266,7 +265,6 @@ router.post('/verify-otp', async (req, res, next) => {
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
     // 🛡️ SECURITY FIX: Unified validation comparison logic 
-    // Prevents identity enumeration profiles by using a generic error response string
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
       return res.status(400).json({ 
         success: false, 
@@ -285,22 +283,31 @@ router.post('/verify-otp', async (req, res, next) => {
       throw new Error("Security configuration error.");
     }
 
-    // Sign payload token allocations
+    // Sign payload
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' } // Aligned with cookie expiry
     );
 
+    // 🛡️ Set Secure HttpOnly Cookie
+    res.cookie('token', token, {
+      httpOnly: true,       // Prevents XSS access
+      secure: true,         // Required for HTTPS
+      sameSite: 'Lax',      // Prevents CSRF while allowing same-domain access
+      signed: true,         // Validates against your COOKIE_SECRET
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
+
+    // Successfully logged in; return success without the raw token
     return res.status(200).json({
       success: true,
-      token: token,
       slug: agent.slug,
       message: "Your profile is now live!"
     });
 
   } catch (err) {
-    // Forward traces safely via central app intercept middleware
     next(err); 
   }
 });
@@ -317,17 +324,11 @@ router.post('/login', async (req, res, next) => {
     }
 
     const AgentModel = getAgentModel();
-    // Fetch profile fields along with auth data
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
     }).select('slug currentSessionId firstName lastName email occupation bio +password isVerified isSubscribed plan'); 
     
-    if (!agent) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
-    }
-
-    const isMatch = await bcrypt.compare(password, agent.password);
-    if (!isMatch) {
+    if (!agent || !(await bcrypt.compare(password, agent.password))) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
@@ -346,8 +347,7 @@ router.post('/login', async (req, res, next) => {
     agent.currentSessionId = newSessionId;
     await agent.save();
 
-    // 🚀 PRIME THE CACHE: Store the profile data in Redis now
-    // We store the data needed for the dashboard to load without hitting the DB
+    // PRIME THE CACHE
     const cacheKey = `agent:profile:${agent._id}`;
     const cacheableAgent = {
       id: agent._id,
@@ -363,28 +363,24 @@ router.post('/login', async (req, res, next) => {
     await redisClient.setEx(cacheKey, 3600, JSON.stringify(cacheableAgent));
 
     const token = jwt.sign(
-      { 
-        id: agent._id, 
-        slug: agent.slug, 
-        role: 'agent',
-        sessionId: newSessionId
-      }, 
+      { id: agent._id, slug: agent.slug, role: 'agent', sessionId: newSessionId }, 
       process.env.JWT_SECRET, 
-      { expiresIn: '24h' }
+      { expiresIn: '7d' }
     );
 
+    // Set Secure HttpOnly Cookie
     res.cookie('token', token, {
       httpOnly: true,
       secure: true, 
-      sameSite: 'None',
+      sameSite: 'Lax', // Updated to Lax for same-origin security
       signed: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/'
     });
 
+    // Clean Response: Token is now handled by the browser cookie
     return res.status(200).json({ 
       success: true, 
-      token: token,
       slug: agent.slug,
       role: 'agent',
       isSubscribed: !!agent.isSubscribed, 
@@ -1134,6 +1130,39 @@ router.post('/unlock-voice-package', authenticateToken, async (req, res) => {
       message: "Server error during voice activation.",
       error: error.message 
     });
+  }
+});
+
+// GET /api/auth/me
+// Returns the profile of the currently logged-in user or agent
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    // req.user is populated by your authenticateToken middleware
+    // We fetch the latest data to ensure the session is still valid in the DB
+    const userId = req.user.id;
+    const role = req.user.role;
+    
+    let profile = null;
+    
+    if (role === 'agent') {
+      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
+      profile = await AgentModel.findById(userId).select('firstName lastName email slug role isSubscribed plan');
+    } else {
+      const UserModel = mongoose.models.User || mongoose.model('User');
+      profile = await UserModel.findById(userId).select('email role isProfileComplete');
+    }
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: "User/Agent not found" });
+    }
+
+    return res.json({ 
+      success: true, 
+      role: role,
+      profile: profile 
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Server error during session verification" });
   }
 });
 

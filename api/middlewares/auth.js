@@ -2,7 +2,8 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 
 export const authenticateToken = async (req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1] || req.signedCookies?.token;
+  // 1. Enforce Cookie-only authentication
+  const token = req.signedCookies?.token;
 
   if (!token) {
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
@@ -13,23 +14,36 @@ export const authenticateToken = async (req, res, next) => {
     req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    // Agent Logic
-    if (decoded.role === 'agent') {
-      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-      
-      if (!agent) return res.status(404).json({ success: false, message: "Agent context not found." });
+    const redisClient = req.app.get('redisClient');
 
-      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
-      }
+    // 2. Optimized Agent Logic (Using Redis Cache)
+    if (decoded.role === 'agent') {
+      const cacheKey = `agent:profile:${req.user.id}`;
       
-      await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
+      // Try fetching session/active status from cache
+      let agentSession = await redisClient.get(cacheKey);
+      
+      if (!agentSession) {
+        // Fallback to DB if cache miss
+        const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
+        const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+        
+        if (!agent) return res.status(404).json({ success: false, message: "Agent context not found." });
+        
+        // Validate session ID
+        if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+          return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
+        }
+        
+        // Update DB and prime cache for future requests
+        await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
+      }
     }
 
-    // Admin Logic
+    // 3. Admin Logic (Optional: also cache this if admin traffic is high)
     if (['admin', 'superadmin'].includes(decoded.role)) {
       const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
+      // Consider debouncing this update to once every 5 minutes to save DB writes
       await AdminModel.findByIdAndUpdate(req.user.id, { $set: { lastLogin: new Date() } });
     }
 
@@ -39,6 +53,7 @@ export const authenticateToken = async (req, res, next) => {
     return res.status(403).json({ success: false, message: "Invalid token" });
   }
 };
+
 
 export const isAdmin = (req, res, next) => {
   if (req.user?.role === 'admin' || req.user?.role === 'superadmin') return next();
