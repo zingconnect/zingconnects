@@ -107,8 +107,9 @@ const [isSubscribed, setIsSubscribed] = useState(null); // Use null instead of f
   const [isUploading, setIsUploading] = useState(false);
   const [previewFile, setPreviewFile] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null);   
-  const [caption, setCaption] = useState("");          
-
+  const [caption, setCaption] = useState("");  
+          
+const hasProcessedDeepLink = useRef(false);
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
@@ -1805,19 +1806,24 @@ const handleSelectUser = async (user) => {
 };
 
 useEffect(() => {
+  // 1. Exit if already processed or data isn't ready
+  if (hasProcessedDeepLink.current || users.length === 0) return;
+
   const params = new URLSearchParams(window.location.search);
   const userIdFromUrl = params.get('userId');
   
-  if (userIdFromUrl && users.length > 0) {
+  if (userIdFromUrl) {
     const userToSelect = users.find(u => u._id === userIdFromUrl);
+    
     if (userToSelect) {
       handleSelectUser(userToSelect);
-      // Clean the URL so refreshing doesn't keep resetting the chat
+      hasProcessedDeepLink.current = true; // 2. Mark as done
+      
+      // 3. Clean up the URL so it doesn't trigger on refresh
       navigate('/agent/dashboard', { replace: true });
     }
   }
-}, [users, navigate]); // Fires as soon as the user list is loaded from the API
-
+}, [users, navigate]);
 
 useEffect(() => {
   setIsInitialLoad(true);
@@ -1850,7 +1856,6 @@ useEffect(() => {
 }, [messages, isInitialLoad]);
 
 useEffect(() => {
-  // 1. Guard clause: Do not run if we are in an invalid state
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
 
   const refreshUserList = async () => {
