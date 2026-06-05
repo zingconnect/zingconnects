@@ -116,7 +116,6 @@ const canvasRef = useRef(null);
 const [showCamera, setShowCamera] = useState(false);
 
   const [agent, setAgent] = useState(null);
-  const [isSessionReady, setIsSessionReady] = useState(false);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
@@ -478,12 +477,10 @@ const handleEndCall = useCallback(async () => {
 
 
 useEffect(() => {
-  // 🛡️ GUARD: Only run if the session is fully hydrated and the socket is present
-  if (!socket || !isSessionReady || !userData?._id) return;
+  if (!socket || !userData?._id) return;
 
   const myId = userData._id.toString();
   socket.emit("join-main-room", myId);
-
   const handleIncomingCall = (data) => {
     peerConnectedRef.current = false;
     setPeerConnected(false);
@@ -493,10 +490,7 @@ useEffect(() => {
       socket.emit("user-busy", { to: data.fromId, callId: data.callId });
       return; 
     }
-    
     console.log("📥 Incoming Secure Call detected:", data.callId);
-    
-    // Ring timeout logic
     const ringTimeout = setTimeout(() => {
       if (callStatusRef.current === 'ringing') {
         console.log("⏰ Call timed out: No answer after 45s.");
@@ -526,13 +520,13 @@ useEffect(() => {
   const handleCallAccepted = (acceptData) => {
     console.log("📡 Outbound Call Accepted by Agent:", acceptData);
     if (acceptData.lkToken) {
+      // 🔥 Mark peer as ready so the LiveKitRoom bridge can activate immediately
       peerConnectedRef.current = true;
       setPeerConnected(true);
       setLiveKitToken(acceptData.lkToken);
       setCallStatus('connected');
     }
   };
-
   const handleRemoteEnd = (data) => {
     const currentCallId = (activeCallRef.current?.callId || activeCallRef.current?._id || "").toString();
     const incomingCallId = (data?.callId || data?.roomName || "").toString();
@@ -559,7 +553,7 @@ useEffect(() => {
     socket.off("call-ended", handleRemoteEnd);
     socket.off("call-rejected", handleRemoteEnd);
   };
-}, [socket, isSessionReady, userData?._id, handleEndCall, isEnding]);
+}, [socket, userData?._id, handleEndCall, isEnding]);
 
 useEffect(() => {
   if (!socket) return;
@@ -1136,15 +1130,19 @@ useEffect(() => {
         : '/api/users/my-session';
       
       const response = await secureFetch(endpoint, token);
+
+      // If session is invalid, let the AuthProvider or the parent Route 
+      // handle the redirect. Don't navigate here to avoid race conditions.
       if (!response.ok) {
         console.warn("Session expired or invalid. Status:", response.status);
         return;
       }
+
       const data = await response.json();
+      
       if (isMounted) {
         setAgent(data.agent);
         setUserData(data.user);
-        setIsSessionReady(true);
         if (!data.user?.isProfileComplete) setShowOnboarding(true);
       }
     } catch (err) {
