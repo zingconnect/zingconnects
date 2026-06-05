@@ -290,16 +290,14 @@ router.post('/verify-otp', async (req, res, next) => {
       { expiresIn: '7d' } // Aligned with cookie expiry
     );
 
-    // 🛡️ Set Secure HttpOnly Cookie
-    res.cookie('token', token, {
-      httpOnly: true,       // Prevents XSS access
-      secure: true,         // Required for HTTPS
-      sameSite: 'Lax',      // Prevents CSRF while allowing same-domain access
-      signed: true,         // Validates against your COOKIE_SECRET
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/'
-    });
-
+ // Updated Cookie Configuration
+res.cookie('token', token, {
+  httpOnly: true,       // Prevents XSS/JS access
+  secure: true,         // MANDATORY because your domain is HTTPS
+  sameSite: 'None',     // Ensures the cookie is sent in all contexts
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  path: '/'
+});
     // Successfully logged in; return success without the raw token
     return res.status(200).json({
       success: true,
@@ -367,16 +365,14 @@ router.post('/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '7d' }
     );
-
-    // Set Secure HttpOnly Cookie
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true, 
-      sameSite: 'Lax', // Updated to Lax for same-origin security
-      signed: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/'
-    });
+// Updated Cookie Configuration
+res.cookie('token', token, {
+  httpOnly: true,       // Prevents XSS/JS access
+  secure: true,         // MANDATORY because your domain is HTTPS
+  sameSite: 'None',     // Ensures the cookie is sent in all contexts
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  path: '/'
+});
 
     // Clean Response: Token is now handled by the browser cookie
     return res.status(200).json({ 

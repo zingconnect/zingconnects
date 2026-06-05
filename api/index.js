@@ -64,13 +64,6 @@ import adminRoutes from './routes/admin.js';
 import { authenticateToken, isAdmin, requireSuperAdmin } from './middlewares/auth.js';
 
 const app = express();
-app.use(cookieParser(process.env.COOKIE_SECRET));
-app.disable('x-powered-by');
-
-const terminatingCallsCache = new Set();
-app.set('terminatingCallsCache', terminatingCallsCache);
-
-app.set('redisClient', redisClient); 
 
 const corsOptions = {
   origin: [
@@ -88,8 +81,17 @@ const corsOptions = {
   ],
   exposedHeaders: ["Set-Cookie"]
 };
+
+
 app.use(cors(corsOptions));
 app.use(express.json());
+
+app.use(cookieParser(process.env.COOKIE_SECRET));
+app.disable('x-powered-by');
+const terminatingCallsCache = new Set();
+app.set('terminatingCallsCache', terminatingCallsCache);
+
+app.set('redisClient', redisClient); 
 
 const server = http.createServer(app);
 const pubClient = redisClient;
@@ -553,15 +555,14 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       { expiresIn: '7d' } // Extended to 7d to match cookie age
     );
 
-    // 🛡️ Set Secure HttpOnly Cookie
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true, 
-      sameSite: 'Lax', 
-      signed: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/'
-    });
+   // Updated Cookie Configuration
+res.cookie('token', token, {
+  httpOnly: true,       // Prevents XSS/JS access
+  secure: true,         // MANDATORY because your domain is HTTPS
+  sameSite: 'None',     // Ensures the cookie is sent in all contexts
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  path: '/'
+});
 
     return res.status(200).json({
       success: true,
@@ -668,16 +669,14 @@ app.post('/api/agents/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '7d' } 
     );
-
-    // Set Secure HttpOnly Cookie
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true, 
-      sameSite: 'Lax', // Changed to Lax as frontend/backend share same domain
-      signed: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/'
-    });
+// Updated Cookie Configuration
+res.cookie('token', token, {
+  httpOnly: true,       // Prevents XSS/JS access
+  secure: true,         // MANDATORY because your domain is HTTPS
+  sameSite: 'None',     // Ensures the cookie is sent in all contexts
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  path: '/'
+});
 
     // Successfully logged in; token is now in the HttpOnly cookie
     return res.json({ 
@@ -975,14 +974,14 @@ app.post('/api/users/handshake', async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true, 
-      sameSite: 'Lax', // Updated from None to Lax
-      signed: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/'
-    });
+  // Updated Cookie Configuration
+res.cookie('token', token, {
+  httpOnly: true,       // Prevents XSS/JS access
+  secure: true,         // MANDATORY because your domain is HTTPS
+  sameSite: 'None',     // Ensures the cookie is sent in all contexts
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  path: '/'
+});
 
     // 5. Clean Response (Removed token from JSON body)
     return res.json({ 
@@ -1047,7 +1046,7 @@ app.post('/api/agents/logout', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
 
   try {
-    const token = req.signedCookies.token;
+const token = req.cookies?.token;
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const agentId = decoded.id;
@@ -1061,11 +1060,11 @@ app.post('/api/agents/logout', async (req, res, next) => {
 
     // 3. Clear the cookie with identical settings used during creation
     res.clearCookie('token', {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Lax', // Must match the sameSite used in your login/handshake
-      path: '/'
-    });
+     httpOnly: true,       // Prevents XSS/JS access
+  secure: true,         // MANDATORY because your domain is HTTPS
+  sameSite: 'None',     // Ensures the cookie is sent in all contexts
+  path: '/'
+});
 
     return res.json({ 
       success: true, 

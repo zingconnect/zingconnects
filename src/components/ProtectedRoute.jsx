@@ -5,9 +5,13 @@ export const ProtectedRoute = ({ requiredRole }) => {
   const { isAuthenticated, userRole, isLoading } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
-    return <div>Authenticating...</div>;
-  }
+ if (isLoading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="w-8 h-8 border-[3px] border-blue-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 
   // 1. Redirect if not logged in
   if (!isAuthenticated) {

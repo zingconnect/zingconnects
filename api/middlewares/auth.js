@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 
 export const authenticateToken = async (req, res, next) => {
   // 1. Enforce Cookie-only authentication
-  const token = req.signedCookies?.token;
+ const token = req.cookies?.token; 
 
   if (!token) {
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
