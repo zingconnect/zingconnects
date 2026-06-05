@@ -1788,31 +1788,18 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
     next(err);
   }
 });
-
 // =========================================================================
 // 💳 EXTEND/UPGRADE SUBSCRIPTION PIPELINE (WITH CACHE INVALIDATION)
 // =========================================================================
 app.put('/api/agents/update-subscription', authenticateToken, async (req, res, next) => {
-  const redisClient = req.app.get('redisClient'); // Access Redis
+  const redisClient = req.app.get('redisClient');
 
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, message: "Unauthorized extraction payload" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return res.status(403).json({ success: false, message: "Session expired context" });
-    }
-
-    const agentId = decoded.id; 
+    // Use req.user.id populated by authenticateToken
+    const agentId = req.user.id; 
     const { planTier, months, transaction_id } = req.body;
 
     if (!planTier || !months || months < 1 || !transaction_id) {
@@ -1826,7 +1813,7 @@ app.put('/api/agents/update-subscription', authenticateToken, async (req, res, n
 
     const planPricesInNGN = {
       'BASIC': 8500,          
-      'GROWTH': 51000,         
+      'GROWTH': 51000,        
       'PROFESSIONAL': 102000   
     };
 
@@ -1897,8 +1884,6 @@ app.put('/api/agents/update-subscription', authenticateToken, async (req, res, n
     syncBilling(agent, finalUpgradeAmount);
     await agent.save();
 
-    // 🚀 CACHE INVALIDATION: Force remove the cached profile 
-    // This ensures the next GET /api/agents/profile request fetches the updated data from MongoDB
     await redisClient.del(`agent:profile:${agentId}`);
 
     return res.status(200).json({
@@ -1926,20 +1911,8 @@ app.get('/api/agents/subscription/history', authenticateToken, async (req, res, 
   try {
     await connectToDatabase();
 
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, message: "Unauthorized history query request." });
-    }
-
-    const token = authHeader.split(' ')[1];
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return res.status(403).json({ success: false, message: "Session expired context." });
-    }
-
-    const history = await Transaction.find({ agentId: decoded.id })
+    // Use req.user.id populated by authenticateToken
+    const history = await Transaction.find({ agentId: req.user.id })
       .sort({ paidAt: -1 });
 
     return res.status(200).json({

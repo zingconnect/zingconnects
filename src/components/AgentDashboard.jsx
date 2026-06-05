@@ -1502,51 +1502,66 @@ const handlePayment = async () => {
         description: `Activation for ${activePlan.tier} Plan (₦${activePlan.price})`,
         logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
       },
-      callback: async (response) => {
-        try {
-          // UPDATED: Removed 'token' argument.
-          // secureFetch uses 'credentials: include' to verify the authenticated session.
-          const verifyRes = await secureFetch('/api/subscriptions/verify', {
-            method: 'POST',
-            body: JSON.stringify({
-              transaction_id: response.transaction_id,
-              plan: activePlan.tier,
-              ngnAmount: finalNairaAmount
-            })
-          });
+     callback: async (response) => {
+  console.log("🚀 Payment Callback Triggered. Response:", response);
+  
+  try {
+    console.log("🔄 Initiating verification request...");
+    
+    const verifyRes = await secureFetch('/api/subscriptions/verify', {
+      method: 'POST',
+      body: JSON.stringify({
+        transaction_id: response.transaction_id,
+        plan: activePlan.tier,
+        ngnAmount: finalNairaAmount
+      })
+    });
 
-          if (verifyRes.status === 401 || verifyRes.status === 403) {
-            setIsDualLoginConflict(true);
-            setPaymentProcessing(false);
-            return;
-          }
+    console.log("📡 Verification Response Status:", verifyRes.status);
 
-          if (verifyRes.ok) {
-            const data = await verifyRes.json();
-            
-            setIsSubscribed(true);
-            setAgentData(prev => ({ 
-              ...prev, 
-              ...data.agent,
-              isSubscribed: true 
-            }));
-            
-            setShowSuccessOverlay(true);
-            setPaymentProcessing(false);
-          } else {
-            const errData = await verifyRes.json();
-            alert(errData.message || "Verification failed");
-            setPaymentProcessing(false);
-          }
-        } catch (err) {
-          console.error("Verification error:", err);
-          alert("Connection error during verification.");
-          setPaymentProcessing(false);
-        }
-      },
-      onclose: () => {
-        setPaymentProcessing(false);
-      }
+    if (verifyRes.status === 401 || verifyRes.status === 403) {
+      console.warn("⚠️ Auth conflict detected.");
+      setIsDualLoginConflict(true);
+      setPaymentProcessing(false);
+      return;
+    }
+
+    const data = await verifyRes.json();
+    console.log("📦 Parsed Verification Data:", data);
+
+    if (verifyRes.ok) {
+      console.log("✅ Verification OK. Updating React state...");
+      
+      // Update states
+      setIsSubscribed(true);
+      setAgentData(prev => {
+        console.log("👤 Updating agentData with:", data.agent);
+        return { 
+          ...prev, 
+          ...data.agent,
+          isSubscribed: true 
+        };
+      });
+      
+      console.log("🎉 Attempting to show Success Overlay...");
+      setShowSuccessOverlay(true);
+      setPaymentProcessing(false);
+      console.log("🏁 Callback flow finished successfully.");
+    } else {
+      console.error("❌ Verification failed on server:", data.message);
+      alert(data.message || "Verification failed");
+      setPaymentProcessing(false);
+    }
+  } catch (err) {
+    console.error("❌ Catch block - Verification error:", err);
+    alert("Connection error during verification.");
+    setPaymentProcessing(false);
+  }
+},
+onclose: () => {
+  console.log("ℹ️ Flutterwave modal closed.");
+  setPaymentProcessing(false);
+}
     });
   } catch (err) {
     console.error("Payment Initialization Error:", err);
@@ -2186,6 +2201,20 @@ return (
 <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
   <audio ref={localAudioRef} muted autoPlay playsInline style={{ display: 'none' }} />
 
+    {/* --- SUCCESS OVERLAY --- */}
+    {showSuccessOverlay && (
+      <div className="fixed inset-0 z-[20000] bg-blue-600 flex flex-col items-center justify-center text-white p-6">
+        <div className="bg-white/10 p-6 rounded-full mb-6">
+          <BsCheckCircleFill size={60} className="text-white animate-bounce" />
+        </div>
+        <h1 className="text-2xl md:text-4xl font-black uppercase tracking-tighter mb-2 text-center">Activation Successful!</h1>
+        <p className="text-sm md:text-lg font-medium opacity-90 text-center max-w-xs mb-8">
+          Your <strong>{selectedPlan}</strong> plan has been activated.
+        </p>
+        <button onClick={() => window.location.reload()} className="w-full max-w-xs bg-white text-blue-600 font-black py-4 rounded-xl shadow-xl uppercase tracking-widest text-[11px]">Return to Dashboard</button>
+      </div>
+    )}
+    
 {/* --- CALL ENGINE (FIXED POSITIONING & DESIGN STABILITY) --- */}
 
 {callStatus !== 'idle' && (
@@ -2402,20 +2431,6 @@ return (
             </div>
           )}
         </div>
-      </div>
-    )}
-
-    {/* --- SUCCESS OVERLAY --- */}
-    {showSuccessOverlay && (
-      <div className="fixed inset-0 z-[20000] bg-blue-600 flex flex-col items-center justify-center text-white p-6">
-        <div className="bg-white/10 p-6 rounded-full mb-6">
-          <BsCheckCircleFill size={60} className="text-white animate-bounce" />
-        </div>
-        <h1 className="text-2xl md:text-4xl font-black uppercase tracking-tighter mb-2 text-center">Activation Successful!</h1>
-        <p className="text-sm md:text-lg font-medium opacity-90 text-center max-w-xs mb-8">
-          Your <strong>{selectedPlan}</strong> plan has been activated.
-        </p>
-        <button onClick={() => window.location.reload()} className="w-full max-w-xs bg-white text-blue-600 font-black py-4 rounded-xl shadow-xl uppercase tracking-widest text-[11px]">Return to Dashboard</button>
       </div>
     )}
 
