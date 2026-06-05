@@ -76,52 +76,51 @@ export const AgentProfile = () => {
   };
 
   useEffect(() => {
-    // Apply theme changes to document root instantly on initial mount
-    handleThemeChange(activeTheme);
+  handleThemeChange(activeTheme);
 
-    const fetchProfileAndHistory = async () => {
-      try {
-        const storedToken = localStorage.getItem('accessToken');
+  const fetchProfileAndHistory = async () => {
+    try {
+      // 1. Fetch Agent Base Profile Details
+      // No token passed; secureFetch handles cookie-based auth
+      const profileResponse = await secureFetch('/api/agents/profile/me', { 
+        method: 'GET' 
+      });
 
-        // 1. Fetch Agent Base Profile Details
-        const profileResponse = await secureFetch('/api/agents/profile/me', storedToken, { 
-          method: 'GET' 
-        });
+      if (!profileResponse.ok) throw new Error("Failed to load profile");
+      const profileResult = await profileResponse.json();
 
-        if (!profileResponse.ok) throw new Error("Failed to load profile");
-        const profileResult = await profileResponse.json();
+      if (profileResult.success && profileResult.agent) {
+        const agent = profileResult.agent;
+        const isActive = agent.isSubscribed === true && agent.status === 'active';
+        setIsSubscribed(isActive); 
 
-        if (profileResult.success && profileResult.agent) {
-          const agent = profileResult.agent;
-          const isActive = agent.isSubscribed === true && agent.status === 'active';
-          setIsSubscribed(isActive); 
-
-          setAgentData(prevData => ({
-            ...prevData,
-            ...agent
-          }));
-        }
-
-        // 2. Fetch Ledger History Collections Cleanly
-        const historyResponse = await secureFetch('/api/agents/subscription/history', storedToken, {
-          method: 'GET'
-        });
-
-        if (historyResponse.ok) {
-          const historyResult = await historyResponse.json();
-          setTransactions(historyResult.history || []);
-        }
-
-      } catch (err) {
-        console.error("Profile/Ledger Initialisation Sync Error:", err);
-        navigate('/');
-      } finally {
-        setLoading(false);
+        setAgentData(prevData => ({
+          ...prevData,
+          ...agent
+        }));
       }
-    };
 
-    fetchProfileAndHistory();
-  }, [navigate]);
+      // 2. Fetch Ledger History Collections
+      const historyResponse = await secureFetch('/api/agents/subscription/history', {
+        method: 'GET'
+      });
+
+      if (historyResponse.ok) {
+        const historyResult = await historyResponse.json();
+        setTransactions(historyResult.history || []);
+      }
+
+    } catch (err) {
+      console.error("Profile/Ledger Initialisation Sync Error:", err);
+      // If unauthorized, the middleware will have triggered the 401 response
+      navigate('/');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchProfileAndHistory();
+}, [navigate]);
 
   const handleThemeChange = (newTheme) => {
     const root = window.document.documentElement;
@@ -138,128 +137,119 @@ export const AgentProfile = () => {
   };
 
   const handleUpdate = async (e) => {
-    e.preventDefault();
-    
-    if (passwordData.newPassword && passwordData.newPassword !== passwordData.confirmPassword) {
-      return alert("New passwords do not match!");
-    }
+  e.preventDefault();
+  
+  if (passwordData.newPassword && passwordData.newPassword !== passwordData.confirmPassword) {
+    return alert("New passwords do not match!");
+  }
 
-    setIsSaving(true);
-
-    try {
-      const storedToken = localStorage.getItem('accessToken');
-
-      const response = await secureFetch('/api/agents/update-profile', storedToken, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({
-          ...agentData,    
-          ...passwordData
-        })
-      });
-
-      if (response.ok) {
-        alert("Identity & Security Sync Successful");
-        setPasswordData({ oldPassword: '', newPassword: '', confirmPassword: '' });
-        localStorage.setItem('agentVoiceProfile', agentData.voiceId);
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || "Error updating profile");
-      }
-    } catch (err) {
-      console.error("Profile Update Error:", err);
-      alert("Error updating profile. Please check your connection.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // HANDLER: PROCESS PRODUCTION FLUTTERWAVE EXTENSION GATEWAY PIPELINE
-  const handleUpgradeSubscription = async (e) => {
-    e.preventDefault();
-
-    if (!agentData || !agentData.email) {
-      alert("Profile telemetry mapping incomplete. Please try again.");
-      return;
-    }
-
-    setIsUpdatingSub(true);
-
-    const targetMonthlyRate = planPricesInNGN[subConfig.planTier] || 8500;
-    const finalCalculatedNairaAmount = targetMonthlyRate * subConfig.months;
-
-    try {
-      window.FlutterwaveCheckout({
-        public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
-        tx_ref: `ZING-EXT-${Date.now()}`,
-        amount: finalCalculatedNairaAmount,
-        currency: "NGN",
-        payment_options: "card, account, transfer, ussd",
-        customer: {
-          email: agentData?.email,
-          name: `${agentData?.firstName || ''} ${agentData?.lastName || ''}`.trim() || "Agent User",
-        },
-        customizations: {
-          title: "ZingConnect",
-          description: `Extend ${subConfig.planTier} Plan by ${subConfig.months} Month(s) (₦${finalCalculatedNairaAmount.toLocaleString()})`,
-          logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
-        },
-       callback: async (response) => {
-  setIsUpdatingSub(true);
+  setIsSaving(true);
 
   try {
-    const storedToken = localStorage.getItem('accessToken');
-
-    const verifyRes = await secureFetch('/api/agents/update-subscription', storedToken, {
+    const response = await secureFetch('/api/agents/update-profile', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({
-        planTier: subConfig.planTier,
-        months: parseInt(subConfig.months, 10),
-        transaction_id: response.transaction_id
+        ...agentData,    
+        ...passwordData
       })
     });
 
-    const result = await verifyRes.json();
-
-    if (verifyRes.ok) {
-      // 1. Update React State Optimistically
-      setAgentData(prev => ({
-        ...prev,
-        plan: result.agent.plan,
-        isSubscribed: result.agent.isSubscribed,
-        expiryDate: result.agent.expiryDate,
-        subscriptionAmount: result.agent.subscriptionAmount,
-        paymentDetails: result.agent.paymentDetails
-      }));
-      setIsSubscribed(true);
-
-      // 2. Refresh the page to ensure all components (Nav, Dashboard, Profile) 
-      // fetch the fresh data from the server
-      alert(result.message || "Subscription updated successfully!");
-      window.location.reload(); 
+    if (response.ok) {
+      alert("Identity & Security Sync Successful");
+      setPasswordData({ oldPassword: '', newPassword: '', confirmPassword: '' });
+      localStorage.setItem('agentVoiceProfile', agentData.voiceId);
     } else {
-      alert(result.message || "Payment verification failed.");
+      const errorData = await response.json();
+      alert(errorData.message || "Error updating profile");
     }
   } catch (err) {
-    console.error("Critical Failure in Subscription Sync:", err);
-    alert("Connection error occurred while syncing your payment.");
+    console.error("Profile Update Error:", err);
+    alert("Error updating profile. Please check your connection.");
   } finally {
-    setIsUpdatingSub(false);
+    setIsSaving(false);
   }
-},
-        onclose: () => {
+};
+
+const handleUpgradeSubscription = async (e) => {
+  e.preventDefault();
+
+  if (!agentData || !agentData.email) {
+    alert("Profile telemetry mapping incomplete. Please try again.");
+    return;
+  }
+
+  setIsUpdatingSub(true);
+
+  const targetMonthlyRate = planPricesInNGN[subConfig.planTier] || 8500;
+  const finalCalculatedNairaAmount = targetMonthlyRate * subConfig.months;
+
+  try {
+    window.FlutterwaveCheckout({
+      public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
+      tx_ref: `ZING-EXT-${Date.now()}`,
+      amount: finalCalculatedNairaAmount,
+      currency: "NGN",
+      payment_options: "card, account, transfer, ussd",
+      customer: {
+        email: agentData?.email,
+        name: `${agentData?.firstName || ''} ${agentData?.lastName || ''}`.trim() || "Agent User",
+      },
+      customizations: {
+        title: "ZingConnect",
+        description: `Extend ${subConfig.planTier} Plan by ${subConfig.months} Month(s) (₦${finalCalculatedNairaAmount.toLocaleString()})`,
+        logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
+      },
+      callback: async (response) => {
+        setIsUpdatingSub(true);
+        try {
+          // No token passed; secureFetch handles session cookie automatically
+          const verifyRes = await secureFetch('/api/agents/update-subscription', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              planTier: subConfig.planTier,
+              months: parseInt(subConfig.months, 10),
+              transaction_id: response.transaction_id
+            })
+          });
+
+          const result = await verifyRes.json();
+
+          if (verifyRes.ok) {
+            setAgentData(prev => ({
+              ...prev,
+              plan: result.agent.plan,
+              isSubscribed: result.agent.isSubscribed,
+              expiryDate: result.agent.expiryDate,
+              subscriptionAmount: result.agent.subscriptionAmount,
+              paymentDetails: result.agent.paymentDetails
+            }));
+            setIsSubscribed(true);
+            alert(result.message || "Subscription updated successfully!");
+            window.location.reload(); 
+          } else {
+            alert(result.message || "Payment verification failed.");
+          }
+        } catch (err) {
+          console.error("Critical Failure in Subscription Sync:", err);
+          alert("Connection error occurred while syncing your payment.");
+        } finally {
           setIsUpdatingSub(false);
         }
-      });
-    } catch (err) {
-      console.error("Flutterwave Runtime Framework Crash:", err);
-      alert("Failed to initialize payment frame connection layer.");
-      setIsUpdatingSub(false);
-    }
-  };
+      },
+      onclose: () => {
+        setIsUpdatingSub(false);
+      }
+    });
+  } catch (err) {
+    console.error("Flutterwave Runtime Framework Crash:", err);
+    alert("Failed to initialize payment frame connection layer.");
+    setIsUpdatingSub(false);
+  }
+};
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-page-bg transition-colors duration-300">

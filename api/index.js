@@ -1664,11 +1664,12 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ROUTE 1: POST /api/subscriptions/verify (With Cache Invalidation)
 // =========================================================================
-app.post('/api/subscriptions/verify', async (req, res, next) => {
-  const redisClient = req.app.get('redisClient'); // Access Redis
+app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) => {
+    const redisClient = req.app.get('redisClient'); // Access Redis
 
   try {
     await connectToDatabase();
@@ -1801,7 +1802,7 @@ app.post('/api/subscriptions/verify', async (req, res, next) => {
 // =========================================================================
 // 💳 EXTEND/UPGRADE SUBSCRIPTION PIPELINE (WITH CACHE INVALIDATION)
 // =========================================================================
-app.put('/api/agents/update-subscription', async (req, res, next) => {
+app.put('/api/agents/update-subscription', authenticateToken, async (req, res, next) => {
   const redisClient = req.app.get('redisClient'); // Access Redis
 
   try {
@@ -1931,7 +1932,7 @@ app.put('/api/agents/update-subscription', async (req, res, next) => {
 // =========================================================================
 // 📑 HISTORICAL FETCH QUERY: GET /api/agents/subscription/history
 // =========================================================================
-app.get('/api/agents/subscription/history', async (req, res, next) => {
+app.get('/api/agents/subscription/history', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
 
