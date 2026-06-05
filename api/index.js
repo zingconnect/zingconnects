@@ -1664,28 +1664,17 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
-
 // =========================================================================
-// 🛡️ HARDENED ROUTE 1: POST /api/subscriptions/verify (With Cache Invalidation)
+// 🛡️ HARDENED ROUTE: POST /api/subscriptions/verify (With Cache Invalidation)
 // =========================================================================
 app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) => {
-    const redisClient = req.app.get('redisClient'); // Access Redis
+  const redisClient = req.app.get('redisClient');
 
   try {
     await connectToDatabase();
 
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return res.status(403).json({ message: "Session expired" });
-    }
+    // Use req.user.id populated by the authenticateToken middleware
+    const agentId = req.user.id;
 
     const { transaction_id, plan } = req.body || {};
 
@@ -1694,9 +1683,9 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
     }
 
     const planPricesInNGN = {
-      'BASIC': 8500,          
-      'GROWTH': 51000,         
-      'PROFESSIONAL': 102000    
+      'BASIC': 8500,
+      'GROWTH': 51000,
+      'PROFESSIONAL': 102000
     };
 
     const targetPlan = String(plan).toUpperCase().trim();
@@ -1715,7 +1704,8 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
     ) {
       
       const AgentModel = getAgentModel(); 
-      const agent = await AgentModel.findById(decoded.id);
+      // Using agentId from the secure session
+      const agent = await AgentModel.findById(agentId);
       if (!agent) {
         return res.status(404).json({ message: "Agent profile mapping context missing." });
       }
@@ -1770,8 +1760,7 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
       syncBilling(agent, finalNumericAmount);
       await agent.save();
 
-      // 🚀 CACHE INVALIDATION: Force remove the cached profile so 
-      // the next request fetches the new subscription status from DB
+      // 🚀 CACHE INVALIDATION
       await redisClient.del(`agent:profile:${agent._id}`);
 
       console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Cache cleared.`);
@@ -1799,6 +1788,7 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
     next(err);
   }
 });
+
 // =========================================================================
 // 💳 EXTEND/UPGRADE SUBSCRIPTION PIPELINE (WITH CACHE INVALIDATION)
 // =========================================================================
