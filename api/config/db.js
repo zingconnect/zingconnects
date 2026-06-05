@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 // Disabling command buffering ensures serverless functions fail fast instead of hanging on timeouts
-mongoose.set('bufferCommands', false);
+mongoose.set('bufferCommands', true);
 
 let cached = global.mongoose;
 

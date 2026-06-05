@@ -3880,7 +3880,10 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
     next(err);
   }
 });
+
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  await connectToDatabase();
+
   try {
     const userId = req.user?.id;
     const role = req.user?.role;
