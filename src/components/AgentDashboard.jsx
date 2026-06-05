@@ -1995,9 +1995,7 @@ useEffect(() => {
 
 useEffect(() => {
   if (!socket) return;
-  
-  // Ensure notification permission is handled once
-  if ("Notification" in window && Notification.permission === "default") {
+    if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
 
