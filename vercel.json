@@ -9,12 +9,13 @@
     { "source": "/((?!api/|sounds/|assets/|sw.js).*)", "destination": "/index.html" }
   ],
   "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-store, max-age=0" }
-      ]
-    },
+{
+  "source": "/api/(.*)",
+  "headers": [
+    { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, proxy-revalidate" },
+    { "key": "Access-Control-Allow-Credentials", "value": "true" }
+  ]
+},
     {
       "source": "/(.*)",
       "headers": [
