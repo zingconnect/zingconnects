@@ -1467,8 +1467,8 @@ useEffect(() => {
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]); // Removed localStorage dependency
-
-const handlePayment = async () => {
+// Add this to your component body
+const handlePayment = useCallback(async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
     return;
@@ -1481,6 +1481,7 @@ const handlePayment = async () => {
     setPaymentProcessing(false);
     return;
   }
+
   try {
     const finalNairaAmount = Number(activePlan.price.replace(/,/g, ''));
 
@@ -1499,73 +1500,58 @@ const handlePayment = async () => {
         description: `Activation for ${activePlan.tier} Plan (₦${activePlan.price})`,
         logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
       },
-     callback: async (response) => {
-  console.log("🚀 Payment Callback Triggered. Response:", response);
-  
-  try {
-    console.log("🔄 Initiating verification request...");
-    
-    const verifyRes = await secureFetch('/api/subscriptions/verify', {
-      method: 'POST',
-      body: JSON.stringify({
-        transaction_id: response.transaction_id,
-        plan: activePlan.tier,
-        ngnAmount: finalNairaAmount
-      })
-    });
+      callback: async (response) => {
+        console.log("🚀 Payment Callback Triggered.");
+        
+        try {
+          const verifyRes = await secureFetch('/api/subscriptions/verify', {
+            method: 'POST',
+            body: JSON.stringify({
+              transaction_id: response.transaction_id,
+              plan: activePlan.tier,
+              ngnAmount: finalNairaAmount
+            })
+          });
 
-    console.log("📡 Verification Response Status:", verifyRes.status);
+          if (verifyRes.status === 401 || verifyRes.status === 403) {
+            setIsDualLoginConflict(true);
+            setPaymentProcessing(false);
+            return;
+          }
 
-    if (verifyRes.status === 401 || verifyRes.status === 403) {
-      console.warn("⚠️ Auth conflict detected.");
-      setIsDualLoginConflict(true);
-      setPaymentProcessing(false);
-      return;
-    }
+          const data = await verifyRes.json();
 
-    const data = await verifyRes.json();
-    console.log("📦 Parsed Verification Data:", data);
-
-    if (verifyRes.ok) {
-      console.log("✅ Verification OK. Updating React state...");
-      
-      // Update states
-      setIsSubscribed(true);
-      setAgentData(prev => {
-        console.log("👤 Updating agentData with:", data.agent);
-        return { 
-          ...prev, 
-          ...data.agent,
-          isSubscribed: true 
-        };
-      });
-      
-      console.log("🎉 Attempting to show Success Overlay...");
-      setShowSuccessOverlay(true);
-      setPaymentProcessing(false);
-      console.log("🏁 Callback flow finished successfully.");
-    } else {
-      console.error("❌ Verification failed on server:", data.message);
-      alert(data.message || "Verification failed");
-      setPaymentProcessing(false);
-    }
-  } catch (err) {
-    console.error("❌ Catch block - Verification error:", err);
-    alert("Connection error during verification.");
-    setPaymentProcessing(false);
-  }
-},
-onclose: () => {
-  console.log("ℹ️ Flutterwave modal closed.");
-  setPaymentProcessing(false);
-}
+          if (verifyRes.ok) {
+            // ✅ These are now guaranteed to be in scope
+            setIsSubscribed(true); 
+            setAgentData(prev => ({ 
+              ...prev, 
+              ...data.agent, 
+              isSubscribed: true 
+            }));
+            
+            setShowSuccessOverlay(true);
+            setPaymentProcessing(false);
+          } else {
+            alert(data.message || "Verification failed");
+            setPaymentProcessing(false);
+          }
+        } catch (err) {
+          console.error("Verification error:", err);
+          alert("Connection error during verification.");
+          setPaymentProcessing(false);
+        }
+      },
+      onclose: () => {
+        setPaymentProcessing(false);
+      }
     });
   } catch (err) {
     console.error("Payment Initialization Error:", err);
     alert("Failed to initialize payment.");
     setPaymentProcessing(false);
   }
-};
+}, [agentData, selectedPlan, plans, setIsSubscribed, setAgentData, setShowSuccessOverlay, setPaymentProcessing, setIsDualLoginConflict]);
 
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
