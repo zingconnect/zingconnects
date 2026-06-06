@@ -3,8 +3,7 @@ import mongoose from 'mongoose';
 import { connectToDatabase } from '../config/db.js';
 
 export const authenticateToken = async (req, res, next) => {
-  const token = req.cookies?.token; 
-
+const token = req.signedCookies?.token;
   if (!token) {
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
