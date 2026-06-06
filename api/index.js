@@ -86,17 +86,19 @@ app.use(cors(corsOptions));
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
 
-// --- 2. THE PARSERS (Must be at the top) ---
+const jsonParser = express.json({ limit: '5mb' });
+const urlEncodedParser = express.urlencoded({ limit: '5mb', extended: true });
+
 app.use((req, res, next) => {
-  if (req.headers['content-type'] === 'application/json') {
-    return express.json()(req, res, next);
+  const contentType = req.headers['content-type'] || '';
+  if (contentType.includes('application/json')) {
+    return jsonParser(req, res, next);
   }
-  if (req.headers['content-type']?.includes('application/x-www-form-urlencoded')) {
-    return express.urlencoded({ extended: true })(req, res, next);
+  if (contentType.includes('application/x-www-form-urlencoded')) {
+    return urlEncodedParser(req, res, next);
   }
   next();
 });
-
 // --- 3. PARSING ERROR HANDLER ---
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
@@ -151,7 +153,15 @@ webpush.setVapidDetails(
 console.log("DEBUG: VAPID Configured for:", process.env.VITE_EMAIL);
 console.log("DEBUG: Public Key defined:", !!process.env.VITE_PUBLIC_KEY);
 
-const upload = multer({ storage: multer.memoryStorage() });
+
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, 
+    fieldSize: 5 * 1024 * 1024 
+  }
+});
+
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
