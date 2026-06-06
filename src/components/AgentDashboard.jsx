@@ -1468,6 +1468,7 @@ useEffect(() => {
   return () => { isMounted = false; };
 }, [navigate, slug]); // Removed localStorage dependency
 
+
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
     console.error("DEBUG: Agent data missing during payment attempt.");

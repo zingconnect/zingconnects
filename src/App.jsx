@@ -1,19 +1,21 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom';
 
-// Component Imports
+// 1. Keep small, critical components directly imported
 import { PricingPage } from './components/PricingPage';
 import { Registration } from './components/Registration';
-import { VerifyOTP } from './components/VerifyOTP'; 
+import { VerifyOTP } from './components/VerifyOTP';
 import { AgentSlug } from './components/AgentSlug';
-import { AgentDashboard } from './components/AgentDashboard'; 
-import { UserDashboard } from './components/UserDashboard'; 
-import { AgentProfile } from './components/AgentProfile'; 
-import { UserProfile } from './components/UserProfile'; 
-import { CallSetting } from './components/CallSetting'; 
-import { ProtectedRoute } from './components/ProtectedRoute';
-import ZingAdmin from './components/ZingAdmin'; 
-import ZingDashboard from './components/ZingDashboard'; 
+import { AuthProvider } from './context/AuthContext';
+
+// 2. Lazy load heavy, route-specific components
+const AgentDashboard = lazy(() => import('./components/AgentDashboard'));
+const UserDashboard = lazy(() => import('./components/UserDashboard'));
+const AgentProfile = lazy(() => import('./components/AgentProfile'));
+const UserProfile = lazy(() => import('./components/UserProfile'));
+const CallSetting = lazy(() => import('./components/CallSetting'));
+const ZingAdmin = lazy(() => import('./components/ZingAdmin'));
+const ZingDashboard = lazy(() => import('./components/ZingDashboard'));
 
 // Context & Utility Imports
 import { AuthProvider } from './context/AuthContext'; 
@@ -73,39 +75,42 @@ function App() {
       <Router>
         <PWAController>
           <ThemeInitializer />
-          <Routes>
-            {/* --- 1. PUBLIC ROUTES --- */}
-            <Route path="/" element={<PricingPage />} />
-            <Route path="/pricing" element={<PricingPage />} />
-            <Route path="/registration" element={<Registration />} />
-            <Route path="/verify-otp" element={<VerifyOTP />} />
-            <Route path="/:slug" element={<AgentSlug />} />
+          {/* 3. Suspense wraps the Routes to handle the "loading" state */}
+          <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-white">
+              <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          }>
+            <Routes>
+              <Route path="/" element={<PricingPage />} />
+              <Route path="/pricing" element={<PricingPage />} />
+              <Route path="/registration" element={<Registration />} />
+              <Route path="/verify-otp" element={<VerifyOTP />} />
+              <Route path="/:slug" element={<AgentSlug />} />
 
-            {/* --- 2. PROTECTED AGENT ROUTES --- */}
-            <Route element={<ProtectedRoute requiredRole="agent" />}>
-              <Route element={<AgentLayoutWrapper />}>
-                <Route path="/agent/dashboard/:slug" element={<AgentDashboard />} />
-                <Route path="/agent/profile/:slug" element={<AgentProfile />} />
-                <Route path="/agent/call-settings/:slug" element={<CallSetting />} />
+              <Route element={<ProtectedRoute requiredRole="agent" />}>
+                <Route element={<AgentLayoutWrapper />}>
+                  <Route path="/agent/dashboard/:slug" element={<AgentDashboard />} />
+                  <Route path="/agent/profile/:slug" element={<AgentProfile />} />
+                  <Route path="/agent/call-settings/:slug" element={<CallSetting />} />
+                </Route>
               </Route>
-            </Route>
 
-            {/* --- 3. PROTECTED USER ROUTES --- */}
-            <Route element={<ProtectedRoute requiredRole="user" />}>
-              <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
-                <Route path="/user/dashboard/:agentId" element={<UserDashboard />} />
-                <Route path="/user/profile/:agentId" element={<UserProfile />} />
+              <Route element={<ProtectedRoute requiredRole="user" />}>
+                <Route element={<UserCallProvider><Outlet /></UserCallProvider>}>
+                  <Route path="/user/dashboard/:agentId" element={<UserDashboard />} />
+                  <Route path="/user/profile/:agentId" element={<UserProfile />} />
+                </Route>
               </Route>
-            </Route>
 
-            {/* --- 4. PROTECTED ADMINISTRATOR ROUTES --- */}
-            <Route element={<ProtectedRoute requiredRole="admin" />}>
-              <Route path="/admin/terminal" element={<ZingAdmin />} /> 
-              <Route path="/admin/dashboard" element={<ZingDashboard />} />
-            </Route>
-            
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              <Route element={<ProtectedRoute requiredRole="admin" />}>
+                <Route path="/admin/terminal" element={<ZingAdmin />} /> 
+                <Route path="/admin/dashboard" element={<ZingDashboard />} />
+              </Route>
+              
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </PWAController>
       </Router>
     </AuthProvider>

@@ -5,6 +5,7 @@ console.log("--- ATTEMPTING TO START SERVER ---");
 
 // 2. Standard Third-Party and Vendor Package Imports
 import express from 'express';
+import compression from 'compression'; 
 import mongoose from 'mongoose';
 import cors from 'cors';
 import path from 'path'; 
@@ -81,6 +82,17 @@ const corsOptions = {
   ],
   exposedHeaders: ["Set-Cookie"]
 };
+
+app.use(compression({
+  level: 6, 
+  threshold: 1024, 
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  }
+}));
 
 app.use(cors(corsOptions));
 app.use(cookieParser(process.env.COOKIE_SECRET));
