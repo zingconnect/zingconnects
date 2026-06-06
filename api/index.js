@@ -1087,7 +1087,7 @@ app.post('/api/agents/logout', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
 
   try {
-const token = req.cookies?.token;
+const token = req.signedCookies?.token;
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const agentId = decoded.id;
