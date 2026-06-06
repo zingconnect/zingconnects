@@ -1714,6 +1714,7 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
+
 // =========================================================================
 // 🛡️ HARDENED ROUTE: POST /api/subscriptions/verify (With Cache Invalidation)
 // =========================================================================

@@ -100,6 +100,7 @@ export const AgentDashboard = () => {
   const [timeTicker, setTimeTicker] = useState(Date.now());
 
   // Subscription States
+  const [isSubscribed, setIsSubscribed] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);  
@@ -1479,7 +1480,6 @@ const handlePayment = async () => {
     setPaymentProcessing(false);
     return;
   }
-
   try {
     const finalNairaAmount = Number(activePlan.price.replace(/,/g, ''));
 
