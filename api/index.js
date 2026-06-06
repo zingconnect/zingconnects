@@ -82,14 +82,41 @@ const corsOptions = {
   exposedHeaders: ["Set-Cookie"]
 };
 
-
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
-
-
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
+
+// --- 2. THE PARSERS (Must be at the top) ---
+app.use((req, res, next) => {
+  if (req.headers['content-type'] === 'application/json') {
+    return express.json()(req, res, next);
+  }
+  if (req.headers['content-type']?.includes('application/x-www-form-urlencoded')) {
+    return express.urlencoded({ extended: true })(req, res, next);
+  }
+  next();
+});
+
+// --- 3. PARSING ERROR HANDLER ---
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('🔴 Bad JSON Request:', err.message);
+    return res.status(400).json({ success: false, message: "Invalid JSON format." });
+  }
+  next(err);
+});
+
+// --- 4. DATABASE MIDDLEWARE ---
+app.use(async (req, res, next) => {
+  if (req.path.startsWith('/api/socket.io')) return next();
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    return res.status(503).json({ success: false, message: "Database connection temporarily unavailable." });
+  }
+});
+
 const terminatingCallsCache = new Set();
 app.set('terminatingCallsCache', terminatingCallsCache);
 
@@ -124,15 +151,7 @@ webpush.setVapidDetails(
 console.log("DEBUG: VAPID Configured for:", process.env.VITE_EMAIL);
 console.log("DEBUG: Public Key defined:", !!process.env.VITE_PUBLIC_KEY);
 
-
-const upload = multer({ 
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 2 * 1024 * 1024, // 2MB limit (adjust based on your needs)
-    files: 1                  // Only allow 1 file upload
-  }
-});
-
+const upload = multer({ storage: multer.memoryStorage() });
 const getAgentModel = () => {
   return mongoose.models.Agent || Agent;
 };
@@ -348,6 +367,7 @@ const addDays = (date, days) => {
   result.setDate(result.getDate() + days);
   return result;
 };
+
 
 // ==========================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
@@ -3948,28 +3968,8 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// 1. Database Connection Timeout Fallback Middleware
-app.use(async (req, res, next) => {
-  if (req.path.startsWith('/api/socket.io')) {
-    return next();
-  }
-
-  try {
-    await connectToDatabase();
-    next();
-  } catch (error) {
-    console.error("CRITICAL MIDDLEWARE DB TIMEOUT:", error.message);
-    return res.status(503).json({ 
-      success: false, 
-      message: "Database connection temporarily unavailable. Request aborted safely." 
-    });
-  }
-});
-
-// 2. Centralized Error Interceptor (THE LAST ACTIVE LINE OF EXPRESS CODE)
 app.use((err, req, res, next) => {
   console.error("🔴 Protected Application Fault:", err.stack);
-
   res.status(err.status || 500).json({
     success: false,
     message: "An internal server error occurred safely."
