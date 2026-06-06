@@ -100,7 +100,7 @@ export const AgentDashboard = () => {
   const [timeTicker, setTimeTicker] = useState(Date.now());
 
   // Subscription States
-  const [isSubscribed, setIsSubscribed] = useState(false);
+const [isSubscribed, setIsSubscribed] = useState(agentData?.isSubscribed ?? false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);  
@@ -108,7 +108,6 @@ export const AgentDashboard = () => {
   const [previewFile, setPreviewFile] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");  
-const isSubscribed = agentData?.isSubscribed ?? false;
 
 const hasProcessedDeepLink = useRef(false);
   const messagesEndRef = useRef(null);
@@ -205,8 +204,6 @@ const handleStartCall = async (targetUserId) => {
   }
 
   try {
-    // UPDATED: Use secureFetch instead of manual fetch.
-    // Cookies are automatically attached via credentials: 'include'.
     const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/start`, {
       method: 'POST',
       body: JSON.stringify({
@@ -692,6 +689,10 @@ useEffect(() => {
   
   provisionAgentCryptoEnvironment();
 }, [token, isLoading, agentData?._id]);
+
+useEffect(() => {
+  setIsSubscribed(agentData?.isSubscribed ?? false);
+}, [agentData]);
 
   useEffect(() => {
     if (!room) return;
