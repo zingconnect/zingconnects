@@ -690,10 +690,6 @@ useEffect(() => {
   provisionAgentCryptoEnvironment();
 }, [token, isLoading, agentData?._id]);
 
-useEffect(() => {
-  setIsSubscribed(agentData?.isSubscribed ?? false);
-}, [agentData]);
-
   useEffect(() => {
     if (!room) return;
 
@@ -1467,6 +1463,7 @@ useEffect(() => {
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]); // Removed localStorage dependency
+
 const handlePayment = useCallback(async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
@@ -1490,10 +1487,12 @@ const handlePayment = useCallback(async () => {
       amount: finalNairaAmount,
       currency: "NGN",
       payment_options: "card, account, transfer, ussd",
-      // Cleaned customer object to prevent 400 errors in event tracker
+      // Cleaned and explicit customer object
       customer: {
         email: agentData.email,
-        name: `${agentData.firstName} ${agentData.lastName}`
+        name: `${agentData.firstName} ${agentData.lastName}`,
+        // Using a clean string ID to prevent auto-detection of invalid numeric IDs
+        id: "zing_user_" + (agentData._id || "unknown")
       },
       customizations: {
         title: "ZingConnect",
@@ -1503,11 +1502,18 @@ const handlePayment = useCallback(async () => {
       callback: async (response) => {
         console.log("🚀 Payment Callback Triggered. Response:", response);
         
+        // 1. Validate response status before calling server
+        if (response.status !== 'successful' && response.status !== 'completed') {
+           alert("Payment was not completed successfully.");
+           setPaymentProcessing(false);
+           return;
+        }
+
         try {
           const verifyRes = await secureFetch('/api/subscriptions/verify', {
             method: 'POST',
             body: JSON.stringify({
-              transaction_id: response.transaction_id,
+              transaction_id: response.transaction_id || response.tx_ref,
               plan: activePlan.tier,
               ngnAmount: finalNairaAmount
             })
@@ -1522,9 +1528,6 @@ const handlePayment = useCallback(async () => {
           const data = await verifyRes.json();
 
           if (verifyRes.ok) {
-            console.log("✅ Verification OK. Finalizing...");
-            
-            // 1. Update React state
             setIsSubscribed(true); 
             setAgentData(prev => ({ 
               ...prev, 
@@ -1532,21 +1535,14 @@ const handlePayment = useCallback(async () => {
               isSubscribed: true 
             }));
             
-            // 2. Trigger Overlay
             setShowSuccessOverlay(true);
             setPaymentProcessing(false);
 
-            // 3. Force redirect after 2 seconds to ensure user sees success
             setTimeout(() => {
               setShowSuccessOverlay(false);
               const targetSlug = slug || data.agent?.slug;
-              if (targetSlug) {
-                navigate(`/agent/dashboard/${targetSlug}`);
-              } else {
-                window.location.reload();
-              }
+              navigate(targetSlug ? `/agent/dashboard/${targetSlug}` : '/');
             }, 2000);
-
           } else {
             console.error("❌ Verification failed:", data.message);
             alert(data.message || "Verification failed");
@@ -1568,16 +1564,9 @@ const handlePayment = useCallback(async () => {
     setPaymentProcessing(false);
   }
 }, [
-    agentData, 
-    selectedPlan, 
-    plans, 
-    setIsSubscribed, 
-    setAgentData, 
-    setShowSuccessOverlay, 
-    setPaymentProcessing, 
-    setIsDualLoginConflict,
-    slug,
-    navigate
+    agentData, selectedPlan, plans, setIsSubscribed, 
+    setAgentData, setShowSuccessOverlay, setPaymentProcessing, 
+    setIsDualLoginConflict, slug, navigate
 ]);
 
 const handleFileUpload = (e) => {
