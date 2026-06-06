@@ -1491,8 +1491,7 @@ const handlePayment = useCallback(async () => {
       customer: {
         email: agentData.email,
         name: `${agentData.firstName} ${agentData.lastName}`,
-        // Using a clean string ID to prevent auto-detection of invalid numeric IDs
-        id: "zing_user_" + (agentData._id || "unknown")
+        id: "UID_" + String(agentData.id || agentData._id || "0").replace(/\./g, '_')
       },
       customizations: {
         title: "ZingConnect",
@@ -1527,36 +1526,48 @@ const handlePayment = useCallback(async () => {
 
           const data = await verifyRes.json();
 
-          if (verifyRes.ok) {
-            setIsSubscribed(true); 
-            setAgentData(prev => ({ 
-              ...prev, 
-              ...data.agent, 
-              isSubscribed: true 
-            }));
-            
-            setShowSuccessOverlay(true);
-            setPaymentProcessing(false);
+         if (verifyRes.ok) {
+      console.log("✅ Verification successful. Updating app state...");
+      
+      // 1. Force update the state
+      setIsSubscribed(true); 
+      setAgentData(prev => ({ 
+        ...prev, 
+        ...data.agent, 
+        isSubscribed: true 
+      }));
+      
+      setShowSuccessOverlay(true);
+      setPaymentProcessing(false);
 
-            setTimeout(() => {
-              setShowSuccessOverlay(false);
-              const targetSlug = slug || data.agent?.slug;
-              navigate(targetSlug ? `/agent/dashboard/${targetSlug}` : '/');
-            }, 2000);
-          } else {
-            console.error("❌ Verification failed:", data.message);
-            alert(data.message || "Verification failed");
-            setPaymentProcessing(false);
-          }
-        } catch (err) {
-          console.error("Verification error:", err);
-          alert("Connection error during verification.");
-          setPaymentProcessing(false);
+      // 2. Optimized Navigation
+      setTimeout(() => {
+        setShowSuccessOverlay(false);
+        const targetSlug = slug || data.agent?.slug;
+        
+        // Ensure we are hitting the specific route
+        if (targetSlug) {
+           navigate(`/agent/dashboard/${targetSlug}`, { replace: true });
+        } else {
+           // Fallback: Use replace to clear the history stack and refresh the state
+           window.location.href = '/'; 
         }
-      },
-      onclose: () => {
-        setPaymentProcessing(false);
-      }
+      }, 1500);
+
+    } else {
+      console.error("❌ Verification failed:", data.message);
+      alert(data.message || "Verification failed");
+      setPaymentProcessing(false);
+    }
+  } catch (err) {
+    console.error("Verification error:", err);
+    alert("Connection error during verification.");
+    setPaymentProcessing(false);
+  }
+},
+onclose: () => {
+  setPaymentProcessing(false);
+}
     });
   } catch (err) {
     console.error("Payment Initialization Error:", err);
