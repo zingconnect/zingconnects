@@ -6,7 +6,6 @@ import { PricingPage } from './components/PricingPage';
 import { Registration } from './components/Registration';
 import { VerifyOTP } from './components/VerifyOTP';
 import { AgentSlug } from './components/AgentSlug';
-import { AuthProvider } from './context/AuthContext';
 
 // 2. Lazy load heavy, route-specific components
 const AgentDashboard = lazy(() => import('./components/AgentDashboard'));
