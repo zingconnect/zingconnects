@@ -1463,10 +1463,9 @@ useEffect(() => {
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]); // Removed localStorage dependency
-
 const handlePayment = useCallback(async () => {
-  if (!agentData || !agentData.email) {
-    alert("Profile data is still loading. Please wait a moment or refresh.");
+  if (!agentData?.email) {
+    alert("Profile data is still loading.");
     return;
   }
   setPaymentProcessing(true);
@@ -1486,98 +1485,51 @@ const handlePayment = useCallback(async () => {
       tx_ref: `ZING-${Date.now()}`,
       amount: finalNairaAmount,
       currency: "NGN",
-      payment_options: "card, account, transfer, ussd",
       customer: {
         email: agentData.email,
         name: `${agentData.firstName} ${agentData.lastName}`,
-        phone_number: agentData?.phone, 
-      },
-      customizations: {
-        title: "ZingConnect",
-        description: `Activation for ${activePlan.tier} Plan (₦${activePlan.price})`,
-        logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
+        // Fix: Replace dots to satisfy SDK validation
+        id: agentData.email.replace(/\./g, '_') 
       },
       callback: async (response) => {
-        console.log("🚀 Payment Callback Triggered. Response:", response);
-        
-        // 1. Validate response status before calling server
-        if (response.status !== 'successful' && response.status !== 'completed') {
-           alert("Payment was not completed successfully.");
-           setPaymentProcessing(false);
-           return;
-        }
-
         try {
           const verifyRes = await secureFetch('/api/subscriptions/verify', {
             method: 'POST',
             body: JSON.stringify({
               transaction_id: response.transaction_id || response.tx_ref,
-              plan: activePlan.tier,
-              ngnAmount: finalNairaAmount
+              plan: activePlan.tier
             })
           });
 
-          if (verifyRes.status === 401 || verifyRes.status === 403) {
-            setIsDualLoginConflict(true);
-            setPaymentProcessing(false);
-            return;
-          }
-
           const data = await verifyRes.json();
 
-         if (verifyRes.ok) {
-      console.log("✅ Verification successful. Updating app state...");
-      
-      // 1. Force update the state
-      setIsSubscribed(true); 
-      setAgentData(prev => ({ 
-        ...prev, 
-        ...data.agent, 
-        isSubscribed: true 
-      }));
-      
-      setShowSuccessOverlay(true);
-      setPaymentProcessing(false);
+          if (verifyRes.ok && data.success) {
+            setIsSubscribed(true);
+            setAgentData(prev => ({ ...prev, ...data.agent, isSubscribed: true }));
+            setShowSuccessOverlay(true);
 
-      // 2. Optimized Navigation
-      setTimeout(() => {
-        setShowSuccessOverlay(false);
-        const targetSlug = slug || data.agent?.slug;
-        
-        // Ensure we are hitting the specific route
-        if (targetSlug) {
-           navigate(`/agent/dashboard/${targetSlug}`, { replace: true });
-        } else {
-           // Fallback: Use replace to clear the history stack and refresh the state
-           window.location.href = '/'; 
+            // Server-Driven Navigation
+            setTimeout(() => {
+              setShowSuccessOverlay(false);
+              setPaymentProcessing(false);
+              navigate(data.redirectUrl || `/agent/dashboard/${slug}`, { replace: true });
+            }, 1500);
+          } else {
+            throw new Error(data.message || "Verification failed");
+          }
+        } catch (err) {
+          console.error("Verification error:", err);
+          alert(err.message);
+          setPaymentProcessing(false);
         }
-      }, 1500);
-
-    } else {
-      console.error("❌ Verification failed:", data.message);
-      alert(data.message || "Verification failed");
-      setPaymentProcessing(false);
-    }
-  } catch (err) {
-    console.error("Verification error:", err);
-    alert("Connection error during verification.");
-    setPaymentProcessing(false);
-  }
-},
-onclose: () => {
-  setPaymentProcessing(false);
-}
+      },
+      onclose: () => setPaymentProcessing(false)
     });
   } catch (err) {
     console.error("Payment Initialization Error:", err);
-    alert("Failed to initialize payment.");
     setPaymentProcessing(false);
   }
-}, [
-    agentData, selectedPlan, plans, setIsSubscribed, 
-    setAgentData, setShowSuccessOverlay, setPaymentProcessing, 
-    setIsDualLoginConflict, slug, navigate
-]);
+}, [agentData, selectedPlan, plans, slug, navigate]);
 
 const handleFileUpload = (e) => {
   const file = e.target.files[0];

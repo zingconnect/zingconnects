@@ -649,6 +649,7 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
       return res.status(200).json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",
+        redirectUrl: `/agent/dashboard/${agent.slug}`, // Add this field
         agent: {
           id: agent._id,
           email: agent.email,

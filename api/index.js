@@ -1819,6 +1819,7 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
       return res.json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",
+        redirectUrl: `/agent/dashboard/${agent.slug}`, // Add this field
         agent: {
           id: agent._id,
           email: agent.email,
