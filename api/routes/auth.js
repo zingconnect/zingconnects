@@ -290,13 +290,13 @@ router.post('/verify-otp', async (req, res, next) => {
       { expiresIn: '7d' } // Aligned with cookie expiry
     );
 
- // Updated Cookie Configuration
 res.cookie('token', token, {
-  httpOnly: true,       // Prevents XSS/JS access
-  secure: true,         // MANDATORY because your domain is HTTPS
-  sameSite: 'None',     // Ensures the cookie is sent in all contexts
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  path: '/'
+  httpOnly: true,
+  secure: true,
+  sameSite: 'None',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+  signed: true // <--- Add this
 });
     // Successfully logged in; return success without the raw token
     return res.status(200).json({
@@ -365,13 +365,13 @@ router.post('/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '7d' }
     );
-// Updated Cookie Configuration
 res.cookie('token', token, {
-  httpOnly: true,       // Prevents XSS/JS access
-  secure: true,         // MANDATORY because your domain is HTTPS
-  sameSite: 'None',     // Ensures the cookie is sent in all contexts
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  path: '/'
+  httpOnly: true,
+  secure: true,
+  sameSite: 'None',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+  signed: true // <--- Add this
 });
 
     // Clean Response: Token is now handled by the browser cookie

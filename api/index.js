@@ -86,10 +86,21 @@ app.use(cors(corsOptions));
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
 
-// ADD THESE INSTEAD
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
+app.use((req, res, next) => {
+  const contentType = req.headers['content-type'];
+    if (contentType && contentType.includes('multipart/form-data')) {
+    return next();
+  }
+    express.json({ limit: '5mb' })(req, res, next);
+});
 
+app.use((req, res, next) => {
+  const contentType = req.headers['content-type'];
+  if (contentType && contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  express.urlencoded({ limit: '5mb', extended: true })(req, res, next);
+});
 // --- 3. PARSING ERROR HANDLER ---
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
@@ -586,13 +597,13 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       { expiresIn: '7d' } // Extended to 7d to match cookie age
     );
 
-   // Updated Cookie Configuration
 res.cookie('token', token, {
-  httpOnly: true,       // Prevents XSS/JS access
-  secure: true,         // MANDATORY because your domain is HTTPS
-  sameSite: 'None',     // Ensures the cookie is sent in all contexts
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  path: '/'
+  httpOnly: true,
+  secure: true,
+  sameSite: 'None',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+  signed: true // <--- Add this
 });
 
     return res.status(200).json({
@@ -700,15 +711,14 @@ app.post('/api/agents/login', async (req, res, next) => {
       process.env.JWT_SECRET, 
       { expiresIn: '7d' } 
     );
-// Updated Cookie Configuration
 res.cookie('token', token, {
-  httpOnly: true,       // Prevents XSS/JS access
-  secure: true,         // MANDATORY because your domain is HTTPS
-  sameSite: 'None',     // Ensures the cookie is sent in all contexts
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  path: '/'
+  httpOnly: true,
+  secure: true,
+  sameSite: 'None',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+  signed: true // <--- Add this
 });
-
     // Successfully logged in; token is now in the HttpOnly cookie
     return res.json({ 
       success: true, 
@@ -1005,13 +1015,13 @@ app.post('/api/users/handshake', async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
-  // Updated Cookie Configuration
 res.cookie('token', token, {
-  httpOnly: true,       // Prevents XSS/JS access
-  secure: true,         // MANDATORY because your domain is HTTPS
-  sameSite: 'None',     // Ensures the cookie is sent in all contexts
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  path: '/'
+  httpOnly: true,
+  secure: true,
+  sameSite: 'None',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+  signed: true // <--- Add this
 });
 
     // 5. Clean Response (Removed token from JSON body)
