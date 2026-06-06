@@ -1487,11 +1487,10 @@ const handlePayment = useCallback(async () => {
       amount: finalNairaAmount,
       currency: "NGN",
       payment_options: "card, account, transfer, ussd",
-      // Cleaned and explicit customer object
       customer: {
         email: agentData.email,
         name: `${agentData.firstName} ${agentData.lastName}`,
-        id: "UID_" + String(agentData.id || agentData._id || "0").replace(/\./g, '_')
+        phone_number: agentData?.phone, 
       },
       customizations: {
         title: "ZingConnect",
