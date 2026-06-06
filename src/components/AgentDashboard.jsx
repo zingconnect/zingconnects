@@ -1467,7 +1467,6 @@ useEffect(() => {
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]); // Removed localStorage dependency
-// Add this to your component body
 const handlePayment = useCallback(async () => {
   if (!agentData || !agentData.email) {
     alert("Profile data is still loading. Please wait a moment or refresh.");
@@ -1491,9 +1490,10 @@ const handlePayment = useCallback(async () => {
       amount: finalNairaAmount,
       currency: "NGN",
       payment_options: "card, account, transfer, ussd",
+      // Cleaned customer object to prevent 400 errors in event tracker
       customer: {
-        email: agentData?.email,
-        name: `${agentData?.firstName} ${agentData?.lastName}`,
+        email: agentData.email,
+        name: `${agentData.firstName} ${agentData.lastName}`
       },
       customizations: {
         title: "ZingConnect",
@@ -1501,7 +1501,7 @@ const handlePayment = useCallback(async () => {
         logo: "https://cdn-icons-png.flaticon.com/512/9431/9431166.png",
       },
       callback: async (response) => {
-        console.log("🚀 Payment Callback Triggered.");
+        console.log("🚀 Payment Callback Triggered. Response:", response);
         
         try {
           const verifyRes = await secureFetch('/api/subscriptions/verify', {
@@ -1522,7 +1522,9 @@ const handlePayment = useCallback(async () => {
           const data = await verifyRes.json();
 
           if (verifyRes.ok) {
-            // ✅ These are now guaranteed to be in scope
+            console.log("✅ Verification OK. Finalizing...");
+            
+            // 1. Update React state
             setIsSubscribed(true); 
             setAgentData(prev => ({ 
               ...prev, 
@@ -1530,9 +1532,23 @@ const handlePayment = useCallback(async () => {
               isSubscribed: true 
             }));
             
+            // 2. Trigger Overlay
             setShowSuccessOverlay(true);
             setPaymentProcessing(false);
+
+            // 3. Force redirect after 2 seconds to ensure user sees success
+            setTimeout(() => {
+              setShowSuccessOverlay(false);
+              const targetSlug = slug || data.agent?.slug;
+              if (targetSlug) {
+                navigate(`/agent/dashboard/${targetSlug}`);
+              } else {
+                window.location.reload();
+              }
+            }, 2000);
+
           } else {
+            console.error("❌ Verification failed:", data.message);
             alert(data.message || "Verification failed");
             setPaymentProcessing(false);
           }
@@ -1551,7 +1567,18 @@ const handlePayment = useCallback(async () => {
     alert("Failed to initialize payment.");
     setPaymentProcessing(false);
   }
-}, [agentData, selectedPlan, plans, setIsSubscribed, setAgentData, setShowSuccessOverlay, setPaymentProcessing, setIsDualLoginConflict]);
+}, [
+    agentData, 
+    selectedPlan, 
+    plans, 
+    setIsSubscribed, 
+    setAgentData, 
+    setShowSuccessOverlay, 
+    setPaymentProcessing, 
+    setIsDualLoginConflict,
+    slug,
+    navigate
+]);
 
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
