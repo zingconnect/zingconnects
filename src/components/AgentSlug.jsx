@@ -16,6 +16,7 @@ export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
   const { setToken } = useAuth();
+  const { login } = useAuth();
   
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -130,7 +131,6 @@ useEffect(() => {
 React.useEffect(() => {
   return () => { isMounted.current = false; };
 }, []);
-
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -147,25 +147,25 @@ const handleUserInquiry = async (e) => {
         email: userEmail.trim(), 
         agentSlug: slug 
       }),
-      // CRITICAL: This tells the browser to include the HttpOnly cookie in the request
-      // and process the Set-Cookie header in the response.
       credentials: 'include' 
     });
 
     const data = await response.json();
 
     if (response.ok) {
-      // Token is now managed by the browser cookie.
-      // Update your local auth state (e.g., isAuthenticated = true)
+      // 1. Await the async login function. 
+      // This ensures AuthContext has finished verifying the cookie
+      // before we force the browser to change pages.
       if (typeof login === 'function') {
-        login(slug); // Using the login function from AuthContext
+        await login(slug); 
       }
       
       if (rememberUser) {
         localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
       }
       
-      navigate(`/user/dashboard/${slug}`);
+      // 2. Navigate with replace to prevent back-button loops
+      navigate(`/user/dashboard/${slug}`, { replace: true });
     } else {
       alert(`Connection failed: ${data.message || "Unknown error"}`);
     }
@@ -192,7 +192,6 @@ const handleAgentLogin = async (e) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      // CRITICAL: Must be 'include' to send/receive HttpOnly cookies
       credentials: 'include' 
     });
 
@@ -201,19 +200,18 @@ const handleAgentLogin = async (e) => {
     if (!isMounted.current) return;
 
     if (response.ok) {
-      // The token is now stored securely in the browser's cookie jar.
-      // We no longer access it via JavaScript or store it in localStorage.
-      
-      // Update AuthContext state to reflect that the user is now authenticated
+      // 1. AWAIT the login to ensure AuthContext state is fully synced 
+      // with the cookie the server just sent.
       if (typeof login === 'function') {
-        login(payload.targetSlug);
+        await login(payload.targetSlug);
       }
       
       if (rememberAgent) {
         localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
       }
       
-      navigate(`/agent/dashboard/${payload.targetSlug}`);
+      // 2. Now it is safe to navigate
+      navigate(`/agent/dashboard/${payload.targetSlug}`, { replace: true });
     } else {
       console.error("Login Server Error:", data.message);
       alert(data.message || "Invalid Credentials");

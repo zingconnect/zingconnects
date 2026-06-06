@@ -12,6 +12,12 @@ export const AuthProvider = ({ children }) => {
     verifySession();
   }, []);
 
+const login = async (slug) => {
+  setIsLoading(true); // Lock the UI while we confirm the session
+  await verifySession(); // Wait until the server confirms the cookie is valid
+  setIsLoading(false);
+};
+
   const verifySession = async () => {
     setIsLoading(true);
     try {
@@ -43,7 +49,8 @@ export const AuthProvider = ({ children }) => {
       userRole, 
       setUserRole, 
       isLoading,
-      verifySession 
+      verifySession,
+      login 
     }}>
       {children}
     </AuthContext.Provider>

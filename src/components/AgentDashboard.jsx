@@ -1468,16 +1468,18 @@ useEffect(() => {
   return () => { isMounted = false; };
 }, [navigate, slug]); // Removed localStorage dependency
 
-
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
+    console.error("DEBUG: Agent data missing during payment attempt.");
     alert("Profile data is still loading.");
     return;
   }
+
   setPaymentProcessing(true);
-  
   const activePlan = plans.find(p => p.tier === selectedPlan);
+  
   if (!activePlan) {
+    console.error("DEBUG: Invalid plan selected:", selectedPlan);
     alert("Invalid plan selected");
     setPaymentProcessing(false);
     return;
@@ -1485,6 +1487,7 @@ const handlePayment = useCallback(async () => {
 
   try {
     const finalNairaAmount = Number(activePlan.price.replace(/,/g, ''));
+    console.log("DEBUG: Initializing Flutterwave for:", agentData.email);
 
     window.FlutterwaveCheckout({
       public_key: import.meta.env.VITE_FLW_PUBLIC_KEY,
@@ -1492,13 +1495,24 @@ const handlePayment = useCallback(async () => {
       amount: finalNairaAmount,
       currency: "NGN",
       customer: {
-  email: agentData.email,
-  name: `${agentData.firstName} ${agentData.lastName}`,
-  phone_number: agentData?.phone || '08000000000', 
-  id: String(agentData._id || agentData.email).replace(/\./g, '_')
-},
+        email: agentData.email,
+        name: `${agentData.firstName} ${agentData.lastName}`,
+        phone_number: agentData?.phone || '08000000000',
+        id: String(agentData._id || agentData.email).replace(/\./g, '_')
+      },
       callback: async (response) => {
+        console.log("DEBUG: Flutterwave Callback Received:", response);
+        
+        // Ensure response is actually successful
+        if (response.status !== "successful" && response.status !== "completed") {
+          console.error("DEBUG: Payment status not successful:", response.status);
+          alert("Payment was not successful. Status: " + response.status);
+          setPaymentProcessing(false);
+          return;
+        }
+
         try {
+          console.log("DEBUG: Sending verification request to /api/subscriptions/verify");
           const verifyRes = await secureFetch('/api/subscriptions/verify', {
             method: 'POST',
             body: JSON.stringify({
@@ -1508,31 +1522,36 @@ const handlePayment = useCallback(async () => {
           });
 
           const data = await verifyRes.json();
+          console.log("DEBUG: Verification server response:", data);
 
           if (verifyRes.ok && data.success) {
             setIsSubscribed(true);
             setAgentData(prev => ({ ...prev, ...data.agent, isSubscribed: true }));
             setShowSuccessOverlay(true);
 
-            // Server-Driven Navigation
             setTimeout(() => {
+              const targetUrl = data.redirectUrl || `/agent/dashboard/${slug}`;
+              console.log("DEBUG: Attempting navigation to:", targetUrl);
               setShowSuccessOverlay(false);
               setPaymentProcessing(false);
-              navigate(data.redirectUrl || `/agent/dashboard/${slug}`, { replace: true });
+              navigate(targetUrl, { replace: true });
             }, 1500);
           } else {
-            throw new Error(data.message || "Verification failed");
+            throw new Error(data.message || "Verification failed on server");
           }
         } catch (err) {
-          console.error("Verification error:", err);
-          alert(err.message);
+          console.error("DEBUG: Verification flow error:", err);
+          alert("Payment verified, but failed to update subscription: " + err.message);
           setPaymentProcessing(false);
         }
       },
-      onclose: () => setPaymentProcessing(false)
+      onclose: () => {
+        console.log("DEBUG: Payment modal closed by user.");
+        setPaymentProcessing(false);
+      }
     });
   } catch (err) {
-    console.error("Payment Initialization Error:", err);
+    console.error("DEBUG: Flutterwave Init Error:", err);
     setPaymentProcessing(false);
   }
 }, [agentData, selectedPlan, plans, slug, navigate]);
