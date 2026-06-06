@@ -86,22 +86,33 @@ app.use(cors(corsOptions));
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.disable('x-powered-by');
 
+// Create the parsers
+const jsonParser = express.json({ limit: '5mb' });
+const urlencodedParser = express.urlencoded({ limit: '5mb', extended: true });
+
 app.use((req, res, next) => {
   const contentType = req.headers['content-type'];
-    if (contentType && contentType.includes('multipart/form-data')) {
+  
+  // If it's a file upload, skip the JSON/URL parser entirely
+  if (contentType && contentType.includes('multipart/form-data')) {
     return next();
   }
-    express.json({ limit: '5mb' })(req, res, next);
+  
+  // Otherwise, run the standard parsers
+  jsonParser(req, res, next);
 });
 
+// Repeat for urlencoded
 app.use((req, res, next) => {
   const contentType = req.headers['content-type'];
   if (contentType && contentType.includes('multipart/form-data')) {
     return next();
   }
-  express.urlencoded({ limit: '5mb', extended: true })(req, res, next);
+  urlencodedParser(req, res, next);
 });
-// --- 3. PARSING ERROR HANDLER ---
+
+// --- 4. GLOBAL ERROR HANDLER ---
+// This handles REAL JSON errors for non-multipart routes
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     console.error('🔴 Bad JSON Request:', err.message);
@@ -109,7 +120,6 @@ app.use((err, req, res, next) => {
   }
   next(err);
 });
-
 // --- 4. DATABASE MIDDLEWARE ---
 app.use(async (req, res, next) => {
   if (req.path.startsWith('/api/socket.io')) return next();
