@@ -3,8 +3,12 @@ import mongoose from 'mongoose';
 import { connectToDatabase } from '../config/db.js';
 
 export const authenticateToken = async (req, res, next) => {
+
+  console.log("Incoming request cookies:", req.signedCookies);
+
 const token = req.signedCookies?.token;
   if (!token) {
+    console.warn("Auth failed: No signed cookie token detected.");
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
 
@@ -14,9 +18,6 @@ const token = req.signedCookies?.token;
     req.user = decoded;
     req.user.id = decoded.id || decoded._id;
 
-    // 2. FORCE CONNECTION: Await the database initialization.
-    // This solves the MongooseError by ensuring the connection is established
-    // before any model operations are called.
     await connectToDatabase();
 
     const redisClient = req.app.get('redisClient');

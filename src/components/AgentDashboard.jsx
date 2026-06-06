@@ -164,6 +164,10 @@ const agentPrivateKeyRef = useRef(agentPrivateKey);
     },
   ];
 
+  useEffect(() => {
+  console.log("Cookies found in browser:", document.cookie);
+}, []);
+
  const handleLogout = async (e) => {
   e.preventDefault();
   try {
@@ -1463,6 +1467,8 @@ useEffect(() => {
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug]); // Removed localStorage dependency
+
+
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
     alert("Profile data is still loading.");
@@ -1486,11 +1492,11 @@ const handlePayment = useCallback(async () => {
       amount: finalNairaAmount,
       currency: "NGN",
       customer: {
-        email: agentData.email,
-        name: `${agentData.firstName} ${agentData.lastName}`,
-        // Fix: Replace dots to satisfy SDK validation
-        id: agentData.email.replace(/\./g, '_') 
-      },
+  email: agentData.email,
+  name: `${agentData.firstName} ${agentData.lastName}`,
+  phone_number: agentData?.phone || '08000000000', 
+  id: String(agentData._id || agentData.email).replace(/\./g, '_')
+},
       callback: async (response) => {
         try {
           const verifyRes = await secureFetch('/api/subscriptions/verify', {
@@ -2280,47 +2286,74 @@ const handleSendMessage = async (e) => {
             </>
           )}
 
-          {/* --- SIDEBAR --- */}
-          <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
-            <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center shrink-0">
-              <button onClick={() => navigate(`/agent/profile/${slug || agentData?.slug || ''}`)} className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center">
-                <BsPersonCircle size={32} className="text-text-secondary" />
-              </button>
-              <BsThreeDotsVertical className="cursor-pointer text-text-secondary" size={18} />
-            </header>
-            <div className="p-2 bg-card-bg">
-              <div className="bg-input-bg flex items-center px-3 py-1.5 rounded-lg">
-                <BsSearch className="text-text-secondary mr-3" size={12} />
-                <input placeholder="Search" className="bg-transparent text-xs w-full outline-none text-text-main" />
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {users.length > 0 ? (
-                users.map((user) => (
-                  <div key={user._id} onClick={() => handleSelectUser(user)} className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] ${selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''}`}>
-                    <div className="relative shrink-0">
-                      <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
-                        <img src={user.photoUrl} alt={user.firstName} className="w-full h-full object-cover" onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }} />
-                      </div>
-                      <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
-                    </div>
-                    <div className="ml-3 flex-1 min-w-0">
-                      <h3 className="text-[13px] font-bold text-gray-800 truncate mb-0.5">{user.firstName} {user.lastName}</h3>
-                      <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-center text-gray-500 py-10 text-xs font-bold uppercase tracking-widest">No users connected.</p>
-              )}
-            </div>
-            <div className="p-4 border-t bg-gray-50/50">
-              <button onClick={handleLogout} className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95">
-                <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
-              </button>
-            </div>
-          </aside>
-
+    {/* --- SIDEBAR --- */}
+    <aside className={`${showSidebar ? 'flex' : 'hidden'} lg:flex w-full lg:w-[30%] lg:min-w-[350px] bg-card-bg flex-col z-[100]`}>
+  <header className="h-[60px] bg-page-bg px-3 flex justify-between items-center  shrink-0">
+   <button 
+  onClick={() => navigate(`/agent/profile/${slug || agentData?.slug || ''}`)} 
+  className="h-10 w-10 rounded-full hover:bg-input-bg flex items-center justify-center"
+>
+  <BsPersonCircle size={32} className="text-text-secondary" />
+</button>
+    <BsThreeDotsVertical className="cursor-pointer text-text-secondary" size={18} />
+  </header>
+    <div className="p-2 bg-card-bg">
+    <div className="bg-input-bg flex items-center px-3 py-1.5 rounded-lg">
+      <BsSearch className="text-text-secondary mr-3" size={12} />
+      <input placeholder="Search" className="bg-transparent text-xs w-full outline-none text-text-main" />
+    </div>
+  </div>
+      <div className="flex-1 overflow-y-auto">
+{users.length > 0 ? users.map((user) => (
+  <div
+    key={user._id}
+    onClick={() => handleSelectUser(user)}
+    className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6]  ${selectedUser?._id === user._id ? 'bg-[#ebebeb]' : ''}`}
+  >
+    <div className="relative shrink-0">
+      <div className="w-11 h-11 rounded-full overflow-hidden border bg-white">
+        <img
+          src={user.photoUrl}
+          alt={user.firstName}
+          className="w-full h-full object-cover"
+          onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${user.firstName}&background=random&color=fff`; }}
+        />
+      </div>
+      <div className={`absolute -bottom-0.5 -right-0.5 border-2 border-white w-4 h-4 rounded-full ${user.status === 'online' || user.isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+    </div>
+    
+    <div className="ml-3 flex-1 min-w-0">
+      <div className="flex justify-between items-center mb-0.5">
+        <h3 className="text-[13px] font-bold text-gray-800 truncate">
+          {user.firstName} {user.lastName}
+        </h3>
+      </div>
+      
+      <p className="text-[11px] text-gray-500 truncate mb-0.5">{user.email}</p>
+      
+      {/* NEW: City and State Display */}
+      {(user.city || user.state) && (
+        <p className="text-[10px] font-bold text-blue-600 truncate flex items-center gap-1">
+          <span className="opacity-70">📍</span>
+          {user.city ? user.city : ''}{user.city && user.state ? ', ' : ''}{user.state ? user.state : ''}
+        </p>
+      )}
+    </div>
+  </div>
+)) : (
+  <p className="text-center text-gray-500 py-10 text-xs font-bold uppercase tracking-widest">No users connected.</p>
+)}
+      </div>
+     <div className="p-4 border-t bg-gray-50/50">
+        <button 
+          onClick={handleLogout} 
+          className="w-full flex items-center justify-center gap-3 py-3 bg-white border border-red-100 text-red-500 rounded-xl hover:bg-red-50 transition-all active:scale-95"
+        >
+          <span className="text-[11px] font-black uppercase tracking-widest">Disconnect Session</span>
+        </button>
+      </div>
+    </aside>
+    
           {/* --- MAIN CHAT & MODALS --- */}
           <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden h-screen`}>
             {selectedUser ? (
