@@ -11,20 +11,16 @@ function arrayBufferToBase64(buffer) {
   return window.btoa(binary);
 }
 
+// Replacement for your current base64ToArrayBuffer
 function base64ToArrayBuffer(base64) {
-  // 1. Sanitize for URL-safe base64 if needed
-  const sanitized = base64.replace(/-/g, '+').replace(/_/g, '/');
-  // 2. Decode using a Blob/FileReader pattern for true binary handling
-  // Or use the standard method below:
-  const binary_string = window.atob(sanitized);
+  const binary_string = window.atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
   const len = binary_string.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
     bytes[i] = binary_string.charCodeAt(i);
   }
-  return bytes.buffer;
+  return bytes.buffer; // Returning the buffer directly
 }
-
 /**
  * 🔑 GENERATE KEYPAIR: Generates ECDH keys in memory.
  * Caller (AuthContext) is responsible for storing privateKeyJwk in React State.

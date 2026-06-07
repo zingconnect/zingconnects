@@ -84,6 +84,36 @@ const CallStatusMessage = ({ status, time }) => {
   );
 };
 
+// Add this component BEFORE your UserDashboard export
+const MessageItem = ({ message, isMe, isCryptoReady, privateKeyJwk, senderPublicKey }) => {
+  const [decryptedText, setDecryptedText] = useState(message.isEncrypted ? '🔒 Decrypting...' : message.text);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+
+  useEffect(() => {
+    if (message.isEncrypted && isCryptoReady && privateKeyJwk && senderPublicKey) {
+      setIsDecrypting(true);
+      decryptMessageText(message.text, message.iv, senderPublicKey, privateKeyJwk)
+        .then(text => {
+          setDecryptedText(text);
+          setIsDecrypting(false);
+        })
+        .catch((err) => {
+          console.error("Decryption failed:", err);
+          setDecryptedText("🔒 [Decryption Failed]");
+          setIsDecrypting(false);
+        });
+    } else {
+      setDecryptedText(message.text);
+    }
+  }, [message.text, message.isEncrypted, isCryptoReady, privateKeyJwk, senderPublicKey]);
+
+  return (
+    <p className={`text-[13px] md:text-[15px] leading-relaxed break-words ${isDecrypting ? 'opacity-50 italic' : ''}`}>
+      {decryptedText}
+    </p>
+  );
+};
+
 export const UserDashboard = () => {
 const { token, isLoading, privateKeyJwk, isCryptoReady } = useAuth();
   const navigate = useNavigate();

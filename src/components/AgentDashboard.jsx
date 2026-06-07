@@ -58,38 +58,14 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
-const MessageItem = ({ message, isMe, isCryptoReady, privateKey, senderPublicKey }) => {
-  const [decryptedText, setDecryptedText] = useState(
-    message.isEncrypted ? '🔒 Decrypting...' : message.text
-  );
-  const [isDecrypting, setIsDecrypting] = useState(false);
-
-  useEffect(() => {
-    if (message.isEncrypted && isCryptoReady && privateKey && senderPublicKey) {
-      setIsDecrypting(true);
-      
-      decryptMessageText(message.text, message.iv, senderPublicKey, privateKey)
-        .then(text => {
-          setDecryptedText(text);
-          setIsDecrypting(false);
-        })
-        .catch((err) => {
-          console.error("Decryption failed:", err);
-          setDecryptedText("🔒 [Decryption Failed]");
-          setIsDecrypting(false);
-        });
-    } else {
-      // If NOT encrypted, display text directly without calling decryption engine
-      setDecryptedText(message.text);
-    }
-  }, [message.text, message.isEncrypted, isCryptoReady, privateKey, senderPublicKey]);
-
+const MessageItem = ({ message, isMe }) => {
   return (
-    <p className={`text-[13px] md:text-[15px] leading-relaxed break-words ${isDecrypting ? 'opacity-50 italic' : ''}`}>
-      {decryptedText}
+    <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
+      {message.text}
     </p>
   );
 };
+
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
@@ -1921,7 +1897,6 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
 
-
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
@@ -1929,27 +1904,47 @@ useEffect(() => {
     if (document.visibilityState !== 'visible') return;
 
     const incomingMsgs = await fetchMessages(selectedUser._id, limit);
-    if (!incomingMsgs) return;
+    if (!incomingMsgs || incomingMsgs.length === 0) return;
+
+    // 1. Decrypt batch before updating state
+    const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
+      if (msg.isEncrypted && selectedUser?.publicKeyJwk && privateKey) {
+        try {
+          const decrypted = await decryptMessageText(
+            msg.text, 
+            msg.iv, 
+            selectedUser.publicKeyJwk, 
+            privateKey
+          );
+          return { ...msg, text: decrypted, isEncrypted: false };
+        } catch (err) {
+          console.error("Batch decryption failed:", err);
+          return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
+        }
+      }
+      return msg;
+    }));
     setMessages(prev => {
-      const isNew = incomingMsgs.length !== prev.length || 
-                    incomingMsgs[incomingMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
+      const isNew = processedMsgs.length !== prev.length || 
+                    processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
       
       if (isNew) {
         // Notification logic
-        const latest = incomingMsgs[incomingMsgs.length - 1];
+        const latest = processedMsgs[processedMsgs.length - 1];
         if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
           lastNotifiedId.current = latest._id;
           notificationSound.current?.play().catch(() => {});
         }
-        return incomingMsgs;
+        return processedMsgs;
       }
       return prev;
     });
   };
-
-  const interval = setInterval(refreshMessages, 5000); // 5s is good for active chat
+  const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
-}, [selectedUser?._id, callStatus, limit]); // Only re-run if chat or status changes
+  }, [selectedUser?._id, callStatus, limit, privateKey]);
+
+
 useEffect(() => {
   const setupNotifications = async () => {
     // 1. Ensure token is available from context
@@ -2021,8 +2016,7 @@ useEffect(() => {
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
-
-  const handleIncomingMessage = async (data, callback) => {
+const handleIncomingMessage = async (data, callback) => {
     if (callback) callback({ status: 'received' });
 
     console.log("📥 Real-time Socket Message Detected:", data);
@@ -2030,10 +2024,11 @@ useEffect(() => {
     lastNotifiedId.current = data._id;
 
     const currentUser = selectedUserRef.current;
-    const currentAgent = agentDataRef.current;
     const currentKey = agentPrivateKeyRef.current;
 
     let processedData = { ...data };
+
+    // --- PRE-DECRYPTION BLOCK ---
     if (processedData.isEncrypted) {
       if (currentUser?.publicKeyJwk && currentKey) {
         try {
@@ -2041,18 +2036,21 @@ useEffect(() => {
             processedData.text,
             processedData.iv,
             currentUser.publicKeyJwk,
-            currentAgent?._id,
-            currentKey // Using the secure Ref
+            currentKey
           );
+          // Flag as false so the UI knows this is now plain text
+          processedData.isEncrypted = false; 
         } catch (err) {
           console.error("🔒 Socket decryption error:", err);
           processedData.text = "🔒 [Decryption Failed]";
+          processedData.isEncrypted = false;
         }
       } else {
         processedData.text = "🔒 [Secure Channel Not Ready]";
       }
     }
 
+    // Update the message state
     const isChattingWithSender = currentUser && 
       (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
     
@@ -2062,12 +2060,12 @@ useEffect(() => {
         return [...prev, processedData];
       });
       
-      // UPDATED: No token needed; session is managed via cookies
       secureFetch(`/api/messages/mark-read/${currentUser._id}`, {
         method: 'PATCH'
       }).catch(err => console.error("Mark read error:", err));
     }
 
+    // Handle Notifications
     if (processedData.senderModel === 'User') {
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
@@ -2080,8 +2078,9 @@ useEffect(() => {
 
       const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
       if (Notification.permission === "granted" && shouldShowPopup) {
+        // Use processedData.text directly since it is now plain text
         const notificationBody = processedData.isEncrypted 
-          ? "You received an encrypted message." 
+          ? "You received a new message." 
           : (processedData.text || "Sent a file");
 
         const popup = new Notification(`Message from ${processedData.senderName || 'Client'}`, {
@@ -2190,33 +2189,30 @@ const handleSendMessage = async (e) => {
         fileType: 'text'
       })
     });
+const data = await response.json();
+ 
+if (data.success) {
+  if (selectedUser._id !== activeUser._id) return;
+  const finalizedMessage = { ...data.message };
+    if (finalizedMessage.isEncrypted) {
+    try {
+      finalizedMessage.text = await decryptMessageText(
+        finalizedMessage.text,
+        finalizedMessage.iv,
+        activeUser.publicKeyJwk,
+        privateKey
+      );
+      finalizedMessage.isEncrypted = false; // Mark as plain text for UI
+    } catch (e) {
+      finalizedMessage.text = "🔒 [Decryption Failed]";
+      finalizedMessage.isEncrypted = false;
+    }
+  }
 
-   const data = await response.json();
-    
-    if (data.success) {
-      // 1. CONTEXT GUARD: Ensure user hasn't switched chats while waiting for the server
-      if (selectedUser._id !== activeUser._id) {
-        console.warn("User switched conversations. Skipping local state update.");
-        return;
-      }
-const finalizedMessage = { ...data.message };
-
-if (finalizedMessage.isEncrypted && finalizedMessage.text) {
-  finalizedMessage.text = await decryptMessageText(
-    finalizedMessage.text,
-    finalizedMessage.iv,
-    activeUser.publicKeyJwk,
-    privateKey
+  setMessages(prev => 
+    prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
   );
 } else {
-  // If it's not encrypted, leave it as is (it's already plain text)
-  finalizedMessage.text = finalizedMessage.text; 
-}
-
-setMessages(prev => 
-  prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
-);
-    } else {
       throw new Error(data.message || "Transmission rejected by server.");
     }
   } catch (err) {
