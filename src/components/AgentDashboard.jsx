@@ -58,14 +58,33 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
-const MessageItem = ({ message }) => {
-  if (message.isEncrypted && message.text.length > 30) { 
+const MessageItem = ({ message, isCryptoReady, privateKey, senderPublicKey }) => {
+  const [decryptedText, setDecryptedText] = useState(message.text);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+
+  useEffect(() => {
+    // Only attempt decryption if it's encrypted, we have the payload, and we haven't decrypted it yet
+    if (message.isEncrypted && message.payload?.ciphertext && !decryptedText) {
+      setIsDecrypting(true);
+      decryptMessageText(message.payload, senderPublicKey, privateKey)
+        .then(text => {
+          setDecryptedText(text);
+          setIsDecrypting(false);
+        })
+        .catch(() => {
+          setDecryptedText("🔒 [Decryption Failed]");
+          setIsDecrypting(false);
+        });
+    }
+  }, [message, isCryptoReady, privateKey, senderPublicKey]);
+
+  if (isDecrypting) {
     return <p className="text-gray-400 italic text-[13px]">Decrypting message...</p>;
   }
-  
+
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {message.text}
+      {decryptedText || message.text}
     </p>
   );
 };
@@ -2447,16 +2466,16 @@ const handleSendMessage = async (e) => {
                 </div>
               )}
               
-              {m.text && (
-                <MessageItem 
-                  message={m} 
-                  isMe={isMe} 
-                  isCryptoReady={isCryptoReady} 
-                  privateKey={privateKey} 
-                  senderPublicKey={selectedUser?.publicKeyJwk} 
-                />
-              )}
-
+             // Change this line in your map function:
+{ (m.text || m.isEncrypted) && (
+  <MessageItem 
+    message={m} 
+    isMe={isMe} 
+    isCryptoReady={isCryptoReady} 
+    privateKey={privateKey} 
+    senderPublicKey={selectedUser?.publicKeyJwk} 
+  />
+)}
               <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
                 <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 {isMe && (

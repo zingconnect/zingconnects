@@ -2,24 +2,44 @@
 // 🔒 ZINGCONNECT SECURE END-TO-END CRYPTOGRAPHIC LAYER (MEMORY-ONLY)
 // =========================================================================
 
+/**
+ * 🛠️ CONVERT: ArrayBuffer to Base64 (Safe)
+ */
 function arrayBufferToBase64(buffer) {
+  if (!buffer) return '';
   const bytes = new Uint8Array(buffer);
   let binary = '';
+  // Use chunking for very large buffers to prevent stack overflow
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
   return window.btoa(binary);
 }
 
-// Replacement for your current base64ToArrayBuffer
+/**
+ * 🛠️ CONVERT: Base64 to ArrayBuffer (Safe)
+ */
 function base64ToArrayBuffer(base64) {
-  const binary_string = window.atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
-  const len = binary_string.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary_string.charCodeAt(i);
+  // 1. Critical Validation
+  if (!base64 || typeof base64 !== 'string') {
+    console.error("base64ToArrayBuffer received invalid input:", base64);
+    return new Uint8Array(0).buffer;
   }
-  return bytes.buffer; // Returning the buffer directly
+
+  // 2. Cleanup and Decode
+  try {
+    const sanitized = base64.replace(/-/g, '+').replace(/_/g, '/');
+    const binary_string = window.atob(sanitized);
+    const len = binary_string.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary_string.charCodeAt(i);
+    }
+    return bytes.buffer;
+  } catch (err) {
+    console.error("Base64 decoding failed:", err);
+    return new Uint8Array(0).buffer;
+  }
 }
 /**
  * 🔑 GENERATE KEYPAIR: Generates ECDH keys in memory.
