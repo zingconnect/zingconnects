@@ -29,7 +29,7 @@ import {
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
 // 🔒 END-TO-END ENCRYPTION MODULES
-import { initializeUserE2EEKeys, encryptMessageText, decryptMessageText } from '../utils/cryptoEngine'; 
+import { encryptMessageText, decryptMessageText } from '../utils/cryptoEngine';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 

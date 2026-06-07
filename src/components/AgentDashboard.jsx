@@ -15,7 +15,7 @@ import {
 } from 'react-icons/bs';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
-import { initializeUserE2EEKeys, encryptMessageText, decryptMessageText } from '../utils/cryptoEngine'; 
+import { encryptMessageText, decryptMessageText } from "../utils/cryptoEngine";
 
 const formatLastSeen = (lastSeenDate, ticker) => {
   if (!lastSeenDate) return 'Recently';
