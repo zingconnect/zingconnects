@@ -58,7 +58,11 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
-const MessageItem = ({ message, isMe }) => {
+const MessageItem = ({ message }) => {
+  if (message.isEncrypted && message.text.length > 30) { 
+    return <p className="text-gray-400 italic text-[13px]">Decrypting message...</p>;
+  }
+  
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
       {message.text}
@@ -72,6 +76,7 @@ export const AgentDashboard = () => {
   const { slug } = useParams();
   const location = useLocation(); // <--- ADD THIS
 const { privateKey, isCryptoReady } = useAuth();
+
 
   const isForcedRefresh = location.state?.forceRefresh;
   const [agentData, setAgentData] = useState(null);
@@ -119,6 +124,7 @@ const [isSubscribed, setIsSubscribed] = useState(agentData?.isSubscribed ?? fals
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");  
 
+  const activeSessionRef = useRef(null);
 const hasProcessedDeepLink = useRef(false);
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
@@ -1746,9 +1752,12 @@ const handleDisconnect = async (e) => {
     window.location.replace(targetUrl);
   }
 };
-
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
+
+  // 1. Generate a unique session ID for this specific chat click
+  const sessionId = Math.random().toString(36).substring(7);
+  activeSessionRef.current = sessionId;
 
   setSelectedUser(user);
   setMessages([]);
@@ -1768,8 +1777,18 @@ const handleSelectUser = async (user) => {
       const freshUserData = data.user || data.clientDetails;
 
       if (freshUserData) {
+        let validatedKey = freshUserData.publicKeyJwk;
+        if (typeof validatedKey === 'string') {
+          try {
+            validatedKey = JSON.parse(validatedKey);
+          } catch (e) {
+            console.error("Critical: Received malformed JWK string from server!");
+            validatedKey = null;
+          }
+        }
+
         setSelectedUser(prev => {
-          const merged = { ...prev, ...freshUserData };
+          const merged = { ...prev, ...freshUserData, publicKeyJwk: validatedKey };
           if (!merged.publicKeyJwk && prev?.publicKeyJwk) {
             merged.publicKeyJwk = prev.publicKeyJwk;
           }
@@ -1778,36 +1797,49 @@ const handleSelectUser = async (user) => {
       }
 
       if (data.success && Array.isArray(data.messages)) {
-        const targetUser = freshUserData || user;
-        const currentKey = agentPrivateKeyRef.current;
-const decryptedHistory = await Promise.all(
-  data.messages.map(async (msg) => {
-    if (msg.isEncrypted && targetUser?.publicKeyJwk && agentPrivateKeyRef.current) {
-      try {
-        const decryptedText = await decryptMessageText(
-          msg.text,
-          msg.iv,
-          targetUser.publicKeyJwk,
-          agentPrivateKeyRef.current
-        );
-                return { 
-          ...msg, 
-          text: decryptedText, 
-          isEncrypted: false 
-        };
-      } catch (e) {
-        console.error("Decryption failed for msg:", msg._id, e);
-        return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
-      }
-    }
-        return msg; 
-  })
-);
+        // --- OPTIMISTIC UI RENDER ---
+        // Set raw messages immediately to stop the "Loading" state
+        setMessages(data.messages);
+        setIsInitialLoad(false); 
 
-setMessages(decryptedHistory);
+        // --- BACKGROUND DECRYPTION WITH SESSION GUARD ---
+        (async () => {
+          const targetUser = freshUserData || user;
+          const currentKey = agentPrivateKeyRef.current;
+
+          const decryptedHistory = await Promise.all(
+            data.messages.map(async (msg) => {
+              // Always pull the freshest refs inside the loop
+              const activeKey = selectedUserRef.current?.publicKeyJwk || targetUser?.publicKeyJwk;
+              const privKey = agentPrivateKeyRef.current;
+
+              if (msg.isEncrypted && activeKey && privKey) {
+                try {
+                  const decryptedText = await decryptMessageText(
+                    msg.text,
+                    msg.iv,
+                    activeKey,
+                    privKey
+                  );
+                  return { ...msg, text: decryptedText, isEncrypted: false };
+                } catch (e) {
+                  console.error("Decryption failed for msg:", msg._id, e);
+                  return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
+                }
+              }
+              return msg;
+            })
+          );
+          
+          // Only update the UI if this session is still the active one
+          if (activeSessionRef.current === sessionId) {
+            setMessages(decryptedHistory);
+          } else {
+            console.warn("Stale decryption task discarded.");
+          }
+        })();
       }
 
-      // UPDATED: secureFetch handles cookie-based auth for PATCH request
       await secureFetch(`/api/messages/mark-read/${user._id}`, {
         method: 'PATCH'
       });
