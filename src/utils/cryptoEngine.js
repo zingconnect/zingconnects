@@ -2,8 +2,6 @@
 // 🔒 ZINGCONNECT SECURE END-TO-END CRYPTOGRAPHIC LAYER (MEMORY-ONLY)
 // =========================================================================
 
-/** * Helper: Converts raw binary array buffers to base64 strings 
- */
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -14,16 +12,15 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
-  // 1. Sanitize
+  // 1. Sanitize for URL-safe base64 if needed
   const sanitized = base64.replace(/-/g, '+').replace(/_/g, '/');
-  
-  // 2. Decode standard Base64
-  const binaryString = window.atob(sanitized);
-  const bytes = new Uint8Array(binaryString.length);
-  
-  // 3. Correct binary mapping
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+  // 2. Decode using a Blob/FileReader pattern for true binary handling
+  // Or use the standard method below:
+  const binary_string = window.atob(sanitized);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
   }
   return bytes.buffer;
 }
@@ -115,9 +112,10 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
       dataByteLength: data.byteLength 
     });
 
-    if (iv.byteLength !== 12) {
-      throw new Error(`Invalid IV length: expected 12 bytes, got ${iv.byteLength}`);
-    }
+   if (iv.byteLength !== 12) {
+  console.warn("IV length mismatch. Expected 12, got:", iv.byteLength);
+  return "🔒 [Encrypted Message - Key/IV Mismatch]";
+}
     if (data.byteLength === 0) {
       throw new Error("Ciphertext data is empty");
     }

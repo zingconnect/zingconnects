@@ -12,6 +12,12 @@ import { sendOfflineNotification } from '../utils/mailer.js';
 
 const router = express.Router();
 
+const isBase64 = (str) => {
+  if (!str) return false;
+  // Regex ensures the string is valid Base64
+  return /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/.test(str);
+};
+
 /**
  * Helper to clear cache consistently
  */
@@ -87,27 +93,30 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 router.post('/send', authenticateToken, async (req, res, next) => {
-  try {
+try {
     await connectToDatabase();
     const myId = req.user.id;
-    
-    // 🔒 Extract E2EE payload keys
-    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
+        const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
     
     if (!text?.trim() || !receiverId) {
       return res.status(400).json({ success: false, message: "Invalid payload: Text or Recipient missing" });
     }
-
-    // 🔒 SECURITY VIOLATION CHECK: Ensure IV exists if message claims to be encrypted
-    if (isEncrypted && (!iv || typeof iv !== 'string')) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Security violation: IV is required for encrypted messages." 
-      });
+    if (isEncrypted) {
+      if (!iv || typeof iv !== 'string') {
+        return res.status(400).json({ success: false, message: "Security violation: IV required." });
+      }
+      if (!isBase64(text)) {
+        return res.status(400).json({ success: false, message: "Security violation: Malformed ciphertext." });
+      }
+      // AES-GCM expects a 12-byte IV. Base64 of 12 bytes is exactly 16 characters.
+      if (iv.length !== 16) {
+        return res.status(400).json({ success: false, message: "Security violation: Invalid IV length (expected 12 bytes)." });
+      }
     }
     
-    // Determine target roles dynamically
+    // Determine target roles
     let senderDoc = await Agent.findById(myId) || await User.findById(myId);
     if (!senderDoc) {
       return res.status(404).json({ success: false, message: "Sender identity mismatch." });
@@ -115,7 +124,6 @@ router.post('/send', authenticateToken, async (req, res, next) => {
 
     const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
-
     // Create the message tracking payload
     const newMessage = await Message.create({
       senderId: myId,

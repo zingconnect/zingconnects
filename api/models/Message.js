@@ -24,7 +24,7 @@ const messageSchema = new mongoose.Schema({
   // --- CONTENT FIELDS ---
   text: {
     type: String,
-    trim: true
+    trim: false
   },
   callMetadata: {
     callId: { type: mongoose.Schema.Types.ObjectId, ref: 'Call' },

@@ -402,6 +402,11 @@ const addDays = (date, days) => {
   return result;
 };
 
+const isBase64 = (str) => {
+  if (!str) return false;
+  // Regex validates standard Base64 structure
+  return /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/.test(str);
+};
 
 // ==========================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
@@ -2130,26 +2135,30 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     
-    // 🔒 Extract E2EE structural requirements
-    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
-    
-    if (!text || typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ success: false, message: "Message text cannot be blank." });
-    }
-    if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
-      return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
-    }
-    const sanitizedModel = String(receiverModel || '').trim();
-    if (!['Agent', 'User'].includes(sanitizedModel)) {
-      return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
-    }
-    if (isEncrypted && (!iv || typeof iv !== 'string')) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Security violation: IV required for encrypted payloads." 
-      });
-    }
+   const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
 
+// 2. Structural Validation
+if (!text || typeof text !== 'string' || !text.trim()) {
+  return res.status(400).json({ success: false, message: "Message text cannot be blank." });
+}
+if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
+  return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
+}
+const sanitizedModel = String(receiverModel || '').trim();
+if (!['Agent', 'User'].includes(sanitizedModel)) {
+  return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
+}
+if (isEncrypted) {
+  if (!iv || typeof iv !== 'string' || !isBase64(iv)) {
+    return res.status(400).json({ success: false, message: "Security violation: Invalid IV format." });
+  }
+  if (iv.length !== 16) {
+    return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
+  }
+  if (!isBase64(text)) {
+    return res.status(400).json({ success: false, message: "Security violation: Invalid ciphertext format." });
+  }
+}
     // Save crypto parameters safely inside MongoDB
     const newMessage = new Message({
       senderId: myId,
