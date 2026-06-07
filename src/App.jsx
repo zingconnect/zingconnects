@@ -1,11 +1,13 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, Outlet } from 'react-router-dom';
 
+
 // 1. Keep small, critical components directly imported
 import { PricingPage } from './components/PricingPage';
 import { Registration } from './components/Registration';
 import { VerifyOTP } from './components/VerifyOTP';
 import { AgentSlug } from './components/AgentSlug';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
 // 2. Lazy load heavy, route-specific components
 const AgentDashboard = lazy(() => import('./components/AgentDashboard'));
