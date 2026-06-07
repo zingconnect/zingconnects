@@ -1470,7 +1470,7 @@ useEffect(() => {
 
   fetchInitialData();
   return () => { isMounted = false; };
-  }, [navigate, slug, isForcedRefresh]);
+}, [navigate, slug, isForcedRefresh, isSubscribed]);
 
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
@@ -1498,11 +1498,11 @@ const handlePayment = useCallback(async () => {
       tx_ref: `ZING-${Date.now()}`,
       amount: finalNairaAmount,
       currency: "NGN",
-     customer: {
+  customer: {
   email: agentData.email,
   name: `${agentData.firstName} ${agentData.lastName}`,
   phone_number: agentData?.phone || '08000000000',
-  id: String(agentData._id) 
+  id: String(agentData._id).replace(/[^a-zA-Z0-9]/g, '') 
 },
       callback: async (response) => {
         console.log("DEBUG: Flutterwave Callback Received:", response);
@@ -1524,7 +1524,7 @@ const handlePayment = useCallback(async () => {
             })
           });
 
-          const data = await verifyRes.json();
+const data = await verifyRes.json();
           console.log("DEBUG: Verification server response:", data);
 
           if (verifyRes.ok && data.success) {
@@ -1532,16 +1532,19 @@ const handlePayment = useCallback(async () => {
             setAgentData(prev => ({ ...prev, ...data.agent, isSubscribed: true }));
             setShowSuccessOverlay(true);
 
+            // Force a full re-initialization to ensure AuthContext picks up 
+            // the new subscription status immediately from the server.
             setTimeout(() => {
               const targetUrl = data.redirectUrl || `/agent/dashboard/${slug}`;
-              console.log("DEBUG: Attempting navigation to:", targetUrl);
+              console.log("DEBUG: Forcing full reload for navigation to:", targetUrl);
+              
               setShowSuccessOverlay(false);
               setPaymentProcessing(false);
-              navigate(targetUrl, { 
-    replace: true, 
-    state: { forceRefresh: true } 
-  });
-}, 1500);
+              
+              // Use window.location.href for a complete state refresh,
+              // bypassing potential SPA state stale-ness.
+              window.location.href = targetUrl;
+            }, 1500);
           } else {
             throw new Error(data.message || "Verification failed on server");
           }
