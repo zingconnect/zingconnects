@@ -65,26 +65,40 @@ export const initializeUserE2EEKeys = async (userId, token) => {
     return false;
   }
 };
-
 /**
  * 🔒 ENCRYPT: Takes plaintext message string and recipient's public key.
- * Generates an AES-GCM shared key on-the-fly and returns the cipher text + IV.
  */
 export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myUserId) => {
   try {
+    const storageKey = `zing_secure_pk_${myUserId}`;
+    console.log("DEBUG: Attempting encryption for:", myUserId);
+    
+    // 1. Verify recipient key
     if (!recipientPublicKeyJwk) {
-      // Fallback if the peer hasn't generated keys yet
+      console.warn("DEBUG: No recipient public key provided.");
       return { cipherText: clearText, iv: null, isEncrypted: false };
     }
 
-    const rawSavedPrivate = JSON.parse(localStorage.getItem(`zing_secure_pk_${myUserId}`));
-    if (!rawSavedPrivate) return { cipherText: clearText, iv: null, isEncrypted: false };
+    // 2. Verify own private key
+    const rawSavedPrivate = localStorage.getItem(storageKey);
+    if (!rawSavedPrivate) {
+      console.error(`DEBUG: Private key not found in localStorage under: ${storageKey}`);
+      return { cipherText: clearText, iv: null, isEncrypted: false };
+    }
 
-    // Import keys into standard subtle crypto engine structures
-    const myPrivateKey = await window.crypto.subtle.importKey("jwk", rawSavedPrivate, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
-    const peerPublicKey = await window.crypto.subtle.importKey("jwk", recipientPublicKeyJwk, { name: "ECDH", namedCurve: "P-256" }, true, []);
+    const myPrivateKeyJwk = JSON.parse(rawSavedPrivate);
 
-    // Securely derive a shared symetric key locally (AES-GCM 256)
+    // 3. Import Keys with logging
+    console.log("DEBUG: Importing keys...");
+    const myPrivateKey = await window.crypto.subtle.importKey(
+      "jwk", myPrivateKeyJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
+    );
+    const peerPublicKey = await window.crypto.subtle.importKey(
+      "jwk", recipientPublicKeyJwk, { name: "ECDH", namedCurve: "P-256" }, true, []
+    );
+
+    // 4. Derive Shared Secret
+    console.log("DEBUG: Deriving shared secret...");
     const sharedSecretKey = await window.crypto.subtle.deriveKey(
       { name: "ECDH", public: peerPublicKey },
       myPrivateKey,
@@ -93,6 +107,7 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myUse
       ["encrypt", "decrypt"]
     );
 
+    // 5. Encrypt
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const encodedText = new TextEncoder().encode(clearText);
 
@@ -102,16 +117,23 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myUse
       encodedText
     );
 
+    console.log("DEBUG: Encryption successful.");
     return {
       cipherText: arrayBufferToBase64(encryptedBuffer),
       iv: arrayBufferToBase64(iv),
       isEncrypted: true
     };
   } catch (e) {
-    console.error("Encryption runtime failure:", e);
+    // THIS LOG WILL IDENTIFY THE EXACT POINT OF FAILURE
+    console.error("DEBUG: Encryption runtime failure details:", {
+      message: e.message,
+      name: e.name,
+      stack: e.stack
+    });
     return { cipherText: clearText, iv: null, isEncrypted: false };
   }
 };
+
 export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myUserId) => {
   try {
     // 1. Validation

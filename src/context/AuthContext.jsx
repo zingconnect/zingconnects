@@ -1,5 +1,6 @@
-import { createContext, useState, useContext, useEffect } from 'react';
+import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { secureFetch } from "../../api/utils/api";
+import { generateE2EEKeyPair } from '../utils/cryptoengine'; // Ensure correct path
 
 const AuthContext = createContext(null);
 
@@ -7,34 +8,42 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  // NEW: Store private key in memory state
+  const [privateKey, setPrivateKey] = useState(null);
 
   useEffect(() => {
     verifySession();
   }, []);
 
-const login = async (slug) => {
-  setIsLoading(true); // Lock the UI while we confirm the session
-  await verifySession(); // Wait until the server confirms the cookie is valid
-  setIsLoading(false);
-};
+  // NEW: Function to generate and register keys
+  const initializeCrypto = useCallback(async () => {
+    const keys = await generateE2EEKeyPair();
+    if (keys) {
+      setPrivateKey(keys.privateKeyJwk);
+      await secureFetch('/api/update-crypto-key', {
+        method: 'PUT',
+        body: JSON.stringify({ publicKeyJwk: keys.publicKeyJwk })
+      });
+      console.log("✅ E2EE Memory-session initialized.");
+    }
+  }, []);
 
   const verifySession = async () => {
     setIsLoading(true);
     try {
-      // Using your central secureFetch utility
       const response = await secureFetch('/api/auth/me'); 
-      
       if (response.ok) {
         const data = await response.json();
         setIsAuthenticated(true);
-        setUserRole(data.role); 
+        setUserRole(data.role);
+        // Trigger key initialization once authenticated
+        await initializeCrypto();
       } else {
-        // If the session is invalid, status will likely be 401 or 403
         setIsAuthenticated(false);
         setUserRole(null);
+        setPrivateKey(null);
       }
     } catch (err) {
-      console.error("Session verification failed:", err);
       setIsAuthenticated(false);
       setUserRole(null);
     } finally {
@@ -45,12 +54,10 @@ const login = async (slug) => {
   return (
     <AuthContext.Provider value={{ 
       isAuthenticated, 
-      setIsAuthenticated, 
       userRole, 
-      setUserRole, 
       isLoading,
-      verifySession,
-      login 
+      privateKey, // Expose key to components
+      verifySession 
     }}>
       {children}
     </AuthContext.Provider>
