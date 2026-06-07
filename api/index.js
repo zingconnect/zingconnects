@@ -2117,67 +2117,50 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
- const myId = req.user.id;
+  const myId = req.user.id;
 
   try {
     await connectToDatabase();
-    let senderDoc = await Agent.findById(myId);
-    let senderRole = 'Agent';
-
-    if (!senderDoc) {
-      senderDoc = await User.findById(myId);
-      senderRole = 'User';
-    }
-
+    let senderDoc = await Agent.findById(myId) || await User.findById(myId);
     if (!senderDoc) {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
+    const senderRole = await Agent.exists({ _id: myId }) ? 'Agent' : 'User';
     
-    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
+    // 1. Destructure payload components
+    const { receiverId, text, ciphertext, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
 
-    // 1. Structural Validation
-    if (!text || typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ success: false, message: "Message text cannot be blank." });
-    }
+    // 2. Structural Validation
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
     }
-    const sanitizedModel = String(receiverModel || '').trim();
-    if (!['Agent', 'User'].includes(sanitizedModel)) {
-      return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
+    const sanitizedModel = ['Agent', 'User'].includes(receiverModel) ? receiverModel : 'User';
+
+    // 3. Cryptographic/Content Validation
+    if (isEncrypted) {
+      if (!ciphertext || !iv) {
+        return res.status(400).json({ success: false, message: "Security violation: Payload/IV required." });
+      }
+      // Validate IV length
+      if (Buffer.from(iv, 'base64').length !== 12) {
+        return res.status(400).json({ success: false, message: "Security violation: Invalid IV." });
+      }
+    } else if (!text || typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ success: false, message: "Message text cannot be blank." });
     }
 
-    // 2. Cryptographic Validation
-    if (isEncrypted) {
-      if (!iv || typeof iv !== 'string') {
-        return res.status(400).json({ success: false, message: "Security violation: IV is required." });
-      }
-      
-      // CORRECTED: Decode Base64 to verify actual byte length (12 bytes for AES-GCM)
-      const ivBuffer = Buffer.from(iv, 'base64');
-      if (ivBuffer.length !== 12) {
-        return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
-      }
-      
-      if (!isBase64(text)) {
-        return res.status(400).json({ success: false, message: "Security violation: Invalid ciphertext format." });
-      }
-    }
-  // 3. Save Message
+    // 4. Save Message using the payload structure
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: sanitizedModel,
-      text: String(text).trim(), 
-      iv: iv || null,
+      text: isEncrypted ? null : String(text).trim(), 
+      payload: isEncrypted ? { ciphertext, iv, version: 1 } : null,
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
-      replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) 
-                 ? new mongoose.Types.ObjectId(replyToId) 
-                 : null,
+      replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? new mongoose.Types.ObjectId(replyToId) : null,
       notificationSent: false
     });
     await newMessage.save();
@@ -2190,78 +2173,51 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-  // 4. Socket Emission
+    // 5. Socket Emission (Emitting the full object ensures 'payload' is sent)
     try {
       const io = req.app.get('socketio');
       if (io) {
-        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
-          _id: newMessage._id,
-          senderId: newMessage.senderId,
-          senderModel: newMessage.senderModel,
-          receiverId: newMessage.receiverId,
-          receiverModel: newMessage.receiverModel,
-          text: newMessage.text,
-          iv: newMessage.iv,
-          isEncrypted: newMessage.isEncrypted,
-          fileType: newMessage.fileType,
-          replyToId: newMessage.replyToId,
-          createdAt: newMessage.createdAt
-        });
+        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
       }
     } catch (socketErr) {
       console.error("⚠️ Socket emission warning:", socketErr.message);
     }
 
-    // 2. 🛡️ Privacy-Preserving Push Notifications
+    // 6. Notifications Logic
     const baseUrl = "https://www.zingconnect.chat";
     const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'ZingConnect';
     
     const notificationBody = newMessage.isEncrypted 
       ? "🔒 Sent an end-to-end encrypted message" 
-      : (text.length > 40 ? `${text.substring(0, 40)}...` : text);
+      : (text?.length > 40 ? `${text.substring(0, 40)}...` : text);
 
-    const payload = JSON.stringify({
-      title: `New Message from ${senderName}`,
-      body: notificationBody,
-      icon: `${baseUrl}/logo-s.png`,
-      badge: `${baseUrl}/logo-s.png`,
-      data: { url: `${baseUrl}${path}`, type: 'message' }
-    });
-
-    if (receiver && receiver.pushSubscription && receiver.pushSubscription.endpoint) {
+    if (receiver.pushSubscription?.endpoint) {
       try {
-        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await webpush.sendNotification(receiver.pushSubscription, JSON.stringify({
+          title: `New Message from ${senderName}`,
+          body: notificationBody,
+          icon: `${baseUrl}/logo-s.png`,
+          data: { url: `${baseUrl}${path}`, type: 'message' }
+        }));
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
       } catch (pushErr) {
         console.error("❌ PUSH FAILED:", pushErr.message);
-        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
-        }
       }
     }
 
-    // 3. Email offline fallback 
     try {
       const COOLDOWN = 30 * 60 * 1000;
-      const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-      
+      const lastEmailTime = receiver.lastNotificationEmail?.getTime() || 0;
       if (Date.now() - lastEmailTime > COOLDOWN) {
-        const emailBodyPlaceholder = newMessage.isEncrypted 
-          ? "You have received a new end-to-end encrypted message. Please sign into your dashboard to view." 
-          : text;
-
-        await sendOfflineNotification(receiver, senderDoc, emailBodyPlaceholder, sanitizedModel);
+        await sendOfflineNotification(receiver, senderDoc, newMessage.isEncrypted ? "Please login to view." : text, sanitizedModel);
         await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
       }
     } catch (mailErr) {
       console.error("❌ Email Error:", mailErr.message);
     }
 
-    return res.status(201).json({
-      success: true,
-      message: newMessage
-    });
+    return res.status(201).json({ success: true, message: newMessage });
   } catch (err) {
     next(err);
   }

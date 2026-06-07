@@ -21,11 +21,16 @@ const messageSchema = new mongoose.Schema({
     required: true,
     enum: ['Agent', 'User']
   },
-  // --- CONTENT FIELDS ---
-  text: {
-    type: String,
-    trim: false
-  },
+  payload: {
+  ciphertext: { type: String }, // The encrypted message
+  iv: { type: String },         // Must be 12 bytes (16 chars in Base64)
+  version: { type: Number, default: 1 }
+},
+// Keep 'text' ONLY for non-encrypted messages (if you support them)
+text: {
+  type: String,
+  trim: false
+},
   callMetadata: {
     callId: { type: mongoose.Schema.Types.ObjectId, ref: 'Call' },
     status: { 
@@ -78,6 +83,7 @@ messageSchema.index({ receiverId: 1, senderId: 1, createdAt: -1 });
 // 🔒 ADD THIS: Optimized index for decryption-heavy queries
 // This helps the database quickly return messages that need decryption (isEncrypted: true)
 messageSchema.index({ receiverId: 1, isEncrypted: 1, createdAt: -1 });
+
 
 
 const Message = mongoose.models.Message || mongoose.model('Message', messageSchema);

@@ -2092,6 +2092,7 @@ const handleSendMessage = async (e) => {
     receiverId: activeUser._id,
     receiverModel: activeUser.modelType || 'User',
     status: 'sending',
+    isEncrypted: true, // IMPORTANT: Mark as true so UI knows it's a secure message
     createdAt: new Date().toISOString(),
     fileType: 'text'
   };

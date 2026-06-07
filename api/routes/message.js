@@ -93,9 +93,8 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 router.post('/send', authenticateToken, async (req, res, next) => {
-try {
+  try {
     await connectToDatabase();
     const myId = req.user.id;
 
@@ -117,7 +116,7 @@ try {
 
     // 3. Cryptographic Validation
     if (isEncrypted) {
-      if (!iv || !ciphertext) {
+      if (!ciphertext || !iv) {
         return res.status(400).json({ success: false, message: "Encryption payload missing." });
       }
       const ivBuffer = Buffer.from(iv, 'base64');
@@ -132,13 +131,8 @@ try {
       senderModel: senderModelName,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: targetModelName,
-      // If encrypted, store in payload; if clear text, store in text
       text: isEncrypted ? null : String(text || '').trim(),
-      payload: isEncrypted ? {
-        ciphertext: ciphertext,
-        iv: iv,
-        version: 1
-      } : null,
+      payload: isEncrypted ? { ciphertext, iv, version: 1 } : null,
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? replyToId : null,
@@ -153,79 +147,46 @@ try {
       return res.status(404).json({ success: false, message: "Recipient not found." });
     }
 
-    // 5. Socket Emission
+    // 5. Consolidated Socket Emission
     try {
       const io = req.app.get('socketio');
       if (io) {
+        // Emit the full document including the 'payload' object
         io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
       }
     } catch (socketErr) {
-      console.error("⚠️ Socket relay warning:", socketErr.message);
+      console.error("⚠️ Socket relay error:", socketErr.message);
     }
 
-    // ⚡ Socket emission (Fault-Tolerant)
-    try {
-      const io = req.app.get('socketio');
-      if (io) {
-        // Emitting directly to the room is the standard non-blocking approach
-        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
-          _id: newMessage._id,
-          senderId: newMessage.senderId,
-          senderModel: newMessage.senderModel,
-          receiverId: newMessage.receiverId,
-          receiverModel: newMessage.receiverModel,
-          text: newMessage.text,
-          iv: newMessage.iv,
-          isEncrypted: newMessage.isEncrypted,
-          fileType: newMessage.fileType,
-          replyToId: newMessage.replyToId,
-          createdAt: newMessage.createdAt
-        });
-      }
-    } catch (socketErr) {
-      console.error("⚠️ Socket relay non-fatal warning:", socketErr.message);
-    }
-
-    // 🛡️ WEB PUSH NOTIFICATION DISPATCHER
+    // 6. Push Notifications
     const baseUrl = "https://www.zingconnect.chat";
     const path = targetModelName === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'Zing';
     
     const displayNotificationBody = newMessage.isEncrypted
       ? "🔒 Sent an end-to-end encrypted message"
-      : (text.length > 60 ? `${text.substring(0, 60)}...` : text);
-
-    const payload = JSON.stringify({
-      title: `New Message from ${senderName}`,
-      body: displayNotificationBody,
-      icon: `${baseUrl}/logo-s.png`,
-      badge: `${baseUrl}/logo-s.png`,
-      data: { url: `${baseUrl}${path}`, type: 'message' }
-    });
+      : (text?.length > 60 ? `${text.substring(0, 60)}...` : text);
 
     if (receiver.pushSubscription?.endpoint) {
       try {
-        await webpush.sendNotification(receiver.pushSubscription, payload);
+        await webpush.sendNotification(receiver.pushSubscription, JSON.stringify({
+          title: `New Message from ${senderName}`,
+          body: displayNotificationBody,
+          icon: `${baseUrl}/logo-s.png`,
+          data: { url: `${baseUrl}${path}`, type: 'message' }
+        }));
         await Message.findByIdAndUpdate(newMessage._id, { $set: { notificationSent: true } });
       } catch (pushErr) {
         console.error("❌ PUSH FAILED:", pushErr.message);
-        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-          await TargetModel.findByIdAndUpdate(receiverId, { $unset: { pushSubscription: "" } });
-        }
       }
     }
 
-    // 📧 OFFLINE EMAIL FALLBACK ROUTINE
+    // 7. Email Fallback
     try {
       const COOLDOWN = 30 * 60 * 1000;
-      const lastEmailTime = receiver.lastNotificationEmail ? new Date(receiver.lastNotificationEmail).getTime() : 0;
-      
+      const lastEmailTime = receiver.lastNotificationEmail?.getTime() || 0;
       if (Date.now() - lastEmailTime > COOLDOWN) {
-        const emailMessageFallbackText = newMessage.isEncrypted
-          ? "You have received a new end-to-end encrypted message. Securely log into your dashboard interface to view."
-          : text;
-
-        await sendOfflineNotification(receiver, senderDoc, emailMessageFallbackText, targetModelName);
+        await sendOfflineNotification(receiver, senderDoc, newMessage.isEncrypted ? "Please login to view." : text, targetModelName);
         await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
       }
     } catch (mailErr) {
