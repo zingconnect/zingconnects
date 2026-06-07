@@ -37,7 +37,6 @@ export const AuthProvider = ({ children }) => {
         const data = await response.json();
         setIsAuthenticated(true);
         setUserRole(data.role);
-        setIsSubscribed(data.isSubscribed); // <--- Add this!
         // Trigger key initialization once authenticated
         await initializeCrypto();
       } else {
@@ -58,7 +57,6 @@ export const AuthProvider = ({ children }) => {
       isAuthenticated, 
       userRole, 
       isLoading,
-      isSubscribed,
       isCryptoReady, // <--- MUST BE ADDED HERE
       privateKey, // Expose key to components
       verifySession 
