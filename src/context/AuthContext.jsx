@@ -1,6 +1,6 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { secureFetch } from "../../api/utils/api";
-import { generateE2EEKeyPair } from '../utils/cryptoengine'; // Ensure correct path
+import { generateE2EEKeyPair } from "../utils/cryptoEngine";
 
 const AuthContext = createContext(null);
 
