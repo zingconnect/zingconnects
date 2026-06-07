@@ -381,7 +381,6 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
                 msg.text,
                 msg.iv,
                 targetUserCryptoProfile.publicKeyJwk,
-                agentData._id,
                 myKey // Pass the private key directly from the ref
               );
               return { ...msg, text: clearText };
@@ -2290,17 +2289,23 @@ const handleSendMessage = async (e) => {
       {/* --- 4. MAIN APPLICATION --- */}
       {!loading && !isDualLoginConflict && (
         <>
-          {(connectionStatus === 'offline' || connectionStatus === 'connecting') && (
-            <div className={`fixed top-0 left-0 w-full z-[50000] py-1.5 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-300 ${connectionStatus === 'offline' ? 'bg-[#ea0038]' : 'bg-[#0052FF]'}`}>
-              <div className="flex items-center gap-2 text-white">
-                {connectionStatus === 'offline' ? (
-                  <div className="flex items-center gap-2"><BsShieldLockFill className="animate-pulse" size={12} /><span className="text-[10px] font-black uppercase tracking-widest">Security Node Offline • Check Connection</span></div>
-                ) : (
-                  <div className="flex items-center gap-2"><div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" /><span className="text-[10px] font-black uppercase tracking-widest">Establishing Encrypted Tunnel...</span></div>
-                )}
-              </div>
+            {(connectionStatus === 'offline' || connectionStatus === 'connecting') && (
+          <div className={`fixed top-0 left-0 w-full z-[50000] py-1.5 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-300 ${connectionStatus === 'offline' ? 'bg-[#ea0038]' : 'bg-[#0052FF]'}`}>
+            <div className="flex items-center gap-2 text-white">
+              {connectionStatus === 'offline' ? (
+                <div className="flex items-center gap-2">
+                  <BsShieldLockFill className="animate-pulse" size={12} />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Security Node Offline • Check Connection</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Establishing Encrypted Tunnel...</span>
+                </div>
+              )}
             </div>
-          )}
+          </div>
+        )}
 
           {showSuccessOverlay && (
             <div className="fixed inset-0 z-[20000] bg-blue-600 flex flex-col items-center justify-center text-white p-6">

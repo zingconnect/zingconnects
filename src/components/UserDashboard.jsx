@@ -85,10 +85,12 @@ const CallStatusMessage = ({ status, time }) => {
 };
 
 export const UserDashboard = () => {
-  const { token, isLoading } = useAuth();
+const { token, isLoading, privateKeyJwk } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+
+
 const ringtoneAudio = useRef(new Audio('/sounds/ringtone.mp3')); // Incoming
 const callingAudio = useRef(new Audio('/sounds/calling.wav'));  // Outgoing (New)
 const notificationSound = useRef(new Audio('/sounds/notification.mp3'));
@@ -1178,26 +1180,27 @@ useEffect(() => {
       if (response.ok && data.success) {
         // 1. 🔓 DECRYPT ALL INCOMING SERVER MESSAGES
         const incomingMessages = await Promise.all(
-          data.messages.map(async (msg) => {
-            if (msg.isEncrypted && agent?.publicKeyJwk) {
-              try {
-                const clearText = await decryptMessageText(
-                  msg.text,
-                  msg.iv,
-                  agent.publicKeyJwk,
-                  userData._id
-                );
-                return { ...msg, text: clearText };
-              } catch (decryptionError) {
-                console.error("Failed to decrypt:", decryptionError);
-                return { ...msg, text: "🔒 [Decryption Failed]" };
-              }
-            }
-            return msg;
-          })
-        );
+  data.messages.map(async (msg) => {
+    // 1. Guard Clause: Only attempt decryption if all required keys are available
+    const canDecrypt = msg.isEncrypted && agent?.publicKeyJwk && privateKeyJwk;
 
-        // 2. Notification & Auto-Read logic
+    if (canDecrypt) {
+      try {
+        const clearText = await decryptMessageText(
+          msg.text,
+          msg.iv,
+          agent.publicKeyJwk,
+          privateKeyJwk
+        );
+        return { ...msg, text: clearText, isEncrypted: false }; // Update flag so we don't re-decrypt
+      } catch (decryptionError) {
+        console.error("Failed to decrypt message:", msg._id, decryptionError);
+        return { ...msg, text: "🔒 [Decryption Failed]" };
+      }
+    }
+    return msg;
+  })
+);
         const lastMsg = incomingMessages[incomingMessages.length - 1];
         if (
           lastMsg && 
