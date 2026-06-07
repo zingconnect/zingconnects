@@ -59,31 +59,30 @@ function urlBase64ToUint8Array(base64String) {
 const socket = io(import.meta.env.VITE_API_URL);
 
 const MessageItem = ({ message, isMe, isCryptoReady, privateKey, senderPublicKey }) => {
-  const [decryptedText, setDecryptedText] = useState(message.isEncrypted ? '🔒 Decrypting...' : message.text);
+  const [decryptedText, setDecryptedText] = useState(
+    message.isEncrypted ? '🔒 Decrypting...' : message.text
+  );
   const [isDecrypting, setIsDecrypting] = useState(false);
 
   useEffect(() => {
-    if (message.isEncrypted && isCryptoReady && privateKey && message.iv) {
-            if (typeof message.iv !== 'string' || message.iv.length < 10) {
-        setDecryptedText("🔒 [Error: Invalid Encrypted Data]");
-        return;
-      }
-
+    if (message.isEncrypted && isCryptoReady && privateKey && senderPublicKey) {
       setIsDecrypting(true);
+      
       decryptMessageText(message.text, message.iv, senderPublicKey, privateKey)
         .then(text => {
           setDecryptedText(text);
           setIsDecrypting(false);
         })
         .catch((err) => {
-          console.error("MessageItem Decryption Error:", err);
+          console.error("Decryption failed:", err);
           setDecryptedText("🔒 [Decryption Failed]");
           setIsDecrypting(false);
         });
     } else {
+      // If NOT encrypted, display text directly without calling decryption engine
       setDecryptedText(message.text);
     }
-  }, [message.text, message.iv, message.isEncrypted, isCryptoReady, privateKey, senderPublicKey]);
+  }, [message.text, message.isEncrypted, isCryptoReady, privateKey, senderPublicKey]);
 
   return (
     <p className={`text-[13px] md:text-[15px] leading-relaxed break-words ${isDecrypting ? 'opacity-50 italic' : ''}`}>
@@ -91,7 +90,6 @@ const MessageItem = ({ message, isMe, isCryptoReady, privateKey, senderPublicKey
     </p>
   );
 };
-
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();

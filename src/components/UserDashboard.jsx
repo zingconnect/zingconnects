@@ -85,7 +85,7 @@ const CallStatusMessage = ({ status, time }) => {
 };
 
 export const UserDashboard = () => {
-const { token, isLoading, privateKey, isCryptoReady } = useAuth();
+const { token, isLoading, privateKeyJwk, isCryptoReady } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -1850,9 +1850,7 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, pendingMessage]);
 
   try {
-    // 2. Perform Encryption
-    // Pass the actual private key (from AuthContext) instead of the User ID
-    const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, privateKey);
+    const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, privateKeyJwk);
 
     if (!encryptedData.cipherText || !encryptedData.iv) {
       throw new Error("Encryption failed: Missing IV or Ciphertext.");
@@ -1912,10 +1910,11 @@ function AudioTracks({ active }) {
 
   return null; // This component doesn't need to render anything visual
 };
-
-const MessageBubble = ({ m, isMe, onReply, children }) => {
+const MessageBubble = ({ m, isMe, onReply, isCryptoReady, privateKeyJwk, senderPublicKey }) => {
   const controls = useAnimation();
+  
   const bind = useDrag(({ active, movement: [x], last }) => {
+    // Restrict movement to 100px
     const xMovement = Math.min(Math.max(0, x), 100); 
 
     if (active) {
@@ -1932,10 +1931,10 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
   }, { axis: 'x' });
 
   return (
-    <div className="relative group">
+    <div className={`relative group w-full flex ${isMe ? 'justify-end' : 'justify-start'}`}>
       {/* The Hidden Reply Icon */}
       <div className="absolute left-[-40px] inset-y-0 flex items-center opacity-0 group-active:opacity-100 transition-opacity">
-        <div className="bg-gray-200 p-2 rounded-full">
+        <div className="bg-gray-200 p-2 rounded-full cursor-pointer">
           <BsReplyFill className="text-gray-600" size={18} />
         </div>
       </div>
@@ -1944,10 +1943,19 @@ const MessageBubble = ({ m, isMe, onReply, children }) => {
         {...bind()} 
         animate={controls}
         className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
-          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
+          isMe 
+            ? 'bg-[#dcf8c6] self-end rounded-tr-none' 
+            : 'bg-white self-start rounded-tl-none border border-gray-200'
         } mb-1`}
       >
-        {children}
+        {/* Decryption logic is now encapsulated inside MessageItem */}
+        <MessageItem 
+          message={m} 
+          isMe={isMe} 
+          isCryptoReady={isCryptoReady} 
+          privateKeyJwk={privateKeyJwk} 
+          senderPublicKey={senderPublicKey} 
+        />
       </motion.div>
     </div>
   );
@@ -2346,11 +2354,22 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
           </div>
         )}
 
-        {m.text && (
-          <p className={`text-[12px] md:text-[14px] leading-relaxed pr-6 break-words ${m.fileType ? 'mt-1 mb-1' : ''}`}>
-            {m.text}
-          </p>
-        )}
+      {m.text && (
+  <MessageBubble 
+    m={m} 
+    isMe={isMe} 
+    onReply={setReplyingTo}
+  >
+    <MessageItem 
+      message={m} 
+      isMe={isMe} 
+      isCryptoReady={isCryptoReady} 
+      privateKeyJwk={privateKeyJwk} 
+      // Fallback to null if agent not loaded yet
+      senderPublicKey={agent?.publicKeyJwk || null} 
+    />
+  </MessageBubble>
+)}
 
         <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
           <span className="text-[9px] text-gray-400 font-bold uppercase">
