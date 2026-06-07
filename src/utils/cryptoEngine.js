@@ -5,13 +5,23 @@
 /** * Helper: Converts raw binary array buffers to base64 strings 
  */
 function arrayBufferToBase64(buffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
 }
 
 /** * Helper: Converts base64 strings back to binary array buffers 
+ * Includes sanitization for URL-safe Base64 and whitespace
  */
 function base64ToArrayBuffer(base64) {
-  const binary_string = window.atob(base64);
+  // 1. Sanitize: Convert Base64URL (-, _) to Standard Base64 (+, /)
+  const sanitized = base64.replace(/-/g, '+').replace(/_/g, '/');
+  
+  // 2. Decode standard Base64
+  const binary_string = window.atob(sanitized.trim());
   const len = binary_string.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
@@ -19,7 +29,6 @@ function base64ToArrayBuffer(base64) {
   }
   return bytes.buffer;
 }
-
 /**
  * 🔑 GENERATE KEYPAIR: Generates ECDH keys in memory.
  * Caller (AuthContext) is responsible for storing privateKeyJwk in React State.
@@ -85,24 +94,33 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPri
     return { cipherText: clearText, iv: null, isEncrypted: false };
   }
 };
-
 export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myPrivateKeyJwk) => {
   try {
     if (!ivBase64 || !senderPublicKeyJwk || !cipherTextBase64 || !myPrivateKeyJwk) {
       return "🔒 [Encrypted Message]";
     }
 
+    // --- ADD LOG HERE: Verify the strings before conversion ---
+    console.log("Decryption Debug:", { 
+      cipherText: cipherTextBase64, 
+      iv: ivBase64 
+    });
+
     const iv = base64ToArrayBuffer(ivBase64);
     const data = base64ToArrayBuffer(cipherTextBase64);
 
-    // --- CRITICAL VALIDATION ---
+    // --- ADD LOG HERE: Verify the resulting byte lengths ---
+    console.log("Buffer Check:", { 
+      ivByteLength: iv.byteLength, 
+      dataByteLength: data.byteLength 
+    });
+
     if (iv.byteLength !== 12) {
       throw new Error(`Invalid IV length: expected 12 bytes, got ${iv.byteLength}`);
     }
     if (data.byteLength === 0) {
       throw new Error("Ciphertext data is empty");
     }
-    // ---------------------------
 
     const myPrivateKey = await window.crypto.subtle.importKey(
       "jwk", myPrivateKeyJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
@@ -119,6 +137,9 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
       ["decrypt"]
     );
 
+    // --- ADD LOG HERE: Confirm key derivation success ---
+    console.log("Shared secret derived successfully.");
+
     const decryptedBuffer = await window.crypto.subtle.decrypt(
       { name: "AES-GCM", iv: iv },
       sharedSecretKey,
@@ -128,6 +149,7 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
     return new TextDecoder().decode(decryptedBuffer);
     
   } catch (err) {
+    // This will now show the logs leading up to the failure in your browser console
     console.error("Decryption runtime error:", err);
     return "🔒 [Encrypted Message - Decryption Failed]";
   }

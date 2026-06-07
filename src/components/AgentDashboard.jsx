@@ -57,6 +57,7 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 const socket = io(import.meta.env.VITE_API_URL);
+
 const MessageItem = ({ message, isMe, isCryptoReady, privateKey, senderPublicKey }) => {
   const [decryptedText, setDecryptedText] = useState(message.isEncrypted ? '🔒 Decrypting...' : message.text);
   const [isDecrypting, setIsDecrypting] = useState(false);

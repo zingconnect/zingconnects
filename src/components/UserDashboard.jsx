@@ -153,7 +153,6 @@ const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   const [isIncomingCall, setIsIncomingCall] = useState(false);
   const { agentId: slugFromUrl } = useParams();
   
-  const API_BASE_URL = import.meta.env.VITE_API_URL
 
   const [formData, setFormData] = useState({
   firstName: '',
@@ -1167,7 +1166,6 @@ useEffect(() => {
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
-  const API_BASE_URL = import.meta.env.VITE_API_URL;
   if (!targetAgentId) return;
 
   const fetchMessages = async () => {
@@ -1222,9 +1220,8 @@ useEffect(() => {
             });
           }
 
-          // UPDATED: 'mark-read' call also uses secureFetch without manual token
-          secureFetch(`${API_BASE_URL}/api/messages/mark-read/${targetAgentId}`, {
-            method: 'PATCH'
+         secureFetch(`/api/messages/mark-read/${targetAgentId}`, {
+          method: 'PATCH'
           }).catch(console.error);
         }
 
@@ -1746,7 +1743,6 @@ const startStatusPolling = (roomName) => {
 const handleStartCall = async () => {
   const currentUserId = userData?._id || userData?.id;
   const currentAgentId = agent?._id || agent?.id;
-  const API_BASE_URL = import.meta.env.VITE_API_URL;
 
   if (!currentAgentId || !currentUserId) {
     alert("Profile data still loading. Please try again.");
@@ -1759,14 +1755,14 @@ const handleStartCall = async () => {
   try {
     // UPDATED: Now using secureFetch for consistency.
     // secureFetch handles the 'credentials: include' and JSON headers automatically.
-    const res = await secureFetch(`${API_BASE_URL}/api/calls/start`, {
-      method: 'POST',
-      body: JSON.stringify({ 
-        receiverId: currentAgentId, 
-        receiverModel: 'Agent',
-        voiceId: "natural" 
-      })
-    });
+  const res = await secureFetch('/api/calls/start', {
+  method: 'POST',
+  body: JSON.stringify({ 
+    receiverId: currentAgentId, 
+    receiverModel: 'Agent',
+    voiceId: "natural" 
+  })
+});
 
     const data = await res.json();
 
