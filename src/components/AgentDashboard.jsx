@@ -57,34 +57,32 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 const socket = io(import.meta.env.VITE_API_URL);
-
-const MessageItem = ({ message, isCryptoReady, privateKey, senderPublicKey }) => {
-  const [decryptedText, setDecryptedText] = useState(message.text);
+const MessageItem = ({ message, privateKey, senderPublicKey, onDecrypted }) => {
   const [isDecrypting, setIsDecrypting] = useState(false);
 
   useEffect(() => {
-    // Only attempt decryption if it's encrypted, we have the payload, and we haven't decrypted it yet
-    if (message.isEncrypted && message.payload?.ciphertext && !decryptedText) {
+    // Only decrypt if we haven't already (check message.decryptedText)
+    if (message.isEncrypted && message.payload?.ciphertext && !message.decryptedText) {
       setIsDecrypting(true);
       decryptMessageText(message.payload, senderPublicKey, privateKey)
         .then(text => {
-          setDecryptedText(text);
+          onDecrypted(text); // Save to parent state
           setIsDecrypting(false);
         })
-        .catch(() => {
-          setDecryptedText("🔒 [Decryption Failed]");
+        .catch((err) => {
+          console.error("Decryption error:", err);
+          onDecrypted("🔒 [Decryption Failed]");
           setIsDecrypting(false);
         });
     }
-  }, [message, isCryptoReady, privateKey, senderPublicKey]);
+  }, [message, privateKey, senderPublicKey]);
 
-  if (isDecrypting) {
-    return <p className="text-gray-400 italic text-[13px]">Decrypting message...</p>;
-  }
+  if (isDecrypting) return <p className="text-gray-400 italic text-[13px]">Decrypting...</p>;
 
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {decryptedText || message.text}
+      {/* Show the saved decrypted text, or the original message text */}
+      {message.decryptedText || message.text || (message.isEncrypted ? "..." : "")}
     </p>
   );
 };
@@ -2468,12 +2466,16 @@ const handleSendMessage = async (e) => {
               
 { (m.text || m.isEncrypted) && (
   <MessageItem 
-    message={m} 
-    isMe={isMe} 
-    isCryptoReady={isCryptoReady} 
-    privateKey={privateKey} 
-    senderPublicKey={selectedUser?.publicKeyJwk} 
-  />
+  message={m} 
+  privateKey={privateKey} 
+  senderPublicKey={selectedUser?.publicKeyJwk}
+  onDecrypted={(text) => {
+    // This updates the message object in your main dashboard state array
+    setMessages(prev => prev.map(msg => 
+      msg._id === m._id ? { ...msg, decryptedText: text } : msg
+    ));
+  }}
+/>
 )}
               <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
                 <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
