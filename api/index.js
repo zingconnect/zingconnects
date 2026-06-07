@@ -67,20 +67,19 @@ import { authenticateToken, isAdmin, requireSuperAdmin } from './middlewares/aut
 const app = express();
 
 const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (e.g., mobile apps, curl)
-    if (!origin) return callback(null, true);
-    
-    // Check if the origin matches your domain
-    if (origin === "https://www.zingconnect.chat" || origin === "https://zingconnect.chat") {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+  origin: [
+    "https://www.zingconnect.chat", 
+    "https://zingconnect.chat" // Add the non-www version too for safety
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // ADDED OPTIONS
+  credentials: true, 
+  allowedHeaders: [
+    "Content-Type", 
+    "Authorization", 
+    "X-Requested-With", 
+    "Accept", 
+    "Origin"
+  ],
   exposedHeaders: ["Set-Cookie"]
 };
 
@@ -626,7 +625,7 @@ res.cookie('token', token, {
   sameSite: 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
-  signed: false 
+  signed: true // <--- Add this
 });
 
     return res.status(200).json({
@@ -1046,23 +1045,21 @@ app.post('/api/users/handshake', async (req, res, next) => {
 
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true, // Only if you are using HTTPS
+  secure: true,
   sameSite: 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
-  domain: '.zingconnect.chat' // The leading dot is crucial! It enables subdomains (www vs non-www)
+  signed: true // <--- Add this
 });
+
     // 5. Clean Response (Removed token from JSON body)
-   return res.json({ 
-  success: true, 
-  isNewUser, 
-  isProfileComplete: !!user.isProfileComplete,
-  user: {
-    ...cacheableUser,
-    role: 'user',        // Explicitly tell the frontend this is a 'user'
-    isSubscribed: false  // Handshake users don't pay
-  }
-});
+    return res.json({ 
+      success: true, 
+      isNewUser, 
+      isProfileComplete: user.isProfileComplete,
+      user: cacheableUser
+    });
+    
   } catch (err) {
     next(err);
   }
@@ -1836,7 +1833,6 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
       await redisClient.del(`agent:profile:full:${agent._id}`);
 
       console.log(`Subscription ACTIVATED for: ${agent.email} | Cache invalidated for both keys.`);
-
       return res.json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",
@@ -3954,7 +3950,10 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
     next(err);
   }
 });
+
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  await connectToDatabase();
+
   try {
     const userId = req.user?.id;
     const role = req.user?.role;
@@ -3964,19 +3963,16 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     }
     
     let profile = null;
-    let isSubscribed = false; // Default for users
     
+    // Use imported models directly rather than mongoose.models
     if (role === 'agent') {
       profile = await Agent.findById(userId)
         .select('firstName lastName email slug role isSubscribed plan')
-        .lean();
-      
-      if (profile) isSubscribed = !!profile.isSubscribed;
+        .lean(); // .lean() is faster for read-only operations
     } else {
       profile = await User.findById(userId)
         .select('email role isProfileComplete')
         .lean();
-            isSubscribed = false; 
     }
 
     if (!profile) {
@@ -3986,11 +3982,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     return res.json({ 
       success: true, 
       role: role,
-      isSubscribed: isSubscribed, 
-      profile: {
-        ...profile,
-        isSubscribed: isSubscribed
-      }
+      profile: profile 
     });
   } catch (err) {
     console.error("Session verification error:", err);
