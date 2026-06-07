@@ -625,7 +625,7 @@ res.cookie('token', token, {
   sameSite: 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
-  signed: true // <--- Add this
+  signed: false 
 });
 
     return res.status(200).json({
@@ -1053,13 +1053,16 @@ res.cookie('token', token, {
 });
 
     // 5. Clean Response (Removed token from JSON body)
-    return res.json({ 
-      success: true, 
-      isNewUser, 
-      isProfileComplete: user.isProfileComplete,
-      user: cacheableUser
-    });
-    
+   return res.json({ 
+  success: true, 
+  isNewUser, 
+  isProfileComplete: !!user.isProfileComplete,
+  user: {
+    ...cacheableUser,
+    role: 'user',        // Explicitly tell the frontend this is a 'user'
+    isSubscribed: false  // Handshake users don't pay
+  }
+});
   } catch (err) {
     next(err);
   }
@@ -1833,7 +1836,7 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
       await redisClient.del(`agent:profile:full:${agent._id}`);
 
       console.log(`Subscription ACTIVATED for: ${agent.email} | Cache invalidated for both keys.`);
-      
+
       return res.json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",

@@ -6,7 +6,7 @@ export const authenticateToken = async (req, res, next) => {
 
   console.log("Incoming request cookies:", req.signedCookies);
 
-const token = req.signedCookies?.token;
+const token = req.cookies?.token;
   if (!token) {
     console.warn("Auth failed: No signed cookie token detected.");
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
