@@ -2381,41 +2381,285 @@ const handleSendMessage = async (e) => {
       </div>
     </aside>
     
-          {/* --- MAIN CHAT & MODALS --- */}
-          <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden h-screen`}>
-            {selectedUser ? (
-              <>
-                <header className="h-[75px] bg-card-bg px-3 flex justify-between items-center z-30 shadow-sm relative">
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 rounded-full"><BsChevronLeft size={18} /></button>
-                    <div onClick={(e) => { e.stopPropagation(); setShowUserModal(true); }} className="relative z-40 w-10 h-10 rounded-full overflow-hidden border bg-slate-100 cursor-pointer hover:ring-2 hover:ring-blue-400/50 pointer-events-auto">
-                      <img src={selectedUser.photoUrl} className="w-full h-full object-cover" alt="Profile" />
-                    </div>
-                    <div>
-                      <h2 className="text-sm font-bold text-text-main">{selectedUser.firstName} {selectedUser.lastName}</h2>
-                    </div>
-                  </div>
-                </header>
-                <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg">
-                  {messages.map((m) => (
-                    <div key={m._id || m.id} className={`max-w-[85%] px-3 py-1.5 rounded-lg ${m.senderId === agentData?._id ? 'bg-green-600 text-white self-end' : 'bg-card-bg self-start'}`}>
-                      <p className="text-[13px]">{m.text}</p>
-                    </div>
-                  ))}
-                  <div ref={messagesEndRef} className="h-4" />
-                </div>
-                <footer className="min-h-[48px] bg-card-bg p-1 flex items-center gap-1">
-                  <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-1">
-                    <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} className="w-full bg-input-bg px-3 py-1.5 rounded-full" />
-                    <button type="submit" className="p-2 bg-blue-600 text-white rounded-full"><BsSend /></button>
-                  </form>
-                </footer>
-              </>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center opacity-30">
-                <BsShieldLockFill size={40} />
-                <h1 className="text-2xl font-black uppercase">ZingConnect</h1>
-              </div>
+          {/* --- MAIN CHAT INTERFACE --- */}
+         <main className={`${!showSidebar ? 'flex' : 'hidden'} lg:flex flex-1 flex-col bg-page-bg relative overflow-hidden h-screen`}>
+                   {selectedUser ? (
+                 <>
+         <header className="h-[75px] bg-card-bg px-3 flex justify-between items-center z-30 shadow-sm relative">
+             <div className="flex items-center gap-3">
+             <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 text-gray-600 rounded-full">
+               <BsChevronLeft size={18} />
+             </button>
+             
+             <div onClick={(e) => { e.stopPropagation(); setShowUserModal(true); }} className="relative z-40 w-10 h-10 rounded-full overflow-hidden border bg-slate-100 cursor-pointer hover:ring-2 hover:ring-blue-400/50 pointer-events-auto">
+               <img
+                 src={selectedUser.photoUrl}
+                 className="w-full h-full object-cover"
+                 alt="Profile"
+                 onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${selectedUser.firstName}&background=random&color=fff`; }}
+               />
+             </div>
+         
+             <div className="cursor-pointer" onClick={() => setShowUserModal(true)}>
+               <div className="flex items-center gap-2">
+                 <h2 className="text-sm font-bold text-text-main truncate leading-tight">
+                     {selectedUser.firstName} {selectedUser.lastName}
+                 </h2>
+                 
+                 {/* UPDATED: Real-time Status Indicator - Matches Sidebar Logic */}
+                 <span className={`flex items-center gap-1 text-[9px] font-black uppercase ${
+                   selectedUser.status === 'online' || selectedUser.isOnline ? 'text-green-500' : 'text-gray-400'
+                 }`}>
+                   <span className={`w-1.5 h-1.5 rounded-full ${
+                     selectedUser.status === 'online' || selectedUser.isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
+                   }`} />
+                   {selectedUser.status === 'online' || selectedUser.isOnline ? 'Online' : 'Offline'}
+                 </span>
+               </div>
+              {selectedUser.status === 'online' || selectedUser.isOnline ? (
+           <p className="text-[11px] font-medium text-gray-500 lowercase leading-tight">
+             {selectedUser.email}
+           </p>
+         ) : (
+           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tight">
+             {/* Updated to use selectedUser.lastActive and timeTicker */}
+             Last seen: {formatLastSeen(selectedUser.lastActive || selectedUser.updatedAt, timeTicker)}
+           </p>
+         )}
+               {(selectedUser.city || selectedUser.state) && (
+                 <p className="text-[9px] font-bold text-blue-600 truncate max-w-[180px] mt-0.5">
+                   📍 {selectedUser.city}{selectedUser.city && selectedUser.state ? ', ' : ''}{selectedUser.state}
+                 </p>
+               )}
+             </div>
+           </div>
+         <div className="flex items-center gap-6 text-gray-500 mr-2">
+           <button 
+             onClick={() => alert('Feature not available yet')} 
+             className="hover:text-blue-600 transition-colors active:scale-90 p-2" 
+             title="Call Settings"
+           > 
+             <BsGearFill size={20} />
+           </button>
+         </div>
+         </header>
+         
+         <div 
+           ref={scrollRef} 
+           onScroll={handleScroll} 
+           className="flex-1 overflow-y-auto scroll-manual p-4 md:px-20 space-y-2 z-10 flex flex-col bg-page-bg dark:bg-slate-950/50"
+         >
+                     {messages.length >= limit && (
+                       <div className="flex justify-center py-6">
+                         <button onClick={() => setLimit(prev => prev + 30)} className="text-[10px] font-black uppercase text-gray-500 bg-white/50 px-4 py-2 rounded-full border border-gray-300 hover:bg-white transition-colors">↑ Load Older Messages</button>
+                       </div>
+                     )}
+                     {messages.map((m) => {
+                       const isMe = m.senderId === agentData?._id;
+                       const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
+         
+                     if (m.fileType === 'call_log' && m.callMetadata) {
+           {/* Determine if the logged-in agent is the one who initiated the call */}
+           const isMe = m.senderId === agentData?._id; 
+           const isMissed = m.callMetadata.status === 'missed';
+         
+           return (
+             <div 
+               key={msgKey} 
+               className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-2 animate-in fade-in zoom-in duration-500`}
+             >
+               <div className={`
+                 px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-md border max-w-[80%]
+                 ${isMe 
+                   ? 'bg-green-600 border-green-500 text-white rounded-tr-none mr-2' 
+                   : 'bg-white border-gray-200 text-slate-800 rounded-tl-none ml-2'}
+                 dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white
+               `}>
+                 <div className={`p-2.5 rounded-full ${
+                   isMe 
+                     ? 'bg-white/20 text-white' 
+                     : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
+                 }`}>
+                   {isMissed ? <BsTelephoneXFill size={16} /> : <BsTelephoneOutboundFill size={16} />}
+                 </div>
+         
+                 <div className="flex flex-col">
+                   <p className={`text-[11px] font-black uppercase tracking-widest ${
+                     isMe ? 'text-white' : 'text-gray-700'
+                   } dark:text-white`}>
+                     {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
+                   </p>
+                   <span className={`text-[9px] font-bold ${
+                     isMe ? 'text-white/70' : 'text-gray-400'
+                   } dark:text-white/60`}>
+                     {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                   </span>
+                 </div>
+               </div>
+             </div>
+           );
+         }
+         
+                       return (
+                         <div
+                           key={msgKey}
+                           onMouseDown={() => isMe && startHold(m._id)}
+                           onMouseUp={stopHold}
+                          className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative flex flex-col  ${isMe 
+                         ? 'bg-green-600 text-white self-end rounded-tr-none' 
+                         : 'bg-card-bg text-text-main border dark:border-slate-800 self-start rounded-tl-none'
+                          } mb-1`}>
+                           {(m.fileType === 'image' || m.fileType === 'video') && (
+                             <div className="relative mb-1.5 mt-0.5 group">
+                               {m.fileType === 'image' ? (
+                                 <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="rounded-lg bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95" alt="attachment" />
+                               ) : (
+                                 <div className="relative">
+                                   <video className="rounded-lg w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}><source src={m.fileUrl} type="video/mp4" /></video>
+                                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" /></div>
+                                 </div>
+                               )}
+                               <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
+                             </div>
+                           )}
+                             {m.text && <p className="text-[13px] md:text-[15px] leading-relaxed break-words">{m.text}</p>}
+                           <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
+                             <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                             {isMe && (
+                               <div className="flex items-center ml-1">
+                                 {m.status === 'sending' ? <div className="w-2.5 h-2.5 border-2 border-t-blue-500 rounded-full animate-spin" /> : 
+                                  m.status === 'failed' ? <BsPlusLg className="rotate-45 text-red-500" size={10} onClick={() => handleResend(m)} /> :
+                                  <BsCheckAll className={m.status === 'seen' ? 'text-blue-500' : 'text-gray-400'} size={16} />}
+                               </div>
+                             )}
+                           </div>
+                         </div>
+                       );
+                     })}
+                     <div ref={messagesEndRef} className="h-4 shrink-0 w-full" />
+                   </div>
+         
+                     <footer className="min-h-[48px] bg-card-bg px-1 py-1 flex items-center justify-between gap-1 z-10">
+                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,video/*" className="hidden" />
+                     <input type="file" ref={cameraInputRef} onChange={handleFileUpload} accept="image/*,video/*" capture="environment" className="hidden" />
+                     <div className="flex items-center shrink-0">
+                       <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="p-1.5 hover:bg-gray-200 rounded-full"><BsPaperclip size={18} className="text-gray-500" /></button>
+                       <button onClick={() => cameraInputRef.current.click()} disabled={isUploading} className="p-1.5 hover:bg-gray-200 rounded-full"><BsCameraFill size={18} className="text-gray-500" /></button>
+                     </div>
+                     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-1">
+                       <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Message" className="w-full bg-input-bg text-text-main px-3 py-1.5 rounded-full text-[14px] outline-none  shadow-sm" />
+                       <button type="submit" disabled={!newMessage.trim() || isUploading} className={`p-2 rounded-full shadow-sm ${newMessage.trim() ? 'bg-blue-600 text-white' : 'bg-gray-300 text-white'}`}><BsSend size={15} /></button>
+                     </form>
+                 </footer>
+                   </>
+                 ) : (
+                   <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30 text-text-main">
+                     <BsShieldLockFill size={40} className="mb-4" />
+                     <h1 className="text-2xl font-black uppercase tracking-widest text-blue-950">ZingConnect</h1>
+                     <p className="text-[10px] font-bold uppercase tracking-widest">Secure Terminal</p>
+                   </div>
+                 )}
+         {showUserModal && selectedUser && (
+           <div className="fixed inset-0 z-[50000] flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-300">
+             <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity" onClick={() => setShowUserModal(false)} />
+             <div className="relative w-full max-w-2xl bg-slate-50/80 backdrop-blur-2xl rounded-[2.5rem] border border-white/70 shadow-2xl overflow-hidden flex flex-col md:flex-row animate-in zoom-in-95 duration-200">
+               <div className="relative w-full md:w-[240px] bg-gradient-to-b from-slate-900 to-slate-950 text-white p-6 flex flex-col items-center justify-between text-center border-b md:border-b-0 md:border-r border-slate-800/80">
+                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-blue-600/15 via-transparent to-transparent opacity-70 pointer-events-none" />
+                 <div className="relative w-full flex flex-col items-center z-10">
+                   <div className="relative mb-4 w-28 h-28 rounded-3xl overflow-hidden bg-slate-800 shadow-xl border border-white/10 group">
+                     <img src={selectedUser.photoUrl} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" alt={`${selectedUser.firstName || 'User'}'s Profile`} onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedUser.firstName || 'U')}&background=0D1117&color=fff&size=128`; }} />
+                   </div>
+                   <h3 className="text-lg font-black tracking-tight text-slate-100 leading-tight">{selectedUser.firstName || '—'} {selectedUser.lastName || ''}</h3>
+                   <span className={`inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-wider ${selectedUser.isVerified ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
+                     <span className={`h-1.5 w-1.5 rounded-full ${selectedUser.isVerified ? 'bg-emerald-400' : 'bg-blue-400'}`} />
+                     {selectedUser.isVerified ? 'Verified Client' : 'Standard Client'}
+                   </span>
+                 </div>
+                 <div className="relative w-full mt-6 pt-4 border-t border-slate-800/60 space-y-2.5 text-left z-10 hidden md:block">
+                   <div>
+                     <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Lifecycle Status</p>
+                     <p className="text-[10px] font-bold text-slate-300">{selectedUser.isProfileComplete ? 'Profile Active' : 'Pending Lifecycle Configuration'}</p>
+                   </div>
+                   {selectedUser.createdAt && (
+                     <div>
+                       <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Creation Index</p>
+                       <p className="text-[10px] font-bold text-slate-400">{new Date(selectedUser.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                     </div>
+                   )}
+                 </div>
+               </div>
+               <div className="flex-1 p-6 md:p-8 flex flex-col justify-between">
+                 <div className="space-y-5">
+                   <div className="flex items-center gap-2">
+                     <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">Client Profile Parameters</h4>
+                     <div className="flex-1 h-px bg-slate-200/80" />
+                   </div>
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                     <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between sm:col-span-2 group hover:border-slate-300 transition-colors">
+                       <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Email Address</p>
+                       <p className="text-xs font-bold text-slate-800 break-all select-all selection:bg-blue-100">{selectedUser.email || '—'}</p>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between hover:border-slate-300 transition-colors">
+                       <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Phone Number</p>
+                       <p className="text-xs font-bold text-slate-800">
+                         {(() => {
+                           const phoneData = selectedUser.phone || selectedUser.phoneNumber;
+                           if (!phoneData) return 'No Phone Registered';
+                           if (typeof phoneData === 'object') return phoneData.formatted || phoneData.raw || 'No Phone Registered';
+                           return String(phoneData);
+                         })()}
+                       </p>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between hover:border-slate-300 transition-colors">
+                       <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender Identity</p>
+                       <p className={`text-xs font-bold capitalize ${!selectedUser.gender || selectedUser.gender.toLowerCase() === 'not specified' ? 'text-slate-400 italic font-medium' : 'text-slate-800'}`}>
+                         {selectedUser.gender && selectedUser.gender.toLowerCase() !== 'not specified' ? selectedUser.gender : 'Not Specified'}
+                       </p>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col justify-between sm:col-span-2 hover:border-slate-300 transition-colors">
+                       <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Geographical Parameters</p>
+                       <div className="text-xs font-bold text-slate-800 leading-relaxed">
+                         {selectedUser.address && <p className="text-slate-600 font-medium mb-1">{selectedUser.address}</p>}
+                         {(selectedUser.city || selectedUser.state) ? (
+                           <p className="text-blue-600 font-black">{[selectedUser.city, selectedUser.state].filter(Boolean).join(', ')}</p>
+                         ) : (
+                           !selectedUser.address && <p className="text-slate-400 font-medium italic">No Location Context Found</p>
+                         )}
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+                 <div className="mt-8 pt-4 border-t border-slate-200/80 flex items-center justify-end">
+                   <button onClick={() => setShowUserModal(false)} className="w-full sm:w-auto px-6 py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-md shadow-slate-900/10 transition-all duration-150">
+                     Dismiss Profile View
+                   </button>
+                 </div>
+               </div>
+             </div>
+           </div>
+         )}
+         
+                 {previewUrl && (
+                   <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col">
+                     <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white">
+                       <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-2 hover:bg-white/10 rounded-full"><BsXLg size={24} /></button>
+                       <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">Media Preview</span>
+                       <div className="w-10" />
+                     </div>
+                     <div className="flex-1 flex items-center justify-center p-4">
+                       {previewFile?.type.startsWith('video') ? (
+                         <video src={previewUrl} controls className="max-w-full max-h-[65vh] rounded-2xl" />
+                       ) : (
+                         <img src={previewUrl} className="max-w-full max-h-[65vh] rounded-2xl object-contain" alt="Preview" />
+                       )}
+                     </div>
+                     <div className="p-6 bg-slate-900">
+                       <div className="max-w-4xl mx-auto flex items-center gap-4">
+                         <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption..." className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-white text-sm outline-none" />
+                         <button onClick={handleFinalSend} className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center"><BsSend size={28} className="text-white" /></button>
+                       </div>
+                     </div>
+                   </div>
             )}
           </main>
         </>
