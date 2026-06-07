@@ -3976,9 +3976,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
       profile = await User.findById(userId)
         .select('email role isProfileComplete')
         .lean();
-      
-      // Handshake users are never subscribed
-      isSubscribed = false; 
+            isSubscribed = false; 
     }
 
     if (!profile) {
@@ -3988,7 +3986,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     return res.json({ 
       success: true, 
       role: role,
-      isSubscribed: isSubscribed, // Exposed at the root for easier AuthContext consumption
+      isSubscribed: isSubscribed, 
       profile: {
         ...profile,
         isSubscribed: isSubscribed
