@@ -1,14 +1,15 @@
 // =========================================================================
-// 🔒 ZINGCONNECT SECURE END-TO-END CRYPTOGRAPHIC LAYER (WEB CRYPTO API)
+// 🔒 ZINGCONNECT SECURE END-TO-END CRYPTOGRAPHIC LAYER (MEMORY-ONLY)
 // =========================================================================
-import { secureFetch } from "../../api/utils/api";
 
-// Helper: Converts raw binary array buffers to base64 strings for DB storage
+/** * Helper: Converts raw binary array buffers to base64 strings 
+ */
 function arrayBufferToBase64(buffer) {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)));
 }
 
-// Helper: Converts base64 strings back to binary array buffers for decryption
+/** * Helper: Converts base64 strings back to binary array buffers 
+ */
 function base64ToArrayBuffer(base64) {
   const binary_string = window.atob(base64);
   const len = binary_string.length;
@@ -20,76 +21,36 @@ function base64ToArrayBuffer(base64) {
 }
 
 /**
- * 🔑 GENERATE KEYPAIR: Runs locally on the client machine.
- * Stores the private key in localStorage, and ships the public key to MongoDB.
+ * 🔑 GENERATE KEYPAIR: Generates ECDH keys in memory.
+ * Caller (AuthContext) is responsible for storing privateKeyJwk in React State.
  */
-export const initializeUserE2EEKeys = async (userId, token) => {
-  const privateKeyName = `zing_secure_pk_${userId}`;
-  
-  // If this device already contains the private key, skip generation
-  if (localStorage.getItem(privateKeyName)) {
-    console.log("🔒 Identity keys verified locally.");
-    return true;
-  }
-
+export const generateE2EEKeyPair = async () => {
   try {
-    console.log("🛡️ Generating new asymmetric ECDH keypair...");
-    // 1. Generate an ECDH Key Pair on the secure P-256 Elliptic Curve
     const keyPair = await window.crypto.subtle.generateKey(
       { name: "ECDH", namedCurve: "P-256" },
       true, 
       ["deriveKey", "deriveBits"]
     );
 
-    // 2. Export keys to standard JSON Web Key (JWK) format
     const publicKeyJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
     const privateKeyJwk = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
 
-    // 3. Keep the Private Key strictly isolated inside this browser's Local Storage
-    localStorage.setItem(privateKeyName, JSON.stringify(privateKeyJwk));
-
-   // ⚡ CLEANER & SECURE: Swapped native fetch for your custom secureFetch utility
-    const response = await secureFetch('/api/update-crypto-key', {
-      method: 'PUT',
-      body: JSON.stringify({ publicKeyJwk })
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to register public cryptographic key with server.");
-    }
-
-    console.log("✅ E2EE Keys successfully synced with ZingConnect Protocol.");
-    return true;
+    return { publicKeyJwk, privateKeyJwk };
   } catch (err) {
-    console.error("❌ E2EE Key Initialization Failed:", err);
-    return false;
+    console.error("❌ E2EE Key Generation Failed:", err);
+    return null;
   }
 };
+
 /**
- * 🔒 ENCRYPT: Takes plaintext message string and recipient's public key.
+ * 🔒 ENCRYPT: Uses recipient public key and OWN private key (passed from memory).
  */
-export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myUserId) => {
+export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPrivateKeyJwk) => {
   try {
-    const storageKey = `zing_secure_pk_${myUserId}`;
-    console.log("DEBUG: Attempting encryption for:", myUserId);
-    
-    // 1. Verify recipient key
-    if (!recipientPublicKeyJwk) {
-      console.warn("DEBUG: No recipient public key provided.");
-      return { cipherText: clearText, iv: null, isEncrypted: false };
+    if (!recipientPublicKeyJwk || !myPrivateKeyJwk) {
+      throw new Error("Missing cryptographic keys for encryption.");
     }
 
-    // 2. Verify own private key
-    const rawSavedPrivate = localStorage.getItem(storageKey);
-    if (!rawSavedPrivate) {
-      console.error(`DEBUG: Private key not found in localStorage under: ${storageKey}`);
-      return { cipherText: clearText, iv: null, isEncrypted: false };
-    }
-
-    const myPrivateKeyJwk = JSON.parse(rawSavedPrivate);
-
-    // 3. Import Keys with logging
-    console.log("DEBUG: Importing keys...");
     const myPrivateKey = await window.crypto.subtle.importKey(
       "jwk", myPrivateKeyJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
     );
@@ -97,17 +58,14 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myUse
       "jwk", recipientPublicKeyJwk, { name: "ECDH", namedCurve: "P-256" }, true, []
     );
 
-    // 4. Derive Shared Secret
-    console.log("DEBUG: Deriving shared secret...");
     const sharedSecretKey = await window.crypto.subtle.deriveKey(
       { name: "ECDH", public: peerPublicKey },
       myPrivateKey,
       { name: "AES-GCM", length: 256 },
       false,
-      ["encrypt", "decrypt"]
+      ["encrypt"]
     );
 
-    // 5. Encrypt
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const encodedText = new TextEncoder().encode(clearText);
 
@@ -117,42 +75,26 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myUse
       encodedText
     );
 
-    console.log("DEBUG: Encryption successful.");
     return {
       cipherText: arrayBufferToBase64(encryptedBuffer),
       iv: arrayBufferToBase64(iv),
       isEncrypted: true
     };
   } catch (e) {
-    // THIS LOG WILL IDENTIFY THE EXACT POINT OF FAILURE
-    console.error("DEBUG: Encryption runtime failure details:", {
-      message: e.message,
-      name: e.name,
-      stack: e.stack
-    });
+    console.error("Encryption runtime failure:", e);
     return { cipherText: clearText, iv: null, isEncrypted: false };
   }
 };
 
-export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myUserId) => {
+/**
+ * 🔓 DECRYPT: Uses sender public key and OWN private key (passed from memory).
+ */
+export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myPrivateKeyJwk) => {
   try {
-    // 1. Validation
-    if (!ivBase64 || !senderPublicKeyJwk || !cipherTextBase64) return cipherTextBase64;
-
-    // 2. Retrieve Private Key
-    const storageKey = `zing_secure_pk_${myUserId}`;
-    console.log("🔍 Attempting to retrieve key with:", storageKey); // ADD THIS
-    const rawSavedPrivate = localStorage.getItem(storageKey);
-    
-    if (!rawSavedPrivate) {
-      console.error("Decryption failed: Private key not found in storage.");
-      return "🔒 [Encrypted Message - Key Missing]";
+    if (!ivBase64 || !senderPublicKeyJwk || !cipherTextBase64 || !myPrivateKeyJwk) {
+      throw new Error("Missing parameters for decryption.");
     }
 
-    const myPrivateKeyJwk = JSON.parse(rawSavedPrivate);
-
-    // 3. Import Keys
-    // Ensure the curves and names match your encryption setup perfectly
     const myPrivateKey = await window.crypto.subtle.importKey(
       "jwk", myPrivateKeyJwk, 
       { name: "ECDH", namedCurve: "P-256" }, 
@@ -165,7 +107,6 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
       true, []
     );
 
-    // 4. Derive Shared Secret
     const sharedSecretKey = await window.crypto.subtle.deriveKey(
       { name: "ECDH", public: peerPublicKey },
       myPrivateKey,
@@ -173,8 +114,6 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
       false, ["decrypt"]
     );
 
-    // 5. Decrypt
-    // Ensure you are passing the iv as a Uint8Array (AES-GCM requires 12 bytes)
     const iv = base64ToArrayBuffer(ivBase64);
     const data = base64ToArrayBuffer(cipherTextBase64);
 
@@ -185,10 +124,8 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
     );
 
     return new TextDecoder().decode(decryptedBuffer);
-
   } catch (err) {
     console.error("Decryption runtime error:", err);
-    // Return a clear indicator so the UI knows to show a "failed to decrypt" icon
     return "🔒 [Encrypted Message - Decryption Failed]";
   }
 };

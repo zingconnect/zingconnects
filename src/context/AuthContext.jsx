@@ -8,25 +8,26 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  // NEW: Store private key in memory state
+  const [isCryptoReady, setIsCryptoReady] = useState(false);
   const [privateKey, setPrivateKey] = useState(null);
 
   useEffect(() => {
     verifySession();
   }, []);
 
-  // NEW: Function to generate and register keys
   const initializeCrypto = useCallback(async () => {
-    const keys = await generateE2EEKeyPair();
-    if (keys) {
-      setPrivateKey(keys.privateKeyJwk);
-      await secureFetch('/api/update-crypto-key', {
-        method: 'PUT',
-        body: JSON.stringify({ publicKeyJwk: keys.publicKeyJwk })
-      });
-      console.log("✅ E2EE Memory-session initialized.");
-    }
-  }, []);
+  setIsCryptoReady(false); // Reset while generating
+  const keys = await generateE2EEKeyPair();
+  if (keys) {
+    setPrivateKey(keys.privateKeyJwk);
+    await secureFetch('/api/update-crypto-key', {
+      method: 'PUT',
+      body: JSON.stringify({ publicKeyJwk: keys.publicKeyJwk })
+    });
+    setIsCryptoReady(true); // Signal that it's safe to encrypt
+    console.log("✅ E2EE Memory-session initialized.");
+  }
+}, []);
 
   const verifySession = async () => {
     setIsLoading(true);
