@@ -4,8 +4,6 @@ import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { secureFetch } from "../../api/utils/api";
 
-// ⚡ IMPORT THE CRYPTO ENGINE TOOL
-import { initializeUserE2EEKeys } from '../utils/cryptoEngine';
 
 export const VerifyOTP = () => {
   const location = useLocation();
@@ -50,7 +48,6 @@ const handleResend = async () => {
     setIsVerifying(true);
 
     try {
-      // Remove 'null' token argument, add credentials: 'include'
       const response = await secureFetch('/api/agents/verify-otp', {
         method: 'POST',
         body: JSON.stringify({ email, otp }),
@@ -60,10 +57,7 @@ const handleResend = async () => {
       const data = await response.json();
 
       if (response.ok) {
-        // 🛡️ E2EE Initialization
-        // Note: Check if initializeUserE2EEKeys still requires the 'token' argument.
-        // If it was only used for auth headers, you can now remove it.
-        await initializeUserE2EEKeys(data.userId);
+       
 
         setServerSlug(data.slug);
         setIsSuccess(true);
