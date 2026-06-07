@@ -193,6 +193,7 @@ const handleAgentLogin = async (e) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      // CRITICAL: Must be 'include' to send/receive HttpOnly cookies
       credentials: 'include' 
     });
 
@@ -201,18 +202,19 @@ const handleAgentLogin = async (e) => {
     if (!isMounted.current) return;
 
     if (response.ok) {
-      // 1. AWAIT the login to ensure AuthContext state is fully synced 
-      // with the cookie the server just sent.
+      // The token is now stored securely in the browser's cookie jar.
+      // We no longer access it via JavaScript or store it in localStorage.
+      
+      // Update AuthContext state to reflect that the user is now authenticated
       if (typeof login === 'function') {
-        await login(payload.targetSlug);
+        login(payload.targetSlug);
       }
       
       if (rememberAgent) {
         localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
       }
       
-      // 2. Now it is safe to navigate
-      navigate(`/agent/dashboard/${payload.targetSlug}`, { replace: true });
+      navigate(`/agent/dashboard/${payload.targetSlug}`);
     } else {
       console.error("Login Server Error:", data.message);
       alert(data.message || "Invalid Credentials");
