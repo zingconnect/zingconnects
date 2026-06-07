@@ -2085,19 +2085,21 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
-  
+
+  // 1. Initial validation
   if (!selectedUser || !newMessage.trim() || isUploading) return;
 
   let activeUser = selectedUser;
+
+  // 2. Silent sync if Public Key is missing
   if (!activeUser.publicKeyJwk) {
     console.warn("Key missing in state. Attempting silent sync...");
     try {
       const res = await secureFetch(`/api/users/profile/${activeUser._id}`, { method: 'GET' });
       const data = await res.json();
-      
+
       if (data.user?.publicKeyJwk) {
         activeUser = { ...activeUser, ...data.user };
         setSelectedUser(activeUser);
@@ -2106,11 +2108,12 @@ const handleSendMessage = async (e) => {
       }
     } catch (err) {
       console.error("Recovery failed:", err);
-      alert("Secure channel is currently unavailable. Please ensure the user has initialized their session.");
+      alert("Secure channel is unavailable. User must initialize their session.");
       return;
     }
   }
 
+  // 3. Prepare message
   const textToSend = newMessage;
   const tempId = Date.now().toString();
   setNewMessage('');
@@ -2131,21 +2134,30 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, optimisticMsg]);
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
+  // 4. Secure Transmission Block
   try {
-    if (!activeUser.publicKeyJwk) {
-      throw new Error("Encryption key missing. Transmission aborted for security.");
+    // A: Pre-flight check: verify private key exists locally
+    const storageKey = `zing_secure_pk_${agentData._id}`;
+    if (!localStorage.getItem(storageKey)) {
+      throw new Error("Local identity key missing. Please refresh to re-initialize.");
     }
 
+    if (!activeUser.publicKeyJwk) {
+      throw new Error("Recipient encryption key missing.");
+    }
+
+    // B: Encrypt
     const encryptedData = await encryptMessageText(
       textToSend,
       activeUser.publicKeyJwk,
       agentData._id
     );
-    
-    if (!encryptedData.isEncrypted) {
-      throw new Error("Encryption failed: Payload remains insecure.");
+
+    if (!encryptedData.isEncrypted || !encryptedData.cipherText) {
+      throw new Error("Encryption failed: Crypto engine returned insecure payload.");
     }
 
+    // C: Send to server
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
@@ -2161,27 +2173,28 @@ const handleSendMessage = async (e) => {
     const data = await response.json();
 
     if (data.success) {
-      let finalizedMessage = { ...data.message };
-      
+      // D: Decrypt response for local view
+      const finalizedMessage = { ...data.message };
       finalizedMessage.text = await decryptMessageText(
         finalizedMessage.text,
         finalizedMessage.iv,
         activeUser.publicKeyJwk,
-        agentData._id,
-        agentPrivateKeyRef.current 
+        agentData._id
       );
 
       setMessages(prev => 
         prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
       );
     } else {
-      throw new Error(data.message || "Transmission failed");
+      throw new Error(data.message || "Transmission rejected by server.");
     }
   } catch (err) {
     console.error("Agent transmission crypto block exception:", err);
+    // Mark message as failed so the agent can retry
     setMessages(prev => 
       prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg)
     );
+    alert("Security Error: " + err.message);
   }
 };
 
@@ -2638,7 +2651,6 @@ const handleSendMessage = async (e) => {
              </div>
            </div>
          )}
-         
                  {previewUrl && (
                    <div className="fixed inset-0 z-[70000] bg-slate-950 flex flex-col">
                      <div className="p-4 flex justify-between items-center bg-slate-900/90 text-white">
