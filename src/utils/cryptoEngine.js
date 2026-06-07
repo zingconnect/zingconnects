@@ -37,7 +37,7 @@ export const initializeUserE2EEKeys = async (userId, token) => {
     // 1. Generate an ECDH Key Pair on the secure P-256 Elliptic Curve
     const keyPair = await window.crypto.subtle.generateKey(
       { name: "ECDH", namedCurve: "P-256" },
-      false, 
+      true, 
       ["deriveKey", "deriveBits"]
     );
 
@@ -49,7 +49,7 @@ export const initializeUserE2EEKeys = async (userId, token) => {
     localStorage.setItem(privateKeyName, JSON.stringify(privateKeyJwk));
 
    // ⚡ CLEANER & SECURE: Swapped native fetch for your custom secureFetch utility
-    const response = await secureFetch('/api/update-crypto-key', token, {
+    const response = await secureFetch('/api/update-crypto-key', {
       method: 'PUT',
       body: JSON.stringify({ publicKeyJwk })
     });
