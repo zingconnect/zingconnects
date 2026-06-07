@@ -2201,19 +2201,23 @@ const handleSendMessage = async (e) => {
         console.warn("User switched conversations. Skipping local state update.");
         return;
       }
+const finalizedMessage = { ...data.message };
 
-      // 2. Decrypt and finalize
-      const finalizedMessage = { ...data.message };
-      finalizedMessage.text = await decryptMessageText(
-        finalizedMessage.text,
-        finalizedMessage.iv,
-        activeUser.publicKeyJwk,
-        privateKey
-      );
+if (finalizedMessage.isEncrypted && finalizedMessage.text) {
+  finalizedMessage.text = await decryptMessageText(
+    finalizedMessage.text,
+    finalizedMessage.iv,
+    activeUser.publicKeyJwk,
+    privateKey
+  );
+} else {
+  // If it's not encrypted, leave it as is (it's already plain text)
+  finalizedMessage.text = finalizedMessage.text; 
+}
 
-      setMessages(prev => 
-        prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
-      );
+setMessages(prev => 
+  prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
+);
     } else {
       throw new Error(data.message || "Transmission rejected by server.");
     }

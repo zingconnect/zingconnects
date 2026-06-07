@@ -85,7 +85,7 @@ const CallStatusMessage = ({ status, time }) => {
 };
 
 export const UserDashboard = () => {
-const { token, isLoading, privateKeyJwk } = useAuth();
+const { token, isLoading, privateKey, isCryptoReady } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -1818,9 +1818,17 @@ const handleStartCall = async () => {
 const handleSendMessage = async (e) => {
   e.preventDefault();
 
+  // 1. Validate Security State before proceeding
+  // We use the new isCryptoReady and privateKey from AuthContext
+  if (!isCryptoReady || !privateKey) {
+    console.error("Security Block: E2EE layer not initialized.");
+    alert("Establishing secure channel... please wait.");
+    return;
+  }
+
   if (agent && !agent.publicKeyJwk) {
-    console.error("Security Block: Cannot send message, Agent public key missing.");
-    alert("Secure channel not established. Please refresh or try again.");
+    console.error("Security Block: Recipient public key missing.");
+    alert("Recipient security profile not available.");
     return;
   }
 
@@ -1832,9 +1840,7 @@ const handleSendMessage = async (e) => {
 
   const pendingMessage = {
     _id: tempId,
-    tempId: tempId,
     senderId: userData._id,
-    senderModel: 'User',
     text: textToSend,
     status: 'sending',
     createdAt: new Date().toISOString(),
@@ -1844,38 +1850,35 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, pendingMessage]);
 
   try {
-    let finalPayloadText = textToSend;
-    let encryptionIv = null;
-    let encryptionStatus = false;
+    // 2. Perform Encryption
+    // Pass the actual private key (from AuthContext) instead of the User ID
+    const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, privateKey);
 
-    if (agent?.publicKeyJwk) {
-      const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, userData._id);
-      if (encryptedData && encryptedData.cipherText && encryptedData.iv) {
-        finalPayloadText = encryptedData.cipherText;
-        encryptionIv = encryptedData.iv;
-        encryptionStatus = true;
-      } else {
-        throw new Error("Encryption failed: Missing IV or Ciphertext.");
-      }
+    if (!encryptedData.cipherText || !encryptedData.iv) {
+      throw new Error("Encryption failed: Missing IV or Ciphertext.");
     }
+
+    // 3. Send securely
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
         receiverModel: 'Agent',
-        text: finalPayloadText,
-        iv: encryptionIv,
-        isEncrypted: encryptionStatus,
+        text: encryptedData.cipherText,
+        iv: encryptedData.iv,
+        isEncrypted: true,
         fileType: 'text',
         replyToId: replyingTo?._id
       })
     });
+
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message);
 
+    // 4. Finalize UI
     const finalizedMessage = { 
       ...data.message, 
-      text: textToSend,
+      text: textToSend, // Keep the plain text for the sender's view
       status: 'sent' 
     };
 
@@ -1883,10 +1886,11 @@ const handleSendMessage = async (e) => {
     setReplyingTo(null);
 
   } catch (err) {
-    console.error("Message encryption/transmission failed:", err);
+    console.error("Message transmission failed:", err);
     setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
   }
 };
+
 const handleResend = (msg) => {
   setMessages(prev => prev.filter(m => m._id !== msg._id));
   if (msg.fileType === 'image' || msg.fileType === 'video') {

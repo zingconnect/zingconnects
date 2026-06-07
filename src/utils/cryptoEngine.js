@@ -13,22 +13,21 @@ function arrayBufferToBase64(buffer) {
   return window.btoa(binary);
 }
 
-/** * Helper: Converts base64 strings back to binary array buffers 
- * Includes sanitization for URL-safe Base64 and whitespace
- */
 function base64ToArrayBuffer(base64) {
-  // 1. Sanitize: Convert Base64URL (-, _) to Standard Base64 (+, /)
+  // 1. Sanitize
   const sanitized = base64.replace(/-/g, '+').replace(/_/g, '/');
   
   // 2. Decode standard Base64
-  const binary_string = window.atob(sanitized.trim());
-  const len = binary_string.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary_string.charCodeAt(i);
+  const binaryString = window.atob(sanitized);
+  const bytes = new Uint8Array(binaryString.length);
+  
+  // 3. Correct binary mapping
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes.buffer;
 }
+
 /**
  * 🔑 GENERATE KEYPAIR: Generates ECDH keys in memory.
  * Caller (AuthContext) is responsible for storing privateKeyJwk in React State.
@@ -94,6 +93,7 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPri
     return { cipherText: clearText, iv: null, isEncrypted: false };
   }
 };
+
 export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myPrivateKeyJwk) => {
   try {
     if (!ivBase64 || !senderPublicKeyJwk || !cipherTextBase64 || !myPrivateKeyJwk) {
