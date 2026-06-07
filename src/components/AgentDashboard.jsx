@@ -2466,7 +2466,6 @@ const handleSendMessage = async (e) => {
                 </div>
               )}
               
-             // Change this line in your map function:
 { (m.text || m.isEncrypted) && (
   <MessageItem 
     message={m} 
