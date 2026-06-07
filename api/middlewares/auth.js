@@ -3,20 +3,24 @@ import mongoose from 'mongoose';
 import { connectToDatabase } from '../config/db.js';
 
 export const authenticateToken = async (req, res, next) => {
+  // 1. Get token from standard cookies (since we disabled 'signed' to avoid signature mismatch)
+  const token = req.cookies?.token;
 
-  console.log("Incoming request cookies:", req.signedCookies);
-
-const token = req.cookies?.token;
   if (!token) {
-    console.warn("Auth failed: No signed cookie token detected.");
+    console.warn("Auth failed: No token detected in cookies.");
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
 
   try {
-    // 1. Verify token first (no DB required)
+    // 2. Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    req.user.id = decoded.id || decoded._id;
+    
+    // Normalize user object to ensure 'id' and 'role' are always present
+    req.user = {
+      id: decoded.id || decoded._id,
+      role: decoded.role || 'user', // Default to 'user' if not specified in JWT
+      sessionId: decoded.sessionId || null
+    };
 
     await connectToDatabase();
 
@@ -26,8 +30,8 @@ const token = req.cookies?.token;
       return res.status(503).json({ success: false, message: "Service temporarily unavailable" });
     }
 
-    // 3. Agent Logic
-    if (decoded.role === 'agent') {
+    // 3. Role-specific logic
+    if (req.user.role === 'agent') {
       const cacheKey = `agent:profile:${req.user.id}`;
       let agentSession = await redisClient.get(cacheKey);
       
@@ -37,16 +41,14 @@ const token = req.cookies?.token;
         
         if (!agent) return res.status(404).json({ success: false, message: "Agent context not found." });
         
-        if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+        // Check for concurrent sessions
+        if (agent.currentSessionId && req.user.sessionId && agent.currentSessionId !== req.user.sessionId) {
           return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
         }
         
         await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
       }
-    }
-
-    // 4. Admin Logic
-    if (['admin', 'superadmin'].includes(decoded.role)) {
+    } else if (['admin', 'superadmin'].includes(req.user.role)) {
       const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
       await AdminModel.updateOne({ _id: req.user.id }, { $set: { lastLogin: new Date() } });
     }
@@ -57,14 +59,4 @@ const token = req.cookies?.token;
     if (err.name === 'TokenExpiredError') return res.status(401).json({ success: false, message: "Token expired" });
     return res.status(403).json({ success: false, message: "Invalid token" });
   }
-};
-
-export const isAdmin = (req, res, next) => {
-  if (req.user?.role === 'admin' || req.user?.role === 'superadmin') return next();
-  return res.status(403).json({ success: false, message: "Admin privileges required." });
-};
-
-export const requireSuperAdmin = (req, res, next) => {
-  if (req.user?.role === 'superadmin') return next();
-  return res.status(403).json({ success: false, message: "Superadmin authorization required." });
 };

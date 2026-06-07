@@ -67,19 +67,20 @@ import { authenticateToken, isAdmin, requireSuperAdmin } from './middlewares/aut
 const app = express();
 
 const corsOptions = {
-  origin: [
-    "https://www.zingconnect.chat", 
-    "https://zingconnect.chat" // Add the non-www version too for safety
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // ADDED OPTIONS
-  credentials: true, 
-  allowedHeaders: [
-    "Content-Type", 
-    "Authorization", 
-    "X-Requested-With", 
-    "Accept", 
-    "Origin"
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g., mobile apps, curl)
+    if (!origin) return callback(null, true);
+    
+    // Check if the origin matches your domain
+    if (origin === "https://www.zingconnect.chat" || origin === "https://zingconnect.chat") {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
   exposedHeaders: ["Set-Cookie"]
 };
 
@@ -1045,13 +1046,12 @@ app.post('/api/users/handshake', async (req, res, next) => {
 
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,
+  secure: true, // Only if you are using HTTPS
   sameSite: 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
-  signed: true // <--- Add this
+  domain: '.zingconnect.chat' // The leading dot is crucial! It enables subdomains (www vs non-www)
 });
-
     // 5. Clean Response (Removed token from JSON body)
    return res.json({ 
   success: true, 
@@ -3954,10 +3954,7 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
     next(err);
   }
 });
-
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
-  await connectToDatabase();
-
   try {
     const userId = req.user?.id;
     const role = req.user?.role;
@@ -3967,16 +3964,21 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     }
     
     let profile = null;
+    let isSubscribed = false; // Default for users
     
-    // Use imported models directly rather than mongoose.models
     if (role === 'agent') {
       profile = await Agent.findById(userId)
         .select('firstName lastName email slug role isSubscribed plan')
-        .lean(); // .lean() is faster for read-only operations
+        .lean();
+      
+      if (profile) isSubscribed = !!profile.isSubscribed;
     } else {
       profile = await User.findById(userId)
         .select('email role isProfileComplete')
         .lean();
+      
+      // Handshake users are never subscribed
+      isSubscribed = false; 
     }
 
     if (!profile) {
@@ -3986,7 +3988,11 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     return res.json({ 
       success: true, 
       role: role,
-      profile: profile 
+      isSubscribed: isSubscribed, // Exposed at the root for easier AuthContext consumption
+      profile: {
+        ...profile,
+        isSubscribed: isSubscribed
+      }
     });
   } catch (err) {
     console.error("Session verification error:", err);
