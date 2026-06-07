@@ -17,18 +17,26 @@ function arrayBufferToBase64(buffer) {
 }
 
 /**
- * 🛠️ CONVERT: Base64 to ArrayBuffer (Safe)
+ * 🛠️ CONVERT: Base64 to ArrayBuffer (Safe & Robust)
  */
 function base64ToArrayBuffer(base64) {
   // 1. Critical Validation
   if (!base64 || typeof base64 !== 'string') {
-    console.error("base64ToArrayBuffer received invalid input:", base64);
+    console.warn("base64ToArrayBuffer: Input is missing or not a string.");
     return new Uint8Array(0).buffer;
   }
 
-  // 2. Cleanup and Decode
   try {
-    const sanitized = base64.replace(/-/g, '+').replace(/_/g, '/');
+    // 2. URL-safe Base64 to Standard Base64
+    // Replace '-' with '+' and '_' with '/'
+    let sanitized = base64.replace(/-/g, '+').replace(/_/g, '/');
+    
+    // Add padding if necessary (atob requires string length to be multiple of 4)
+    while (sanitized.length % 4 !== 0) {
+      sanitized += '=';
+    }
+
+    // 3. Decode
     const binary_string = window.atob(sanitized);
     const len = binary_string.length;
     const bytes = new Uint8Array(len);
@@ -37,10 +45,11 @@ function base64ToArrayBuffer(base64) {
     }
     return bytes.buffer;
   } catch (err) {
-    console.error("Base64 decoding failed:", err);
+    console.error("Base64 decoding failed. Ensure input is valid Base64.", err);
     return new Uint8Array(0).buffer;
   }
 }
+
 /**
  * 🔑 GENERATE KEYPAIR: Generates ECDH keys in memory.
  * Caller (AuthContext) is responsible for storing privateKeyJwk in React State.

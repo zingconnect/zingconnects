@@ -62,12 +62,12 @@ const MessageItem = ({ message, privateKey, senderPublicKey, onDecrypted }) => {
   const [isDecrypting, setIsDecrypting] = useState(false);
 
   useEffect(() => {
-    // Only decrypt if we haven't already (check message.decryptedText)
-    if (message.isEncrypted && message.payload?.ciphertext && !message.decryptedText) {
+    // Check if we have all requirements to decrypt
+    if (message.isEncrypted && message.payload?.ciphertext && !message.decryptedText && privateKey && senderPublicKey) {
       setIsDecrypting(true);
       decryptMessageText(message.payload, senderPublicKey, privateKey)
         .then(text => {
-          onDecrypted(text); // Save to parent state
+          onDecrypted(text);
           setIsDecrypting(false);
         })
         .catch((err) => {
@@ -76,14 +76,13 @@ const MessageItem = ({ message, privateKey, senderPublicKey, onDecrypted }) => {
           setIsDecrypting(false);
         });
     }
-  }, [message, privateKey, senderPublicKey]);
+  }, [message._id, message.decryptedText, privateKey, senderPublicKey]); // Depend on specific IDs/States
 
   if (isDecrypting) return <p className="text-gray-400 italic text-[13px]">Decrypting...</p>;
 
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {/* Show the saved decrypted text, or the original message text */}
-      {message.decryptedText || message.text || (message.isEncrypted ? "..." : "")}
+      {message.decryptedText || message.text || (message.isEncrypted ? "🔒 Encrypted" : "")}
     </p>
   );
 };
@@ -142,6 +141,7 @@ const [isSubscribed, setIsSubscribed] = useState(agentData?.isSubscribed ?? fals
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");  
 
+  const isFetchingRef = useRef(false);
   const activeSessionRef = useRef(null);
 const hasProcessedDeepLink = useRef(false);
   const messagesEndRef = useRef(null);
@@ -915,6 +915,7 @@ useEffect(() => {
     }
   };
 }, [socket, callStatus, isSpeakerOn]);
+
 const unlockAudio = () => {
   setAudioUnlocked(true);
   console.log("Initializing secure audio channels for Agent...");
@@ -1227,10 +1228,12 @@ useEffect(() => {
 }, [agentData?._id, selectedUser?._id, callStatus, socket]);
 
 useEffect(() => {
-  if (selectedUser && !selectedUser.publicKeyJwk) {
-    console.warn("CRITICAL: Selected user has no public key!");
+  if (selectedUser && agentData && agentPrivateKey) { 
+    fetchMessages(selectedUser._id, 30, selectedUser).then(msgs => {
+      if (msgs) setMessages(msgs);
+    });
   }
-}, [selectedUser]);
+}, [selectedUser?._id, agentPrivateKey]); 
 
 useEffect(() => {
   const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
@@ -1849,6 +1852,7 @@ useEffect(() => {
     }
   }
 }, [messages, isInitialLoad]);
+
 useEffect(() => {
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
 
@@ -1881,55 +1885,59 @@ useEffect(() => {
   const interval = setInterval(refreshUserList, 15000);
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
-
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
   const refreshMessages = async () => {
-    if (document.visibilityState !== 'visible' || isFetching) return;
-    isFetching = true;
+    // 2. Check the ref
+    if (document.visibilityState !== 'visible' || isFetchingRef.current) return;
+    
+    // 3. Set the ref
+    isFetchingRef.current = true;
 
-    const incomingMsgs = await fetchMessages(selectedUser._id, limit);
-    if (!incomingMsgs || incomingMsgs.length === 0) {
-      isFetching = false;
-      return;
+    try {
+      const incomingMsgs = await fetchMessages(selectedUser._id, limit);
+      if (!incomingMsgs || incomingMsgs.length === 0) return;
+
+      const currentKey = agentPrivateKeyRef.current;
+      const currentUser = selectedUserRef.current;
+
+      const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
+        if (msg.isEncrypted && msg.payload && currentUser?.publicKeyJwk && currentKey) {
+          try {
+            const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
+            return { ...msg, text: decrypted, isEncrypted: false };
+          } catch (err) {
+            return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
+          }
+        }
+        return msg;
+      }));
+
+      setMessages(prev => {
+        const isNew = processedMsgs.length !== prev.length || 
+                      processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
+        if (isNew) {
+          const latest = processedMsgs[processedMsgs.length - 1];
+          if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
+            lastNotifiedId.current = latest._id;
+            notificationSound.current?.play().catch(() => {});
+          }
+          return processedMsgs;
+        }
+        return prev;
+      });
+    } catch (err) {
+      console.error("Refresh failed:", err);
+    } finally {
+      // 4. Always reset the ref in finally block
+      isFetchingRef.current = false;
     }
-
-    const currentKey = agentPrivateKeyRef.current;
-    const currentUser = selectedUserRef.current;
-
-    const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
-      if (msg.isEncrypted && msg.payload && currentUser?.publicKeyJwk && currentKey) {
-        try {
-          const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
-          return { ...msg, text: decrypted, isEncrypted: false };
-        } catch (err) {
-          return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
-        }
-      }
-      return msg;
-    }));
-
-    setMessages(prev => {
-      const isNew = processedMsgs.length !== prev.length || 
-                    processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
-      if (isNew) {
-        const latest = processedMsgs[processedMsgs.length - 1];
-        if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
-          lastNotifiedId.current = latest._id;
-          notificationSound.current?.play().catch(() => {});
-        }
-        return processedMsgs;
-      }
-      return prev;
-    });
-    isFetching = false;
   };
 
   const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
 }, [selectedUser?._id, callStatus, limit, privateKey]);
-
 
 useEffect(() => {
   const setupNotifications = async () => {
@@ -2469,11 +2477,11 @@ const handleSendMessage = async (e) => {
               
 { (m.text || m.isEncrypted) && (
   <MessageItem 
+  key={m._id} 
   message={m} 
-  privateKey={privateKey} 
+  privateKey={agentPrivateKeyRef.current}
   senderPublicKey={selectedUser?.publicKeyJwk}
   onDecrypted={(text) => {
-    // This updates the message object in your main dashboard state array
     setMessages(prev => prev.map(msg => 
       msg._id === m._id ? { ...msg, decryptedText: text } : msg
     ));
