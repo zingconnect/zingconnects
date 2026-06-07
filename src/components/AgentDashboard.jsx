@@ -57,6 +57,7 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 const socket = io(import.meta.env.VITE_API_URL);
+
 const MessageItem = ({ message, privateKey, senderPublicKey, onDecrypted }) => {
   const [isDecrypting, setIsDecrypting] = useState(false);
 
@@ -1172,14 +1173,10 @@ useEffect(() => {
     if (document.visibilityState === 'visible') {
       console.log("📱 ZingConnect: App returned to foreground.");
       
-      if (callStatus !== 'idle') {
-        return; 
-      }
+      if (callStatus !== 'idle') return; 
 
       if (socket) {
-        if (agentData?._id) {
-          socket.emit("join-main-room", agentData._id.toString());
-        }
+        if (agentData?._id) socket.emit("join-main-room", agentData._id.toString());
         if (!socket.connected) socket.connect();
       }
 
@@ -1193,26 +1190,30 @@ useEffect(() => {
           const data = await response.json();
           
           if (data.success && data.messages) {
-            const decryptedMessages = await Promise.all(
+            // Map over fresh data and merge with potential existing decryption status
+            const updatedMessages = await Promise.all(
               data.messages.map(async (msg) => {
-                if (msg.isEncrypted && selectedUser?.publicKeyJwk) {
+                // If it's encrypted and we have the keys, attempt decryption
+                if (msg.isEncrypted && msg.payload?.ciphertext && selectedUser?.publicKeyJwk) {
                   try {
                     const clearText = await decryptMessageText(
-                      msg.text,
-                      msg.iv,
-                      selectedUser.publicKeyJwk,
-                      agentData._id,
+                      msg.payload, 
+                      selectedUser.publicKeyJwk, 
                       agentPrivateKeyRef.current
                     );
-                    return { ...msg, text: clearText };
+                    return { ...msg, decryptedText: clearText };
                   } catch (e) {
-                    return { ...msg, text: "🔒 [Decryption Failed]" };
+                    console.error("Sync Decryption Error:", e);
+                    return { ...msg, decryptedText: "🔒 [Decryption Failed]" };
                   }
                 }
+                // Return as-is if not encrypted or already handled
                 return msg;
               })
             );
-            setMessages(decryptedMessages);
+            
+            // Set the state with the newly fetched and processed messages
+            setMessages(updatedMessages);
           }
         } catch (err) {
           console.warn("Message catch-up failed:", err);
@@ -1226,20 +1227,22 @@ useEffect(() => {
 }, [agentData?._id, selectedUser?._id, callStatus, socket]);
 
 useEffect(() => {
-  const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
+  if (selectedUser && !selectedUser.publicKeyJwk) {
+    console.warn("CRITICAL: Selected user has no public key!");
+  }
+}, [selectedUser]);
 
+useEffect(() => {
+  const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
   if (!currentCallId || typeof currentCallId !== 'string' || callStatus === 'idle' || isDualLoginConflict) {
     return;
   }
-
   const syncStatus = async () => {
-    if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return;
-    
+    if (!['calling', 'ringing', 'connecting', 'connected'].includes(callStatus)) return; 
     try {
       const res = await secureFetch(`/api/calls/status/${currentCallId}`, {
         method: 'GET'
       });
-      
       if (res.status === 401 || res.status === 403) {
         setIsDualLoginConflict(true);
         return;
