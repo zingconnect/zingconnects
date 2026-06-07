@@ -131,6 +131,7 @@ useEffect(() => {
 React.useEffect(() => {
   return () => { isMounted.current = false; };
 }, []);
+
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -153,9 +154,7 @@ const handleUserInquiry = async (e) => {
     const data = await response.json();
 
     if (response.ok) {
-      // 1. Await the async login function. 
-      // This ensures AuthContext has finished verifying the cookie
-      // before we force the browser to change pages.
+     
       if (typeof login === 'function') {
         await login(slug); 
       }

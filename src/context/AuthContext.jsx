@@ -10,6 +10,7 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
   const [privateKey, setPrivateKey] = useState(null);
+  const [isHandshaking, setIsHandshaking] = useState(false); // Add this
 
   useEffect(() => {
     verifySession();
@@ -29,15 +30,21 @@ export const AuthProvider = ({ children }) => {
   }
 }, []);
 
+const login = async (slug) => {
+    setIsHandshaking(true); // Signal that we are in the middle of a process
+    await verifySession();
+    setIsHandshaking(false);
+  };
+
   const verifySession = async () => {
     setIsLoading(true);
     try {
       const response = await secureFetch('/api/auth/me'); 
       if (response.ok) {
         const data = await response.json();
+        console.log("Setting Auth to True"); // <--- IS THIS LOGGING?
         setIsAuthenticated(true);
         setUserRole(data.role);
-        // Trigger key initialization once authenticated
         await initializeCrypto();
       } else {
         setIsAuthenticated(false);
@@ -56,9 +63,11 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider value={{ 
       isAuthenticated, 
       userRole, 
+      login,
       isLoading,
       isCryptoReady, // <--- MUST BE ADDED HERE
       privateKey, // Expose key to components
+      isHandshaking, // <--- MUST BE ADDED HERE
       verifySession 
     }}>
       {children}
