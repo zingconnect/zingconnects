@@ -404,8 +404,8 @@ const addDays = (date, days) => {
 
 const isBase64 = (str) => {
   if (!str) return false;
-  // Regex validates standard Base64 structure
-  return /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/.test(str);
+  const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
+  return base64Regex.test(str);
 };
 
 // ==========================================
@@ -415,9 +415,6 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-
-    // With upload.single('photo') here, req.body is already populated 
-    // by multer, and the multipart stream is consumed.
     const { 
       firstName, 
       lastName, 
@@ -841,7 +838,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
 
     const AgentModel = getAgentModel();
     const agent = await AgentModel.findById(req.user.id)
-      .select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive lastActive createdAt');
+      .select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive publicKeyJwk lastActive createdAt');
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -913,6 +910,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
       expiryDate: agent.expiryDate || null,
       voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
       voicePackageActive: !!agent.voicePackageActive, 
+      publicKeyJwk: agent.publicKeyJwk || null, // ADD THIS
       status: isOnline ? 'online' : 'offline',
       lastActive: agent.lastActive,
       paymentDetails: {
@@ -2152,9 +2150,10 @@ if (isEncrypted) {
   if (!iv || typeof iv !== 'string' || !isBase64(iv)) {
     return res.status(400).json({ success: false, message: "Security violation: Invalid IV format." });
   }
-  if (iv.length !== 16) {
-    return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
-  }
+  // Change this in your backend index.js
+if (iv.length !== 12) { // AES-GCM standard IV is 12 bytes
+  return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
+}
   if (!isBase64(text)) {
     return res.status(400).json({ success: false, message: "Security violation: Invalid ciphertext format." });
   }
@@ -3975,16 +3974,15 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     
     let profile = null;
     
-    // Use imported models directly rather than mongoose.models
-    if (role === 'agent') {
-      profile = await Agent.findById(userId)
-        .select('firstName lastName email slug role isSubscribed plan')
-        .lean(); // .lean() is faster for read-only operations
-    } else {
-      profile = await User.findById(userId)
-        .select('email role isProfileComplete')
-        .lean();
-    }
+   if (role === 'agent') {
+  profile = await Agent.findById(userId)
+    .select('firstName lastName email slug role isSubscribed plan publicKeyJwk') // ADD publicKeyJwk
+    .lean();
+} else {
+  profile = await User.findById(userId)
+    .select('email role isProfileComplete publicKeyJwk') // ADD publicKeyJwk
+    .lean();
+}
 
     if (!profile) {
       return res.status(404).json({ success: false, message: "User/Agent not found" });

@@ -453,7 +453,7 @@ router.get('/profile/me', authenticateToken, async (req, res, next) => {
       req.user.id,
       { $set: { lastActive: new Date() } },
       { new: true }
-    ).select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive lastActive createdAt');
+    ).select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive publicKeyJwk lastActive createdAt');
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -509,6 +509,7 @@ router.get('/profile/me', authenticateToken, async (req, res, next) => {
       expiryDate: agent.expiryDate || null,
       voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
       voicePackageActive: !!agent.voicePackageActive,
+      publicKeyJwk: agent.publicKeyJwk || null, // ADD THIS
       status: isOnline ? 'online' : 'offline',
       lastActive: agent.lastActive,
       paymentDetails: {
