@@ -640,43 +640,45 @@ sameSite: 'Lax',
     next(err); 
   }
 });
-
-// =========================================================================
-// 🔒 UNIFIED CRYPTO REGISTRATION PATHWAY (Universal Route for Agents & Users)
-// =========================================================================
 app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     
-    const { publicKeyJwk } = req.body;
-    if (!publicKeyJwk) {
-      return res.status(400).json({ success: false, message: "Public key payload required." });
+    let { publicKeyJwk } = req.body;
+    
+    // 1. Force structural validation
+    // If it's a string, try to parse it once here.
+    if (typeof publicKeyJwk === 'string') {
+      try {
+        publicKeyJwk = JSON.parse(publicKeyJwk);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid JSON format for public key." });
+      }
+    }
+
+    // 2. Minimal JWK Schema Check
+    if (!publicKeyJwk || typeof publicKeyJwk !== 'object' || !publicKeyJwk.kty) {
+      return res.status(400).json({ success: false, message: "Invalid JWK structure. Missing 'kty'." });
     }
 
     const userId = req.user.id;
-    
-    // ⚡ DYNAMIC ROUTING: Automatically resolves collection without messy URL prefixes
-    const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-    const UserModel = mongoose.models.User || mongoose.model('User');
+    const AgentModel = mongoose.models.Agent;
+    const UserModel = mongoose.models.User;
     const targetModel = req.user.role === 'agent' ? AgentModel : UserModel;
-    console.log(`🔒 Registering public key for ${req.user.role} with ID: ${userId}`);
+
     const updatedProfile = await targetModel.findByIdAndUpdate(
       userId,
-      { $set: { publicKeyJwk } },
-      { returnDocument: 'after' } // Keeps console clear of Mongoose deprecation warnings
+      { $set: { publicKeyJwk } }, // Store as native Object
+      { new: true }
     );
 
     if (!updatedProfile) {
-      return res.status(404).json({ success: false, message: "Profile matching identity token not found." });
+      return res.status(404).json({ success: false, message: "Profile not found." });
     }
 
-    return res.status(200).json({ 
-      success: true, 
-      message: `End-to-End Encryption active for ${req.user.role}.` 
-    });
+    return res.status(200).json({ success: true, message: "Public key registered." });
 
   } catch (err) {
-    console.error("❌ Cryptographic handoff failed:", err);
     next(err);
   }
 });
@@ -2117,7 +2119,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
 });
 
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
-  const myId = req.user.id;
+ const myId = req.user.id;
 
   try {
     await connectToDatabase();
@@ -2133,32 +2135,37 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     
-   const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
+    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
 
-// 2. Structural Validation
-if (!text || typeof text !== 'string' || !text.trim()) {
-  return res.status(400).json({ success: false, message: "Message text cannot be blank." });
-}
-if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
-  return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
-}
-const sanitizedModel = String(receiverModel || '').trim();
-if (!['Agent', 'User'].includes(sanitizedModel)) {
-  return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
-}
-if (isEncrypted) {
-  if (!iv || typeof iv !== 'string' || !isBase64(iv)) {
-    return res.status(400).json({ success: false, message: "Security violation: Invalid IV format." });
-  }
-  // Change this in your backend index.js
-if (iv.length !== 12) { // AES-GCM standard IV is 12 bytes
-  return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
-}
-  if (!isBase64(text)) {
-    return res.status(400).json({ success: false, message: "Security violation: Invalid ciphertext format." });
-  }
-}
-    // Save crypto parameters safely inside MongoDB
+    // 1. Structural Validation
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ success: false, message: "Message text cannot be blank." });
+    }
+    if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
+      return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
+    }
+    const sanitizedModel = String(receiverModel || '').trim();
+    if (!['Agent', 'User'].includes(sanitizedModel)) {
+      return res.status(400).json({ success: false, message: "Unsupported receiver routing model." });
+    }
+
+    // 2. Cryptographic Validation
+    if (isEncrypted) {
+      if (!iv || typeof iv !== 'string') {
+        return res.status(400).json({ success: false, message: "Security violation: IV is required." });
+      }
+      
+      // CORRECTED: Decode Base64 to verify actual byte length (12 bytes for AES-GCM)
+      const ivBuffer = Buffer.from(iv, 'base64');
+      if (ivBuffer.length !== 12) {
+        return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
+      }
+      
+      if (!isBase64(text)) {
+        return res.status(400).json({ success: false, message: "Security violation: Invalid ciphertext format." });
+      }
+    }
+  // 3. Save Message
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
@@ -2183,7 +2190,7 @@ if (iv.length !== 12) { // AES-GCM standard IV is 12 bytes
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // 1. ⚡ Socket emission (Fault-Tolerant)
+  // 4. Socket Emission
     try {
       const io = req.app.get('socketio');
       if (io) {
@@ -2202,7 +2209,7 @@ if (iv.length !== 12) { // AES-GCM standard IV is 12 bytes
         });
       }
     } catch (socketErr) {
-      console.error("⚠️ Socket emission warning (non-fatal):", socketErr.message);
+      console.error("⚠️ Socket emission warning:", socketErr.message);
     }
 
     // 2. 🛡️ Privacy-Preserving Push Notifications

@@ -327,58 +327,37 @@ const handleStartCall = async (targetUserId) => {
     }, 500);
   }
 };
-
 const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
-  if (isFetching || isDualLoginConflict) return null; 
-  
+  if (isFetching || isDualLoginConflict) return null;
   isFetching = true;
-  
   try {
-    // UPDATED: Removed token argument. secureFetch handles cookie-based auth.
-    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, {
-      method: 'GET'
-    });
-    
+    const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, { method: 'GET' });
     if (res.status === 403 || res.status === 401) {
-      console.error("⛔ Authentication session invalid. Aborting further fetches.");
       setIsDualLoginConflict(true);
       return null;
     }
-
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    
+    if (!res.ok) throw new Error(`HTTP error! ${res.status}`);
     const data = await res.json();
-    
     if (data.success && data.messages) {
-      const decryptedMessages = await Promise.all(
-        data.messages.map(async (msg) => {
-          // Use agentPrivateKeyRef instead of localStorage for better security
-          const myKey = agentPrivateKeyRef.current;
-          
-          if (msg.isEncrypted && targetUserCryptoProfile?.publicKeyJwk && myKey) {
-            try {
-              const clearText = await decryptMessageText(
-                msg.text,
-                msg.iv,
-                targetUserCryptoProfile.publicKeyJwk,
-                myKey // Pass the private key directly from the ref
-              );
-              return { ...msg, text: clearText };
-            } catch (decryptionError) {
-              return { ...msg, text: "🔒 [Decryption Failed]" };
-            }
+      return await Promise.all(data.messages.map(async (msg) => {
+        const myKey = agentPrivateKeyRef.current;
+        if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
+          try {
+            const clearText = await decryptMessageText(msg.payload, targetUserCryptoProfile.publicKeyJwk, myKey);
+            return { ...msg, text: clearText, isEncrypted: false };
+          } catch (e) {
+            return { ...msg, text: "🔒 [Decryption Failed]" };
           }
-          return msg; 
-        })
-      );
-      return decryptedMessages;
+        }
+        return msg;
+      }));
     }
     return null;
   } catch (err) {
     console.error("Fetch error:", err);
     return null;
   } finally {
-    isFetching = false; 
+    isFetching = false;
   }
 };
 
@@ -1755,7 +1734,6 @@ const handleDisconnect = async (e) => {
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
 
-  // 1. Generate a unique session ID for this specific chat click
   const sessionId = Math.random().toString(36).substring(7);
   activeSessionRef.current = sessionId;
 
@@ -1767,83 +1745,44 @@ const handleSelectUser = async (user) => {
   if (socket) socket.emit('join-chat', user._id);
 
   try {
-    const response = await secureFetch(`/api/messages/${user._id}?limit=30`, {
-      method: 'GET'
-    });
+    const response = await secureFetch(`/api/messages/${user._id}?limit=30`, { method: 'GET' });
+    if (!response.ok) throw new Error("Failed to fetch messages");
 
-    if (response.ok) {
-      setConnectionStatus('connected');
-      const data = await response.json();
-      const freshUserData = data.user || data.clientDetails;
+    const data = await response.json();
+    const freshUserData = data.user || data.clientDetails;
 
-      if (freshUserData) {
-        let validatedKey = freshUserData.publicKeyJwk;
-        if (typeof validatedKey === 'string') {
-          try {
-            validatedKey = JSON.parse(validatedKey);
-          } catch (e) {
-            console.error("Critical: Received malformed JWK string from server!");
-            validatedKey = null;
-          }
-        }
-
-        setSelectedUser(prev => {
-          const merged = { ...prev, ...freshUserData, publicKeyJwk: validatedKey };
-          if (!merged.publicKeyJwk && prev?.publicKeyJwk) {
-            merged.publicKeyJwk = prev.publicKeyJwk;
-          }
-          return merged;
-        });
-      }
-
-      if (data.success && Array.isArray(data.messages)) {
-        // --- OPTIMISTIC UI RENDER ---
-        // Set raw messages immediately to stop the "Loading" state
-        setMessages(data.messages);
-        setIsInitialLoad(false); 
-
-        // --- BACKGROUND DECRYPTION WITH SESSION GUARD ---
-        (async () => {
-          const targetUser = freshUserData || user;
-          const currentKey = agentPrivateKeyRef.current;
-
-          const decryptedHistory = await Promise.all(
-            data.messages.map(async (msg) => {
-              // Always pull the freshest refs inside the loop
-              const activeKey = selectedUserRef.current?.publicKeyJwk || targetUser?.publicKeyJwk;
-              const privKey = agentPrivateKeyRef.current;
-
-              if (msg.isEncrypted && activeKey && privKey) {
-                try {
-                  const decryptedText = await decryptMessageText(
-                    msg.text,
-                    msg.iv,
-                    activeKey,
-                    privKey
-                  );
-                  return { ...msg, text: decryptedText, isEncrypted: false };
-                } catch (e) {
-                  console.error("Decryption failed for msg:", msg._id, e);
-                  return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
-                }
-              }
-              return msg;
-            })
-          );
-          
-          // Only update the UI if this session is still the active one
-          if (activeSessionRef.current === sessionId) {
-            setMessages(decryptedHistory);
-          } else {
-            console.warn("Stale decryption task discarded.");
-          }
-        })();
-      }
-
-      await secureFetch(`/api/messages/mark-read/${user._id}`, {
-        method: 'PATCH'
-      });
+    if (freshUserData) {
+      setSelectedUser(prev => ({ ...prev, ...freshUserData }));
     }
+
+    if (data.success && Array.isArray(data.messages)) {
+      setMessages(data.messages);
+      setIsInitialLoad(false);
+
+      (async () => {
+        const targetUser = freshUserData || user;
+        const decryptedHistory = await Promise.all(data.messages.map(async (msg) => {
+          const activeKey = selectedUserRef.current?.publicKeyJwk || targetUser?.publicKeyJwk;
+          const privKey = agentPrivateKeyRef.current;
+
+          // Check for payload structure instead of msg.text/msg.iv
+          if (msg.isEncrypted && msg.payload && activeKey && privKey) {
+            try {
+              const decryptedText = await decryptMessageText(msg.payload, activeKey, privKey);
+              return { ...msg, text: decryptedText, isEncrypted: false };
+            } catch (e) {
+              return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
+            }
+          }
+          return msg;
+        }));
+
+        if (activeSessionRef.current === sessionId) {
+          setMessages(decryptedHistory);
+        }
+      })();
+    }
+    await secureFetch(`/api/messages/mark-read/${user._id}`, { method: 'PATCH' });
   } catch (err) {
     setConnectionStatus('connecting');
     console.error("Failed to load chat history:", err);
@@ -1851,19 +1790,15 @@ const handleSelectUser = async (user) => {
 };
 
 useEffect(() => {
-  // Exit if already processed or data isn't ready
   if (hasProcessedDeepLink.current || users.length === 0) return;
-
   const params = new URLSearchParams(window.location.search);
   const userIdFromUrl = params.get('userId');
-  
   if (userIdFromUrl) {
     const userToSelect = users.find(u => u._id === userIdFromUrl);
-    
     if (userToSelect) {
       handleSelectUser(userToSelect);
       hasProcessedDeepLink.current = true;
-            navigate('/agent/dashboard', { replace: true });
+      navigate('/agent/dashboard', { replace: true });
     }
   }
 }, [users, navigate]);
@@ -1883,84 +1818,72 @@ useEffect(() => {
       const timeoutId = setTimeout(() => {
         container.scrollTop = container.scrollHeight;
         setIsInitialLoad(false); 
-      }, 150); // 150ms is the "sweet spot" for mobile layout stability
-
+      }, 150);
       return () => clearTimeout(timeoutId);
     });
   } else {
-    const threshold = 150;
-    const isNearBottom = 
-      container.scrollHeight - container.scrollTop <= container.clientHeight + threshold;
-
+    // Check if we are at the bottom BEFORE the new message is fully rendered
+    const isNearBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 250;
     if (isNearBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }
 }, [messages, isInitialLoad]);
-
 useEffect(() => {
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
 
   const refreshUserList = async () => {
     try {
       const res = await secureFetch('/api/agents/my-users', { method: 'GET' });
-
       if (res.status === 401 || res.status === 403) {
         setIsDualLoginConflict(true);
         return;
       }
-
       if (!res.ok) return;
 
       const data = await res.json();
-      
       if (data.success && data.users) {
-        setUsers(prevUsers => {
-          return data.users.map(newUser => {
-            const existingUser = prevUsers.find(u => u._id === newUser._id);
-            return (existingUser && !newUser.publicKeyJwk && existingUser.publicKeyJwk)
-              ? { ...newUser, publicKeyJwk: existingUser.publicKeyJwk }
-              : newUser;
-          });
-        });
+        setUsers(prevUsers => data.users.map(newUser => {
+          const existing = prevUsers.find(u => u._id === newUser._id);
+          // Preserve existing public key if incoming one is missing/null
+          if (existing?.publicKeyJwk && !newUser.publicKeyJwk) {
+            return { ...newUser, publicKeyJwk: existing.publicKeyJwk };
+          }
+          return newUser;
+        }));
       }
     } catch (err) { 
-      console.warn("Network error during user list refresh:", err); 
+      console.warn("User list refresh error:", err); 
     }
   };
 
   refreshUserList();
-
   const interval = setInterval(refreshUserList, 15000);
-
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
+
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
   const refreshMessages = async () => {
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible' || isFetching) return;
+    isFetching = true;
 
     const incomingMsgs = await fetchMessages(selectedUser._id, limit);
-    if (!incomingMsgs || incomingMsgs.length === 0) return;
+    if (!incomingMsgs || incomingMsgs.length === 0) {
+      isFetching = false;
+      return;
+    }
 
-    // Use the Ref here to guarantee we have the latest key
     const currentKey = agentPrivateKeyRef.current;
     const currentUser = selectedUserRef.current;
 
     const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
-      // Gatekeeper: Check for valid keys before attempting crypto
-      if (msg.isEncrypted && currentUser?.publicKeyJwk && currentKey) {
+      if (msg.isEncrypted && msg.payload && currentUser?.publicKeyJwk && currentKey) {
         try {
-          const decrypted = await decryptMessageText(
-            msg.text, 
-            msg.iv, 
-            currentUser.publicKeyJwk, 
-            currentKey
-          );
+          const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
           return { ...msg, text: decrypted, isEncrypted: false };
         } catch (err) {
-          console.error("Batch decryption failed:", err);
           return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
         }
       }
@@ -1970,7 +1893,6 @@ useEffect(() => {
     setMessages(prev => {
       const isNew = processedMsgs.length !== prev.length || 
                     processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
-      
       if (isNew) {
         const latest = processedMsgs[processedMsgs.length - 1];
         if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
@@ -1981,6 +1903,7 @@ useEffect(() => {
       }
       return prev;
     });
+    isFetching = false;
   };
 
   const interval = setInterval(refreshMessages, 5000);
@@ -2054,35 +1977,30 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
+
 useEffect(() => {
   if (!socket) return;
-  if ("Notification" in window && Notification.permission === "default") {
-    Notification.requestPermission();
-  }
-const handleIncomingMessage = async (data, callback) => {
-    if (callback) callback({ status: 'received' });
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
 
-    console.log("📥 Real-time Socket Message Detected:", data);
+  const handleIncomingMessage = async (data, callback) => {
+    if (callback) callback({ status: 'received' });
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
     const currentUser = selectedUserRef.current;
     const currentKey = agentPrivateKeyRef.current;
-
     let processedData = { ...data };
 
-    // --- PRE-DECRYPTION BLOCK ---
-    if (processedData.isEncrypted) {
+    // --- PRE-DECRYPTION BLOCK: PAYLOAD SCHEMA COMPLIANT ---
+    if (processedData.isEncrypted && processedData.payload) {
       if (currentUser?.publicKeyJwk && currentKey) {
         try {
           processedData.text = await decryptMessageText(
-            processedData.text,
-            processedData.iv,
+            processedData.payload,
             currentUser.publicKeyJwk,
             currentKey
           );
-          // Flag as false so the UI knows this is now plain text
-          processedData.isEncrypted = false; 
+          processedData.isEncrypted = false;
         } catch (err) {
           console.error("🔒 Socket decryption error:", err);
           processedData.text = "🔒 [Decryption Failed]";
@@ -2093,46 +2011,23 @@ const handleIncomingMessage = async (data, callback) => {
       }
     }
 
-    // Update the message state
     const isChattingWithSender = currentUser && 
       (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
     
     if (isChattingWithSender) {
-      setMessages((prev) => {
-        if (prev.some(m => m._id === processedData._id)) return prev;
-        return [...prev, processedData];
-      });
-      
-      secureFetch(`/api/messages/mark-read/${currentUser._id}`, {
-        method: 'PATCH'
-      }).catch(err => console.error("Mark read error:", err));
+      setMessages(prev => prev.some(m => m._id === processedData._id) ? prev : [...prev, processedData]);
+      secureFetch(`/api/messages/mark-read/${currentUser._id}`, { method: 'PATCH' }).catch(() => {});
     }
 
-    // Handle Notifications
     if (processedData.senderModel === 'User') {
-      if (notificationSound.current) {
-        notificationSound.current.currentTime = 0;
-        notificationSound.current.play().catch((err) => 
-          console.warn("🔊 Notification audio context autoplay restricted:", err.message)
-        );
-      }
-      
+      notificationSound.current?.play().catch(() => {});
       if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
 
-      const shouldShowPopup = document.visibilityState !== 'visible' || !isChattingWithSender;
-      if (Notification.permission === "granted" && shouldShowPopup) {
-        // Use processedData.text directly since it is now plain text
-        const notificationBody = processedData.isEncrypted 
-          ? "You received a new message." 
-          : (processedData.text || "Sent a file");
-
-        const popup = new Notification(`Message from ${processedData.senderName || 'Client'}`, {
-          body: notificationBody,
-          icon: processedData.senderPhoto || '/favicon.ico',
-          tag: 'zing-msg',
-          renotify: true
+      if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !isChattingWithSender)) {
+        new Notification(`New Message from ${processedData.senderName || 'Client'}`, {
+          body: processedData.text || "New encrypted message",
+          icon: '/favicon.ico'
         });
-        popup.onclick = () => { window.focus(); popup.close(); };
       }
     }
   };
@@ -2164,13 +2059,13 @@ const handleResend = async (failedMsg) => {
 const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!selectedUser || !newMessage.trim() || isUploading) return;
+  
   let activeUser = selectedUser;
+  // 1. Silent Key Sync
   if (!activeUser.publicKeyJwk) {
-    console.warn("Key missing in state. Attempting silent sync...");
     try {
       const res = await secureFetch(`/api/users/profile/${activeUser._id}`, { method: 'GET' });
       const data = await res.json();
-
       if (data.user?.publicKeyJwk) {
         activeUser = { ...activeUser, ...data.user };
         setSelectedUser(activeUser);
@@ -2178,14 +2073,16 @@ const handleSendMessage = async (e) => {
         throw new Error("Could not recover secure key.");
       }
     } catch (err) {
-      console.error("Recovery failed:", err);
       alert("Secure channel is unavailable. User must initialize their session.");
       return;
     }
   }
+
   const textToSend = newMessage;
   const tempId = Date.now().toString();
   setNewMessage('');
+
+  // 2. Optimistic UI
   const optimisticMsg = {
     _id: tempId,
     tempId: tempId,
@@ -2198,71 +2095,56 @@ const handleSendMessage = async (e) => {
     createdAt: new Date().toISOString(),
     fileType: 'text'
   };
-
   setMessages(prev => [...prev, optimisticMsg]);
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-      if (!privateKey) {
-        throw new Error("Session identity not found. Please refresh the page to re-initialize security.");
-      }
+    if (!privateKey) throw new Error("Session identity missing.");
+    if (!activeUser.publicKeyJwk) throw new Error("Recipient key missing.");
 
-      if (!activeUser.publicKeyJwk) {
-        throw new Error("Recipient encryption key missing.");
-      }
-      const encryptedData = await encryptMessageText(
-        textToSend,
-        activeUser.publicKeyJwk,
-        privateKey
-      );
+    // 3. Encrypt using payload structure
+    const encrypted = await encryptMessageText(textToSend, activeUser.publicKeyJwk, privateKey);
+    if (!encrypted.isEncrypted || !encrypted.payload) {
+      throw new Error("Encryption failed.");
+    }
 
-      if (!encryptedData.isEncrypted || !encryptedData.cipherText) {
-        throw new Error("Encryption failed: Payload remains insecure.");
-      }
-
-    // C: Send to server
+    // 4. Send to server
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: activeUser._id,
         receiverModel: activeUser.modelType || 'User',
-        text: encryptedData.cipherText,
-        iv: encryptedData.iv,
+        ciphertext: encrypted.payload.ciphertext,
+        iv: encrypted.payload.iv,
         isEncrypted: true,
         fileType: 'text'
       })
     });
-const data = await response.json();
- 
-if (data.success) {
-  if (selectedUser._id !== activeUser._id) return;
-  const finalizedMessage = { ...data.message };
-    if (finalizedMessage.isEncrypted) {
-    try {
-      finalizedMessage.text = await decryptMessageText(
-        finalizedMessage.text,
-        finalizedMessage.iv,
-        activeUser.publicKeyJwk,
-        privateKey
-      );
-      finalizedMessage.isEncrypted = false; // Mark as plain text for UI
-    } catch (e) {
-      finalizedMessage.text = "🔒 [Decryption Failed]";
-      finalizedMessage.isEncrypted = false;
-    }
-  }
 
-  setMessages(prev => 
-    prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
-  );
-} else {
-      throw new Error(data.message || "Transmission rejected by server.");
+    const data = await response.json();
+    if (data.success) {
+      if (selectedUser._id !== activeUser._id) return;
+      const finalizedMessage = { ...data.message };
+      
+      // 5. Decrypt using payload structure
+      if (finalizedMessage.isEncrypted && finalizedMessage.payload) {
+        try {
+          finalizedMessage.text = await decryptMessageText(
+            finalizedMessage.payload,
+            activeUser.publicKeyJwk,
+            privateKey
+          );
+          finalizedMessage.isEncrypted = false;
+        } catch (e) {
+          finalizedMessage.text = "🔒 [Decryption Failed]";
+        }
+      }
+      setMessages(prev => prev.map(msg => msg._id === tempId ? finalizedMessage : msg));
+    } else {
+      throw new Error(data.message || "Transmission rejected.");
     }
   } catch (err) {
-    console.error("Agent transmission crypto block exception:", err);
-    setMessages(prev => 
-      prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg)
-    );
+    setMessages(prev => prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg));
     alert("Security Error: " + err.message);
   }
 };

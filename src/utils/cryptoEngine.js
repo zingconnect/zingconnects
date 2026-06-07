@@ -42,9 +42,8 @@ export const generateE2EEKeyPair = async () => {
     return null;
   }
 };
-
 /**
- * 🔒 ENCRYPT: Uses recipient public key and OWN private key (passed from memory).
+ * 🔒 ENCRYPT: Returns a structured payload object for the database.
  */
 export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPrivateKeyJwk) => {
   try {
@@ -68,51 +67,47 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPri
     );
 
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encodedText = new TextEncoder().encode(clearText);
-
     const encryptedBuffer = await window.crypto.subtle.encrypt(
       { name: "AES-GCM", iv: iv },
       sharedSecretKey,
-      encodedText
+      new TextEncoder().encode(clearText)
     );
 
     return {
-      cipherText: arrayBufferToBase64(encryptedBuffer),
-      iv: arrayBufferToBase64(iv),
+      payload: {
+        ciphertext: arrayBufferToBase64(encryptedBuffer),
+        iv: arrayBufferToBase64(iv),
+        version: 1
+      },
       isEncrypted: true
     };
   } catch (e) {
     console.error("Encryption runtime failure:", e);
-    return { cipherText: clearText, iv: null, isEncrypted: false };
+    return { text: clearText, isEncrypted: false };
   }
 };
 
-export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myPrivateKeyJwk) => {
+/**
+ * 🔑 DECRYPT: Accepts the database 'payload' object.
+ */
+export const decryptMessageText = async (payload, senderPublicKeyJwk, myPrivateKeyJwk) => {
   try {
-    // 1. Sanitize JWK: Ensure we are only passing standard JWK properties
+    // 1. Destructure payload
+    const { ciphertext, iv: ivBase64 } = payload;
+    
+    // 2. Validate IV
+    const iv = base64ToArrayBuffer(ivBase64);
+    if (iv.byteLength !== 12) throw new Error("Invalid IV length");
+
+    // 3. Sanitize keys
     const sanitize = (jwk) => ({
-      kty: jwk.kty,
-      crv: jwk.crv,
-      x: jwk.x,
-      y: jwk.y,
-      d: jwk.d,
-      ext: true
+      kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d, ext: true
     });
 
-    // Ensure we are working with objects, not strings
     const privKeyObj = typeof myPrivateKeyJwk === 'string' ? JSON.parse(myPrivateKeyJwk) : myPrivateKeyJwk;
     const pubKeyObj = typeof senderPublicKeyJwk === 'string' ? JSON.parse(senderPublicKeyJwk) : senderPublicKeyJwk;
 
-    // 2. Validate IV and Data
-    const iv = base64ToArrayBuffer(ivBase64);
-    const data = base64ToArrayBuffer(cipherTextBase64);
-
-    if (iv.byteLength !== 12) {
-      console.warn("IV length mismatch. Expected 12, got:", iv.byteLength);
-      return "🔒 [Decryption Failed - IV]";
-    }
-
-    // 3. Import with Sanitized Objects
+    // 4. Import keys
     const myPrivateKey = await window.crypto.subtle.importKey(
       "jwk", sanitize(privKeyObj), { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
     );
@@ -120,7 +115,7 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
       "jwk", sanitize(pubKeyObj), { name: "ECDH", namedCurve: "P-256" }, true, []
     );
 
-    // 4. Derivation and Decryption
+    // 5. Derive and Decrypt
     const sharedSecretKey = await window.crypto.subtle.deriveKey(
       { name: "ECDH", public: peerPublicKey },
       myPrivateKey,
@@ -132,11 +127,10 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
     const decryptedBuffer = await window.crypto.subtle.decrypt(
       { name: "AES-GCM", iv: iv },
       sharedSecretKey,
-      data
+      base64ToArrayBuffer(ciphertext)
     );
 
     return new TextDecoder().decode(decryptedBuffer);
-    
   } catch (err) {
     console.error("Decryption runtime error:", err);
     return "🔒 [Decryption Failed]";

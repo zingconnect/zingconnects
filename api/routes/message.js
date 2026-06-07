@@ -14,8 +14,8 @@ const router = express.Router();
 
 const isBase64 = (str) => {
   if (!str) return false;
-  // Regex ensures the string is valid Base64
-  return /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/.test(str);
+  const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
+  return base64Regex.test(str);
 };
 
 /**
@@ -98,43 +98,50 @@ router.post('/send', authenticateToken, async (req, res, next) => {
 try {
     await connectToDatabase();
     const myId = req.user.id;
-        const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
-    
-    if (!text?.trim() || !receiverId) {
-      return res.status(400).json({ success: false, message: "Invalid payload: Text or Recipient missing" });
-    }
-    if (isEncrypted) {
-      if (!iv || typeof iv !== 'string') {
-        return res.status(400).json({ success: false, message: "Security violation: IV required." });
-      }
-      if (!isBase64(text)) {
-        return res.status(400).json({ success: false, message: "Security violation: Malformed ciphertext." });
-      }
-      // AES-GCM expects a 12-byte IV. Base64 of 12 bytes is exactly 16 characters.
-      if (iv.length !== 16) {
-        return res.status(400).json({ success: false, message: "Security violation: Invalid IV length (expected 12 bytes)." });
-      }
-    }
-    
-    // Determine target roles
+
+    // 1. Identify Sender
     let senderDoc = await Agent.findById(myId) || await User.findById(myId);
     if (!senderDoc) {
-      return res.status(404).json({ success: false, message: "Sender identity mismatch." });
+      return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
 
-    const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
+    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted, ciphertext } = req.body;
+
+    // 2. Structural Validation
+    if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
+      return res.status(400).json({ success: false, message: "Invalid recipient identifier." });
+    }
+
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
-    // Create the message tracking payload
+    const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
+
+    // 3. Cryptographic Validation
+    if (isEncrypted) {
+      if (!iv || !ciphertext) {
+        return res.status(400).json({ success: false, message: "Encryption payload missing." });
+      }
+      const ivBuffer = Buffer.from(iv, 'base64');
+      if (ivBuffer.length !== 12) {
+        return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
+      }
+    }
+
+    // 4. Create Message with Structured Payload
     const newMessage = await Message.create({
       senderId: myId,
       senderModel: senderModelName,
-      receiverId,
+      receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: targetModelName,
-      text: text.trim(),
-      iv: iv || null,
+      // If encrypted, store in payload; if clear text, store in text
+      text: isEncrypted ? null : String(text || '').trim(),
+      payload: isEncrypted ? {
+        ciphertext: ciphertext,
+        iv: iv,
+        version: 1
+      } : null,
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
-      replyToId: replyToId || null,
+      replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? replyToId : null,
       notificationSent: false
     });
 
@@ -143,7 +150,17 @@ try {
       .select('pushSubscription lastNotificationEmail email firstName lastName');
 
     if (!receiver) {
-      return res.status(404).json({ success: false, message: "Recipient entity match not found." });
+      return res.status(404).json({ success: false, message: "Recipient not found." });
+    }
+
+    // 5. Socket Emission
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
+      }
+    } catch (socketErr) {
+      console.error("⚠️ Socket relay warning:", socketErr.message);
     }
 
     // ⚡ Socket emission (Fault-Tolerant)
