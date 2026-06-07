@@ -29,7 +29,7 @@ import {
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
 // 🔒 END-TO-END ENCRYPTION MODULES
-import { encryptMessageText, decryptMessageText, initializeUserE2EEKeys } from '../utils/cryptoEngine';
+import { encryptMessageText, decryptMessageText } from '../utils/cryptoEngine';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 
@@ -405,27 +405,19 @@ useEffect(() => {
   return () => { isMounted = false; };
 }, [unlockAudio]);
 
+
+// Add this logic to your UserDashboard useEffect
 useEffect(() => {
   const provisionCryptoEnvironment = async () => {
     if (!isLoading && token && userData?._id && userData?.isProfileComplete) {
             if (!userData?.publicKeyJwk) {
         console.log("🔒 Missing publicKeyJwk detected. Triggering registration...");
-        
-        try {
-          const newKeys = await initializeUserE2EEKeys(userData._id, token);
-          
-          if (newKeys) {
-            console.log("✅ Key registration successful. Updating local state."); 
-          }
-        } catch (err) {
-          console.error("❌ Failed to provision crypto environment:", err);
-        }
+        await initializeUserE2EEKeys(userData._id, token);
       } else {
         console.log("🔒 Identity already synced.");
       }
     }
   };
-  
   provisionCryptoEnvironment();
 }, [token, isLoading, userData?._id, userData?.isProfileComplete, userData?.publicKeyJwk]);
 
