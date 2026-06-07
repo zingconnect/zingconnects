@@ -1419,11 +1419,10 @@ useEffect(() => {
       }
 
       // 3. Added '?t=${Date.now()}' to force the browser to ignore cache
-      const [profileResponse, usersResponse] = await Promise.allSettled([
-        secureFetch(`/api/agents/profile/me?t=${Date.now()}`, { method: 'GET' }),
-        secureFetch(`/api/agents/my-users?t=${Date.now()}`, { method: 'GET' })
-      ]);
-
+    const [profileResponse, usersResponse] = await Promise.allSettled([
+  secureFetch(`/api/agents/profile/me?fresh=true&t=${Date.now()}`, { method: 'GET' }),
+  secureFetch(`/api/agents/my-users?t=${Date.now()}`, { method: 'GET' })
+]);
       if (!isMounted) return;
 
       // Handle Profile Request

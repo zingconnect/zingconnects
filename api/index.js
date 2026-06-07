@@ -808,6 +808,7 @@ app.get('/api/agents/profile', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 // ==========================================
 // 🛡️ HARDENED ROUTE 2: GET /api/agents/profile/me (Redis Cached)
 // ==========================================
@@ -815,11 +816,15 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
   const cacheKey = `agent:profile:full:${req.user.id}`;
 
+  const forceFresh = req.query.fresh === 'true';
+
   try {
-    // 1. ATTEMPT CACHE HIT
-    const cachedProfile = await redisClient.get(cacheKey);
-    if (cachedProfile) {
-      return res.status(200).json({ success: true, agent: JSON.parse(cachedProfile) });
+    // 1. Only attempt cache hit if NOT forcing refresh
+    if (!forceFresh) {
+      const cachedProfile = await redisClient.get(cacheKey);
+      if (cachedProfile) {
+        return res.status(200).json({ success: true, agent: JSON.parse(cachedProfile) });
+      }
     }
 
     // 2. FALLBACK TO DATABASE
@@ -1823,12 +1828,12 @@ app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) 
       
       syncBilling(agent, finalNumericAmount);
       await agent.save();
-
-      // 🚀 CACHE INVALIDATION
+// 🚀 CRITICAL: CLEAR BOTH CACHE VARIANTS
       await redisClient.del(`agent:profile:${agent._id}`);
+      await redisClient.del(`agent:profile:full:${agent._id}`);
 
-      console.log(`Subscription STACKED/ACTIVATED for: ${agent.email} | Cache cleared.`);
-
+      console.log(`Subscription ACTIVATED for: ${agent.email} | Cache invalidated for both keys.`);
+      
       return res.json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",
