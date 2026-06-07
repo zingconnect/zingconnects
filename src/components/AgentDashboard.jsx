@@ -63,8 +63,8 @@ export const AgentDashboard = () => {
   const { token, isLoading, setToken } = useAuth();
   const { slug } = useParams();
   const location = useLocation(); // <--- ADD THIS
-  const { privateKey } = useAuth();
-  
+const { privateKey, isCryptoReady } = useAuth();
+
   const isForcedRefresh = location.state?.forceRefresh;
   const [agentData, setAgentData] = useState(null);
   const [agentPrivateKey, setAgentPrivateKey] = useState(null); // Key material
@@ -2160,15 +2160,23 @@ const handleSendMessage = async (e) => {
       })
     });
 
-    const data = await response.json();
-if (data.success) {
-        const finalizedMessage = { ...data.message };
-        finalizedMessage.text = await decryptMessageText(
-          finalizedMessage.text,
-          finalizedMessage.iv,
-          activeUser.publicKeyJwk,
-          privateKey
-        );
+   const data = await response.json();
+    
+    if (data.success) {
+      // 1. CONTEXT GUARD: Ensure user hasn't switched chats while waiting for the server
+      if (selectedUser._id !== activeUser._id) {
+        console.warn("User switched conversations. Skipping local state update.");
+        return;
+      }
+
+      // 2. Decrypt and finalize
+      const finalizedMessage = { ...data.message };
+      finalizedMessage.text = await decryptMessageText(
+        finalizedMessage.text,
+        finalizedMessage.iv,
+        activeUser.publicKeyJwk,
+        privateKey
+      );
 
       setMessages(prev => 
         prev.map(msg => msg._id === tempId ? finalizedMessage : msg)
