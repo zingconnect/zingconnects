@@ -176,6 +176,7 @@ const handleUserInquiry = async (e) => {
     setIsProcessing(false); 
   }
 };
+
 const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);
@@ -192,7 +193,6 @@ const handleAgentLogin = async (e) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      // CRITICAL: Must be 'include' to send/receive HttpOnly cookies
       credentials: 'include' 
     });
 
@@ -201,11 +201,7 @@ const handleAgentLogin = async (e) => {
     if (!isMounted.current) return;
 
     if (response.ok) {
-      // The token is now stored securely in the browser's cookie jar.
-      // We no longer access it via JavaScript or store it in localStorage.
-      
-      // Update AuthContext state to reflect that the user is now authenticated
-      if (typeof login === 'function') {
+            if (typeof login === 'function') {
         login(payload.targetSlug);
       }
       

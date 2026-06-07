@@ -621,8 +621,8 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
 
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,
-  sameSite: 'Lax',
+secure: process.env.NODE_ENV === 'production', 
+sameSite: 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
   signed: true // <--- Add this
@@ -678,6 +678,7 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 app.post('/api/agents/login', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
 
@@ -735,7 +736,7 @@ app.post('/api/agents/login', async (req, res, next) => {
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,
+  secure: process.env.NODE_ENV === 'production',
   sameSite: 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
@@ -1045,7 +1046,7 @@ app.post('/api/users/handshake', async (req, res, next) => {
 
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,
+ secure: process.env.NODE_ENV === 'production',
   sameSite: 'Lax',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
@@ -1332,6 +1333,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     next(err);
   }
 });
+
 // ==========================================
 // 🛡️ OPTIMIZED PUBLIC PROFILE ROUTE (Redis Cached)
 // ==========================================
