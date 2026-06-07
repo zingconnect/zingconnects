@@ -57,13 +57,17 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 const socket = io(import.meta.env.VITE_API_URL);
-
 const MessageItem = ({ message, isMe, isCryptoReady, privateKey, senderPublicKey }) => {
-  const [decryptedText, setDecryptedText] = useState(message.text);
+  const [decryptedText, setDecryptedText] = useState(message.isEncrypted ? '🔒 Decrypting...' : message.text);
   const [isDecrypting, setIsDecrypting] = useState(false);
 
   useEffect(() => {
-    if (message.isEncrypted && isCryptoReady && privateKey && typeof privateKey === 'object') {
+    if (message.isEncrypted && isCryptoReady && privateKey && message.iv) {
+            if (typeof message.iv !== 'string' || message.iv.length < 10) {
+        setDecryptedText("🔒 [Error: Invalid Encrypted Data]");
+        return;
+      }
+
       setIsDecrypting(true);
       decryptMessageText(message.text, message.iv, senderPublicKey, privateKey)
         .then(text => {
@@ -72,17 +76,16 @@ const MessageItem = ({ message, isMe, isCryptoReady, privateKey, senderPublicKey
         })
         .catch((err) => {
           console.error("MessageItem Decryption Error:", err);
+          setDecryptedText("🔒 [Decryption Failed]");
           setIsDecrypting(false);
         });
+    } else {
+      setDecryptedText(message.text);
     }
-  }, [message.text, isCryptoReady, privateKey, senderPublicKey]);
-
-  if (message.isEncrypted && isDecrypting) {
-    return <div className="text-[10px] text-gray-400 italic px-2">🔒 Decrypting...</div>;
-  }
+  }, [message.text, message.iv, message.isEncrypted, isCryptoReady, privateKey, senderPublicKey]);
 
   return (
-    <p className="text-[13px] md:text-[15px] leading-relaxed break-words">
+    <p className={`text-[13px] md:text-[15px] leading-relaxed break-words ${isDecrypting ? 'opacity-50 italic' : ''}`}>
       {decryptedText}
     </p>
   );

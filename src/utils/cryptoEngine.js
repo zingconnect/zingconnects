@@ -86,36 +86,38 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPri
   }
 };
 
-/**
- * 🔓 DECRYPT: Uses sender public key and OWN private key (passed from memory).
- */
 export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myPrivateKeyJwk) => {
   try {
     if (!ivBase64 || !senderPublicKeyJwk || !cipherTextBase64 || !myPrivateKeyJwk) {
-      throw new Error("Missing parameters for decryption.");
+      return "🔒 [Encrypted Message]";
     }
 
-    const myPrivateKey = await window.crypto.subtle.importKey(
-      "jwk", myPrivateKeyJwk, 
-      { name: "ECDH", namedCurve: "P-256" }, 
-      false, ["deriveKey"]
-    );
+    const iv = base64ToArrayBuffer(ivBase64);
+    const data = base64ToArrayBuffer(cipherTextBase64);
 
+    // --- CRITICAL VALIDATION ---
+    if (iv.byteLength !== 12) {
+      throw new Error(`Invalid IV length: expected 12 bytes, got ${iv.byteLength}`);
+    }
+    if (data.byteLength === 0) {
+      throw new Error("Ciphertext data is empty");
+    }
+    // ---------------------------
+
+    const myPrivateKey = await window.crypto.subtle.importKey(
+      "jwk", myPrivateKeyJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
+    );
     const peerPublicKey = await window.crypto.subtle.importKey(
-      "jwk", senderPublicKeyJwk, 
-      { name: "ECDH", namedCurve: "P-256" }, 
-      true, []
+      "jwk", senderPublicKeyJwk, { name: "ECDH", namedCurve: "P-256" }, true, []
     );
 
     const sharedSecretKey = await window.crypto.subtle.deriveKey(
       { name: "ECDH", public: peerPublicKey },
       myPrivateKey,
       { name: "AES-GCM", length: 256 },
-      false, ["decrypt"]
+      false, 
+      ["decrypt"]
     );
-
-    const iv = base64ToArrayBuffer(ivBase64);
-    const data = base64ToArrayBuffer(cipherTextBase64);
 
     const decryptedBuffer = await window.crypto.subtle.decrypt(
       { name: "AES-GCM", iv: iv },
@@ -124,6 +126,7 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
     );
 
     return new TextDecoder().decode(decryptedBuffer);
+    
   } catch (err) {
     console.error("Decryption runtime error:", err);
     return "🔒 [Encrypted Message - Decryption Failed]";
