@@ -176,6 +176,7 @@ const handleUserInquiry = async (e) => {
     setIsProcessing(false); 
   }
 };
+
 const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);

@@ -57,6 +57,7 @@ export const AuthProvider = ({ children }) => {
       isAuthenticated, 
       userRole, 
       isLoading,
+      isSubscribed,
       isCryptoReady, // <--- MUST BE ADDED HERE
       privateKey, // Expose key to components
       verifySession 

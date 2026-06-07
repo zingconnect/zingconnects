@@ -2,7 +2,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export const ProtectedRoute = ({ requiredRole }) => {
-  const { isAuthenticated, userRole, isLoading } = useAuth();
+  const { isAuthenticated, userRole, isLoading, isSubscribed } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -13,14 +13,21 @@ export const ProtectedRoute = ({ requiredRole }) => {
     );
   }
 
-  // ONLY redirect if we are DEFINITELY not authenticated
+  // 1. Redirect if not logged in
   if (!isAuthenticated) {
     return <Navigate to="/" state={{ from: location.pathname }} replace />;
   }
 
-  // Role validation
+  // 2. Role validation (e.g., if you try to access an agent-only route)
   if (requiredRole && userRole !== requiredRole) {
     return <Navigate to="/unauthorized" replace />;
+  }
+
+  // 3. Subscription validation
+  // Only enforce subscription if the user is an AGENT. 
+  // 'Handshake Users' bypass this check because they aren't required to subscribe.
+  if (userRole === 'agent' && !isSubscribed) {
+    return <Navigate to="/pricing" replace />;
   }
 
   return <Outlet />;
