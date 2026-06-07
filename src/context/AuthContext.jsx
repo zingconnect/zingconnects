@@ -7,6 +7,7 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
+  const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
   const [privateKey, setPrivateKey] = useState(null);
@@ -37,6 +38,7 @@ export const AuthProvider = ({ children }) => {
         const data = await response.json();
         setIsAuthenticated(true);
         setUserRole(data.role);
+        setIsSubscribed(data.isSubscribed); // <--- Add this!
         // Trigger key initialization once authenticated
         await initializeCrypto();
       } else {
