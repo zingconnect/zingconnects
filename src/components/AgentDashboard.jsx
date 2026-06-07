@@ -1378,10 +1378,11 @@ useEffect(() => {
     window.removeEventListener('offline', handleOffline);
   };
 }, []);
+
 useEffect(() => {
   selectedUserRef.current = selectedUser;
-  agentDataRef.current = agentData;
   agentPrivateKeyRef.current = agentPrivateKey;
+  agentDataRef.current = agentData; 
 }, [selectedUser, agentData, agentPrivateKey]);
 
 useEffect(() => {
@@ -1745,6 +1746,7 @@ const handleDisconnect = async (e) => {
     window.location.replace(targetUrl);
   }
 };
+
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
 
@@ -1756,7 +1758,6 @@ const handleSelectUser = async (user) => {
   if (socket) socket.emit('join-chat', user._id);
 
   try {
-    // UPDATED: Removed 'token'. secureFetch handles session auth via cookies.
     const response = await secureFetch(`/api/messages/${user._id}?limit=30`, {
       method: 'GET'
     });
@@ -1779,26 +1780,31 @@ const handleSelectUser = async (user) => {
       if (data.success && Array.isArray(data.messages)) {
         const targetUser = freshUserData || user;
         const currentKey = agentPrivateKeyRef.current;
-
-        const decryptedHistory = await Promise.all(
-          data.messages.map(async (msg) => {
-            if (msg.isEncrypted && targetUser?.publicKeyJwk) {
-              try {
-                return await decryptMessageText(
-                  msg.text,
-                  msg.iv,
-                  targetUser.publicKeyJwk,
-                  agentData._id,
-                  currentKey
-                );
-              } catch (e) {
-                return { ...msg, text: "🔒 [Decryption Failed]" };
-              }
-            }
-            return msg;
-          })
+const decryptedHistory = await Promise.all(
+  data.messages.map(async (msg) => {
+    if (msg.isEncrypted && targetUser?.publicKeyJwk && agentPrivateKeyRef.current) {
+      try {
+        const decryptedText = await decryptMessageText(
+          msg.text,
+          msg.iv,
+          targetUser.publicKeyJwk,
+          agentPrivateKeyRef.current
         );
-        setMessages(decryptedHistory);
+                return { 
+          ...msg, 
+          text: decryptedText, 
+          isEncrypted: false 
+        };
+      } catch (e) {
+        console.error("Decryption failed for msg:", msg._id, e);
+        return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
+      }
+    }
+        return msg; 
+  })
+);
+
+setMessages(decryptedHistory);
       }
 
       // UPDATED: secureFetch handles cookie-based auth for PATCH request
@@ -1811,6 +1817,7 @@ const handleSelectUser = async (user) => {
     console.error("Failed to load chat history:", err);
   }
 };
+
 useEffect(() => {
   // Exit if already processed or data isn't ready
   if (hasProcessedDeepLink.current || users.length === 0) return;
@@ -1896,7 +1903,6 @@ useEffect(() => {
 
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
-
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
@@ -1906,15 +1912,19 @@ useEffect(() => {
     const incomingMsgs = await fetchMessages(selectedUser._id, limit);
     if (!incomingMsgs || incomingMsgs.length === 0) return;
 
-    // 1. Decrypt batch before updating state
+    // Use the Ref here to guarantee we have the latest key
+    const currentKey = agentPrivateKeyRef.current;
+    const currentUser = selectedUserRef.current;
+
     const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
-      if (msg.isEncrypted && selectedUser?.publicKeyJwk && privateKey) {
+      // Gatekeeper: Check for valid keys before attempting crypto
+      if (msg.isEncrypted && currentUser?.publicKeyJwk && currentKey) {
         try {
           const decrypted = await decryptMessageText(
             msg.text, 
             msg.iv, 
-            selectedUser.publicKeyJwk, 
-            privateKey
+            currentUser.publicKeyJwk, 
+            currentKey
           );
           return { ...msg, text: decrypted, isEncrypted: false };
         } catch (err) {
@@ -1924,12 +1934,12 @@ useEffect(() => {
       }
       return msg;
     }));
+
     setMessages(prev => {
       const isNew = processedMsgs.length !== prev.length || 
                     processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
       
       if (isNew) {
-        // Notification logic
         const latest = processedMsgs[processedMsgs.length - 1];
         if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
           lastNotifiedId.current = latest._id;
@@ -1940,9 +1950,10 @@ useEffect(() => {
       return prev;
     });
   };
+
   const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
-  }, [selectedUser?._id, callStatus, limit, privateKey]);
+}, [selectedUser?._id, callStatus, limit, privateKey]);
 
 
 useEffect(() => {

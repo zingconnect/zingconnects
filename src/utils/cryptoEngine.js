@@ -89,40 +89,38 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPri
 
 export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPublicKeyJwk, myPrivateKeyJwk) => {
   try {
-    if (!ivBase64 || !senderPublicKeyJwk || !cipherTextBase64 || !myPrivateKeyJwk) {
-      return "🔒 [Encrypted Message]";
-    }
-
-    // --- ADD LOG HERE: Verify the strings before conversion ---
-    console.log("Decryption Debug:", { 
-      cipherText: cipherTextBase64, 
-      iv: ivBase64 
+    // 1. Sanitize JWK: Ensure we are only passing standard JWK properties
+    const sanitize = (jwk) => ({
+      kty: jwk.kty,
+      crv: jwk.crv,
+      x: jwk.x,
+      y: jwk.y,
+      d: jwk.d,
+      ext: true
     });
 
+    // Ensure we are working with objects, not strings
+    const privKeyObj = typeof myPrivateKeyJwk === 'string' ? JSON.parse(myPrivateKeyJwk) : myPrivateKeyJwk;
+    const pubKeyObj = typeof senderPublicKeyJwk === 'string' ? JSON.parse(senderPublicKeyJwk) : senderPublicKeyJwk;
+
+    // 2. Validate IV and Data
     const iv = base64ToArrayBuffer(ivBase64);
     const data = base64ToArrayBuffer(cipherTextBase64);
 
-    // --- ADD LOG HERE: Verify the resulting byte lengths ---
-    console.log("Buffer Check:", { 
-      ivByteLength: iv.byteLength, 
-      dataByteLength: data.byteLength 
-    });
-
-   if (iv.byteLength !== 12) {
-  console.warn("IV length mismatch. Expected 12, got:", iv.byteLength);
-  return "🔒 [Encrypted Message - Key/IV Mismatch]";
-}
-    if (data.byteLength === 0) {
-      throw new Error("Ciphertext data is empty");
+    if (iv.byteLength !== 12) {
+      console.warn("IV length mismatch. Expected 12, got:", iv.byteLength);
+      return "🔒 [Decryption Failed - IV]";
     }
 
+    // 3. Import with Sanitized Objects
     const myPrivateKey = await window.crypto.subtle.importKey(
-      "jwk", myPrivateKeyJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
+      "jwk", sanitize(privKeyObj), { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
     );
     const peerPublicKey = await window.crypto.subtle.importKey(
-      "jwk", senderPublicKeyJwk, { name: "ECDH", namedCurve: "P-256" }, true, []
+      "jwk", sanitize(pubKeyObj), { name: "ECDH", namedCurve: "P-256" }, true, []
     );
 
+    // 4. Derivation and Decryption
     const sharedSecretKey = await window.crypto.subtle.deriveKey(
       { name: "ECDH", public: peerPublicKey },
       myPrivateKey,
@@ -130,9 +128,6 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
       false, 
       ["decrypt"]
     );
-
-    // --- ADD LOG HERE: Confirm key derivation success ---
-    console.log("Shared secret derived successfully.");
 
     const decryptedBuffer = await window.crypto.subtle.decrypt(
       { name: "AES-GCM", iv: iv },
@@ -143,8 +138,7 @@ export const decryptMessageText = async (cipherTextBase64, ivBase64, senderPubli
     return new TextDecoder().decode(decryptedBuffer);
     
   } catch (err) {
-    // This will now show the logs leading up to the failure in your browser console
     console.error("Decryption runtime error:", err);
-    return "🔒 [Encrypted Message - Decryption Failed]";
+    return "🔒 [Decryption Failed]";
   }
 };
