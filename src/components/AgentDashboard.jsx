@@ -2083,7 +2083,6 @@ const handleResend = async (failedMsg) => {
   }
 };
 
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!selectedUser || !newMessage.trim() || isUploading) return;
@@ -2120,7 +2119,7 @@ const handleSendMessage = async (e) => {
     receiverId: activeUser._id,
     receiverModel: activeUser.modelType || 'User',
     status: 'sending',
-    isEncrypted: true, // IMPORTANT: Mark as true so UI knows it's a secure message
+    isEncrypted: true,
     createdAt: new Date().toISOString(),
     fileType: 'text'
   };
@@ -2131,11 +2130,9 @@ const handleSendMessage = async (e) => {
     if (!privateKey) throw new Error("Session identity missing.");
     if (!activeUser.publicKeyJwk) throw new Error("Recipient key missing.");
 
-    // 3. Encrypt using payload structure
+    // 3. Encrypt
     const encrypted = await encryptMessageText(textToSend, activeUser.publicKeyJwk, privateKey);
-    if (!encrypted.isEncrypted || !encrypted.payload) {
-      throw new Error("Encryption failed.");
-    }
+    if (!encrypted.isEncrypted || !encrypted.payload) throw new Error("Encryption failed.");
 
     // 4. Send to server
     const response = await secureFetch('/api/messages/send', {
@@ -2151,28 +2148,39 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
-    if (data.success) {
-      if (selectedUser._id !== activeUser._id) return;
-      const finalizedMessage = { ...data.message };
-      
-      // 5. Decrypt using payload structure
-      if (finalizedMessage.isEncrypted && finalizedMessage.payload) {
-        try {
-          finalizedMessage.text = await decryptMessageText(
-            finalizedMessage.payload,
-            activeUser.publicKeyJwk,
-            privateKey
-          );
-          finalizedMessage.isEncrypted = false;
-        } catch (e) {
-          finalizedMessage.text = "🔒 [Decryption Failed]";
-        }
-      }
-      setMessages(prev => prev.map(msg => msg._id === tempId ? finalizedMessage : msg));
-    } else {
-      throw new Error(data.message || "Transmission rejected.");
+    
+    if (!data.success) throw new Error(data.message || "Transmission rejected.");
+
+    // 5. Finalize UI with Server Response
+    if (selectedUser._id !== activeUser._id) return;
+
+    // Ensure we handle the response object correctly
+    const savedMsg = data.message; 
+    let finalizedMessage = { ...savedMsg };
+    
+    // Ensure payload exists for decryption
+    if (finalizedMessage.isEncrypted && !finalizedMessage.payload && finalizedMessage.ciphertext) {
+       finalizedMessage.payload = { ciphertext: finalizedMessage.ciphertext, iv: finalizedMessage.iv };
     }
+
+    if (finalizedMessage.isEncrypted && finalizedMessage.payload) {
+      try {
+        finalizedMessage.text = await decryptMessageText(
+          finalizedMessage.payload,
+          activeUser.publicKeyJwk,
+          privateKey
+        );
+        finalizedMessage.isEncrypted = false; // Successfully decrypted
+      } catch (e) {
+        console.error("Decryption Error:", e);
+        finalizedMessage.text = "🔒 [Decryption Failed]";
+      }
+    }
+    
+    setMessages(prev => prev.map(msg => msg._id === tempId ? finalizedMessage : msg));
+
   } catch (err) {
+    console.error("HandleSendMessage Error:", err);
     setMessages(prev => prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg));
     alert("Security Error: " + err.message);
   }
