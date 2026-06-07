@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import Peer from 'simple-peer/simplepeer.min.js'; 
 import { Buffer } from 'buffer'; 
@@ -62,8 +62,9 @@ export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
   const { slug } = useParams();
-
+  const location = useLocation(); // <--- ADD THIS
   
+  const isForcedRefresh = location.state?.forceRefresh;
   const [agentData, setAgentData] = useState(null);
   const [agentPrivateKey, setAgentPrivateKey] = useState(null); // Key material
   const [users, setUsers] = useState([]); 
@@ -1397,8 +1398,7 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
 }, [isDualLoginConflict]);
-
- useEffect(() => {
+useEffect(() => {
   let isMounted = true;
 
   // Load external dependency safely
@@ -1412,11 +1412,16 @@ useEffect(() => {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      // UPDATED: Removed 'token' arguments. 
-      // secureFetch handles the cookie-based session automatically.
+      // 2. Artificial delay to allow database/Redis to sync after payment
+      if (isForcedRefresh) {
+        console.log("🔄 Waiting for subscription sync...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // 3. Added '?t=${Date.now()}' to force the browser to ignore cache
       const [profileResponse, usersResponse] = await Promise.allSettled([
-        secureFetch('/api/agents/profile/me', { method: 'GET' }),
-        secureFetch('/api/agents/my-users', { method: 'GET' })
+        secureFetch(`/api/agents/profile/me?t=${Date.now()}`, { method: 'GET' }),
+        secureFetch(`/api/agents/my-users?t=${Date.now()}`, { method: 'GET' })
       ]);
 
       if (!isMounted) return;
@@ -1429,7 +1434,6 @@ useEffect(() => {
           if (errorData.reason === 'dual_login') {
             setIsDualLoginConflict(true);
           } else {
-            // No need to clear local tokens; session is server-managed
             navigate(`/agent/login/${slug}`);
           }
           return;
@@ -1466,8 +1470,7 @@ useEffect(() => {
 
   fetchInitialData();
   return () => { isMounted = false; };
-}, [navigate, slug]); // Removed localStorage dependency
-
+  }, [navigate, slug, isForcedRefresh]);
 
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
@@ -1495,12 +1498,12 @@ const handlePayment = useCallback(async () => {
       tx_ref: `ZING-${Date.now()}`,
       amount: finalNairaAmount,
       currency: "NGN",
-      customer: {
-        email: agentData.email,
-        name: `${agentData.firstName} ${agentData.lastName}`,
-        phone_number: agentData?.phone || '08000000000',
-        id: String(agentData._id || agentData.email).replace(/\./g, '_')
-      },
+     customer: {
+  email: agentData.email,
+  name: `${agentData.firstName} ${agentData.lastName}`,
+  phone_number: agentData?.phone || '08000000000',
+  id: String(agentData._id) 
+},
       callback: async (response) => {
         console.log("DEBUG: Flutterwave Callback Received:", response);
         
@@ -1511,7 +1514,6 @@ const handlePayment = useCallback(async () => {
           setPaymentProcessing(false);
           return;
         }
-
         try {
           console.log("DEBUG: Sending verification request to /api/subscriptions/verify");
           const verifyRes = await secureFetch('/api/subscriptions/verify', {
@@ -1535,8 +1537,11 @@ const handlePayment = useCallback(async () => {
               console.log("DEBUG: Attempting navigation to:", targetUrl);
               setShowSuccessOverlay(false);
               setPaymentProcessing(false);
-              navigate(targetUrl, { replace: true });
-            }, 1500);
+              navigate(targetUrl, { 
+    replace: true, 
+    state: { forceRefresh: true } 
+  });
+}, 1500);
           } else {
             throw new Error(data.message || "Verification failed on server");
           }
