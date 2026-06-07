@@ -29,7 +29,7 @@ import {
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
 // 🔒 END-TO-END ENCRYPTION MODULES
-import { encryptMessageText, decryptMessageText } from '../utils/cryptoEngine';
+import { encryptMessageText, decryptMessageText, initializeUserE2EEKeys } from '../utils/cryptoEngine';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 
@@ -84,15 +84,17 @@ const CallStatusMessage = ({ status, time }) => {
   );
 };
 
-// Add this component BEFORE your UserDashboard export
-const MessageItem = ({ message, isMe, isCryptoReady, privateKeyJwk, senderPublicKey }) => {
+const MessageItem = ({ message, isCryptoReady, privateKeyJwk, senderPublicKey }) => {
   const [decryptedText, setDecryptedText] = useState(message.isEncrypted ? '🔒 Decrypting...' : message.text);
   const [isDecrypting, setIsDecrypting] = useState(false);
 
   useEffect(() => {
-    if (message.isEncrypted && isCryptoReady && privateKeyJwk && senderPublicKey) {
+    // Check if we have the encrypted payload and the keys
+    if (message.isEncrypted && message.payload?.ciphertext && isCryptoReady && privateKeyJwk && senderPublicKey) {
       setIsDecrypting(true);
-      decryptMessageText(message.text, message.iv, senderPublicKey, privateKeyJwk)
+      
+      // Pass the entire message.payload object as the engine expects
+      decryptMessageText(message.payload, senderPublicKey, privateKeyJwk)
         .then(text => {
           setDecryptedText(text);
           setIsDecrypting(false);
@@ -105,7 +107,7 @@ const MessageItem = ({ message, isMe, isCryptoReady, privateKeyJwk, senderPublic
     } else {
       setDecryptedText(message.text);
     }
-  }, [message.text, message.isEncrypted, isCryptoReady, privateKeyJwk, senderPublicKey]);
+  }, [message, isCryptoReady, privateKeyJwk, senderPublicKey]);
 
   return (
     <p className={`text-[13px] md:text-[15px] leading-relaxed break-words ${isDecrypting ? 'opacity-50 italic' : ''}`}>
@@ -403,19 +405,27 @@ useEffect(() => {
   return () => { isMounted = false; };
 }, [unlockAudio]);
 
-
-// Add this logic to your UserDashboard useEffect
 useEffect(() => {
   const provisionCryptoEnvironment = async () => {
     if (!isLoading && token && userData?._id && userData?.isProfileComplete) {
             if (!userData?.publicKeyJwk) {
         console.log("🔒 Missing publicKeyJwk detected. Triggering registration...");
-        await initializeUserE2EEKeys(userData._id, token);
+        
+        try {
+          const newKeys = await initializeUserE2EEKeys(userData._id, token);
+          
+          if (newKeys) {
+            console.log("✅ Key registration successful. Updating local state."); 
+          }
+        } catch (err) {
+          console.error("❌ Failed to provision crypto environment:", err);
+        }
       } else {
         console.log("🔒 Identity already synced.");
       }
     }
   };
+  
   provisionCryptoEnvironment();
 }, [token, isLoading, userData?._id, userData?.isProfileComplete, userData?.publicKeyJwk]);
 
@@ -941,6 +951,7 @@ const handleAcceptCall = async () => {
     handleEndCall();
   }
 };
+
 useEffect(() => {
   if (!socket || !userData?._id) return;
 
