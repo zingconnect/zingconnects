@@ -19,6 +19,26 @@ export const generateIdentityKeyPair = async () => {
   return { publicKeyJwk, privateKeyJwk, keyPair };
 };
 
+
+/**
+ * Orchestrates the generation of new identity keys and saves them to storage.
+ */
+export const initializeUserE2EEKeys = async () => {
+  // 1. Generate new KeyPair using the existing logic
+  const { publicKeyJwk, privateKeyJwk } = await generateIdentityKeyPair();
+  
+  // 2. Import the storage methods
+  // Note: We perform the import inside the function or at the top level 
+  // to save the private key to indexedDB via your storage utility
+  const { savePrivateKey } = await import("./cryptoStorage");
+
+  // 3. Persist the private key
+  await savePrivateKey(privateKeyJwk);
+  
+  // 4. Return the public key to be sent to your backend/API
+  return { publicKeyJwk };
+};
+
 // 2. SESSION LAYER (The Handshake Foundation)
 // Imports keys into WebCrypto for the X3DH calculation
 export const importPublicKey = async (jwk) => {
