@@ -56,18 +56,21 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 const socket = io(import.meta.env.VITE_API_URL);
-
 const processMessageForUI = async (msg, currentUser, currentKey) => {
   if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
-    return { ...msg, decryptedText: msg.text || msg.content, isEncrypted: false };
+    return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
   }
-  if (msg.decryptedText) return msg;
+    if (msg.decryptedText) return msg;
+  const hasPayload = msg.payload && msg.payload.ciphertext;
+  const hasPubKey = currentUser?.publicKeyJwk;
+  const hasPrivKey = currentKey !== null && currentKey !== undefined;
 
-  if (msg.payload && currentUser?.publicKeyJwk && currentKey) {
+  if (hasPayload && hasPubKey && hasPrivKey) {
     try {
       const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
       return { ...msg, decryptedText: decrypted, isEncrypted: false };
     } catch (e) {
+      console.error("Decryption failed:", e);
       return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
     }
   }
@@ -1205,58 +1208,69 @@ useEffect(() => {
     }
   };
 }, [agentData?._id, callStatus]); // Triggers poll only when status returns to 'idle'
-
 useEffect(() => {
   const handleVisibilityChange = async () => {
-    if (document.visibilityState === 'visible') {
-      console.log("📱 ZingConnect: App returned to foreground.");
-      
-      if (callStatus !== 'idle') return; 
+    if (document.visibilityState !== 'visible') return;
 
-      if (socket) {
-        if (agentData?._id) socket.emit("join-main-room", agentData._id.toString());
-        if (!socket.connected) socket.connect();
-      }
+    console.log("📱 ZingConnect: App returned to foreground.");
+    if (callStatus !== 'idle') return;
 
-      if (selectedUser?._id && agentData?._id) {
-        try {
-          const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, {
-            method: 'GET'
-          });
-          
-          if (!response.ok) throw new Error("Sync failed");
-          const data = await response.json();
-          
-          if (data.success && data.messages) {
-            const updatedMessages = await Promise.all(
-  data.messages.map(async (msg) => {
-    if (msg.decryptedText || msg.text) return msg;
-    if (msg.isEncrypted && msg.payload?.ciphertext && selectedUser?.publicKeyJwk) {
-      try {
-        const clearText = await decryptMessageText(
-          msg.payload, 
-          selectedUser.publicKeyJwk, 
-          agentPrivateKeyRef.current
-        );
-        return { ...msg, decryptedText: clearText, isEncrypted: false };
-      } catch (e) {
-        console.error("Sync Decryption Error:", e);
-        return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
-      }
+    // Socket health check
+    if (socket) {
+      if (agentData?._id) socket.emit("join-main-room", agentData._id.toString());
+      if (!socket.connected) socket.connect();
     }
-        return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
-  })
-);
-            
-           setMessages(prevMessages => {
-  const newIds = new Set(updatedMessages.map(m => m.id || m._id));
-  const filteredPrev = prevMessages.filter(m => !newIds.has(m.id || m._id));
-  return [...filteredPrev, ...updatedMessages].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-});
-          }
-        } catch (err) {
-          console.warn("Message catch-up failed:", err);
+
+    if (selectedUser?._id && agentData?._id) {
+      try {
+        const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, { method: 'GET' });
+        if (!response.ok) throw new Error("Sync failed");
+        const data = await response.json();
+
+        if (data.success && Array.isArray(data.messages)) {
+          // SAFE DECRYPTION GUARD: Check if the private key ref is actually available
+          const hasPrivateKey = agentPrivateKeyRef.current !== null && agentPrivateKeyRef.current !== undefined;
+          
+          const updatedMessages = await Promise.all(
+            data.messages.map(async (msg) => {
+              // 1. Skip if already processed
+              if (msg.decryptedText || msg.text || msg.content) return msg;
+
+              // 2. Attempt decryption only if all required crypto assets exist
+              if (msg.isEncrypted && msg.payload?.ciphertext && selectedUser?.publicKeyJwk && hasPrivateKey) {
+                try {
+                  const clearText = await decryptMessageText(
+                    msg.payload,
+                    selectedUser.publicKeyJwk,
+                    agentPrivateKeyRef.current
+                  );
+                  return { ...msg, decryptedText: clearText, isEncrypted: false };
+                } catch (e) {
+                  console.error("Sync Decryption Error:", e);
+                  return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+                }
+              }
+
+              // 3. Fallback: If encrypted but keys aren't ready, mark as pending
+              return { 
+                ...msg, 
+                decryptedText: msg.isEncrypted ? "🔒 [Decrypting...]" : (msg.text || msg.content || ""), 
+                isEncrypted: msg.isEncrypted 
+              };
+            })
+          );
+
+          // MERGE STRATEGY: Update state without overwriting existing local modifications
+          setMessages((prevMessages) => {
+            const newIds = new Set(updatedMessages.map((m) => m.id || m._id));
+            const filteredPrev = prevMessages.filter((m) => !newIds.has(m.id || m._id));
+            return [...filteredPrev, ...updatedMessages].sort(
+              (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+            );
+          });
         }
+      } catch (err) {
+        console.warn("Message catch-up failed:", err);
       }
     }
   };
@@ -1264,6 +1278,7 @@ useEffect(() => {
   document.addEventListener("visibilitychange", handleVisibilityChange);
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
 }, [agentData?._id, selectedUser?._id, callStatus, socket]);
+
 
 useEffect(() => {
   if (selectedUser && agentData && agentPrivateKey) { 

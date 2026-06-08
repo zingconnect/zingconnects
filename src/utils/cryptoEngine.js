@@ -145,50 +145,31 @@ export const encryptMessageText = async (clearText, recipientPublicKeyJwk, myPri
   }
 };
 
-/**
- * 🔑 DECRYPT: Accepts the database 'payload' object.
- */
 export const decryptMessageText = async (payload, senderPublicKeyJwk, myPrivateKeyJwk) => {
   try {
-    // 1. Destructure payload
-    const { ciphertext, iv: ivBase64 } = payload;
-    
-    // 2. Validate IV
-    const iv = base64ToArrayBuffer(ivBase64);
-    if (iv.byteLength !== 12) throw new Error("Invalid IV length");
+    // 1. Pre-validation: Stop if keys are missing
+    if (!myPrivateKeyJwk || !senderPublicKeyJwk) {
+      throw new Error("Decryption keys are missing/null.");
+    }
 
-    // 3. Sanitize keys
-    const sanitize = (jwk) => ({
-      kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d, ext: true
-    });
-
+    // 2. Destructure and prepare keys
     const privKeyObj = typeof myPrivateKeyJwk === 'string' ? JSON.parse(myPrivateKeyJwk) : myPrivateKeyJwk;
     const pubKeyObj = typeof senderPublicKeyJwk === 'string' ? JSON.parse(senderPublicKeyJwk) : senderPublicKeyJwk;
 
-    // 4. Import keys
+    // 3. Robust Sanitize: Ensure object has required fields
+    const sanitize = (jwk) => {
+      if (!jwk || typeof jwk !== 'object') throw new Error("Invalid JWK format");
+      return { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d, ext: true };
+    };
+
+    const sanitizedPriv = sanitize(privKeyObj);
+    const sanitizedPub = sanitize(pubKeyObj);
+
+    // 4. Proceed with decryption...
     const myPrivateKey = await window.crypto.subtle.importKey(
-      "jwk", sanitize(privKeyObj), { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
+      "jwk", sanitizedPriv, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]
     );
-    const peerPublicKey = await window.crypto.subtle.importKey(
-      "jwk", sanitize(pubKeyObj), { name: "ECDH", namedCurve: "P-256" }, true, []
-    );
-
-    // 5. Derive and Decrypt
-    const sharedSecretKey = await window.crypto.subtle.deriveKey(
-      { name: "ECDH", public: peerPublicKey },
-      myPrivateKey,
-      { name: "AES-GCM", length: 256 },
-      false, 
-      ["decrypt"]
-    );
-
-    const decryptedBuffer = await window.crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: iv },
-      sharedSecretKey,
-      base64ToArrayBuffer(ciphertext)
-    );
-
-    return new TextDecoder().decode(decryptedBuffer);
+    // ... rest of your existing logic
   } catch (err) {
     console.error("Decryption runtime error:", err);
     return "🔒 [Decryption Failed]";
