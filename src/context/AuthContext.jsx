@@ -9,7 +9,6 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
-  const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
   const [privateKey, setPrivateKey] = useState(null);
@@ -30,14 +29,10 @@ export const AuthProvider = ({ children }) => {
 
   const initializeCrypto = useCallback(async () => {
     setIsCryptoReady(false);
-    // Use the function from your new cryptoEngine.js
     const keyPair = await generateIdentityKeyPair();
     
-    // Exporting the key for storage
     const jwk = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
     const pubJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
-
-    // Save to IndexedDB and state
     await savePrivateKey(jwk);
     setPrivateKey(jwk);
 
@@ -50,51 +45,27 @@ export const AuthProvider = ({ children }) => {
     console.log("✅ E2EE Persistent-session initialized.");
   }, []);
 
-// In AuthContext.jsx
-const verifySession = async () => {
-  try {
-    const response = await secureFetch('/api/auth/me'); 
-    if (response.ok) {
-      const data = await response.json();
-      setIsAuthenticated(true);
-      setUserRole(data.role);
-      setUser(data.profile); 
-      
-      const savedKey = await getPrivateKey();
-      if (!savedKey) await initializeCrypto();
-    } else {
-      await logout();
+  const verifySession = async () => {
+    try {
+      const response = await secureFetch('/api/auth/me'); 
+      if (response.ok) {
+        const data = await response.json();
+        setIsAuthenticated(true);
+        setUserRole(data.role);
+        // Only re-init if we don't have a persistent key
+        const savedKey = await getPrivateKey();
+        if (!savedKey) await initializeCrypto();
+      } else {
+        await logout();
+      }
+    } catch (err) {
+      console.error("Auth verify failed:", err);
+    } finally {
+      setIsLoading(false);
     }
-  } catch (err) {
-    console.error("Auth verify failed:", err);
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
-  // In AuthContext.js
-const login = async (slug) => {
-  setIsHandshaking(true);
-  try {
-    // Perform the session verification directly here to get the data
-    const response = await secureFetch('/api/auth/me'); 
-    if (response.ok) {
-      const data = await response.json();
-      setIsAuthenticated(true);
-      setUserRole(data.role);
-      setUser(data.profile); // Set this BEFORE navigating
-      
-      const savedKey = await getPrivateKey();
-      if (!savedKey) await initializeCrypto();
-    }
-  } catch (err) {
-    console.error("Login process failed:", err);
-    setIsAuthenticated(false);
-  } finally {
-    setIsHandshaking(false);
-  }
-};
-
+  
   const logout = async () => {
     await clearKeys();
     setPrivateKey(null);
@@ -105,8 +76,7 @@ const login = async (slug) => {
   return (
   <AuthContext.Provider value={{ 
     isAuthenticated, 
-    userRole,
-    user, 
+    userRole, 
     isLoading,
     isCryptoReady,
     privateKey,
