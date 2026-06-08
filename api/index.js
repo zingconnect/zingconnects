@@ -417,6 +417,23 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
     if (!email) return res.status(400).json({ success: false, message: "Email required." });
     const lowerEmail = String(email).toLowerCase().trim();
 
+    // --- CASE 1: RESEND LOGIC ---
+    if (resend) {
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpExpiry = Date.now() + (10 * 60 * 1000);
+
+      const agent = await AgentModel.findOneAndUpdate(
+        { email: lowerEmail },
+        { $set: { otp: otpCode, otpExpires: otpExpiry } },
+        { new: true }
+      );
+
+      if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
+
+      await sendVerificationEmail(lowerEmail, agent.firstName || "Agent", otpCode);
+      return res.status(200).json({ success: true, message: "New code sent." });
+    }
+    
     // 1. Check if already verified
     const existingAgent = await AgentModel.findOne({ email: lowerEmail });
     if (existingAgent?.isVerified) {
