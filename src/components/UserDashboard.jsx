@@ -28,10 +28,9 @@ import {
   BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
-// 🔒 END-TO-END ENCRYPTION MODULES
-import { encryptMessageText, decryptMessageText, initializeUserE2EEKeys } from '../utils/cryptoEngine';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
+import { SignalEngine } from '../utils/SignalEngine';
 
 
 function urlBase64ToUint8Array(base64String) {
@@ -84,49 +83,41 @@ const CallStatusMessage = ({ status, time }) => {
   );
 };
 
-const MessageItem = ({ message, isCryptoReady, privateKeyJwk, senderPublicKey }) => {
-  // Initialize state based on whether decryption is actually required
-  const [decryptedText, setDecryptedText] = useState(() => 
-    message.isEncrypted ? '🔒 Decrypting...' : (message.text || "")
-  );
-  const [isDecrypting, setIsDecrypting] = useState(message.isEncrypted);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    // Guard clause: If not encrypted, just show the text
-    if (!message.isEncrypted) {
-      setDecryptedText(message.text || "");
-      setIsDecrypting(false);
-      return;
+const processed = await Promise.all(
+  data.messages.map(async (msg) => {
+    // If the message is encrypted, we delegate decryption to the SignalEngine
+    if (msg.isEncrypted && msg.payload) {
+      try {
+        const decryptedText = await SignalEngine.decrypt(msg.senderId, msg.payload);
+        return { 
+          ...msg, 
+          decryptedText, 
+          isEncrypted: false 
+        };
+      } catch (e) {
+        console.error("SignalEngine Decryption Error:", e);
+        return { 
+          ...msg, 
+          decryptedText: "🔒 [Decryption Failed]", 
+          isEncrypted: false 
+        };
+      }
     }
-    if (message.payload?.ciphertext && isCryptoReady && privateKeyJwk && senderPublicKey) {
-      setIsDecrypting(true);
-      
-      decryptMessageText(message.payload, senderPublicKey, privateKeyJwk)
-        .then(text => {
-          if (isMounted) {
-            setDecryptedText(text);
-            setIsDecrypting(false);
-          }
-        })
-        .catch((err) => {
-          console.error("Decryption failed:", err);
-          if (isMounted) {
-            setDecryptedText("🔒 [Decryption Failed]");
-            setIsDecrypting(false);
-          }
-        });
-    } else if (isCryptoReady && !senderPublicKey) {
-      setDecryptedText("🔒 [Waiting for keys...]");
-    }
+    // If not encrypted, treat the existing 'text' or 'content' as the decryptedText
+    return { 
+      ...msg, 
+      decryptedText: msg.text || msg.content || "", 
+      isEncrypted: false 
+    };
+  })
+);
 
-    return () => { isMounted = false; };
-  }, [message, isCryptoReady, privateKeyJwk, senderPublicKey]);
-
+const MessageItem = ({ message, isMe }) => {
+  // If the engine has processed this, decryptedText will be populated.
+  // If the engine is still working, it will return a loading state.
   return (
-    <p className={`text-[13px] md:text-[15px] leading-relaxed break-words ${isDecrypting ? 'opacity-50 italic' : ''}`}>
-      {decryptedText}
+    <p className="text-[13px] md:text-[15px] leading-relaxed break-words">
+      {message.decryptedText || "🔒 Decrypting..."}
     </p>
   );
 };
@@ -302,6 +293,16 @@ const AudioSession = ({ isMuted, isMasked }) => {
 };
 
 useEffect(() => {
+  const initEngine = async () => {
+    if (!token || !userData?._id) return;
+        await SignalEngine.initialize(userData._id);
+    setLoading(false);
+  };
+  
+  initEngine();
+}, [token, userData?._id]);
+
+useEffect(() => {
   let remoteAudio = document.getElementById('remoteAudio');
   if (!remoteAudio) {
     remoteAudio = document.createElement('audio');
@@ -421,27 +422,22 @@ useEffect(() => {
 }, [unlockAudio]);
 
 useEffect(() => {
-  const provisionCryptoEnvironment = async () => {
+  const initSecurityEnvironment = async () => {
     if (!isLoading && token && userData?._id && userData?.isProfileComplete) {
-            if (!userData?.publicKeyJwk) {
-        console.log("🔒 [Crypto] Missing publicKeyJwk detected. Triggering registration...");
-        try {
-          const success = await initializeUserE2EEKeys(userData._id, token); 
-          if (success) {
-            console.log("✅ [Crypto] User E2EE keys successfully provisioned and saved.");
-            } else {
-            console.error("❌ [Crypto] Key initialization failed.");
-          }
-        } catch (err) {
-          console.error("❌ [Crypto] Error during provisioning:", err);
-        }
-      } else {
-        console.log("🔒 [Crypto] Identity already synced.");
+      try {
+        console.log("🔒 [Crypto] Initializing SignalEngine session...");
+        await SignalEngine.initialize(userData._id);
+        
+        console.log("✅ [Crypto] SignalEngine session is active and secure.");
+      } catch (err) {
+        console.error("❌ [Crypto] Failed to initialize secure environment:", err);
       }
     }
   };
-  provisionCryptoEnvironment();
-}, [token, isLoading, userData?._id, userData?.isProfileComplete, userData?.publicKeyJwk]);
+
+  initSecurityEnvironment();
+}, [token, isLoading, userData?._id, userData?.isProfileComplete]);
+
 
 useEffect(() => {
   if (!socket) return;
@@ -706,8 +702,6 @@ useEffect(() => {
     if (isEnding || callStatus === 'connected') return;
     
     try {
-      // UPDATED: Using secureFetch to maintain consistency across the app.
-      // This automatically includes 'credentials: include' and sets JSON headers.
       const res = await secureFetch(`${import.meta.env.VITE_API_URL}/api/calls/status/${currentCallId}`, {
         method: 'GET',
         headers: { 'Cache-Control': 'no-cache' }
@@ -1078,38 +1072,52 @@ async function handleRejectCall() {
 
 useEffect(() => {
   if (!socket) return;
-    socket.on("new-message", (msg, callback) => {
-    if (callback) {
-      callback({ status: 'received' });
+  const handleNewMessage = async (msg, callback) => {
+    if (callback) callback({ status: 'received' });
+    let processedMsg = { ...msg };
+    
+    if (msg.isEncrypted) {
+      try {
+        const decryptedText = await SignalEngine.decrypt(msg.senderId, msg.payload);
+        processedMsg = { 
+          ...msg, 
+          decryptedText, 
+          isEncrypted: false 
+        };
+      } catch (e) {
+        console.error("Ratchet Decryption Error:", e);
+        processedMsg = { 
+          ...msg, 
+          decryptedText: "🔒 [Decryption Failed - Syncing...]", 
+          isEncrypted: false 
+        };
+      }
+    } else {
+      processedMsg.decryptedText = msg.text || "";
     }
     setMessages(prev => {
-      const isDuplicate = prev.some(m => m._id === msg._id || m.tempId === msg._id);
+      const isDuplicate = prev.some(m => m._id === processedMsg._id || m.tempId === processedMsg._id);
       if (isDuplicate) return prev;
-      if (msg.senderModel === 'Agent' && notificationSound.current) {
+      if (processedMsg.senderModel === 'Agent' && notificationSound.current) {
         notificationSound.current.play().catch(() => {});
       }
-      return [...prev, msg];
+      return [...prev, processedMsg];
     });
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-  });
+  };
+  socket.on("new-message", handleNewMessage);
   socket.on("message-deleted", (deletedId) => {
     setMessages(prev => prev.filter(m => (m._id || m.id) !== deletedId));
   });
   return () => {
-    socket.off("new-message");
+    socket.off("new-message", handleNewMessage);
     socket.off("message-deleted");
   };
 }, [socket]);
-
 useEffect(() => {
   const setupNotifications = async () => {
     const publicKey = import.meta.env.VITE_PUBLIC_KEY;
-    
-    // 1. Only proceed if we have keys
     if (!publicKey) return; 
-
-    // 2. Prevent redundant API calls if already synced this session
-    if (localStorage.getItem('pushSynced') === 'true') return;
 
     try {
       const permission = await Notification.requestPermission();
@@ -1128,7 +1136,8 @@ useEffect(() => {
       
       const subData = subscription.toJSON();
       
-      // UPDATED: Removed 'token'. secureFetch handles authentication via HttpOnly cookies.
+      // We perform the sync. The server-side should handle idempotency (checking if the subscription 
+      // already exists for this user) so we don't need a local 'pushSynced' flag.
       const response = await secureFetch('/api/save-subscription', {
         method: 'POST',
         body: JSON.stringify({ 
@@ -1137,11 +1146,10 @@ useEffect(() => {
         }) 
       });
 
-      if (response.ok) {
-        localStorage.setItem('pushSynced', 'true');
-        console.log("Database synced with Push Subscription");
-      } else {
+      if (!response.ok) {
         console.error("Failed to sync subscription, status:", response.status);
+      } else {
+        console.log("Database synced with Push Subscription");
       }
     } catch (err) {
       console.error("User Push setup failed:", err);
@@ -1151,7 +1159,7 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, []); 
+}, []);
 
 useEffect(() => {
   const handleVoiceUpdate = (data) => {
@@ -1172,7 +1180,6 @@ useEffect(() => {
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
-
 useEffect(() => {
   if (isLoading) return;
 
@@ -1185,22 +1192,21 @@ useEffect(() => {
         ? `/api/users/my-session?slug=${slugFromUrl}` 
         : '/api/users/my-session';
       
-      // UPDATED: Removed 'token' argument and added credentials: 'include'
-      const response = await secureFetch(endpoint, {
-        method: 'GET',
-        credentials: 'include' 
-      });
+      const response = await secureFetch(endpoint, { method: 'GET' });
 
-      if (!response.ok) {
-        console.warn("Session expired or invalid. Status:", response.status);
-        return;
-      }
+      if (!response.ok) return;
 
       const data = await response.json();
       
       if (isMounted) {
         setAgent(data.agent);
         setUserData(data.user);
+        
+        // 🔒 CRITICAL: Initialize the SignalEngine as soon as we have the user context
+        if (data.user?._id) {
+            await SignalEngine.initialize(data.user._id);
+        }
+
         if (!data.user?.isProfileComplete) setShowOnboarding(true);
       }
     } catch (err) {
@@ -1220,7 +1226,6 @@ useEffect(() => {
     clearInterval(interval);
   };
 }, [slugFromUrl]);
-
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
   if (!targetAgentId) return;
@@ -1233,29 +1238,24 @@ useEffect(() => {
       
       const data = await response.json();
       if (response.ok && data.success) {
-        // 1. 🔓 DECRYPT ALL INCOMING SERVER MESSAGES
+        // 1. ENGINE-DRIVEN DECRYPTION
+        // We map through messages and let the SignalEngine handle the Ratchet state.
         const incomingMessages = await Promise.all(
-  data.messages.map(async (msg) => {
-    // 1. Guard Clause: Only attempt decryption if all required keys are available
-    const canDecrypt = msg.isEncrypted && agent?.publicKeyJwk && privateKeyJwk;
-
-    if (canDecrypt) {
-      try {
-        const clearText = await decryptMessageText(
-          msg.text,
-          msg.iv,
-          agent.publicKeyJwk,
-          privateKeyJwk
+          data.messages.map(async (msg) => {
+            if (msg.isEncrypted) {
+              try {
+                const decryptedText = await SignalEngine.decrypt(targetAgentId, msg.payload);
+                return { ...msg, decryptedText, isEncrypted: false };
+              } catch (e) {
+                console.error("Ratchet Decryption Error:", e);
+                return { ...msg, decryptedText: "🔒 [Decryption Failed - Syncing...]" };
+              }
+            }
+            return { ...msg, decryptedText: msg.text };
+          })
         );
-        return { ...msg, text: clearText, isEncrypted: false }; // Update flag so we don't re-decrypt
-      } catch (decryptionError) {
-        console.error("Failed to decrypt message:", msg._id, decryptionError);
-        return { ...msg, text: "🔒 [Decryption Failed]" };
-      }
-    }
-    return msg;
-  })
-);
+
+        // 2. Notification & Auto-Read Logic
         const lastMsg = incomingMessages[incomingMessages.length - 1];
         if (
           lastMsg && 
@@ -1272,15 +1272,13 @@ useEffect(() => {
           
           if (Notification.permission === "granted") {
             new Notification(`Agent ${agent.firstName || 'ZingConnect'}`, {
-              body: lastMsg.text || "Sent a file",
+              body: lastMsg.decryptedText || "New encrypted message",
               icon: '/logo-s.png',
               tag: 'zing-msg'
             });
           }
 
-         secureFetch(`/api/messages/mark-read/${targetAgentId}`, {
-          method: 'PATCH'
-          }).catch(console.error);
+          secureFetch(`/api/messages/mark-read/${targetAgentId}`, { method: 'PATCH' }).catch(() => {});
         }
 
         // 3. Update Message State
@@ -1311,9 +1309,8 @@ useEffect(() => {
   fetchMessages();
   const interval = setInterval(fetchMessages, 5000); 
   return () => clearInterval(interval);
-  
-  // Dependency array updated: Removed 'token'
-}, [agent?._id, agent?.id, agent?.publicKeyJwk, userData?._id, slugFromUrl]);
+}, [agent?._id, agent?.id, slugFromUrl]); // Simplified dependencies
+
 
   const agentStatus = getStatusInfo(agent);
 
@@ -1367,7 +1364,6 @@ const fetchOlderMessages = async () => {
   const prevScrollHeight = container?.scrollHeight || 0;
 
   try {
-    // UPDATED: Removed 'token' argument. secureFetch handles credentials: 'include'.
     const response = await secureFetch(`/api/messages/${targetAgentId}?beforeId=${oldestMessage._id}&limit=30`, {
       method: 'GET'
     });
@@ -1378,24 +1374,21 @@ const fetchOlderMessages = async () => {
       if (data.messages.length < 30) setHasMore(false);
       
       if (data.messages.length > 0) {
-        // 1. 🔓 DECRYPT THE HISTORICAL BLOCK
+        // 1. ENGINE-DRIVEN HISTORICAL DECRYPTION
+        // We use the SignalEngine to decrypt. Note: For old messages, 
+        // the engine uses its internal storage to find the correct ratchet keys.
         const decryptedHistoricalMessages = await Promise.all(
           data.messages.map(async (msg) => {
-            if (msg.isEncrypted && agent?.publicKeyJwk) {
+            if (msg.isEncrypted) {
               try {
-                const clearText = await decryptMessageText(
-                  msg.text,
-                  msg.iv,
-                  agent.publicKeyJwk,
-                  userData._id
-                );
-                return { ...msg, text: clearText };
-              } catch (decryptionError) {
-                console.error("Historical message decryption failed:", decryptionError);
-                return { ...msg, text: "🔒 [Decryption Failed]" };
+                const decryptedText = await SignalEngine.decrypt(targetAgentId, msg.payload);
+                return { ...msg, decryptedText, isEncrypted: false };
+              } catch (e) {
+                console.error("Historical Decryption Error:", e);
+                return { ...msg, decryptedText: "🔒 [Decryption Failed - History Out of Sync]" };
               }
             }
-            return msg;
+            return { ...msg, decryptedText: msg.text };
           })
         );
         
@@ -1421,6 +1414,7 @@ const fetchOlderMessages = async () => {
     isAdjustingScrollRef.current = false;
   }
 };
+
 
 const handleChatScroll = (e) => {
   const container = e.currentTarget;
@@ -1452,7 +1446,6 @@ const handleFileChange = (e) => {
   }
   e.target.value = ""; 
 };
-
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
   
@@ -1466,48 +1459,44 @@ const handleProfileSubmit = async (e) => {
   const data = new FormData();
   
   const fileToUpload = onboardingFile || previewFile;
-  if (fileToUpload) {
-    data.append('photo', fileToUpload);
-  }
+  if (fileToUpload) data.append('photo', fileToUpload);
 
   Object.keys(formData).forEach(key => {
-    if (formData[key] !== undefined && formData[key] !== null) {
-      if (key === 'phone') {
-        data.append(key, JSON.stringify(formData[key]));
-      } else {
-        data.append(key, formData[key]);
-      }
+    if (formData[key] != null) {
+      data.append(key, key === 'phone' ? JSON.stringify(formData[key]) : formData[key]);
     }
   });
 
   try {
-    // UPDATED: Removed 'token' argument. secureFetch handles credentials: 'include'.
-    const res = await secureFetch('/api/users/update-user-onboarding', {
-      method: 'PUT',
-      body: data
-    });
-    const result = await res.json();
+    // 1. Fire the API call and Engine init in parallel to save time
+    const [response] = await Promise.all([
+      secureFetch('/api/users/update-user-onboarding', {
+        method: 'PUT',
+        body: data
+      }),
+      // SignalEngine.initialize is now your fast, non-blocking registration
+      SignalEngine.initialize(userData._id || Date.now().toString()) 
+    ]);
 
-    if (res.ok && result.success) {
+    const result = await response.json();
+
+    if (response.ok && result.success) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
       if (setUserData) setUserData(result.user);
       
-      console.log("🛡️ Onboarding complete. Initiating cryptographic registration...");
-      await initializeUserE2EEKeys(result.user.id);
-
+      console.log("🛡️ Profile & Security synced.");
+      
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);
       setPreviewUrl(null);
-      
-      console.log("Profile updated successfully.");
     } else {
-      alert(result.message || "Initialization failed. Please check the form.");
+      throw new Error(result.message || "Initialization failed.");
     }
   } catch (err) {
     console.error("Profile initialization failed:", err);
-    alert("Network error. Please check your connection.");
+    alert("Initialization failed. Please check your connection.");
   } finally {
     setIsUploading(false);
   }
@@ -1633,7 +1622,6 @@ const processFile = (file) => {
   setPreviewUrl(URL.createObjectURL(file));
   setCaption("");
 };
-
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
 
@@ -1644,6 +1632,7 @@ const handleFinalSend = async () => {
   const currentUrl = previewUrl;
   const rawCaption = caption;
 
+  // 1. Optimistic UI
   const pendingMedia = {
     _id: tempId,
     tempId: tempId,
@@ -1657,35 +1646,15 @@ const handleFinalSend = async () => {
   };
 
   setMessages(prev => [...prev, pendingMedia]);
-  
   setPreviewUrl(null);
   setPreviewFile(null);
   setIsUploading(true);
 
   try {
-    let payload = null;
-    let isEncrypted = false;
+    // 2. Encrypt via SignalEngine (Handles caption/metadata encryption)
+    const encryptedBundle = await SignalEngine.encrypt(agent._id, rawCaption.trim());
 
-    if (agent?.publicKeyJwk) {
-      const encryptedCaption = await encryptMessageText(
-        rawCaption.trim(),
-        agent.publicKeyJwk,
-        privateKeyJwk // Use the authorized private key from state
-      );
-      
-      if (!encryptedCaption.isEncrypted) {
-        throw new Error("⚠️ Encryption failed internally.");
-      }
-
-      // MODIFIED: Using structured payload for backend consistency
-      payload = {
-        ciphertext: encryptedCaption.cipherText,
-        iv: encryptedCaption.iv,
-        version: "v1"
-      };
-      isEncrypted = true;
-    }
-
+    // 3. Obtain S3/Storage upload URL
     const urlResponse = await secureFetch('/api/messages/get-upload-url', {
       method: 'POST',
       body: JSON.stringify({ fileName: fileToUpload.name, fileType: fileToUpload.type })
@@ -1694,43 +1663,38 @@ const handleFinalSend = async () => {
     const urlData = await urlResponse.json();
     if (!urlData.success) throw new Error("Upload permission failed");
 
+    // 4. Direct Upload to Storage
     await fetch(urlData.uploadUrl, {
       method: 'PUT',
       body: fileToUpload,
       headers: { 'Content-Type': fileToUpload.type }
     });
 
-    // MODIFIED: Sending as structured payload
+    // 5. Confirm with Server
     const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
-        payload: payload,
-        isEncrypted: isEncrypted,
+        receiverModel: 'Agent',
+        ...encryptedBundle, // Contains ciphertext, iv, and ratchet session headers
         fileUrl: urlData.key,
         fileType: detectedType
       })
     });
 
     const data = await confirmResponse.json();
-    if (data.success) {
-      const finalizedMessage = { ...data.message };
-      
-      // Decrypt using the new payload structure
-      if (finalizedMessage.isEncrypted && finalizedMessage.payload && agent?.publicKeyJwk) {
-        finalizedMessage.text = await decryptMessageText(
-          finalizedMessage.payload,
-          agent.publicKeyJwk,
-          privateKeyJwk
-        );
-      }
+    if (!data.success) throw new Error(data.message || "Upload confirmation failed");
 
-      setMessages(prev => prev.map(m => m._id === tempId ? finalizedMessage : m));
-      setReplyingTo(null);
-      setCaption("");
-    } else {
-      throw new Error(data.message || "Upload confirmation failed");
-    }
+    // 6. Finalize UI
+    setMessages(prev => prev.map(m => m._id === tempId ? { 
+      ...data.message, 
+      decryptedText: rawCaption, 
+      isEncrypted: false 
+    } : m));
+    
+    setReplyingTo(null);
+    setCaption("");
+
   } catch (err) {
     console.error("Upload process error:", err);
     setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
@@ -1811,8 +1775,6 @@ const handleStartCall = async () => {
   setShowFullScreenCall(true);
 
   try {
-    // UPDATED: Now using secureFetch for consistency.
-    // secureFetch handles the 'credentials: include' and JSON headers automatically.
   const res = await secureFetch('/api/calls/start', {
   method: 'POST',
   body: JSON.stringify({ 
@@ -1821,13 +1783,10 @@ const handleStartCall = async () => {
     voiceId: "natural" 
   })
 });
-
     const data = await res.json();
-
     if (!data.success) {
       throw new Error(data.message || "Agent unavailable");
     }
-
     const photoPath = userData?.photoUrl;
     const fullPhotoUrl = photoPath?.startsWith('http') 
       ? photoPath 
@@ -1869,24 +1828,18 @@ const handleStartCall = async () => {
     handleEndCall();
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
-
-  if (!isCryptoReady || !privateKeyJwk) {
-    console.error("Security Block: E2EE layer not initialized.");
+  if (!SignalEngine.isReady()) {
+    console.error("Security Block: SignalEngine not initialized.");
     alert("Establishing secure channel... please wait.");
-    return;
-  }
-
-  if (agent && !agent.publicKeyJwk) {
-    console.error("Security Block: Recipient public key missing.");
-    alert("Recipient security profile not available.");
     return;
   }
 
   if (!newMessage.trim() || !agent?._id) return;
 
-  const textToSend = newMessage;
+  const textToSend = newMessage.trim();
   const tempId = Date.now().toString();
   setNewMessage('');
 
@@ -1902,23 +1855,17 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, pendingMessage]);
 
   try {
-    const encryptedData = await encryptMessageText(textToSend, agent.publicKeyJwk, privateKeyJwk);
+    // 2. Engine-Driven Encryption
+    // The engine manages session keys, IVs, and ratchet headers internally.
+    const encryptedBundle = await SignalEngine.encrypt(agent._id, textToSend);
 
-    if (!encryptedData.cipherText || !encryptedData.iv) {
-      throw new Error("Encryption failed: Missing IV or Ciphertext.");
-    }
-
-    // MODIFIED: Payload structure for Unified API compliance
+    // 3. Payload Delivery
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
         receiverModel: 'Agent',
-        payload: {
-          ciphertext: encryptedData.cipherText,
-          iv: encryptedData.iv,
-          version: "v1"
-        },
+        ...encryptedBundle, // Contains ciphertext, iv, and ratchet session headers
         isEncrypted: true,
         fileType: 'text',
         replyToId: replyingTo?._id
@@ -1926,15 +1873,15 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message);
+    if (!response.ok || !data.success) throw new Error(data.message || "Transmission failed.");
 
-    const finalizedMessage = { 
+    // 4. Update UI
+    setMessages(prev => prev.map(m => m._id === tempId ? { 
       ...data.message, 
-      text: textToSend, // Keep plain text for sender's own UI
+      decryptedText: textToSend, // Engine-compatible field
       status: 'sent' 
-    };
-
-    setMessages(prev => prev.map(m => m._id === tempId ? finalizedMessage : m));
+    } : m));
+    
     setReplyingTo(null);
 
   } catch (err) {
@@ -1954,6 +1901,7 @@ const handleResend = (msg) => {
     setNewMessage(msg.text);
   }
 };
+
 function AudioTracks({ active }) {
   const tracks = useTracks(
     [
@@ -1964,11 +1912,11 @@ function AudioTracks({ active }) {
 
   return null; // This component doesn't need to render anything visual
 };
-const MessageBubble = ({ m, isMe, onReply, isCryptoReady, privateKeyJwk, senderPublicKey }) => {
+
+const MessageBubble = ({ m, isMe, onReply }) => {
   const controls = useAnimation();
   
   const bind = useDrag(({ active, movement: [x], last }) => {
-    // Restrict movement to 100px
     const xMovement = Math.min(Math.max(0, x), 100); 
 
     if (active) {
@@ -1986,7 +1934,7 @@ const MessageBubble = ({ m, isMe, onReply, isCryptoReady, privateKeyJwk, senderP
 
   return (
     <div className={`relative group w-full flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-      {/* The Hidden Reply Icon */}
+      {/* Hidden Reply Icon */}
       <div className="absolute left-[-40px] inset-y-0 flex items-center opacity-0 group-active:opacity-100 transition-opacity">
         <div className="bg-gray-200 p-2 rounded-full cursor-pointer">
           <BsReplyFill className="text-gray-600" size={18} />
@@ -2002,14 +1950,9 @@ const MessageBubble = ({ m, isMe, onReply, isCryptoReady, privateKeyJwk, senderP
             : 'bg-white self-start rounded-tl-none border border-gray-200'
         } mb-1`}
       >
-        {/* Decryption logic is now encapsulated inside MessageItem */}
-        <MessageItem 
-          message={m} 
-          isMe={isMe} 
-          isCryptoReady={isCryptoReady} 
-          privateKeyJwk={privateKeyJwk} 
-          senderPublicKey={senderPublicKey} 
-        />
+        {/* Component only needs the message object. 
+            The SignalEngine handles all state internally. */}
+        <MessageItem message={m} isMe={isMe} />
       </motion.div>
     </div>
   );

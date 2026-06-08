@@ -31,6 +31,7 @@
     "framer-motion": "^12.38.0",
     "idb": "^8.0.3",
     "jsonwebtoken": "^9.0.3",
+    "libsignal": "^6.0.0",
     "livekit-client": "^2.18.9",
     "livekit-server-sdk": "^2.15.2",
     "mongoose": "^9.4.1",

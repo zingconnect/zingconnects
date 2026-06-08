@@ -11,7 +11,7 @@ import {
 import ZingConnectLogo from '../../public/logo.png';
 import { useAuth } from '../context/AuthContext'; // Import your hook
 import { secureFetch } from "../../api/utils/api"; // Ensure this import path is correct
-import { savePeerPublicKey } from "../utils/cryptoStorage";
+import { savePeerPublicKey } from "../utils/ZingSignalStore";
 
 
 export const AgentSlug = () => {

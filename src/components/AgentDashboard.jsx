@@ -14,8 +14,7 @@ import { BsSearch, BsShieldExclamation, BsShieldLock, BsThreeDotsVertical, BsChe
 } from 'react-icons/bs';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
-import { encryptMessageText, decryptMessageText } from "../utils/cryptoEngine";
-import { savePrivateKey, getPrivateKey, clearKeys } from "../utils/cryptoStorage"; // Import persistence
+import { SignalEngine } from '../utils/SignalEngine';
 
 
 const formatLastSeen = (lastSeenDate, ticker) => {
@@ -58,55 +57,47 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 const socket = io(import.meta.env.VITE_API_URL);
-const processMessageForUI = async (msg, currentUser, currentKey) => {
-  // If already processed, return immediately to save cycles
+const processMessageForUI = async (msg) => {
+  // 1. Bypass logic for system messages or already-decrypted content
   if (msg.decryptedText && !msg.isEncrypted) return msg;
-  
   if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
     return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
   }
-
-  // Robust payload check
-  const payload = msg.payload || (msg.ciphertext ? { ciphertext: msg.ciphertext, iv: msg.iv } : null);
-  const hasPubKey = currentUser?.publicKeyJwk;
-  const hasPrivKey = !!currentKey;
-
-  if (payload && hasPubKey && hasPrivKey) {
-    try {
-      const decrypted = await decryptMessageText(payload, currentUser.publicKeyJwk, currentKey);
-      return { ...msg, decryptedText: decrypted, isEncrypted: false };
-    } catch (e) {
-      return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
-    }
+  try {
+    const payload = msg.payload || { ciphertext: msg.ciphertext, iv: msg.iv };
+    const decrypted = await SignalEngine.decrypt(msg.senderId, payload);
+    
+    return { ...msg, decryptedText: decrypted, isEncrypted: false };
+  } catch (e) {
+    console.error("Signal Ratchet Error:", e);
+    return { ...msg, decryptedText: "🔒 [Session Desync - Re-initiating...]", isEncrypted: false };
   }
-  
-  return { ...msg, decryptedText: "🔒 [Decrypting...]", isEncrypted: true };
 };
-
 const MessageItem = ({ message }) => {
-  // Logic is now derived from the state set by processMessageForUI
-  const isFailed = message.decryptedText === "🔒 [Decryption Failed]";
-  const isProcessing = message.decryptedText === "🔒 [Decrypting...]";
+  const displayContent = message.decryptedText || message.text || "";
+  
+  const isFailed = displayContent.includes("[Decryption Failed]");
+  const isDesynced = displayContent.includes("[Session Desync]");
 
-  if (isFailed) {
+  if (isFailed || isDesynced) {
     return (
       <span className="flex items-center gap-1.5 italic text-red-500 text-[11px] font-bold">
-        <BsShieldExclamation size={12} /> Decryption Failed
+        <BsShieldExclamation size={12} /> 
+        {isDesynced ? "Secure Session Desync" : "Decryption Error"}
       </span>
     );
   }
-
-  if (isProcessing) {
+    if (message.isEncrypted && !message.decryptedText) {
     return (
       <span className="flex items-center gap-1.5 italic opacity-60 text-[11px] font-medium">
-        <BsShieldLock size={12} /> Decrypting...
+        <BsShieldLock size={12} /> Establishing Secure Session...
       </span>
     );
   }
 
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words">
-      {message.decryptedText}
+      {displayContent}
     </p>
   );
 };
@@ -116,12 +107,12 @@ export const AgentDashboard = () => {
   const { token, isLoading, setToken } = useAuth();
   const { slug } = useParams();
   const location = useLocation(); // <--- ADD THIS
-const { privateKey, isCryptoReady } = useAuth();
+const { isCryptoReady } = useAuth();
 
 
   const isForcedRefresh = location.state?.forceRefresh;
   const [agentData, setAgentData] = useState(null);
-  const [agentPrivateKey, setAgentPrivateKey] = useState(null); // Key material
+  const [isEngineReady, setIsEngineReady] = useState(false);
   const [users, setUsers] = useState([]); 
   const [selectedUser, setSelectedUser] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -189,7 +180,6 @@ const hasProcessedDeepLink = useRef(false);
   const aiMediaRecorderRef = useRef(null);
   const selectedUserRef = useRef(selectedUser);
 const agentDataRef = useRef(agentData);
-const agentPrivateKeyRef = useRef(agentPrivateKey);
 
     const slugFromUrl = slug || agentData?.slug || '';
 
@@ -226,17 +216,22 @@ const agentPrivateKeyRef = useRef(agentPrivateKey);
   console.log("Cookies found in browser:", document.cookie);
 }, []);
 
- const handleLogout = async (e) => {
+const handleLogout = async (e) => {
   e.preventDefault();
+  
   try {
     await secureFetch('/api/agents/logout', { method: 'POST' });
   } catch (err) {
     console.error("Logout failed:", err);
   } finally {
     await clearKeys(); 
-    agentPrivateKeyRef.current = null;
-        setMessages([]);
+    if (typeof SignalEngine !== 'undefined') {
+        await SignalEngine.purge(); 
+    }
+    setMessages([]);
     setSelectedUser(null);
+    
+    // 5. Final navigation
     const targetUrl = slug ? `/${slug}` : '/';
     window.location.replace(targetUrl); 
   }
@@ -374,9 +369,7 @@ const handleStartCall = async (targetUserId) => {
     }, 500);
   }
 };
-// Ensure 'isFetchingRef' is a useRef defined in your component
 const fetchMessages = async (userId, limit = 30) => {
-  // 1. Use the ref instead of a local variable
   if (isFetchingRef.current || isDualLoginConflict) return null;
   
   isFetchingRef.current = true;
@@ -393,28 +386,23 @@ const fetchMessages = async (userId, limit = 30) => {
     const data = await res.json();
 
     if (data.success && data.messages) {
-      // 2. Capture latest values from refs to avoid closure staleness
-      const myKey = agentPrivateKeyRef.current;
-      const myId = agentData?._id;
-      const selectedUser = selectedUserRef.current;
-
+      // The Engine now handles the state, so we don't need refs for keys.
+      // We map the messages through the SignalEngine.
       return await Promise.all(data.messages.map(async (msg) => {
-        // 3. Sender Bypass
-        if (String(msg.senderId) === String(myId)) {
+        
+        // 1. If it's a message we sent, it's already plain text (or handled by DB)
+        if (String(msg.senderId) === String(agentData?._id)) {
           return { ...msg, decryptedText: msg.text || msg.content, isEncrypted: false };
         }
 
-        // 4. Receiver Decryption
-        if (msg.isEncrypted && msg.payload && selectedUser?.publicKeyJwk && myKey) {
+        // 2. If it's encrypted, let the Engine handle the Double-Ratchet decryption
+        if (msg.isEncrypted && msg.payload) {
           try {
-            const clearText = await decryptMessageText(
-              msg.payload, 
-              selectedUser.publicKeyJwk, 
-              myKey
-            );
+            const clearText = await SignalEngine.decrypt(msg.senderId, msg.payload);
             return { ...msg, decryptedText: clearText, isEncrypted: false };
           } catch (e) {
-            return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+            console.error("Ratchet decryption failed for message:", msg._id, e);
+            return { ...msg, decryptedText: "🔒 [Secure Session Desync]", isEncrypted: false };
           }
         }
         
@@ -430,21 +418,18 @@ const fetchMessages = async (userId, limit = 30) => {
   }
 };
 
+
 const handleAcceptCall = async () => {
   if (ringtoneAudio.current) {
     ringtoneAudio.current.pause();
     ringtoneAudio.current.currentTime = 0;
   }
-  
-
-  const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId || activeCaller?._id;
+const callId = activeCall?.callId || activeCall?._id || activeCaller?.callId || activeCaller?._id;
   const remoteUserId = activeCaller?.fromId || activeCaller?.callerId || activeCall?.fromId || activeCall?.caller;
-
   if (!callId) {
     console.error("❌ ZingConnect Error: No Call ID found.");
     return;
   }
-
  try {
     setCallStatus('connecting'); 
     setShowFullScreenCall(true);
@@ -521,20 +506,17 @@ const handleAcceptCall = async () => {
       currentIncoming?.fromId,
       currentIncoming?.callerData?.callerId
     ];
-
     const targetId = potentialTargets.find(id => {
       if (!id) return false;
       const cid = id._id ? id._id.toString() : id.toString();
       return cid !== myId;
     });
-
     [pollingIntervalRef, pollingRef].forEach(ref => {
       if (ref?.current) {
         clearInterval(ref.current);
         ref.current = null;
       }
     });
-
     if (socket && targetId) {
       const finalTarget = String(targetId).trim();
       console.log(`📡 Signaling END to Remote Party: ${finalTarget}`);
@@ -543,14 +525,12 @@ const handleAcceptCall = async () => {
     } else {
       console.warn("⚠️ Pipeline Warn: Direct clean execution down pathway without peer connection metadata.");
     }
-
     [ringtoneAudio, callingAudio, notificationSound].forEach(ref => {
       if (ref?.current) {
         ref.current.pause();
         ref.current.currentTime = 0;
       }
     });
-    
     setCallStatus('idle');
     setLkToken(null);
     setActiveCall(null);
@@ -559,7 +539,6 @@ const handleAcceptCall = async () => {
     setShowFullScreenCall(false);
     setCallTime(0);
     setPeerConnected(false);
-    
     if (activeCallRef) activeCallRef.current = null;
     if (activeCallerRef) activeCallerRef.current = null;
     
@@ -579,16 +558,14 @@ const handleAcceptCall = async () => {
     console.log("🚫 Agent rejecting incoming call...");
     const targetId = activeCaller?.fromId || activeCall?.caller || activeCall?.fromId;
     const callId = activeCaller?.callId || activeCall?._id;
-
-    if (socket && targetId) {
+if (socket && targetId) {
       socket.emit("end-call", { 
         to: String(targetId).trim(), 
         reason: 'rejected',
         callId 
       });
     }
-    
-    handleEndCall(); 
+handleEndCall(); 
   };
 
   const startHold = (id) => {
@@ -599,7 +576,6 @@ const handleAcceptCall = async () => {
     }, 700); 
     setHoldTimer(timer);
   };
-
   const stopHold = () => {
     if (holdTimer) {
       clearTimeout(holdTimer);
@@ -607,14 +583,11 @@ const handleAcceptCall = async () => {
     }
   };
 
-  // FIXED: Leverages LiveKit's unified tracks wrapper loop safely 
   const startVoiceConversion = async (livekitMediaStream) => {
-    let aiStream = null; 
-    
+    let aiStream = null;     
     try {
       const sourceStream = livekitMediaStream || userStreamRef.current;
       if (!sourceStream) return null;
-      
       aiStream = new MediaStream(sourceStream.getAudioTracks().map(t => t.clone()));    
       sourceStream.getAudioTracks().forEach(track => { track.enabled = false; });
 
@@ -638,7 +611,6 @@ const handleAcceptCall = async () => {
           reader.readAsDataURL(event.data);
         }
       };
-
       mediaRecorder.start(100); 
       console.log("🚀 AI Voice Bridge Active");
       
@@ -657,16 +629,12 @@ const handleAcceptCall = async () => {
       aiMediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       aiMediaRecorderRef.current = null;
     }
-
     if (userStreamRef.current) {
       userStreamRef.current.getAudioTracks().forEach(track => { track.enabled = true; });
     }
-
     socket.emit("stop-voice-conversion", { callId: activeCall?.callId || activeCall?._id });
     setIsVoiceConversionActive(false);
   };
-
-  /* --- INTERNAL AUDIO CONTROLLER SUBCOMPONENTS (SAFE FROM ROOMEEVENT MISSES) --- */
   const LocalUserMuteController = ({ isMuted, isMasked }) => {
     const { localParticipant } = useLocalParticipant();
     const room = useRoomContext();
@@ -720,42 +688,29 @@ const handleAcceptCall = async () => {
     }, 60000); 
     return () => clearInterval(interval);
   }, []);
-  
-// 🛡️ Hardware Device Identity Handshake for the Agent
-useEffect(() => {
-  const provisionAgentCryptoEnvironment = async () => {
-    console.log("🔍 [Crypto] Checking provisioning dependencies:", {
-      isLoading,
-      hasToken: !!token,
-      agentId: agentData?._id
-    });
 
-    if (!isLoading && token && agentData?._id) {
-      console.log("🔒 [Crypto] Initializing agent cryptographic keys for ID:", agentData._id);      
-      try {
-        const agentId = String(agentData._id);
-        const success = await initializeUserE2EEKeys(agentId, token);
-        
-        if (success) {
-          const savedKey = localStorage.getItem(`zing_secure_pk_${agentId}`);
-          
-          if (savedKey) {
-            setAgentPrivateKey(JSON.parse(savedKey));
-            console.log("✅ [Crypto] Agent private key confirmed in storage and loaded to state.");
-          } else {
-            console.error("❌ [Crypto] initializeUserE2EEKeys returned success, but key was NOT found in storage!");
-          }
-        } else {
-          console.error("❌ [Crypto] initializeUserE2EEKeys returned false.");
-        }
-      } catch (err) {
-        console.error("❌ [Crypto] Failed to load agent crypto keys:", err);
+
+  useEffect(() => {
+  const provisionAgentCryptoEnvironment = async () => {
+    if (isLoading || !token || !agentData?._id) return;
+    console.log("🔒 [SignalEngine] Initializing secure environment for:", agentData._id);
+    try {
+      const agentId = String(agentData._id);
+      const success = await initializeUserE2EEKeys(agentId, token);
+      if (!success) {
+        throw new Error("Identity provisioning handshake failed.");
       }
+      await SignalEngine.initialize(agentId);
+      console.log("✅ [SignalEngine] Cryptographic ratchet environment ready.");
+
+    } catch (err) {
+      console.error("❌ [SignalEngine] Initialization failed:", err);
     }
   };
   
   provisionAgentCryptoEnvironment();
 }, [token, isLoading, agentData?._id]);
+
 
   useEffect(() => {
     if (!room) return;
@@ -1027,29 +982,27 @@ useEffect(() => {
 }, [localStream]);
 
 useEffect(() => {
-  if (!socket) return;
-  
-  const handleStatusUpdate = ({ userId, status }) => {
-    // 1. Update the main list
+  if (!socket) return;  
+  const handleStatusUpdate = ({ userId, status, lastActive }) => {
     setUsers(prevUsers => prevUsers.map(u => 
-      u.id === userId ? { ...u, status } : u
+      (u._id === userId || u.id === userId) ? { ...u, status, lastActive } : u
     ));
-    
-    // 2. Update the selected user (if they are currently open)
-    setSelectedUser(prev => (prev?.id === userId ? { ...prev, status } : prev));
+        setSelectedUser(prev => {
+      if (prev && (prev._id === userId || prev.id === userId)) {
+        return { ...prev, status, lastActive };
+      }
+      return prev;
+    });
   };
-
   socket.on('user_status_update', handleStatusUpdate);
   return () => socket.off('user_status_update', handleStatusUpdate);
 }, [socket]);
 
 useEffect(() => {
   let timer;
-
   if (callStatus === 'connected') {
     setCallTime(0);
     const localStart = Date.now();
-    
     timer = setInterval(() => {
       const now = Date.now();
       const secondsPassed = Math.floor((now - localStart) / 1000);
@@ -1075,6 +1028,12 @@ const formatTime = (seconds) => {
 };
 
 useEffect(() => {
+  if (isCryptoReady && agentData?._id) {
+    SignalEngine.initialize(agentData._id); 
+  }
+}, [isCryptoReady, agentData?._id]);
+
+useEffect(() => {
   if (!socket || !agentData?._id) return;
   const myRoomId = agentData._id.toString();
   socket.emit("join-main-room", myRoomId);
@@ -1091,7 +1050,6 @@ useEffect(() => {
 
     handleEndCall(); 
   };
-
   const onIncoming = async (data) => {
     peerConnectedRef.current = false; 
     setPeerConnected(false);
@@ -1099,9 +1057,7 @@ useEffect(() => {
       socket.emit("user-busy", { to: data.fromId, callId: data.callId || data._id });
       return;
     }
-
     const callId = data.callId || data._id;
-
     try {
       const res = await secureFetch(`/api/calls/status/${callId}`, {
         method: 'GET'
@@ -1112,9 +1068,7 @@ useEffect(() => {
         console.log("⏭️ Incoming call already finalized in DB.");
         return;
       }
-
       socket.emit("confirm-ringing", { to: data.fromId });
-
       setActiveCaller({
         fromName: data.fromName,
         photoUrl: data.photoUrl,
@@ -1134,11 +1088,9 @@ useEffect(() => {
       console.error("Agent side check failed:", err);
     }
   };
-
   const onUserRinging = () => {
     setCallStatus(prev => (prev === 'calling' ? 'ringing' : prev));
   };
-
   const onCallAccepted = () => {
     console.log("🔊 User picked up. Silencing outgoing tones.");
     if (callingAudio.current) {
@@ -1148,7 +1100,6 @@ useEffect(() => {
     setCallStatus('connected');
     setPeerConnected(true);
   };
-
   // 4. Attach Listeners
   socket.on("incoming-call", onIncoming);
   socket.on("user-is-ringing", onUserRinging);
@@ -1156,7 +1107,6 @@ useEffect(() => {
   socket.on("call-ended", handleRemoteEnd);
   socket.on("end-call", handleRemoteEnd);
   socket.on("call-rejected", handleRemoteEnd);
-
   // 5. Cleanup on Unmount
   return () => {
     socket.off("incoming-call", onIncoming);
@@ -1218,20 +1168,22 @@ useEffect(() => {
       clearInterval(pollingIntervalRef.current);
     }
   };
-}, [agentData?._id, callStatus]); // Triggers poll only when status returns to 'idle'
+}, [agentData?._id, callStatus]); 
+
 useEffect(() => {
   const handleVisibilityChange = async () => {
     if (document.visibilityState !== 'visible') return;
 
-    console.log("📱 ZingConnect: App returned to foreground.");
+    console.log("📱 ZingConnect: App foregrounded. Syncing Signal state...");
     if (callStatus !== 'idle') return;
 
-    // Socket health check
+    // 1. Socket Health
     if (socket) {
       if (agentData?._id) socket.emit("join-main-room", agentData._id.toString());
       if (!socket.connected) socket.connect();
     }
 
+    // 2. Encrypted Catch-up
     if (selectedUser?._id && agentData?._id) {
       try {
         const response = await secureFetch(`/api/messages/${selectedUser._id}?limit=30`, { method: 'GET' });
@@ -1239,39 +1191,23 @@ useEffect(() => {
         const data = await response.json();
 
         if (data.success && Array.isArray(data.messages)) {
-          // SAFE DECRYPTION GUARD: Check if the private key ref is actually available
-          const hasPrivateKey = agentPrivateKeyRef.current !== null && agentPrivateKeyRef.current !== undefined;
-          
+          // Decrypt via SignalEngine, which manages the chain state
           const updatedMessages = await Promise.all(
             data.messages.map(async (msg) => {
-              // 1. Skip if already processed
-              if (msg.decryptedText || msg.text || msg.content) return msg;
+              if (msg.decryptedText || !msg.isEncrypted) return msg;
 
-              // 2. Attempt decryption only if all required crypto assets exist
-              if (msg.isEncrypted && msg.payload?.ciphertext && selectedUser?.publicKeyJwk && hasPrivateKey) {
-                try {
-                  const clearText = await decryptMessageText(
-                    msg.payload,
-                    selectedUser.publicKeyJwk,
-                    agentPrivateKeyRef.current
-                  );
-                  return { ...msg, decryptedText: clearText, isEncrypted: false };
-                } catch (e) {
-                  console.error("Sync Decryption Error:", e);
-                  return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
-                }
+              try {
+                // SignalEngine handles the Ratchet state update internally
+                const clearText = await SignalEngine.decrypt(msg.senderId, msg.payload || { ciphertext: msg.ciphertext, iv: msg.iv });
+                return { ...msg, decryptedText: clearText, isEncrypted: false };
+              } catch (e) {
+                console.error("Sync Decryption Error (Ratchet Desync):", e);
+                return { ...msg, decryptedText: "🔒 [Session Desync - Refreshing...]", isEncrypted: false };
               }
-
-              // 3. Fallback: If encrypted but keys aren't ready, mark as pending
-              return { 
-                ...msg, 
-                decryptedText: msg.isEncrypted ? "🔒 [Decrypting...]" : (msg.text || msg.content || ""), 
-                isEncrypted: msg.isEncrypted 
-              };
             })
           );
 
-          // MERGE STRATEGY: Update state without overwriting existing local modifications
+          // 3. Merge Strategy
           setMessages((prevMessages) => {
             const newIds = new Set(updatedMessages.map((m) => m.id || m._id));
             const filteredPrev = prevMessages.filter((m) => !newIds.has(m.id || m._id));
@@ -1290,14 +1226,13 @@ useEffect(() => {
   return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
 }, [agentData?._id, selectedUser?._id, callStatus, socket]);
 
-
 useEffect(() => {
-  if (selectedUser && agentData && agentPrivateKey) { 
-    fetchMessages(selectedUser._id, 30, selectedUser).then(msgs => {
+  if (selectedUser?._id && agentData?._id) {
+    fetchMessages(selectedUser._id, 30).then(msgs => {
       if (msgs) setMessages(msgs);
     });
   }
-}, [selectedUser?._id, agentPrivateKey]); 
+}, [selectedUser?._id, agentData?._id]);
 
 useEffect(() => {
   const currentCallId = activeCall?.roomName || activeCall?.callId || activeCall?._id;
@@ -1366,10 +1301,8 @@ useEffect(() => {
       }
     }
   };
-
   socket.on("call-accepted", handleAnswer);
   socket.on("answer-call", handleAnswer); // Handle both event names just in case
-
   return () => {
     socket.off("call-accepted", handleAnswer);
     socket.off("answer-call", handleAnswer);
@@ -1441,21 +1374,14 @@ useEffect(() => {
 useEffect(() => {
   const handleOnline = () => setConnectionStatus('connected');
   const handleOffline = () => setConnectionStatus('offline');
-
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
-
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
   };
 }, []);
 
-useEffect(() => {
-  selectedUserRef.current = selectedUser;
-  agentPrivateKeyRef.current = agentPrivateKey;
-  agentDataRef.current = agentData; 
-}, [selectedUser, agentData, agentPrivateKey]);
 
 useEffect(() => {
   if (isDualLoginConflict) return;
@@ -1493,17 +1419,15 @@ useEffect(() => {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      // 2. Artificial delay to allow database/Redis to sync after payment
       if (isForcedRefresh) {
-        console.log("🔄 Waiting for subscription sync...");
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
-      // 3. Added '?t=${Date.now()}' to force the browser to ignore cache
-    const [profileResponse, usersResponse] = await Promise.allSettled([
-  secureFetch(`/api/agents/profile/me?fresh=true&t=${Date.now()}`, { method: 'GET' }),
-  secureFetch(`/api/agents/my-users?t=${Date.now()}`, { method: 'GET' })
-]);
+      const [profileResponse, usersResponse] = await Promise.allSettled([
+        secureFetch(`/api/agents/profile/me?fresh=true&t=${Date.now()}`, { method: 'GET' }),
+        secureFetch(`/api/agents/my-users?t=${Date.now()}`, { method: 'GET' })
+      ]);
+
       if (!isMounted) return;
 
       // Handle Profile Request
@@ -1511,11 +1435,7 @@ useEffect(() => {
         const res = profileResponse.value;
         if (res?.status === 401 || res?.status === 403) {
           const errorData = await res.json().catch(() => ({}));
-          if (errorData.reason === 'dual_login') {
-            setIsDualLoginConflict(true);
-          } else {
-            navigate(`/agent/login/${slug}`);
-          }
+          errorData.reason === 'dual_login' ? setIsDualLoginConflict(true) : navigate(`/agent/login/${slug}`);
           return;
         }
         throw new Error("Profile data retrieval failed");
@@ -1524,19 +1444,26 @@ useEffect(() => {
       const profileData = await profileResponse.value.json();
       
       if (profileData.agent) {
+        // 1. Set agent state
         setAgentData(profileData.agent);
-        const subscribed = !!profileData.agent.isSubscribed;
-        setIsSubscribed(subscribed); 
+        setIsSubscribed(!!profileData.agent.isSubscribed); 
         if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
 
-        // Handle User Request
-        if (subscribed && usersResponse.status === 'fulfilled') {
+        // 2. CRYPTO SYNC: Ensure Engine is aware of the new Agent context
+        // This is the bridge where the App's authenticated state 
+        // triggers the Engine's secure identity loading.
+        if (profileData.agent._id) {
+          // The engine will now handle checking IndexedDB for existing session state
+          await SignalEngine.initialize(profileData.agent._id);
+        }
+
+        // 3. Handle User Request
+        if (profileData.agent.isSubscribed && usersResponse.status === 'fulfilled') {
           const uRes = usersResponse.value;
           if (uRes.ok) {
             const userData = await uRes.json();
             if (userData.success) setUsers(userData.users);
           } else if (uRes.status === 403) {
-            console.warn("User list access forbidden.");
             setIsDualLoginConflict(true);
           }
         }
@@ -1550,7 +1477,7 @@ useEffect(() => {
 
   fetchInitialData();
   return () => { isMounted = false; };
-}, [navigate, slug, isForcedRefresh, isSubscribed]);
+}, [navigate, slug, isForcedRefresh]);
 
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
@@ -1604,7 +1531,7 @@ const handlePayment = useCallback(async () => {
             })
           });
 
-const data = await verifyRes.json();
+        const data = await verifyRes.json();
           console.log("DEBUG: Verification server response:", data);
 
           if (verifyRes.ok && data.success) {
@@ -1727,24 +1654,7 @@ const handleFinalSend = async () => {
   setIsUploading(true);
 
   try {
-    const detectedType = previewFile.type.startsWith('video/') ? 'video' : 'image';
-    const rawCaption = caption;
-
-    let finalCaption = rawCaption.trim();
-    let encryptionIv = null;
-    let isEncrypted = false;
-
-    if (selectedUser?.publicKeyJwk) {
-      const encryptedData = await encryptMessageText(
-        rawCaption.trim(),
-        selectedUser.publicKeyJwk,
-        agentData._id
-      );
-      finalCaption = encryptedData.cipherText;
-      encryptionIv = encryptedData.iv;
-      isEncrypted = true;
-    }
-
+    // 1. Get Upload URL for the raw file
     const urlResponse = await secureFetch('/api/messages/get-upload-url', {
       method: 'POST',
       body: JSON.stringify({ fileName: previewFile.name, fileType: previewFile.type })
@@ -1753,6 +1663,7 @@ const handleFinalSend = async () => {
     if (!urlResponse.ok) throw new Error("Failed to retrieve upload signature");
     const { uploadUrl, key } = await urlResponse.json();
 
+    // 2. Direct Upload to Cloud Storage
     const directUpload = await fetch(uploadUrl, {
       method: 'PUT',
       body: previewFile,
@@ -1760,47 +1671,41 @@ const handleFinalSend = async () => {
     });
 
     if (!directUpload.ok) throw new Error("Cloud upload failed");
+    const messagePayload = {
+      type: 'media',
+      fileUrl: key,
+      fileType: previewFile.type.startsWith('video/') ? 'video' : 'image',
+      caption: caption.trim()
+    };
 
+    // The Engine handles the Ratchet advancement and provides the ciphertext
+    const encryptedBundle = await SignalEngine.encrypt(selectedUser._id, messagePayload);
+
+    // 4. Send encrypted bundle to server
     const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: selectedUser._id,
         receiverModel: selectedUser.modelType || 'User',
-        text: finalCaption,
-        iv: encryptionIv,
-        isEncrypted: isEncrypted,
-        fileUrl: key,
-        fileType: detectedType
+        ...encryptedBundle // contains ciphertext, iv, and ratchet headers
       })
     });
 
     const finalData = await confirmResponse.json();
     if (finalData.success) {
-      let finalMsg = finalData.message;
-
-      // CORRECTED: Decryption logic aligned with cryptoEngine.js
-      if (finalMsg.isEncrypted && selectedUser?.publicKeyJwk) {
-        const payload = { 
-          ciphertext: finalMsg.text, 
-          iv: finalMsg.iv, 
-          version: 1 
-        };
-        
-        const decrypted = await decryptMessageText(
-          payload, 
-          selectedUser.publicKeyJwk, 
-          agentPrivateKeyRef.current
-        );
-        
-        finalMsg = { 
-          ...finalMsg, 
-          decryptedText: decrypted, 
-          isEncrypted: false 
-        };
-      }
+      // 5. Update local state
+      // We re-decrypt the returned message via the engine to maintain UI sync
+      const decryptedText = await SignalEngine.decrypt(selectedUser._id, finalData.message.payload);
+      
+      const finalMsg = { 
+        ...finalData.message, 
+        decryptedText, 
+        isEncrypted: false 
+      };
 
       setMessages(prev => [...prev, finalMsg]);
       
+      // Cleanup
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
       setPreviewFile(null);
@@ -1824,14 +1729,19 @@ const handleDisconnect = async (e) => {
   } catch (err) {
     console.error("Logout request failed:", err);
   } finally {
+    if (typeof SignalEngine !== 'undefined') {
+      await SignalEngine.purge();
+    }
+        setMessages([]);
+    setSelectedUser(null);
     const targetUrl = slug ? `/${slug}` : '/';
     window.location.replace(targetUrl);
   }
 };
-
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
 
+  // 1. Session tracking to prevent race conditions
   const sessionId = Math.random().toString(36).substring(7);
   activeSessionRef.current = sessionId;
 
@@ -1853,11 +1763,17 @@ const handleSelectUser = async (user) => {
     }
 
     if (data.success && Array.isArray(data.messages)) {
-      // USE YOUR HELPER HERE:
       const processedHistory = await Promise.all(
-        data.messages.map(msg => 
-          processMessageForUI(msg, freshUserData || user, agentPrivateKeyRef.current)
-        )
+        data.messages.map(async (msg) => {
+          if (!msg.isEncrypted) return msg;
+          
+          try {
+            const decryptedText = await SignalEngine.decrypt(user._id, msg.payload);
+            return { ...msg, decryptedText, isEncrypted: false };
+          } catch (e) {
+            return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+          }
+        })
       );
 
       if (activeSessionRef.current === sessionId) {
@@ -1874,10 +1790,12 @@ const handleSelectUser = async (user) => {
 
 useEffect(() => {
   if (hasProcessedDeepLink.current || users.length === 0) return;
+  
   const params = new URLSearchParams(window.location.search);
   const userIdFromUrl = params.get('userId');
+  
   if (userIdFromUrl) {
-    const userToSelect = users.find(u => u._id === userIdFromUrl);
+    const userToSelect = users.find(u => u._id === userIdFromUrl || u.id === userIdFromUrl);
     if (userToSelect) {
       handleSelectUser(userToSelect);
       hasProcessedDeepLink.current = true;
@@ -1896,45 +1814,39 @@ useEffect(() => {
 
   if (isInitialLoad) {
     container.scrollTop = container.scrollHeight;
-    requestAnimationFrame(() => {
+    
+    const rafId = requestAnimationFrame(() => {
       container.scrollTop = container.scrollHeight;
       const timeoutId = setTimeout(() => {
         container.scrollTop = container.scrollHeight;
-        setIsInitialLoad(false); 
+        setIsInitialLoad(false);
       }, 150);
       return () => clearTimeout(timeoutId);
     });
+    
+    return () => cancelAnimationFrame(rafId);
   } else {
-    // Check if we are at the bottom BEFORE the new message is fully rendered
     const isNearBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 250;
     if (isNearBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }
 }, [messages, isInitialLoad]);
-
 useEffect(() => {
   if (!isSubscribed || !agentData?._id || isDualLoginConflict) return;
 
   const refreshUserList = async () => {
     try {
       const res = await secureFetch('/api/agents/my-users', { method: 'GET' });
+      
       if (res.status === 401 || res.status === 403) {
         setIsDualLoginConflict(true);
         return;
       }
       if (!res.ok) return;
-
       const data = await res.json();
       if (data.success && data.users) {
-        setUsers(prevUsers => data.users.map(newUser => {
-          const existing = prevUsers.find(u => u._id === newUser._id);
-          // Preserve existing public key if incoming one is missing/null
-          if (existing?.publicKeyJwk && !newUser.publicKeyJwk) {
-            return { ...newUser, publicKeyJwk: existing.publicKeyJwk };
-          }
-          return newUser;
-        }));
+        setUsers(data.users);
       }
     } catch (err) { 
       console.warn("User list refresh error:", err); 
@@ -1945,25 +1857,36 @@ useEffect(() => {
   const interval = setInterval(refreshUserList, 15000);
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
-
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
   const refreshMessages = async () => {
+    // 1. Guard against background polling and concurrent fetches
     if (document.visibilityState !== 'visible' || isFetchingRef.current) return;
     
     isFetchingRef.current = true;
 
     try {
+      // 2. Fetch encrypted payload from server
       const incomingMsgs = await fetchMessages(selectedUser._id, limit);
       if (!incomingMsgs || incomingMsgs.length === 0) return;
 
+      // 3. Decrypt via SignalEngine
+      // We pass the payload to the engine; it handles the internal Ratchet state.
       const processedMsgs = await Promise.all(
-        incomingMsgs.map(msg => 
-          processMessageForUI(msg, selectedUserRef.current, agentPrivateKeyRef.current)
-        )
+        incomingMsgs.map(async (msg) => {
+          if (!msg.isEncrypted) return msg;
+          try {
+            const decryptedText = await SignalEngine.decrypt(selectedUser._id, msg.payload);
+            return { ...msg, decryptedText, isEncrypted: false };
+          } catch (e) {
+            console.error("Ratchet Decryption failed:", e);
+            return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+          }
+        })
       );
 
+      // 4. Update UI and trigger notifications
       setMessages(prev => {
         const isNew = processedMsgs.length !== prev.length || 
                       processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
@@ -1987,16 +1910,11 @@ useEffect(() => {
 
   const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
-}, [selectedUser?._id, callStatus, limit, privateKey]);
-
-
+}, [selectedUser?._id, callStatus, limit]); // Removed 'privateKey' dependency
 useEffect(() => {
   const setupNotifications = async () => {
-    // 1. Ensure token is available from context
+    // 1. Ensure token is available
     if (!token) return;
-
-    // Preventive check matching your user optimization flow
-    if (localStorage.getItem('agentPushSynced') === 'true') return;
 
     try {
       const publicKey = import.meta.env.VITE_PUBLIC_KEY;
@@ -2015,24 +1933,22 @@ useEffect(() => {
         });
       }
 
-      // ✨ CRITICAL FIX: Explicitly serialize the native PushSubscription instance
+      // 2. Serialize and send to server
       const subData = subscription.toJSON();
-
-      const response = await secureFetch('/api/save-subscription', token, {
+      
+      const response = await secureFetch('/api/save-subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          subscription: subData, // Send clean, stringified JSON literal parameters
+          subscription: subData, 
           userType: 'agent' 
         }) 
       });
 
-      if (response.ok) {
-        localStorage.setItem('agentPushSynced', 'true');
-        console.log("Agent Mobile Push Synced to DB");
-      } else {
+      if (!response.ok) {
         throw new Error(`Sync failed with status: ${response.status}`);
       }
+      
+      console.log("Agent Mobile Push Synced to DB");
     } catch (err) {
       console.error("Agent Push setup failed:", err);
     }
@@ -2041,7 +1957,8 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, [token]);
+}, [token]); // token should be stable; this effect runs once on login
+
 
 useEffect(() => {
   const applyTheme = () => {
@@ -2056,7 +1973,6 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
-
 useEffect(() => {
   if (!socket) return;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
@@ -2065,16 +1981,21 @@ useEffect(() => {
     if (callback) callback({ status: 'received' });
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
-
-    // 1. USE THE UNIFIED PROCESSOR
-    // We pass agentData._id to the processor so it knows if it's the sender
-    const processedData = await processMessageForUI(
-      { ...data, isSelf: String(data.senderId) === String(agentData?._id) },
-      selectedUserRef.current,
-      agentPrivateKeyRef.current
-    );
-
-    // 2. State Update
+    let decryptedText = data.text;
+    if (data.isEncrypted) {
+      try {
+        decryptedText = await SignalEngine.decrypt(data.senderId, data.payload);
+      } catch (e) {
+        console.error("Ratchet Decryption Error on Inbound Message:", e);
+        decryptedText = "🔒 [Decryption Failed - Syncing...]";
+      }
+    }
+    const processedData = { 
+      ...data, 
+      decryptedText, 
+      isEncrypted: false,
+      isSelf: String(data.senderId) === String(agentData?._id) 
+    };
     const isChattingWithSender = selectedUserRef.current && 
       (processedData.senderId === selectedUserRef.current._id || processedData.senderId === selectedUserRef.current.id);
     
@@ -2085,8 +2006,6 @@ useEffect(() => {
       });
       secureFetch(`/api/messages/mark-read/${selectedUserRef.current._id}`, { method: 'PATCH' }).catch(() => {});
     }
-
-    // 3. Notification Logic
     if (processedData.senderModel === 'User') {
       notificationSound.current?.play().catch(() => {});
       if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
@@ -2114,93 +2033,62 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!selectedUser || !newMessage.trim() || isUploading) return;
   
-  let activeUser = selectedUser;
-  
-  // 1. Silent Key Sync
-  if (!activeUser.publicKeyJwk) {
-    try {
-      const res = await secureFetch(`/api/users/profile/${activeUser._id}`, { method: 'GET' });
-      const data = await res.json();
-      if (data.user?.publicKeyJwk) {
-        activeUser = { ...activeUser, ...data.user };
-        setSelectedUser(activeUser);
-      } else {
-        throw new Error("Could not recover secure key.");
-      }
-    } catch (err) {
-      alert("Secure channel is unavailable. User must initialize their session.");
-      return;
-    }
-  }
-
-  const textToSend = newMessage;
+  const textToSend = newMessage.trim();
   const tempId = Date.now().toString();
   setNewMessage('');
 
-  // 2. Optimistic UI
+  // 1. Optimistic UI
   const optimisticMsg = {
     _id: tempId,
     tempId: tempId,
-    text: textToSend,
+    text: textToSend, // Keep raw text for display
     senderId: agentData._id,
     senderModel: 'Agent',
-    receiverId: activeUser._id,
-    receiverModel: activeUser.modelType || 'User',
+    receiverId: selectedUser._id,
+    receiverModel: selectedUser.modelType || 'User',
     status: 'sending',
     isEncrypted: true,
     createdAt: new Date().toISOString(),
     fileType: 'text'
   };
+  
   setMessages(prev => [...prev, optimisticMsg]);
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    if (!privateKey) throw new Error("Session identity missing.");
-    if (!activeUser.publicKeyJwk) throw new Error("Recipient key missing.");
-
-    // 3. Encrypt
-    const encrypted = await encryptMessageText(textToSend, activeUser.publicKeyJwk, privateKey);
-    if (!encrypted.isEncrypted || !encrypted.payload) throw new Error("Encryption failed.");
-
-    // 4. Send to server
+    const encryptedBundle = await SignalEngine.encrypt(selectedUser._id, textToSend);
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
-        receiverId: activeUser._id,
-        receiverModel: activeUser.modelType || 'User',
-        ciphertext: encrypted.payload.ciphertext,
-        iv: encrypted.payload.iv,
-        isEncrypted: true,
-        fileType: 'text'
+        receiverId: selectedUser._id,
+        receiverModel: selectedUser.modelType || 'User',
+        ...encryptedBundle 
       })
     });
 
     const data = await response.json();
     if (!data.success) throw new Error(data.message || "Transmission rejected.");
-
-    // 5. Unified UI Processing
-    // We pass the server response directly to our processor. 
-    // We override decryptedText to the original text so it shows instantly.
-    const finalMsg = await processMessageForUI(
-      { ...data.message, text: textToSend, decryptedText: textToSend, isEncrypted: false },
-      activeUser,
-      privateKey
-    );
-
-    setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
+    setMessages(prev => prev.map(msg => 
+      msg._id === tempId ? { 
+        ...data.message, 
+        decryptedText: textToSend, 
+        isEncrypted: false,
+        status: 'sent' 
+      } : msg
+    ));
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
-    setMessages(prev => prev.map(msg => msg._id === tempId ? { ...msg, status: 'failed' } : msg));
+    setMessages(prev => prev.map(msg => 
+      msg._id === tempId ? { ...msg, status: 'failed' } : msg
+    ));
     alert("Security Error: " + err.message);
   }
 };
-
 
   return (
     <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">

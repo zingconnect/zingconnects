@@ -1,7 +1,7 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import * as libsignal from 'libsignal';
 import { secureFetch } from "../../api/utils/api";
-import { generateIdentityKeyPair } from "../utils/cryptoEngine";
-import { savePrivateKey, getPrivateKey, clearKeys } from "../utils/cryptoStorage"; // Import persistence
+import { ZingSignalStore } from "../utils/ZingSignalStore"; // Your new store
 
 const AuthContext = createContext(null);
 
@@ -26,27 +26,45 @@ export const AuthProvider = ({ children }) => {
     hydrate();
   }, []);
 
-  const initializeCrypto = useCallback(async () => {
-    setIsCryptoReady(false);
-    // Use the function from your new cryptoEngine.js
-    const keyPair = await generateIdentityKeyPair();
-    
-    // Exporting the key for storage
-    const jwk = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
-    const pubJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+const initializeCrypto = useCallback(async () => {
+  setIsCryptoReady(false);
+  
+  // Helper to convert ArrayBuffer to Base64
+  const bufferToBase64 = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer)));
 
-    // Save to IndexedDB and state
-    await savePrivateKey(jwk);
-    setPrivateKey(jwk);
+  // 1. Generate Signal Identity Key & Registration ID
+  const identityKeyPair = await libsignal.KeyHelper.generateIdentityKeyPair();
+  const registrationId = libsignal.KeyHelper.generateRegistrationId();
 
-    await secureFetch('/api/update-crypto-key', {
-      method: 'PUT',
-      body: JSON.stringify({ publicKeyJwk: pubJwk })
-    });
+  // 2. Persist to ZingSignalStore
+  const store = new ZingSignalStore();
+  await store.saveIdentity('local', identityKeyPair);
+  await store.saveRegistrationId(registrationId);
 
-    setIsCryptoReady(true);
-    console.log("✅ E2EE Persistent-session initialized.");
-  }, []);
+  // 3. Generate PreKey Bundle
+  // The '1' represents the current Signed PreKey ID
+  const preKeyBundle = await libsignal.KeyHelper.generatePreKeyBundle(registrationId, 1);
+  
+  // 4. Send to backend with Base64 serialization
+  await secureFetch('/api/update-crypto-key', {
+    method: 'PUT',
+    body: JSON.stringify({ 
+      identityKey: bufferToBase64(identityKeyPair.pubKey), 
+      signedPreKey: {
+        keyId: preKeyBundle.signedPreKey.keyId,
+        publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+        signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+      },
+      preKeys: preKeyBundle.preKeys.map(pk => ({
+        keyId: pk.keyId,
+        publicKey: bufferToBase64(pk.publicKey)
+      }))
+    })
+  });
+
+  setIsCryptoReady(true);
+  console.log("✅ E2EE Persistent-session initialized and keys uploaded.");
+}, []);
 
   const verifySession = async () => {
     try {

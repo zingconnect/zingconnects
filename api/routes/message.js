@@ -28,7 +28,6 @@ async function clearUserCache(app, modelName, userId) {
     await redis.del(`profile:${userId}`).catch(() => {});
   }
 }
-// 1. GET HISTORY (STABILIZED FOR E2EE)
 router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -43,6 +42,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
       ]
     };
 
+    // Pagination logic for historical fetch
     if (beforeId && mongoose.isValidObjectId(beforeId)) {
       const ref = await Message.findById(beforeId).select('createdAt');
       if (ref) query.createdAt = { $lt: ref.createdAt };
@@ -58,15 +58,16 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
     const finalMessages = await Promise.all(messages.reverse().map(async (m) => {
       const msgDto = {
         _id: m._id,
-        id: m._id, // Added for frontend consistency
-        text: m.text || "",
-        content: m.text || "",
+        id: m._id,
+        // Encryption Payload
         isEncrypted: !!m.isEncrypted, 
         payload: m.isEncrypted ? {
           ciphertext: m.payload?.ciphertext || null,
           iv: m.payload?.iv || m.iv, 
           version: m.payload?.version || 1
-        } : null,         
+        } : null,
+        // Metadata
+        text: m.text || "",
         senderId: m.senderId?._id || m.senderId,
         senderModel: m.senderModel || 'User',
         receiverId: m.receiverId?._id || m.receiverId,
@@ -80,6 +81,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
         fileUrl: null
       };
 
+      // S3 Private URL retrieval
       if (m.fileUrl && ['image', 'video'].includes(m.fileType)) {
         try {
           msgDto.fileUrl = await getPrivateUrl(m.fileUrl);
@@ -130,7 +132,7 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: targetModelName,
       text: isEncrypted ? null : String(text || '').trim(),
-      payload: isEncrypted ? { ciphertext, iv, version: 1 } : null,
+      payload: isEncrypted ? payload : null, // Assuming payload was destructured from req.body
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? replyToId : null,

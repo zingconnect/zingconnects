@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
-import { secureFetch } from "../../api/utils/api";
-import { savePrivateKey } from "../utils/cryptoStorage"; // <-- Adjust path as needed
-
+import { initializeSession } from "../utils/signalEngine"; 
+import { ZingSignalStore } from "../utils/ZingSignalStore";
+import * as libsignal from 'libsignal';
 
 export const VerifyOTP = () => {
   const location = useLocation();
@@ -44,55 +44,67 @@ const handleResend = async () => {
   };
 
 const handleVerify = async (e) => {
-    e.preventDefault();
-    setIsVerifying(true);
+  e.preventDefault();
+  setIsVerifying(true);
 
-    try {
-      const response = await secureFetch('/api/agents/verify-otp', {
-        method: 'POST',
-        body: JSON.stringify({ email, otp }),
-      });
+  try {
+    const response = await secureFetch('/api/agents/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp }),
+    });
 
-      const data = await response.json();
+    const data = await response.json();
 
-      if (response.ok) {
-        // ✨ E2EE INITIALIZATION: Generate Agent Keypair
-        try {
-          // 1. Generate new asymmetric keypair (ECDSA or Ed25519)
-          const keyPair = await window.crypto.subtle.generateKey(
-            { name: "ECDSA", namedCurve: "P-256" },
-            true,
-            ["sign", "verify"]
-          );
+    if (response.ok) {
+      try {
+        // 1. Initialize Signal Identity
+        const identityKeyPair = await libsignal.KeyHelper.generateIdentityKeyPair();
+        const registrationId = libsignal.KeyHelper.generateRegistrationId();
+        
+        // 2. Persist to IndexedDB via ZingSignalStore
+        const store = new ZingSignalStore();
+        await store.saveIdentity('local', identityKeyPair);
+        await store.saveRegistrationId(registrationId);
 
-          // 2. Export keys to store in IndexedDB (using your cryptoStorage.js)
-          const privateKey = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
-          const publicKey = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+        // 3. Prepare for Backend (Base64 conversion)
+        const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+        const preKeyBundle = await libsignal.KeyHelper.generatePreKeyBundle(registrationId, 1);
 
-          await savePrivateKey(privateKey);
+        // 4. Update Backend with full Signal Bundle
         await secureFetch('/api/update-crypto-key', {
-         method: 'PUT', // Change from 'POST' to 'PUT'
-         body: JSON.stringify({ publicKeyJwk: publicKey }), 
+          method: 'PUT',
+          body: JSON.stringify({ 
+            identityKey: bufferToBase64(identityKeyPair.pubKey),
+            signedPreKey: {
+              keyId: preKeyBundle.signedPreKey.keyId,
+              publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+              signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+            },
+            preKeys: preKeyBundle.preKeys.map(pk => ({
+              keyId: pk.keyId,
+              publicKey: bufferToBase64(pk.publicKey)
+            }))
+          }), 
         });
-          
-          console.log("Agent Identity established.");
-        } catch (cryptoErr) {
-          console.error("Crypto init failed:", cryptoErr);
-          // Decide if you want to block login here or proceed
-        }
-
-        setServerSlug(data.slug);
-        setIsSuccess(true);
-      } else {
-        alert(data.message || "Invalid Code");
+        
+        console.log("✅ Agent Identity established via Signal Protocol.");
+      } catch (cryptoErr) {
+        console.error("Crypto init failed:", cryptoErr);
+        alert("Verification successful, but identity setup failed.");
       }
-    } catch (err) {
-      console.error("Verification Error:", err);
-      alert("Connection error. Try again.");
-    } finally {
-      setIsVerifying(false);
+
+      setServerSlug(data.slug);
+      setIsSuccess(true);
+    } else {
+      alert(data.message || "Invalid Code");
     }
-  };
+  } catch (err) {
+    console.error("Verification Error:", err);
+    alert("Connection error. Try again.");
+  } finally {
+    setIsVerifying(false);
+  }
+};
 
   const fullLink = `${window.location.origin}/${serverSlug}`;
 

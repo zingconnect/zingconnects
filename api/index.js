@@ -606,35 +606,45 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const lowerEmail = email.toLowerCase().trim();
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
-    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid or expired verification code." 
-      });
+    // 1. Check if account is already locked
+    if (agent?.failedOtpAttempts >= 5) {
+      return res.status(429).json({ success: false, message: "Account locked. Too many failed attempts." });
     }
 
-    // Update agent status
-    agent.isVerified = true;
-    agent.status = 'active';
-    agent.otp = undefined;
-    agent.otpExpires = undefined;
+    // 2. Validate OTP
+    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
+      if (agent) {
+        agent.failedOtpAttempts = (agent.failedOtpAttempts || 0) + 1;
+        await agent.save();
+      }
+      return res.status(400).json({ success: false, message: "Invalid or expired verification code." });
+    }
+
+    // 3. Update agent status and clear security state
+    Object.assign(agent, {
+      isVerified: true,
+      status: 'active',
+      otp: undefined,
+      otpExpires: undefined,
+      failedOtpAttempts: 0 // Reset attempt counter on success
+    });
     await agent.save();
     
-    // Create Session Token
+    // 4. Create Session Token
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' } // Extended to 7d to match cookie age
+      { expiresIn: '7d' }
     );
 
-res.cookie('token', token, {
-  httpOnly: true,
-secure: process.env.NODE_ENV === 'production', 
-sameSite: 'Lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-  signed: true // <--- Add this
-});
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+      signed: true
+    });
 
     return res.status(200).json({
       success: true,
@@ -651,56 +661,79 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     
-    let { publicKeyJwk } = req.body;
+    // Expecting: { identityKey, signedPreKey, preKeys: [] }
+    const { identityKey, signedPreKey, preKeys } = req.body;
     
-    // 1. Force structural validation
-    if (typeof publicKeyJwk === 'string') {
-      try {
-        publicKeyJwk = JSON.parse(publicKeyJwk);
-      } catch (e) {
-        return res.status(400).json({ success: false, message: "Invalid JSON format for public key." });
-      }
-    }
-
-    if (!publicKeyJwk || typeof publicKeyJwk !== 'object' || !publicKeyJwk.kty) {
-      return res.status(400).json({ success: false, message: "Invalid JWK structure. Missing 'kty'." });
+    // 1. Structural Validation
+    if (!identityKey?.kty || !signedPreKey?.key || !Array.isArray(preKeys) || preKeys.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid Key Bundle. Required: identityKey, signedPreKey, and preKeys array." 
+      });
     }
 
     const userId = req.user.id;
     const targetModel = req.user.role === 'agent' ? mongoose.models.Agent : mongoose.models.User;
 
-    // 2. Fetch existing profile to detect Key Rotation
-    const existingProfile = await targetModel.findById(userId);
-    if (!existingProfile) {
-      return res.status(404).json({ success: false, message: "Profile not found." });
-    }
-
-    // 3. Identity Key Rotation Logic
-    let isRotation = false;
-    if (existingProfile.publicKeyJwk && JSON.stringify(existingProfile.publicKeyJwk) !== JSON.stringify(publicKeyJwk)) {
-      isRotation = true;
-      console.log(`⚠️ Identity Key rotation detected for user: ${userId}`);
-      
-      // OPTIONAL: In a real-world scenario, you might want to flag the user 
-      // or clear their active session records here.
-      // await targetModel.findByIdAndUpdate(userId, { $set: { activeSessions: [] } });
-    }
-
-    // 4. Update the profile
+    // 2. Perform Atomic Update
+    // We store the keys so that other users can fetch them via a GET route
     const updatedProfile = await targetModel.findByIdAndUpdate(
       userId,
-      { $set: { publicKeyJwk } },
+      { 
+        $set: { 
+          publicKeyJwk: {
+            identityKey,
+            signedPreKey,
+            preKeys
+          }
+        } 
+      },
       { new: true }
     );
 
+    if (!updatedProfile) {
+      return res.status(404).json({ success: false, message: "Profile not found." });
+    }
+
     return res.status(200).json({ 
       success: true, 
-      message: "Public key registered.",
-      rotationDetected: isRotation 
+      message: "Key bundle registered successfully." 
     });
 
   } catch (err) {
     next(err);
+  }
+});
+
+app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+        const TargetModel = req.query.model === 'Agent' ? Agent : User;
+        let user = await TargetModel.findById(userId, { publicKeyJwk: 1 });
+    
+    if (!user?.publicKeyJwk) {
+      return res.status(404).json({ success: false, message: "User keys unavailable." });
+    }
+
+    // 2. If PreKeys exist, atomically consume one
+    if (user.publicKeyJwk.preKeys?.length > 0) {
+      user = await TargetModel.findOneAndUpdate(
+        { _id: userId },
+        { $pop: { "publicKeyJwk.preKeys": -1 } },
+        { new: true, projection: { publicKeyJwk: 1 } }
+      );
+    }
+    
+    // Note: If preKeys were empty, we simply return the identityKey 
+    // and signedPreKey, which is valid Signal Protocol behavior.
+
+    return res.status(200).json({ 
+      success: true, 
+      bundle: user.publicKeyJwk 
+    });
+  } catch (err) {
+    console.error("❌ Key fetch failed:", err);
+    res.status(500).json({ success: false, message: "Key fetch failed." });
   }
 });
 
@@ -1010,7 +1043,6 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
     next(err);
   }
 });
-
 app.post('/api/users/handshake', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
 
@@ -1018,8 +1050,9 @@ app.post('/api/users/handshake', async (req, res, next) => {
     await connectToDatabase();
     const { email, agentSlug } = req.body;
     
-    if (!email) return res.status(400).json({ success: false, message: "Email required" });
-    if (!agentSlug) return res.status(400).json({ success: false, message: "Agent context is required" });
+    if (!email || !agentSlug) {
+      return res.status(400).json({ success: false, message: "Email and Agent context required" });
+    }
 
     // 1. Find Agent
     const agent = await Agent.findOne({ slug: agentSlug.toLowerCase().trim() });
@@ -1027,68 +1060,48 @@ app.post('/api/users/handshake', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Agent not found" });
     }
     
-    const agentId = agent._id;
+    // 2. User Persistence Logic
     const normalizedEmail = email.toLowerCase().trim();
-    
-    // 2. User Logic
     let user = await User.findOne({ email: normalizedEmail });
-    let isNewUser = false;
 
     if (!user) {
-      user = new User({
+      user = await User.create({
         email: normalizedEmail,
-        connectedAgents: [agentId],
+        connectedAgents: [agent._id],
         lastLogin: new Date(),
         isProfileComplete: false
       });
+    } else if (!user.connectedAgents.includes(agent._id)) {
+      user.connectedAgents.push(agent._id);
       await user.save();
-      isNewUser = true;
-    } else {
-      const stringifiedId = agentId.toString();
-      const hasAgent = user.connectedAgents.some(id => id.toString() === stringifiedId);
-      
-      if (!hasAgent) {
-        user.connectedAgents.push(agentId);
-        await user.save();
-      }
     }
-
-    // 3. PRIME THE USER CACHE
     const cacheKey = `user:profile:${user._id}`;
-    const cacheableUser = {
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify({
       _id: user._id,
       email: user.email,
-      isProfileComplete: !!user.isProfileComplete,
       publicKeyJwk: user.publicKeyJwk || null
-    };
-    await redisClient.setEx(cacheKey, 3600, JSON.stringify(cacheableUser));
+    }));
 
-    // 4. Token & Secure Cookie
+    // 4. Generate Session
     const token = jwt.sign(
       { id: user._id, role: 'user', activeAgentSlug: agent.slug },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-res.cookie('token', token, {
-  httpOnly: true,
- secure: process.env.NODE_ENV === 'production',
-  sameSite: 'Lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-  signed: true // <--- Add this
-});
-
-res.json({ 
-  success: true, 
-  user: { id: user._id, role: 'user' },
-  agentIdentity: {
-    publicKeyJwk: agent.publicKeyJwk,
-    // Add these once you implement PreKeys
-    signedPreKey: agent.signedPreKey, 
-    oneTimePreKey: agent.oneTimePreKey 
-  }
-});
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+      signed: true
+    });
+    return res.json({ 
+      success: true, 
+      user: { id: user._id, role: 'user' },
+      agentIdentity: agent.publicKeyJwk // This now contains the full bundle
+    });
   } catch (err) {
     next(err);
   }
@@ -2176,7 +2189,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: sanitizedModel,
       text: isEncrypted ? null : String(text).trim(), 
-      payload: isEncrypted ? { ciphertext, iv, version: 1 } : null,
+      payload: isEncrypted ? payload : null, 
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? new mongoose.Types.ObjectId(replyToId) : null,
@@ -2238,34 +2251,31 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 const savedMsg = newMessage.toObject();
     const responseMsg = {
       ...savedMsg,
-      id: savedMsg._id, 
-      sender: { id: myId }, 
-      decryptedText: isEncrypted ? null : text 
+      id: savedMsg._id,
+      sender: { id: myId },
+      payload: savedMsg.payload, 
+      isEncrypted: savedMsg.isEncrypted
     };
     
     return res.status(201).json({ success: true, message: responseMsg });
+
   } catch (err) {
     next(err);
   }
 });
-
-// =========================================================================
-// 🛡️ HARDENED CHAT FETCH ROUTE (OFFSET CHRONOLOGY STABILIZED)
-// =========================================================================
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) => {
-try {
+  try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
-      return res.status(400).json({ success: false, message: "Invalid chat target identifier structure." });
+      return res.status(400).json({ success: false, message: "Invalid chat target identifier." });
     }
 
-    let limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
-    let skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-    // 1. Fetch messages using the polymorphic refPath logic
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
@@ -2278,54 +2288,45 @@ try {
     .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
     .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
     .lean();
-    // 2. Reverse for chronological order
+
     const chronologicalMessages = messages.reverse();
 
     const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-  // Helper to resolve user/agent info consistently
-  const resolveSender = (doc, id) => ({
-    id: doc?._id || id,
-    firstName: doc?.firstName || "Unknown",
-    lastName: doc?.lastName || "",
-    photoUrl: doc?.photoUrl || ""
-  });
-
-  const resolveReceiver = (doc, id) => ({
-    id: doc?._id || id,
-    firstName: doc?.firstName || "Unknown",
-    lastName: doc?.lastName || ""
-  });
-
-  const msgDto = {
-    ...m,
-    id: m._id,
-    text: m.text || "",
-    content: m.text || "",
-    isEncrypted: !!m.isEncrypted,
-    payload: m.payload || null,
-    senderModel: m.senderModel || 'User',
-    receiverModel: m.receiverModel || 'User',
-    createdAt: m.createdAt,
-    // Explicitly mapping using the correct helpers to maintain your original requirements
-    sender: resolveSender(m.senderId, m.senderId),
-    receiver: resolveReceiver(m.receiverId, m.receiverId),
-    fileUrl: null
-  };
-      // 4. Handle S3 Private URL retrieval
-      if (m.fileUrl && typeof m.fileUrl === 'string') {
-        let fileKey = m.fileUrl;
-        if (fileKey.startsWith('http')) {
-          const urlParts = fileKey.split('idrivee2.com/');
-          if (urlParts.length > 1) {
-            fileKey = urlParts[1].split('/').slice(1).join('/');
-          }
+      // 1. DTO Construction
+      const msgDto = {
+        _id: m._id,
+        id: m._id,
+        senderId: m.senderId?._id || m.senderId,
+        senderModel: m.senderModel || 'User',
+        receiverId: m.receiverId?._id || m.receiverId,
+        receiverModel: m.receiverModel || 'User',
+        // E2EE Data: Always pass payload as-is for the SignalEngine to process
+        isEncrypted: !!m.isEncrypted,
+        payload: m.payload || null, 
+        text: m.text || "",
+        fileType: m.fileType || 'text',
+        createdAt: m.createdAt,
+        fileUrl: null,
+        sender: {
+            firstName: m.senderId?.firstName || "Unknown",
+            photoUrl: m.senderId?.photoUrl || ""
         }
+      };
+
+      // 2. Handle Secure S3 Media URLs
+      if (m.fileUrl) {
         try {
+          let fileKey = m.fileUrl;
+          if (fileKey.startsWith('http')) {
+            const urlParts = fileKey.split('idrivee2.com/');
+            if (urlParts.length > 1) fileKey = urlParts[1].split('/').slice(1).join('/');
+          }
           msgDto.fileUrl = await getPrivateUrl(fileKey);
         } catch (s3Err) {
-          console.error(`[S3 Chat Error] URL retrieval failed for ${m._id}:`, s3Err.message);
+          console.error(`[S3 Chat Error] ${m._id}:`, s3Err.message);
         }
       }
+
       return msgDto;
     }));
 

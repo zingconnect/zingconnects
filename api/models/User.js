@@ -49,10 +49,16 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ""
   },
- publicKeyJwk: {
-  identityKey: Object,   // Your existing public key
-  signedPreKey: Object,  // Added for Signal handshake
-  preKeys: [Object]      // Pool of one-time keys
+publicKeyJwk: {
+  identityKey: { type: Object, required: true }, // The long-term public key
+  signedPreKey: { 
+    key: Object, 
+    signature: String 
+  }, // Signed to prove authenticity
+  preKeys: [{
+    keyId: Number,
+    key: Object
+  }] // A pool of one-time keys
 },
   role: { 
     type: String, 
