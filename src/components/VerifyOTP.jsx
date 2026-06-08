@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { initializeSession } from "../utils/SignalEngine"; 
-import { ZingSignalStore } from "../utils/ZingSignalStore";
+import { SignalEngine } from "../utils/SignalEngine";
 import * as libsignal from 'libsignal';
 
 export const VerifyOTP = () => {
@@ -55,49 +55,45 @@ const handleVerify = async (e) => {
 
     const data = await response.json();
 
-    if (response.ok) {
-      try {
-        // 1. Initialize Signal Identity
-        const identityKeyPair = await libsignal.KeyHelper.generateIdentityKeyPair();
-        const registrationId = libsignal.KeyHelper.generateRegistrationId();
-        
-        // 2. Persist to IndexedDB via ZingSignalStore
-        const store = new ZingSignalStore();
-        await store.saveIdentity('local', identityKeyPair);
-        await store.saveRegistrationId(registrationId);
-
-        // 3. Prepare for Backend (Base64 conversion)
-        const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
-        const preKeyBundle = await libsignal.KeyHelper.generatePreKeyBundle(registrationId, 1);
-
-        // 4. Update Backend with full Signal Bundle
-        await secureFetch('/api/update-crypto-key', {
-          method: 'PUT',
-          body: JSON.stringify({ 
-            identityKey: bufferToBase64(identityKeyPair.pubKey),
-            signedPreKey: {
-              keyId: preKeyBundle.signedPreKey.keyId,
-              publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-              signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-            },
-            preKeys: preKeyBundle.preKeys.map(pk => ({
-              keyId: pk.keyId,
-              publicKey: bufferToBase64(pk.publicKey)
-            }))
-          }), 
-        });
-        
-        console.log("✅ Agent Identity established via Signal Protocol.");
-      } catch (cryptoErr) {
-        console.error("Crypto init failed:", cryptoErr);
-        alert("Verification successful, but identity setup failed.");
-      }
-
-      setServerSlug(data.slug);
-      setIsSuccess(true);
-    } else {
+    if (!response.ok) {
       alert(data.message || "Invalid Code");
+      return;
     }
+
+    try {
+      // 1. Centralized Identity Setup via SignalEngine
+      // This handles KeyPair generation, ID generation, and IDB persistence
+      const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
+
+      // 2. Helper for Base64 conversion
+      const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+      // 3. Update Backend with the public portion of your Identity
+      await secureFetch('/api/update-crypto-key', {
+        method: 'PUT',
+        body: JSON.stringify({ 
+          identityKey: bufferToBase64(identityKeyPair.pubKey),
+          signedPreKey: {
+            keyId: preKeyBundle.signedPreKey.keyId,
+            publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+            signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+          },
+          preKeys: preKeyBundle.preKeys.map(pk => ({
+            keyId: pk.keyId,
+            publicKey: bufferToBase64(pk.publicKey)
+          }))
+        }), 
+      });
+      
+      console.log("✅ Agent Identity established via Signal Protocol.");
+    } catch (cryptoErr) {
+      console.error("Crypto init failed:", cryptoErr);
+      alert("Verification successful, but identity setup failed.");
+      // Decide if you want to allow continuation if E2EE setup fails
+    }
+
+    setServerSlug(data.slug);
+    setIsSuccess(true);
   } catch (err) {
     console.error("Verification Error:", err);
     alert("Connection error. Try again.");

@@ -12,15 +12,30 @@ export const SignalEngine = {
   store,
 
   /**
+   * Sets up local identity, registration ID, and generates the pre-key bundle
+   * for backend registration.
+   */
+  async setupIdentity() {
+    // 1. Generate keys
+    const identityKeyPair = await libsignal.KeyHelper.generateIdentityKeyPair();
+    const registrationId = libsignal.KeyHelper.generateRegistrationId();
+    
+    // 2. Persist using the store
+    await store.saveIdentity('local', identityKeyPair);
+    await store.saveRegistrationId(registrationId);
+    
+    // 3. Prepare bundle for the backend
+    const preKeyBundle = await libsignal.KeyHelper.generatePreKeyBundle(registrationId, 1);
+    
+    return { identityKeyPair, preKeyBundle };
+  },
+
+  /**
    * Initialize a new session with a remote user using their PreKey Bundle
    */
   async initializeSession(remoteUserId, preKeyBundle) {
     try {
-      // libsignal's SessionBuilder requires the store to implement specific methods
       const sessionBuilder = new libsignal.SessionBuilder(store, remoteUserId);
-      
-      // Ensure the bundle is in the format: 
-      // { identityKey, signedPreKey, preKeyId, preKeyPublic, registrationId }
       await sessionBuilder.processPreKey(preKeyBundle);
       console.log(`✅ Session successfully established with: ${remoteUserId}`);
       return true;
@@ -30,15 +45,26 @@ export const SignalEngine = {
     }
   },
 
+  /**
+   * Encrypts a message using the active Double Ratchet session.
+   */
   async encrypt(remoteUserId, clearText) {
     const sessionCipher = new libsignal.SessionCipher(store, remoteUserId);
-    // Encrypt returns: { type: number, body: string }
     return await sessionCipher.encrypt(new TextEncoder().encode(clearText));
   },
 
+  /**
+   * Decrypts an incoming bundle using the active session.
+   */
   async decrypt(remoteUserId, ciphertextBundle) {
     const sessionCipher = new libsignal.SessionCipher(store, remoteUserId);
     const decrypted = await sessionCipher.decrypt(ciphertextBundle);
     return new TextDecoder().decode(decrypted);
   }
 };
+
+// --- PROXY EXPORTS FOR LEGACY COMPONENT COMPATIBILITY ---
+export const initializeSession = SignalEngine.initializeSession;
+export const encryptMessage = SignalEngine.encrypt;
+export const decryptMessage = SignalEngine.decrypt;
+export const setupIdentity = SignalEngine.setupIdentity;

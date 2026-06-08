@@ -49,13 +49,22 @@ export class ZingSignalStore {
   }
   return id;
 }
-  // --- TRUSTED IDENTITIES ---
-  // In a production app, verify keys against your server's database 
-  // or via QR code scanning.
+
+// In ZingSignalStore.js
+async saveRegistrationId(id) {
+  const db = await dbPromise;
+  await db.put('misc', id, 'registrationId');
+}
+  
   async isTrustedIdentity(identifier, identityKey, direction) {
     // For now, we trust. In production, check against stored identity.
     return true; 
   }
+
+  async savePeerPublicKey(identifier, key) {
+  const db = await dbPromise;
+  await db.put('identity', key, `peer:${identifier}`);
+}
 
   // --- REQUIRED BY LIBSIGNAL ---
   async loadPreKey(keyId) {
@@ -73,3 +82,4 @@ export class ZingSignalStore {
     await db.delete('prekeys', keyId);
   }
 }
+
