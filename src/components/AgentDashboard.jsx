@@ -1998,57 +1998,63 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
-
 useEffect(() => {
   if (!socket) return;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
 
-const handleIncomingMessage = async (data, callback) => {
-  if (callback) callback({ status: 'received' });
-  if (data._id && data._id === lastNotifiedId.current) return;
-  lastNotifiedId.current = data._id;
+  const handleIncomingMessage = async (data, callback) => {
+    if (callback) callback({ status: 'received' });
+    if (data._id && data._id === lastNotifiedId.current) return;
+    lastNotifiedId.current = data._id;
 
-  const currentUser = selectedUserRef.current;
-  const currentKey = agentPrivateKeyRef.current;
-  let processedData = { ...data };
+    const currentUser = selectedUserRef.current;
+    const currentKey = agentPrivateKeyRef.current;
+    let processedData = { ...data };
 
-  // --- PRE-DECRYPTION BLOCK: PAYLOAD SCHEMA COMPLIANT ---
-  if (processedData.isEncrypted && processedData.payload) {
-    if (currentUser?.publicKeyJwk && currentKey) {
-      try {
-        // Use the same decryption call as handleFinalSend
-        const decrypted = await decryptMessageText(
-          processedData.payload,
-          currentUser.publicKeyJwk,
-          currentKey
-        );
-        // Standardize: set decryptedText and clear the flag
-        processedData.decryptedText = decrypted;
-        processedData.isEncrypted = false;
-      } catch (err) {
-        console.error("🔒 Socket decryption error:", err);
-        processedData.decryptedText = "🔒 [Decryption Failed]";
-        processedData.isEncrypted = false;
+    // --- CLEANED DECRYPTION BLOCK ---
+    if (processedData.isEncrypted && processedData.payload) {
+      if (currentUser?.publicKeyJwk && currentKey) {
+        try {
+          const decrypted = await decryptMessageText(
+            processedData.payload,
+            currentUser.publicKeyJwk,
+            currentKey
+          );
+          processedData.decryptedText = decrypted;
+          processedData.isEncrypted = false; // Successfully decrypted
+        } catch (err) {
+          console.error("🔒 Socket decryption error:", err);
+          processedData.decryptedText = "🔒 [Decryption Failed]";
+          processedData.isEncrypted = false;
+        }
+      } else {
+        // Only mark as "Not Ready" if we actually have an encrypted payload 
+        // but no keys to unlock it yet.
+        processedData.decryptedText = "🔒 [Decrypting...]";
+        processedData.isEncrypted = true; 
       }
-    } else {
-      processedData.decryptedText = "🔒 [Secure Channel Not Ready]";
     }
-  }
 
-  const isChattingWithSender = currentUser && 
-    (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
-  
-  if (isChattingWithSender) {
-    setMessages(prev => prev.some(m => m._id === processedData._id) ? prev : [...prev, processedData]);
-    secureFetch(`/api/messages/mark-read/${currentUser._id}`, { method: 'PATCH' }).catch(() => {});
-  }
+    const isChattingWithSender = currentUser && 
+      (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
+    
+    if (isChattingWithSender) {
+      setMessages(prev => {
+        // Prevent duplicate entries
+        if (prev.some(m => m._id === processedData._id)) return prev;
+        return [...prev, processedData];
+      });
+      secureFetch(`/api/messages/mark-read/${currentUser._id}`, { method: 'PATCH' }).catch(() => {});
+    }
+
+    // Notification Logic
     if (processedData.senderModel === 'User') {
       notificationSound.current?.play().catch(() => {});
       if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
 
       if (Notification.permission === "granted" && (document.visibilityState !== 'visible' || !isChattingWithSender)) {
         new Notification(`New Message from ${processedData.senderName || 'Client'}`, {
-          body: processedData.text || "New encrypted message",
+          body: processedData.decryptedText || "New encrypted message", 
           icon: '/favicon.ico'
         });
       }
@@ -2058,14 +2064,6 @@ const handleIncomingMessage = async (data, callback) => {
   socket.on('RECEIVE_PRIVATE_MESSAGE', handleIncomingMessage);
   return () => socket.off('RECEIVE_PRIVATE_MESSAGE', handleIncomingMessage);
 }, [socket]);
-
-useEffect(() => {
-  if (!("Notification" in window)) {
-    console.log("This browser does not support desktop notifications");
-  } else if (Notification.permission !== "granted") {
-    Notification.requestPermission();
-  }
-}, []);
 
 const handleResend = async (failedMsg) => {
   setMessages(prev => prev.filter(m => (m._id || m.id) !== (failedMsg._id || failedMsg.id)));
