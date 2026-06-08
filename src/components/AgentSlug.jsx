@@ -10,6 +10,7 @@ import {
 } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { useAuth } from '../context/AuthContext'; // Import your hook
+import { savePeerPublicKey } from "../utils/cryptoStorage";
 
 
 export const AgentSlug = () => {
