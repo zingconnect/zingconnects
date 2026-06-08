@@ -18,8 +18,8 @@ export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
   const { setToken } = useAuth();
-  const { login } = useAuth();
-  
+const { login, setIsHandshaking } = useAuth(); // Add setIsHandshaking from context
+
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [agentData, setAgentData] = useState(null);
@@ -136,32 +136,25 @@ React.useEffect(() => {
 
 const handleUserInquiry = async (e) => {
   e.preventDefault();
-
   if (!userEmail) return alert("Please enter your email.");
   if (!slug) return alert("Agent context missing.");
 
   setIsProcessing(true);
+  setIsHandshaking(true); // Signal to ProtectedRoute that we are busy
 
   try {
-    // 1. Use secureFetch instead of standard fetch
     const response = await secureFetch('/api/users/handshake', {
       method: 'POST',
-      body: JSON.stringify({ 
-        email: userEmail.trim(), 
-        agentSlug: slug 
-      }),
-      // 'credentials: "include"' is handled by secureFetch automatically
+      body: JSON.stringify({ email: userEmail.trim(), agentSlug: slug }),
     });
 
     const data = await response.json();
 
     if (response.ok) {
-      // 2. PERSISTENCE: Store the Agent's Identity Key
       if (data.agentIdentity?.publicKeyJwk) {
         await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
       }
 
-      // 3. AUTHENTICATION
       if (typeof login === 'function') {
         await login(slug); 
       }
@@ -179,6 +172,7 @@ const handleUserInquiry = async (e) => {
     alert("System error. Please try again."); 
   } finally { 
     setIsProcessing(false); 
+    setIsHandshaking(false); // End the signal
   }
 };
 
