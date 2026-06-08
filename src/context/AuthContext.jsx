@@ -9,6 +9,7 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
+  const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
   const [privateKey, setPrivateKey] = useState(null);
@@ -56,6 +57,7 @@ export const AuthProvider = ({ children }) => {
         const data = await response.json();
         setIsAuthenticated(true);
         setUserRole(data.role);
+        setUser(data.user);
         // Only re-init if we don't have a persistent key
         const savedKey = await getPrivateKey();
         if (!savedKey) await initializeCrypto();
@@ -69,6 +71,23 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const login = async (slug) => {
+  setIsHandshaking(true);
+  try {
+    // 1. Mark as authenticated
+    setIsAuthenticated(true);
+        await verifySession(); 
+        const savedKey = await getPrivateKey();
+    if (!savedKey) await initializeCrypto();
+    
+  } catch (err) {
+    console.error("Login process failed:", err);
+    setIsAuthenticated(false);
+  } finally {
+    setIsHandshaking(false);
+  }
+};
+
   const logout = async () => {
     await clearKeys();
     setPrivateKey(null);
@@ -77,19 +96,22 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      isAuthenticated, 
-      userRole, 
-      isLoading,
-      isCryptoReady,
-      privateKey,
-      isHandshaking,
-      verifySession,
-      logout
-    }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  <AuthContext.Provider value={{ 
+    isAuthenticated, 
+    userRole,
+    user, 
+    isLoading,
+    isCryptoReady,
+    privateKey,
+    isHandshaking,      // Correct
+    setIsHandshaking,   // Correct
+    login,              // Ensure this is defined in your AuthProvider
+    verifySession,
+    logout
+  }}>
+    {children}
+  </AuthContext.Provider>
+);
 };
 
 export const useAuth = () => useContext(AuthContext);

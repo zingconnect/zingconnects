@@ -17,9 +17,8 @@ import { savePeerPublicKey } from "../utils/cryptoStorage";
 export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { setToken } = useAuth();
-const { login, setIsHandshaking } = useAuth(); // Add setIsHandshaking from context
-
+ const { login, setIsHandshaking } = useAuth();
+ 
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [agentData, setAgentData] = useState(null);
