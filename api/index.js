@@ -1,3 +1,413 @@
+import dotenv from 'dotenv';
+dotenv.config(); 
+
+console.log("--- ATTEMPTING TO START SERVER ---");
+
+// 2. Standard Third-Party and Vendor Package Imports
+import express from 'express';
+import compression from 'compression'; 
+import mongoose from 'mongoose';
+import cors from 'cors';
+import path from 'path'; 
+import fs from 'fs';   
+import jwt from 'jsonwebtoken'; 
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import multer from 'multer';
+import WebSocket from 'ws';
+import nodemailer from 'nodemailer';
+import Flutterwave from 'flutterwave-node-v3';
+import axios from 'axios';
+import { fileURLToPath } from 'url';
+import webpush from 'web-push';
+import { Server } from 'socket.io';
+import http from 'http';
+import { createClient } from 'redis'; // 👈 Added Redis Import
+import cookieParser from 'cookie-parser'; // Add this import
+import { createAdapter } from '@socket.io/redis-adapter';
+
+const redisClient = createClient({
+  url: process.env.REDIS_URL,
+  socket: {
+    connectTimeout: 5000, // Wait 5s before failing
+    reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
+  }
+});
+
+redisClient.on('error', (err) => console.error('🔴 Redis Error:', err));
+(async () => {
+  try {
+    await redisClient.connect();
+    console.log('⚡ Connected to Redis successfully!');
+  } catch (err) {
+    console.error('⚠️ Redis connection failed:', err.message);
+  }
+})();
+
+import { connectToDatabase } from './config/db.js';
+import { getS3Client, getPrivateUrl, uploadToS3, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from './config/s3.js';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createLiveKitToken } from './utils/livekitHelper.js';
+import { sendOfflineNotification } from './utils/mailer.js';
+import Agent from './models/Agent.js';
+import User from './models/User.js'; 
+import Message from './models/Message.js';
+import Admin from './models/Admin.js';
+import Call from './models/Call.js'; 
+import SupportMessage from './models/Support.js';
+import Transaction from './models/Transaction.js'; 
+
+// 6. Express Routing Modules
+import authRoutes from './routes/auth.js';
+import messageRoutes from './routes/message.js'; 
+import callRoutes from './routes/callRoutes.js';
+import adminRoutes from './routes/admin.js'; 
+import { authenticateToken, isAdmin, requireSuperAdmin } from './middlewares/auth.js';
+
+const app = express();
+
+const corsOptions = {
+  origin: [
+    "https://www.zingconnect.chat", 
+    "https://zingconnect.chat" // Add the non-www version too for safety
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // ADDED OPTIONS
+  credentials: true, 
+  allowedHeaders: [
+    "Content-Type", 
+    "Authorization", 
+    "X-Requested-With", 
+    "Accept", 
+    "Origin"
+  ],
+  exposedHeaders: ["Set-Cookie"]
+};
+
+app.use(compression({
+  level: 6, 
+  threshold: 1024, 
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  }
+}));
+
+app.use(cors(corsOptions));
+app.use(cookieParser(process.env.COOKIE_SECRET));
+app.disable('x-powered-by');
+
+// Create the parsers
+const jsonParser = express.json({ limit: '5mb' });
+const urlencodedParser = express.urlencoded({ limit: '5mb', extended: true });
+
+app.use((req, res, next) => {
+  const contentType = req.headers['content-type'];
+  
+  // If it's a file upload, skip the JSON/URL parser entirely
+  if (contentType && contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  
+  // Otherwise, run the standard parsers
+  jsonParser(req, res, next);
+});
+
+// Repeat for urlencoded
+app.use((req, res, next) => {
+  const contentType = req.headers['content-type'];
+  if (contentType && contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  urlencodedParser(req, res, next);
+});
+
+// --- 4. GLOBAL ERROR HANDLER ---
+// This handles REAL JSON errors for non-multipart routes
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('🔴 Bad JSON Request:', err.message);
+    return res.status(400).json({ success: false, message: "Invalid JSON format." });
+  }
+  next(err);
+});
+// --- 4. DATABASE MIDDLEWARE ---
+app.use(async (req, res, next) => {
+  if (req.path.startsWith('/api/socket.io')) return next();
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    return res.status(503).json({ success: false, message: "Database connection temporarily unavailable." });
+  }
+});
+
+const terminatingCallsCache = new Set();
+app.set('terminatingCallsCache', terminatingCallsCache);
+
+app.set('redisClient', redisClient); 
+
+
+const server = http.createServer(app);
+const pubClient = redisClient;
+const subClient = redisClient.duplicate();
+await subClient.connect();
+const io = new Server(server, {
+  path: '/api/socket.io',
+  cors: corsOptions,
+  transports: ['polling', 'websocket'],
+  allowEIO3: true,
+});
+
+io.adapter(createAdapter(pubClient, subClient));
+
+app.set('socketio', io);
+app.use('/api/calls', callRoutes);
+app.use('/api/messages', messageRoutes); 
+app.use('/api/agents', authRoutes);
+app.use('/api/admin', authenticateToken, isAdmin, adminRoutes); // Protected by default
+
+const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
+webpush.setVapidDetails(
+  `mailto:${process.env.VITE_EMAIL}`,
+  process.env.VITE_PUBLIC_KEY,
+  process.env.VITE_PRIVATE_KEY
+);
+console.log("DEBUG: VAPID Configured for:", process.env.VITE_EMAIL);
+console.log("DEBUG: Public Key defined:", !!process.env.VITE_PUBLIC_KEY);
+
+
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, 
+    fieldSize: 5 * 1024 * 1024 
+  }
+});
+
+const getAgentModel = () => {
+  return mongoose.models.Agent || Agent;
+};
+
+const syncBilling = (agent, amount) => {
+  agent.subscriptionAmount = amount;
+  if (!agent.paymentDetails) agent.paymentDetails = {};
+  agent.paymentDetails.amountNgn = amount;
+  agent.paymentDetails.currency = 'NGN';
+};
+
+// --- REDIS CACHE HELPERS (Defined in index.js) ---
+const getCachedData = async (key) => {
+  if (!redisClient?.isOpen) return null;
+  try {
+    const data = await redisClient.get(key);
+    return data ? JSON.parse(data) : null;
+  } catch (err) {
+    console.error(`Cache Read Error [${key}]:`, err.message);
+    return null;
+  }
+};
+
+const setCachedData = async (key, data, ttl = 300) => {
+  if (!redisClient?.isOpen) return;
+  try {
+    await redisClient.setEx(key, ttl, JSON.stringify(data));
+  } catch (err) {
+    console.error(`Cache Write Error [${key}]:`, err.message);
+  }
+};
+
+io.on("connection", (socket) => {
+  console.log("Socket Connected:", socket.id);
+  socket.on("join-main-room", async (userId) => {
+    if (userId) {
+      socket.userId = userId; 
+      socket.join(userId.toString());
+      
+      try {
+        await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
+        io.emit("user_status_update", { 
+          userId, 
+          isOnline: true, 
+          lastSeen: new Date() 
+        });
+        console.log(`User ${userId} is online.`);
+      } catch (err) {
+        console.error("❌ Join Room DB Sync Failed:", err.message);
+      }
+    }
+  });
+  
+  socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName, voiceId }) => {
+    if (!userToCall || !roomName) return;
+    try {
+      let signedUrl = photoUrl;
+      if (photoUrl && !photoUrl.startsWith('http')) {
+        signedUrl = await getPrivateUrl(photoUrl);
+      }
+      io.to(userToCall.toString()).emit("incoming-call", { 
+        fromId, 
+        fromName, 
+        photoUrl: signedUrl, 
+        roomName: roomName.trim(),
+        voiceId: voiceId || null
+      });
+      User.findById(userToCall).select('pushSubscription').lean().then(user => {
+        if (user?.pushSubscription) {
+          const payload = JSON.stringify({
+            title: "Incoming Secure Call",
+            body: `${fromName} is calling you...`,
+            data: { url: `/dashboard/call/${roomName}` }
+          });
+          webpush.sendNotification(user.pushSubscription, payload)
+            .catch(e => console.error("Push failed:", e));
+        }
+      });
+
+    } catch (err) {
+      console.error("❌ Socket Call Signal Failed:", err.message);
+    }
+  });
+
+  socket.on("answer-call", ({ to, callId, roomName }) => {
+    if (!to || !roomName) return;
+    const cleanRoom = String(roomName).trim();
+    console.log(`📡 Handshake Accepted: Relaying call-accepted to Caller room ${to}`);
+    io.to(to.toString()).emit("call-accepted", { 
+      callId,
+      roomName: cleanRoom 
+    });
+  });
+
+  socket.on("end-call", ({ to, callId }) => {
+    if (to) {
+      const targetRoom = to.toString().trim();
+      console.log(`📴 Relaying call-ended termination sequence to: ${targetRoom}`);
+      io.to(targetRoom).emit("call-ended", { callId });
+      io.to(targetRoom).emit("end-call", { callId }); 
+    }
+  });
+
+  socket.on("reject-call", ({ to, callId }) => {
+    if (to) {
+      const targetRoom = to.toString().trim();
+      console.log(`❌ Relaying call-rejected state directly to: ${targetRoom}`);
+      io.to(targetRoom).emit("call-rejected", { callId });
+      io.to(targetRoom).emit("call-ended", { callId }); 
+    }
+  });
+
+  socket.on("disconnect", async () => {
+    console.log("Socket disconnected:", socket.id);
+    if (socket.userId) {
+      try {
+        const lastSeen = new Date();
+        await User.findByIdAndUpdate(socket.userId, { 
+          isOnline: false, 
+          lastSeen 
+        });
+        io.emit("user_status_update", { 
+          userId: socket.userId, 
+          isOnline: false, 
+          lastSeen 
+        });
+      } catch (err) {
+        console.error("❌ Offline State Sync Failed:", err.message);
+      }
+    }
+  });
+
+  socket.on("join-support-as-guest", (guestId) => {
+    if (guestId) {
+      socket.guestId = guestId;
+      socket.join(guestId); 
+      console.log(`Guest ${guestId} joined support.`);
+      io.emit("admin_new_guest_online", { guestId, timestamp: new Date() });
+    }
+  });
+
+  socket.on("guest_to_admin_message", async (payload) => {
+    try {
+      const { guestId, text } = payload;
+      await connectToDatabase(); 
+
+      if (!guestId || !text) {
+        return console.error("Database Save Denied: Missing guestId or text content.");
+      }
+      const savedMsg = await SupportMessage.create({
+        guestId: String(guestId),
+        text: text,
+        senderType: 'Guest',
+        isAdminRead: false
+      });
+      console.log("Database Success: Message stored under ID:", savedMsg._id);
+      io.emit("admin_receive_support_message", {
+        _id: savedMsg._id,
+        guestId: savedMsg.guestId,
+        text: savedMsg.text,
+        isAdmin: false,
+        timestamp: savedMsg.createdAt
+      });
+    } catch (err) {
+      console.error("Critical Database Error:", err.message);
+    }
+  });
+
+  socket.on("admin_to_guest_message", async (payload) => {
+    console.log("📥 Admin Payload Received:", payload);
+    
+    try {
+      await connectToDatabase(); 
+      const { guestId, text, senderType } = payload;
+
+      if (!guestId || !text) {
+        console.error("❌ Save Blocked: Missing guestId or text");
+        return;
+      }
+      const savedMsg = await SupportMessage.create({
+        guestId: String(guestId),
+        text: text,
+        senderType: senderType || 'Admin', 
+        isAdminRead: true
+      });
+
+      console.log("✅ Database Save Successful:", savedMsg._id);
+      socket.join(String(guestId));
+      io.to(String(guestId)).emit("guest_receive_admin_message", {
+        _id: savedMsg._id,
+        text: savedMsg.text,
+        isAdmin: true,
+        timestamp: savedMsg.createdAt
+      });
+      socket.emit("admin_message_stored", savedMsg);
+
+    } catch (err) {
+      console.error("❌ Mongoose Error Details:", err);
+    }
+  });
+});
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_PASS,
+  },
+});
+
+const addDays = (date, days) => {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+
+const isBase64 = (str) => {
+  if (!str) return false;
+  const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
+  return base64Regex.test(str);
+};
+
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
