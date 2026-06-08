@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsEyeFill, BsEyeSlashFill, BsCloudUploadFill, BsArrowRight, BsArrowLeft } from 'react-icons/bs';
-import ZingConnectLogo from '../../public/logo.png';
 import { secureFetch } from "../../api/utils/api";
 
 export const Registration = () => {
@@ -106,11 +105,11 @@ const handleSubmit = async (e) => {
     <div className="min-h-screen bg-white text-blue-950 font-sans selection:bg-blue-100">
       <header className="py-4 px-6 flex justify-between items-center border-b border-gray-50 sticky top-0 bg-white/90 backdrop-blur-md z-50">
         <img 
-          src={ZingConnectLogo} 
-          alt="ZingConnect" 
-          className="h-7 w-auto cursor-pointer" 
-          onClick={() => navigate('/')} 
-        />
+  src="/logo.png" 
+  alt="ZingConnect" 
+  className="h-7 w-auto cursor-pointer" 
+  onClick={() => navigate('/')} 
+/>
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Plan:</span>
           <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded">

@@ -469,7 +469,6 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
     next(err); 
   }
 });
-
 // Email Template Helper
 async function sendVerificationEmail(email, firstName, otpCode) {
   const transporter = nodemailer.createTransport({
@@ -481,11 +480,7 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     from: `"ZingConnect Security" <${process.env.GMAIL_USER}>`,
     to: email,
     subject: "Your Verification Code",
-    attachments: [{
-      filename: 'logo.png',
-      path: './public/logo.png', 
-      cid: 'zinglogo' 
-    }],
+    // REMOVED: The attachments array causing the ENOENT error
     html: `
       <!DOCTYPE html>
       <html>
@@ -505,7 +500,7 @@ async function sendVerificationEmail(email, firstName, otpCode) {
               <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
                 <tr>
                   <td align="center" style="padding: 30px 40px 10px 40px;">
-                    <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                    <img src="https://www.zingconnect.chat/logo.png" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
                   </td>
                 </tr>
                 <tr>
@@ -540,6 +535,7 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     `
   });
 }
+
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
