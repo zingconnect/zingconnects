@@ -72,15 +72,21 @@ const verifySession = async () => {
   }
 };
 
-  const login = async (slug) => {
+  // In AuthContext.js
+const login = async (slug) => {
   setIsHandshaking(true);
   try {
-    // 1. Mark as authenticated
-    setIsAuthenticated(true);
-        await verifySession(); 
-        const savedKey = await getPrivateKey();
-    if (!savedKey) await initializeCrypto();
-    
+    // Perform the session verification directly here to get the data
+    const response = await secureFetch('/api/auth/me'); 
+    if (response.ok) {
+      const data = await response.json();
+      setIsAuthenticated(true);
+      setUserRole(data.role);
+      setUser(data.profile); // Set this BEFORE navigating
+      
+      const savedKey = await getPrivateKey();
+      if (!savedKey) await initializeCrypto();
+    }
   } catch (err) {
     console.error("Login process failed:", err);
     setIsAuthenticated(false);
