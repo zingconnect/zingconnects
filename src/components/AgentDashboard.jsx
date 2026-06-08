@@ -58,8 +58,11 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
-const MessageItem = ({ message }) => {
-    if (message.isEncrypted) {
+const MessageItem = ({ message, currentAgentId }) => {
+  // If the message is explicitly marked as not encrypted, or if we know it's our own message
+  const isSelf = message.senderId === currentAgentId;
+  
+  if (message.isEncrypted && !isSelf) {
     return <span className="italic opacity-60 text-[12px]">🔒 Decrypting...</span>;
   }
 
@@ -69,6 +72,7 @@ const MessageItem = ({ message }) => {
     </p>
   );
 };
+
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
@@ -327,6 +331,7 @@ const handleStartCall = async (targetUserId) => {
     }, 500);
   }
 };
+
 const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
   if (isFetching || isDualLoginConflict) return null;
   isFetching = true;
@@ -2023,18 +2028,27 @@ useEffect(() => {
 useEffect(() => {
   if (!socket) return;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-
-  const handleIncomingMessage = async (data, callback) => {
+const handleIncomingMessage = async (data, callback) => {
     if (callback) callback({ status: 'received' });
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
     const currentUser = selectedUserRef.current;
     const currentKey = agentPrivateKeyRef.current;
+    // Get the agent's ID to compare against the sender
+    const myAgentId = agentData?._id; 
     let processedData = { ...data };
 
-    // --- CLEANED DECRYPTION BLOCK ---
-    if (processedData.isEncrypted && processedData.payload) {
+    // --- UPDATED DECRYPTION BLOCK WITH SENDER BYPASS ---
+    
+    // 1. SENDER BYPASS: If I sent this message, it is already plaintext.
+    // Use String comparison to avoid type mismatch issues.
+    if (String(processedData.senderId) === String(myAgentId)) {
+      processedData.decryptedText = processedData.text || processedData.content;
+      processedData.isEncrypted = false;
+    } 
+    // 2. RECEIVER DECRYPTION: Only process if it is encrypted and I am NOT the sender.
+    else if (processedData.isEncrypted && processedData.payload) {
       if (currentUser?.publicKeyJwk && currentKey) {
         try {
           const decrypted = await decryptMessageText(
@@ -2043,26 +2057,24 @@ useEffect(() => {
             currentKey
           );
           processedData.decryptedText = decrypted;
-          processedData.isEncrypted = false; // Successfully decrypted
+          processedData.isEncrypted = false;
         } catch (err) {
           console.error("🔒 Socket decryption error:", err);
           processedData.decryptedText = "🔒 [Decryption Failed]";
           processedData.isEncrypted = false;
         }
       } else {
-        // Only mark as "Not Ready" if we actually have an encrypted payload 
-        // but no keys to unlock it yet.
         processedData.decryptedText = "🔒 [Decrypting...]";
         processedData.isEncrypted = true; 
       }
     }
 
+    // --- REST OF THE LOGIC REMAINS THE SAME ---
     const isChattingWithSender = currentUser && 
       (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
     
     if (isChattingWithSender) {
       setMessages(prev => {
-        // Prevent duplicate entries
         if (prev.some(m => m._id === processedData._id)) return prev;
         return [...prev, processedData];
       });
