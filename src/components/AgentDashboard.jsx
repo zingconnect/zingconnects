@@ -342,12 +342,17 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
     if (data.success && data.messages) {
       return await Promise.all(data.messages.map(async (msg) => {
         const myKey = agentPrivateKeyRef.current;
-      if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
+    // In your frontend fetchMessages
+if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
   try {
-    const clearText = await decryptMessageText(msg.payload, targetUserCryptoProfile.publicKeyJwk, myKey);
-    return { ...msg, decryptedText: clearText, isEncrypted: false }; 
+    const clearText = await decryptMessageText(
+      msg.payload, // This now contains both ciphertext and iv
+      targetUserCryptoProfile.publicKeyJwk,
+      myKey
+    );
+    return { ...msg, decryptedText: clearText, isEncrypted: false };
   } catch (e) {
-return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+    return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
   }
 }
 return msg;

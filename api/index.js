@@ -2264,7 +2264,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
         id: m._id,
         content: m.text || "",
         isEncrypted: !!m.isEncrypted, 
-        iv: m.iv || null,
+        payload: m.payload || null,
         senderModel: m.senderModel || 'User',
         receiverModel: m.receiverModel || 'User',
         fileUrl: null,
