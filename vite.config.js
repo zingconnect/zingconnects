@@ -16,11 +16,22 @@ export default defineConfig({
       protocolImports: true,
     }),
   ],
-  build: {
-    // 🛡️ FIX: Disable source map generation completely to hide frontend code architecture from hackers
+ build: {
     sourcemap: false, 
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
+      output: {
+        // Keeps chunk names predictable and prevents cache collisions
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+        },
+        // Helps browser handle hashed assets better
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]'
+      },
       external: [
         'flutterwave-node-v3', 
         'mock-aws-s3',
