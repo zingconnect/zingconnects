@@ -73,10 +73,9 @@ const handleVerify = async (e) => {
           
           // 3. Optional: POST the public key to your server
           // This allows users to find this agent's public identity
-          await secureFetch('/api/agents/publish-key', {
+          await secureFetch('/api/update-crypto-key', {
             method: 'POST',
             body: JSON.stringify({ publicKey }),
-            credentials: 'include'
           });
           
           console.log("Agent Identity established.");
