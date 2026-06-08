@@ -14,7 +14,6 @@ export const AuthProvider = ({ children }) => {
   const [privateKey, setPrivateKey] = useState(null);
   const [isHandshaking, setIsHandshaking] = useState(false);
 
-  // 1. Initial Load: Try to hydrate keys from IndexedDB
   useEffect(() => {
     const hydrate = async () => {
       const savedKey = await getPrivateKey();
@@ -66,6 +65,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   
+  const login = async (slug) => {
+  try {
+        setIsAuthenticated(true);
+        const savedKey = await getPrivateKey();
+    if (!savedKey) {
+      await initializeCrypto();
+    }
+  } catch (error) {
+    console.error("Login failed", error);
+    throw error;
+  }
+};
+
   const logout = async () => {
     await clearKeys();
     setPrivateKey(null);
