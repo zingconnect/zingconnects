@@ -18,7 +18,7 @@ export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
  const { login, setIsHandshaking } = useAuth();
- 
+
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [agentData, setAgentData] = useState(null);
@@ -139,7 +139,7 @@ const handleUserInquiry = async (e) => {
   if (!slug) return alert("Agent context missing.");
 
   setIsProcessing(true);
-  setIsHandshaking(true); // Signal to ProtectedRoute that we are busy
+  setIsHandshaking(true); 
 
   try {
     const response = await secureFetch('/api/users/handshake', {
@@ -154,24 +154,45 @@ const handleUserInquiry = async (e) => {
         await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
       }
 
-      if (typeof login === 'function') {
-        await login(slug); 
-      }
+      // 1. Initiate Login
+      await login(slug);
       
+      // 2. Remember User
       if (rememberUser) {
         localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
       }
-      
+
+      // 3. Wait for Crypto Readiness
+      // We check if it's already ready; if not, we poll.
+      const waitForCrypto = () => {
+        return new Promise((resolve) => {
+          // Check immediate readiness
+          // Note: You need to access 'isCryptoReady' from your context hook
+          // If 'isCryptoReady' is not updated here, pass it as a ref or check a stable variable
+          const check = () => {
+            if (isCryptoReady) {
+              resolve();
+            } else {
+              setTimeout(check, 100);
+            }
+          };
+          check();
+        });
+      };
+
+      await waitForCrypto();
       navigate(`/user/dashboard/${slug}`, { replace: true });
+
     } else {
+      setIsHandshaking(false); // Reset handshake on failure
       alert(`Connection failed: ${data.message || "Unknown error"}`);
     }
   } catch (err) { 
     console.error("Handshake error:", err);
+    setIsHandshaking(false); // Reset handshake on error
     alert("System error. Please try again."); 
   } finally { 
     setIsProcessing(false); 
-    setIsHandshaking(false); // End the signal
   }
 };
 

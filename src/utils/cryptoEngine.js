@@ -4,19 +4,13 @@
  * X3DH-based Session management.
  */
 
-// 1. IDENTITY & KEY MANAGEMENT
-// Generates a robust JWK KeyPair for the Identity Key
 export const generateIdentityKeyPair = async () => {
   const keyPair = await window.crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
-    true,
+    true, // extractable
     ["deriveKey"]
   );
-  
-  const publicKeyJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
-  const privateKeyJwk = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
-  
-  return { publicKeyJwk, privateKeyJwk, keyPair };
+  return keyPair; // Return the CryptoKeyPair object directly
 };
 
 
