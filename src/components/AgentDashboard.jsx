@@ -327,7 +327,6 @@ const handleStartCall = async (targetUserId) => {
     }, 500);
   }
 };
-
 const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
   if (isFetching || isDualLoginConflict) return null;
   isFetching = true;
@@ -339,23 +338,41 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
     }
     if (!res.ok) throw new Error(`HTTP error! ${res.status}`);
     const data = await res.json();
+
     if (data.success && data.messages) {
       return await Promise.all(data.messages.map(async (msg) => {
         const myKey = agentPrivateKeyRef.current;
-    // In your frontend fetchMessages
-if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
-  try {
-    const clearText = await decryptMessageText(
-      msg.payload, // This now contains both ciphertext and iv
-      targetUserCryptoProfile.publicKeyJwk,
-      myKey
-    );
-    return { ...msg, decryptedText: clearText, isEncrypted: false };
-  } catch (e) {
-    return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
-  }
-}
-return msg;
+        const myId = agentData?._id; // Ensure agentData is available in scope
+
+        // 1. SENDER BYPASS: 
+        // If the Agent sent this, skip decryption logic entirely.
+        // We assume the message object has a 'content' field from your API response.
+        if (msg.sender?.id === myId || msg.senderId === myId) {
+          return { 
+            ...msg, 
+            decryptedText: msg.content, // Use the plain text stored in content
+            isEncrypted: false         // Tells UI to skip "Decrypting..."
+          };
+        }
+
+        // 2. RECEIVER DECRYPTION: 
+        // Only decrypt if the message is encrypted and the Agent is the receiver.
+        if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
+          try {
+            const clearText = await decryptMessageText(
+              msg.payload, 
+              targetUserCryptoProfile.publicKeyJwk, 
+              myKey
+            );
+            return { ...msg, decryptedText: clearText, isEncrypted: false };
+          } catch (e) {
+            console.error("Decryption failed for message:", msg.id, e);
+            return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+          }
+        }
+        
+        // Default: return message as-is if no decryption needed
+        return msg;
       }));
     }
     return null;
@@ -2128,7 +2145,7 @@ const handleSendMessage = async (e) => {
     if (!privateKey) throw new Error("Session identity missing.");
     if (!activeUser.publicKeyJwk) throw new Error("Recipient key missing.");
 
-    // 3. Encrypt
+    // 3. Encrypt for the recipient
     const encrypted = await encryptMessageText(textToSend, activeUser.publicKeyJwk, privateKey);
     if (!encrypted.isEncrypted || !encrypted.payload) throw new Error("Encryption failed.");
 
@@ -2156,27 +2173,14 @@ const handleSendMessage = async (e) => {
     if (finalizedMessage.isEncrypted && !finalizedMessage.payload && finalizedMessage.ciphertext) {
        finalizedMessage.payload = { ciphertext: finalizedMessage.ciphertext, iv: finalizedMessage.iv };
     }
+    const finalMsg = { 
+      ...finalizedMessage, 
+      text: textToSend,          // The original plain text
+      decryptedText: textToSend, // Instantly set the text
+      isEncrypted: false         // Force UI to show plain text immediately
+    };
 
-    // 5. Decrypt and finalize
-    if (finalizedMessage.isEncrypted && finalizedMessage.payload) {
-      const decryptedText = await decryptMessageText(
-        finalizedMessage.payload,
-        activeUser.publicKeyJwk,
-        privateKey
-      );
-
-      // Create the final object to update the state
-      const finalMsg = { 
-        ...finalizedMessage, 
-        text: decryptedText,
-        decryptedText: decryptedText, // Property used by MessageItem
-        isEncrypted: false 
-      };
-
-      setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
-    } else {
-      setMessages(prev => prev.map(msg => msg._id === tempId ? finalizedMessage : msg));
-    }
+    setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
