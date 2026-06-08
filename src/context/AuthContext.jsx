@@ -1,8 +1,7 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { secureFetch } from "../../api/utils/api";
 import { generateIdentityKeyPair } from "../utils/cryptoEngine";
-import { savePrivateKey, getPrivateKey, clearKeys } from "../utils/cryptoStorage"; 
-
+import { savePrivateKey, getPrivateKey, clearKeys } from "../utils/cryptoStorage"; // Import persistence
 
 const AuthContext = createContext(null);
 
@@ -14,6 +13,7 @@ export const AuthProvider = ({ children }) => {
   const [privateKey, setPrivateKey] = useState(null);
   const [isHandshaking, setIsHandshaking] = useState(false);
 
+  // 1. Initial Load: Try to hydrate keys from IndexedDB
   useEffect(() => {
     const hydrate = async () => {
       const savedKey = await getPrivateKey();
@@ -28,10 +28,14 @@ export const AuthProvider = ({ children }) => {
 
   const initializeCrypto = useCallback(async () => {
     setIsCryptoReady(false);
+    // Use the function from your new cryptoEngine.js
     const keyPair = await generateIdentityKeyPair();
     
+    // Exporting the key for storage
     const jwk = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
     const pubJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+
+    // Save to IndexedDB and state
     await savePrivateKey(jwk);
     setPrivateKey(jwk);
 
@@ -64,8 +68,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-
-
   const logout = async () => {
     await clearKeys();
     setPrivateKey(null);
@@ -74,21 +76,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-  <AuthContext.Provider value={{ 
-    isAuthenticated, 
-    userRole, 
-    isLoading,
-    isCryptoReady,
-    privateKey,
-    isHandshaking,      // Correct
-    setIsHandshaking,   // Correct
-    login,              // Ensure this is defined in your AuthProvider
-    verifySession,
-    logout
-  }}>
-    {children}
-  </AuthContext.Provider>
-);
+    <AuthContext.Provider value={{ 
+      isAuthenticated, 
+      userRole, 
+      isLoading,
+      isCryptoReady,
+      privateKey,
+      isHandshaking,
+      verifySession,
+      logout
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => useContext(AuthContext);

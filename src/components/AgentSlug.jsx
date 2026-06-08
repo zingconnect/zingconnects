@@ -10,15 +10,16 @@ import {
 } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { useAuth } from '../context/AuthContext'; // Import your hook
-import { secureFetch } from "../../api/utils/api"; 
+import { secureFetch } from "../../api/utils/api"; // Ensure this import path is correct
 import { savePeerPublicKey } from "../utils/cryptoStorage";
 
 
 export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
-const { login, setIsHandshaking, isCryptoReady } = useAuth();
-
+  const { setToken } = useAuth();
+  const { login } = useAuth();
+  
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [agentData, setAgentData] = useState(null);
@@ -36,11 +37,6 @@ const { login, setIsHandshaking, isCryptoReady } = useAuth();
   const [rememberAgent, setRememberAgent] = useState(false);
 const fullName = agentData ? `${agentData.firstName || ''} ${agentData.lastName || ''}`.trim() : '';
 const isMounted = React.useRef(true);
-
-const isCryptoReadyRef = React.useRef(isCryptoReady);
-  React.useEffect(() => {
-    isCryptoReadyRef.current = isCryptoReady;
-  }, [isCryptoReady]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -139,61 +135,52 @@ React.useEffect(() => {
 }, []);
 
 const handleUserInquiry = async (e) => {
-    e.preventDefault();
-    if (!userEmail) return alert("Please enter your email.");
-    if (!slug) return alert("Agent context missing.");
+  e.preventDefault();
 
-    setIsProcessing(true);
-    setIsHandshaking(true); 
+  if (!userEmail) return alert("Please enter your email.");
+  if (!slug) return alert("Agent context missing.");
 
-    try {
-      const response = await secureFetch('/api/users/handshake', {
-        method: 'POST',
-        body: JSON.stringify({ email: userEmail.trim(), agentSlug: slug }),
-      });
+  setIsProcessing(true);
 
-      const data = await response.json();
+  try {
+    // 1. Use secureFetch instead of standard fetch
+    const response = await secureFetch('/api/users/handshake', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        email: userEmail.trim(), 
+        agentSlug: slug 
+      }),
+    });
 
-      if (response.ok) {
-        if (data.agentIdentity?.publicKeyJwk) {
-          await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
-        }
+    const data = await response.json();
 
-        // 1. Initiate Login (This will trigger AuthContext to init crypto)
-        await login(slug);
-        
-        // 2. Remember User
-        if (rememberUser) {
-          localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
-        }
-        
-        // 3. Wait for Crypto using the Ref (Fixes the "Stuck" issue)
-        const checkCrypto = async () => {
-          if (isCryptoReadyRef.current) {
-            return true;
-          }
-          await new Promise(resolve => setTimeout(resolve, 100));
-          return checkCrypto();
-        };
-
-        await checkCrypto();
-        setIsHandshaking(false); // Clear the handshake state
-        navigate(`/user/dashboard/${slug}`, { replace: true });
-
-      } else {
-        // Reset state so the user can try again
-        setIsHandshaking(false); 
-        alert(`Connection failed: ${data.message || "Unknown error"}`);
+    if (response.ok) {
+      // 2. PERSISTENCE: Store the Agent's Identity Key
+      if (data.agentIdentity?.publicKeyJwk) {
+        await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
       }
-    } catch (err) { 
-      console.error("Handshake error:", err);
-      setIsHandshaking(false); // Ensure UI unlocks on error
-      alert("System error. Please try again."); 
-    } finally { 
-      setIsProcessing(false); 
+
+      // 3. AUTHENTICATION
+      if (typeof login === 'function') {
+        await login(slug); 
+      }
+      
+      if (rememberUser) {
+        localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+      }
+      
+      navigate(`/user/dashboard/${slug}`, { replace: true });
+    } else {
+      alert(`Connection failed: ${data.message || "Unknown error"}`);
     }
-  };
-  
+  } catch (err) { 
+    console.error("Handshake error:", err);
+    alert("System error. Please try again."); 
+  } finally { 
+    setIsProcessing(false); 
+  }
+};
+
 const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);
