@@ -21,27 +21,33 @@ export const VerifyOTP = () => {
   useEffect(() => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
+
 const handleResend = async () => {
-    if (isResending) return;
-    setIsResending(true);
+  if (isResending) return;
+  setIsResending(true);
 
-    try {
-      // Remove 'null' token argument, add credentials: 'include'
-      await secureFetch('/api/agents/register', {
-        method: 'POST',
-        body: JSON.stringify({ email, firstName, resend: true }),
-        credentials: 'include' 
-      });
+  try {
+    // 1. Create a FormData object to match the backend middleware expectations
+    const formData = new FormData();
+    formData.append('email', email);
+    formData.append('firstName', firstName);
+    formData.append('resend', 'true');
 
-      alert("A new security code has been sent to your email.");
-      setOtp(''); 
-    } catch (err) {
-      console.error("Resend Error:", err);
-      alert("Network error. Please try again.");
-    } finally {
-      setIsResending(false);
-    }
-  };
+    // 2. Send the request
+    await secureFetch('/api/agents/register-init', {
+      method: 'POST',
+      body: formData, // Send the FormData object
+    });
+
+    alert("A new security code has been sent to your email.");
+    setOtp(''); 
+  } catch (err) {
+    console.error("Resend Error:", err);
+    alert("Network error. Please try again.");
+  } finally {
+    setIsResending(false);
+  }
+};
 
 const handleVerify = async (e) => {
     e.preventDefault();
@@ -98,7 +104,7 @@ const handleVerify = async (e) => {
       setIsVerifying(false);
     }
   };
-  
+
   const fullLink = `${window.location.origin}/${serverSlug}`;
 
   const copyToClipboard = () => {

@@ -407,18 +407,23 @@ const isBase64 = (str) => {
   const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
   return base64Regex.test(str);
 };
-
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { firstName, lastName, email, password, dob, gender, occupation, address, bio, program, plan } = req.body;
+    
+    // Explicitly destructure 'resend' from req.body
+    const { 
+      firstName, lastName, email, password, dob, gender, 
+      occupation, address, bio, program, plan, resend 
+    } = req.body;
 
     if (!email) return res.status(400).json({ success: false, message: "Email required." });
     const lowerEmail = String(email).toLowerCase().trim();
 
     // --- CASE 1: RESEND LOGIC ---
-    if (resend) {
+    // Check if resend is truthy (handles string 'true' or boolean true)
+    if (resend === 'true' || resend === true) {
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       const otpExpiry = Date.now() + (10 * 60 * 1000);
 
@@ -434,18 +439,16 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
       return res.status(200).json({ success: true, message: "New code sent." });
     }
     
-    // 1. Check if already verified
+    // --- CASE 2: INITIAL REGISTRATION LOGIC ---
     const existingAgent = await AgentModel.findOne({ email: lowerEmail });
     if (existingAgent?.isVerified) {
       return res.status(400).json({ success: false, message: "Account already verified." });
     }
 
-    // 2. Prepare Data
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiry = Date.now() + (10 * 60 * 1000);
     const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
 
-    // 3. Atomic Upsert: Handle creation or OTP update
     const updatedAgent = await AgentModel.findOneAndUpdate(
       { email: lowerEmail, $or: [{ otpExpires: { $lt: Date.now() } }, { otpExpires: { $exists: false } }] },
       {
@@ -469,7 +472,6 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
-    // 4. File Upload (Atomic Post-Update)
     if (req.file) {
       if (req.file.size > 2 * 1024 * 1024) return res.status(400).json({ success: false, message: "Photo too large." });
       const fileKey = `profiles/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-')}`;
@@ -482,10 +484,13 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
 
     await sendVerificationEmail(lowerEmail, firstName || "Agent", otpCode);
     return res.status(200).json({ success: true, message: "Verification code sent." });
+
   } catch (err) {
+    console.error("Registration Error:", err);
     next(err); 
   }
 });
+
 // Email Template Helper
 async function sendVerificationEmail(email, firstName, otpCode) {
   const transporter = nodemailer.createTransport({
