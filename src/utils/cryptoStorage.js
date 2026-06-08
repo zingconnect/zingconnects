@@ -32,3 +32,18 @@ export const getSessionState = async (slug) => {
   const db = await dbPromise;
   return await db.get(STORE_NAME, `session_${slug}`);
 };
+
+export const savePrivateKey = async (key) => {
+  const db = await dbPromise;
+  await db.put(STORE_NAME, key, 'my_private_key');
+};
+
+export const getPrivateKey = async () => {
+  const db = await dbPromise;
+  return await db.get(STORE_NAME, 'my_private_key');
+};
+
+export const clearKeys = async () => {
+  const db = await dbPromise;
+  await db.clear(STORE_NAME);
+};

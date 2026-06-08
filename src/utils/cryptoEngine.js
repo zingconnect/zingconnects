@@ -61,3 +61,42 @@ export const decryptMessage = async (payload, messageKey) => {
     throw new Error("Integrity check failed.");
   }
 };
+
+
+export const encryptMessageText = async (clearText, publicKeyJwk, privateKeyJwk) => {
+  // 1. Import keys
+  const pub = await importPublicKey(publicKeyJwk);
+  const priv = await importPublicKey(privateKeyJwk);
+  
+  // 2. Derive shared secret (ECDH)
+  const sharedSecret = await window.crypto.subtle.deriveKey(
+    { name: "ECDH", public: pub },
+    priv,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+
+  // 3. Encrypt
+  const { ciphertext, iv } = await encryptForTransport(clearText, sharedSecret);
+  
+  return { cipherText: ciphertext, iv, isEncrypted: true };
+};
+
+export const decryptMessageText = async (payload, senderPublicKeyJwk, privateKeyJwk) => {
+  // 1. Import keys
+  const senderPub = await importPublicKey(senderPublicKeyJwk);
+  const priv = await importPublicKey(privateKeyJwk);
+  
+  // 2. Derive shared secret
+  const sharedSecret = await window.crypto.subtle.deriveKey(
+    { name: "ECDH", public: senderPub },
+    priv,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+
+  // 3. Decrypt
+  return await decryptMessage(payload, sharedSecret);
+};
