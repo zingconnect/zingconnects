@@ -50,26 +50,27 @@ export const AuthProvider = ({ children }) => {
     console.log("✅ E2EE Persistent-session initialized.");
   }, []);
 
-  const verifySession = async () => {
-    try {
-      const response = await secureFetch('/api/auth/me'); 
-      if (response.ok) {
-        const data = await response.json();
-        setIsAuthenticated(true);
-        setUserRole(data.role);
-        setUser(data.user);
-        // Only re-init if we don't have a persistent key
-        const savedKey = await getPrivateKey();
-        if (!savedKey) await initializeCrypto();
-      } else {
-        await logout();
-      }
-    } catch (err) {
-      console.error("Auth verify failed:", err);
-    } finally {
-      setIsLoading(false);
+// In AuthContext.jsx
+const verifySession = async () => {
+  try {
+    const response = await secureFetch('/api/auth/me'); 
+    if (response.ok) {
+      const data = await response.json();
+      setIsAuthenticated(true);
+      setUserRole(data.role);
+      setUser(data.profile); 
+      
+      const savedKey = await getPrivateKey();
+      if (!savedKey) await initializeCrypto();
+    } else {
+      await logout();
     }
-  };
+  } catch (err) {
+    console.error("Auth verify failed:", err);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const login = async (slug) => {
   setIsHandshaking(true);

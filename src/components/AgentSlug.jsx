@@ -37,6 +37,11 @@ const { login, setIsHandshaking, isCryptoReady } = useAuth();
 const fullName = agentData ? `${agentData.firstName || ''} ${agentData.lastName || ''}`.trim() : '';
 const isMounted = React.useRef(true);
 
+const isCryptoReadyRef = React.useRef(isCryptoReady);
+  React.useEffect(() => {
+    isCryptoReadyRef.current = isCryptoReady;
+  }, [isCryptoReady]);
+
   useEffect(() => {
     const handler = (e) => {
       e.preventDefault();
@@ -134,68 +139,61 @@ React.useEffect(() => {
 }, []);
 
 const handleUserInquiry = async (e) => {
-  e.preventDefault();
-  if (!userEmail) return alert("Please enter your email.");
-  if (!slug) return alert("Agent context missing.");
+    e.preventDefault();
+    if (!userEmail) return alert("Please enter your email.");
+    if (!slug) return alert("Agent context missing.");
 
-  setIsProcessing(true);
-  setIsHandshaking(true); 
+    setIsProcessing(true);
+    setIsHandshaking(true); 
 
-  try {
-    const response = await secureFetch('/api/users/handshake', {
-      method: 'POST',
-      body: JSON.stringify({ email: userEmail.trim(), agentSlug: slug }),
-    });
+    try {
+      const response = await secureFetch('/api/users/handshake', {
+        method: 'POST',
+        body: JSON.stringify({ email: userEmail.trim(), agentSlug: slug }),
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    if (response.ok) {
-      if (data.agentIdentity?.publicKeyJwk) {
-        await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
+      if (response.ok) {
+        if (data.agentIdentity?.publicKeyJwk) {
+          await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
+        }
+
+        // 1. Initiate Login (This will trigger AuthContext to init crypto)
+        await login(slug);
+        
+        // 2. Remember User
+        if (rememberUser) {
+          localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+        }
+        
+        // 3. Wait for Crypto using the Ref (Fixes the "Stuck" issue)
+        const checkCrypto = async () => {
+          if (isCryptoReadyRef.current) {
+            return true;
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+          return checkCrypto();
+        };
+
+        await checkCrypto();
+        setIsHandshaking(false); // Clear the handshake state
+        navigate(`/user/dashboard/${slug}`, { replace: true });
+
+      } else {
+        // Reset state so the user can try again
+        setIsHandshaking(false); 
+        alert(`Connection failed: ${data.message || "Unknown error"}`);
       }
-
-      // 1. Initiate Login
-      await login(slug);
-      
-      // 2. Remember User
-      if (rememberUser) {
-        localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
-      }
-
-      // 3. Wait for Crypto Readiness
-      // We check if it's already ready; if not, we poll.
-      const waitForCrypto = () => {
-        return new Promise((resolve) => {
-          // Check immediate readiness
-          // Note: You need to access 'isCryptoReady' from your context hook
-          // If 'isCryptoReady' is not updated here, pass it as a ref or check a stable variable
-          const check = () => {
-            if (isCryptoReady) {
-              resolve();
-            } else {
-              setTimeout(check, 100);
-            }
-          };
-          check();
-        });
-      };
-
-      await waitForCrypto();
-      navigate(`/user/dashboard/${slug}`, { replace: true });
-
-    } else {
-      setIsHandshaking(false); // Reset handshake on failure
-      alert(`Connection failed: ${data.message || "Unknown error"}`);
+    } catch (err) { 
+      console.error("Handshake error:", err);
+      setIsHandshaking(false); // Ensure UI unlocks on error
+      alert("System error. Please try again."); 
+    } finally { 
+      setIsProcessing(false); 
     }
-  } catch (err) { 
-    console.error("Handshake error:", err);
-    setIsHandshaking(false); // Reset handshake on error
-    alert("System error. Please try again."); 
-  } finally { 
-    setIsProcessing(false); 
-  }
-};
-
+  };
+  
 const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);
