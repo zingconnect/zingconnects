@@ -11,7 +11,7 @@ import {
 import ZingConnectLogo from '../../public/logo.png';
 import { useAuth } from '../context/AuthContext'; // Import your hook
 import { secureFetch } from "../../api/utils/api"; // Ensure this import path is correct
-import { savePeerPublicKey } from "../utils/ZingSignalStore";
+import { SignalEngine } from '../utils/SignalEngine';
 
 
 export const AgentSlug = () => {
@@ -133,7 +133,6 @@ useEffect(() => {
 React.useEffect(() => {
   return () => { isMounted.current = false; };
 }, []);
-
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -143,7 +142,7 @@ const handleUserInquiry = async (e) => {
   setIsProcessing(true);
 
   try {
-    // 1. Use secureFetch instead of standard fetch
+    // 1. Initiate secure handshake with backend
     const response = await secureFetch('/api/users/handshake', {
       method: 'POST',
       body: JSON.stringify({ 
@@ -155,12 +154,15 @@ const handleUserInquiry = async (e) => {
     const data = await response.json();
 
     if (response.ok) {
-      // 2. PERSISTENCE: Store the Agent's Identity Key
-      if (data.agentIdentity?.publicKeyJwk) {
-        await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
+      // 2. PERSISTENCE: Store the Agent's Identity Key using the integrated Engine/Store
+      // This ensures the key is properly indexed for future decryption sessions
+      if (data.agentIdentity?.publicKey) {
+        // Updated to use the consistent storage method in ZingSignalStore
+        await SignalEngine.store.savePeerPublicKey(slug, data.agentIdentity.publicKey);
+        console.log(`✅ Trust established with Agent: ${slug}`);
       }
 
-      // 3. AUTHENTICATION
+      // 3. AUTHENTICATION & NAVIGATION
       if (typeof login === 'function') {
         await login(slug); 
       }
