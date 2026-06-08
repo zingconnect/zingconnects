@@ -10,6 +10,7 @@ import {
 } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { useAuth } from '../context/AuthContext'; // Import your hook
+import { secureFetch } from "../../api/utils/api"; 
 import { savePeerPublicKey } from "../utils/cryptoStorage";
 
 
@@ -142,27 +143,25 @@ const handleUserInquiry = async (e) => {
   setIsProcessing(true);
 
   try {
-    const response = await fetch('/api/users/handshake', {
+    // 1. Use secureFetch instead of standard fetch
+    const response = await secureFetch('/api/users/handshake', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         email: userEmail.trim(), 
         agentSlug: slug 
       }),
-      credentials: 'include' 
+      // 'credentials: "include"' is handled by secureFetch automatically
     });
 
     const data = await response.json();
 
     if (response.ok) {
-      // 1. PERSISTENCE: Store the Agent's Identity Key from the handshake
-      // This is crucial for encrypting future messages to this agent
+      // 2. PERSISTENCE: Store the Agent's Identity Key
       if (data.agentIdentity?.publicKeyJwk) {
-        // You should create a helper in cryptoStorage.js to store peer keys
         await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
       }
 
-      // 2. AUTHENTICATION: Trigger AuthContext login
+      // 3. AUTHENTICATION
       if (typeof login === 'function') {
         await login(slug); 
       }
@@ -171,7 +170,6 @@ const handleUserInquiry = async (e) => {
         localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
       }
       
-      // 3. NAVIGATION: Proceed to secure dashboard
       navigate(`/user/dashboard/${slug}`, { replace: true });
     } else {
       alert(`Connection failed: ${data.message || "Unknown error"}`);
@@ -200,7 +198,6 @@ const handleAgentLogin = async (e) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      credentials: 'include' 
     });
 
     const data = await response.json();
