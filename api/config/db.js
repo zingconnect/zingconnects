@@ -1,92 +1,73 @@
 import mongoose from 'mongoose';
 
-// 🛡️ Ensure Mongoose queues operations during connection transitions
-// This specifically resolves "Cannot call findOne() before initial connection is complete"
+// Ensure Mongoose handles operational queueing correctly
 mongoose.set('bufferCommands', true);
 
 /**
- * Global is used here to maintain a cached connection across hot-reloads 
- * in development and serverless invocations in production.
+ * Global cache to maintain connection across hot-reloads and serverless invocations.
  */
-let cached = global.mongoose;
-
-if (!cached) {
-  cached = global.mongoose = { 
-    conn: null, 
-    promise: null,
-    isUsingReserve: false 
-  };
-}
+let cached = global.mongoose || { conn: null, promise: null, isUsingReserve: false };
+if (!global.mongoose) global.mongoose = cached;
 
 const commonOpts = {
-  bufferCommands: true, // Explicitly enable for serverless safety
-  maxPoolSize: 2,
-  minPoolSize: 1,
-  serverSelectionTimeoutMS: 5000, 
+  bufferCommands: true,
+  maxPoolSize: 10, // Increased for better concurrency
+  minPoolSize: 2,
+  serverSelectionTimeoutMS: 5000,
   socketTimeoutMS: 30000,
-  family: 4, 
-  autoIndex: false, 
-  connectTimeoutMS: 10000, 
+  family: 4,
+  autoIndex: false,
 };
 
 export async function connectToDatabase() {
-  // 1. Return cached connection if alive
+  // 1. If already connected, return the cached connection immediately
   if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
   }
 
-  // 2. If a connection attempt is already in progress, await it
+  // 2. If a connection process is already active, await that same promise
   if (cached.promise) {
-    try {
-      return await cached.promise;
-    } catch (err) {
-      console.error("Existing connection promise failed, retrying...");
-      cached.promise = null;
-    }
+    return cached.promise;
   }
 
-  // 3. Define the connection logic
-  const attemptConnection = async () => {
+  // 3. Initiate new connection attempt
+  cached.promise = (async () => {
     const primaryURI = process.env.AGENT_DB_URI || process.env.MONGODB_URI;
     const reserveURI = process.env.USER_DB_URI;
 
     if (!primaryURI) {
-      throw new Error("MONGODB_URI or AGENT_DB_URI is not defined in environment variables.");
+      throw new Error("Database URI is not defined in environment variables.");
     }
 
     try {
-      console.log("📡 Connecting to Primary Database Instance...");
+      console.log("📡 Attempting connection to Primary Cluster...");
       const conn = await mongoose.connect(primaryURI, commonOpts);
       cached.isUsingReserve = false;
+      cached.conn = conn;
       return conn;
     } catch (primaryError) {
       console.error(`⚠️ Primary Cluster Unreachable: ${primaryError.message}`);
-      
+
       if (reserveURI) {
+        console.log("📡 Routing connection failover to Reserve DB...");
         try {
-          console.log("📡 Routing connection failover to Reserve DB...");
           const conn = await mongoose.connect(reserveURI, commonOpts);
           cached.isUsingReserve = true;
+          cached.conn = conn;
           return conn;
         } catch (reserveError) {
-          console.error("❌ High Availability Failure: Both Database Clusters are offline.");
-          throw new Error("All database target engines are currently unreachable.");
+          throw new Error("High Availability Failure: All database clusters are offline.");
         }
       }
       throw primaryError;
     }
-  };
+  })();
 
-  // 4. Cache the promise to prevent race conditions during concurrent requests
-  cached.promise = attemptConnection();
-  
+  // 4. Ensure cleanup if the promise ultimately fails
   try {
-    cached.conn = await cached.promise;
+    return await cached.promise;
   } catch (err) {
-    cached.promise = null; 
-    cached.conn = null;
-    throw err; 
+    cached.promise = null;
+    throw err;
   }
-
-  return cached.conn;
 }

@@ -49,10 +49,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ""
   },
-  publicKeyJwk: {
-    type: Object,
-    default: null
-  },
+ publicKeyJwk: {
+  identityKey: Object,   // Your existing public key
+  signedPreKey: Object,  // Added for Signal handshake
+  preKeys: [Object]      // Pool of one-time keys
+},
   role: { 
     type: String, 
     default: 'user' // 👈 Added: Simplifies callerModel logic in controllers

@@ -15,6 +15,8 @@ import { BsSearch, BsShieldExclamation, BsShieldLock, BsThreeDotsVertical, BsChe
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 import { encryptMessageText, decryptMessageText } from "../utils/cryptoEngine";
+import { savePrivateKey, getPrivateKey, clearKeys } from "../utils/cryptoStorage"; // Import persistence
+
 
 const formatLastSeen = (lastSeenDate, ticker) => {
   if (!lastSeenDate) return 'Recently';
@@ -57,36 +59,43 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 const processMessageForUI = async (msg, currentUser, currentKey) => {
+  // If already processed, return immediately to save cycles
+  if (msg.decryptedText && !msg.isEncrypted) return msg;
+  
   if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
     return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
   }
-    if (msg.decryptedText) return msg;
-  const hasPayload = msg.payload && msg.payload.ciphertext;
-  const hasPubKey = currentUser?.publicKeyJwk;
-  const hasPrivKey = currentKey !== null && currentKey !== undefined;
 
-  if (hasPayload && hasPubKey && hasPrivKey) {
+  // Robust payload check
+  const payload = msg.payload || (msg.ciphertext ? { ciphertext: msg.ciphertext, iv: msg.iv } : null);
+  const hasPubKey = currentUser?.publicKeyJwk;
+  const hasPrivKey = !!currentKey;
+
+  if (payload && hasPubKey && hasPrivKey) {
     try {
-      const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
+      const decrypted = await decryptMessageText(payload, currentUser.publicKeyJwk, currentKey);
       return { ...msg, decryptedText: decrypted, isEncrypted: false };
     } catch (e) {
-      console.error("Decryption failed:", e);
       return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
     }
   }
+  
   return { ...msg, decryptedText: "🔒 [Decrypting...]", isEncrypted: true };
 };
 
-const MessageItem = ({ message, currentAgentId }) => {
-  const isDecrypted = !message.isEncrypted && message.decryptedText;
-    const isProcessing = message.isEncrypted && !message.decryptedText;
-  if (message.decryptedText === "🔒 [Decryption Failed]") {
+const MessageItem = ({ message }) => {
+  // Logic is now derived from the state set by processMessageForUI
+  const isFailed = message.decryptedText === "🔒 [Decryption Failed]";
+  const isProcessing = message.decryptedText === "🔒 [Decrypting...]";
+
+  if (isFailed) {
     return (
       <span className="flex items-center gap-1.5 italic text-red-500 text-[11px] font-bold">
         <BsShieldExclamation size={12} /> Decryption Failed
       </span>
     );
   }
+
   if (isProcessing) {
     return (
       <span className="flex items-center gap-1.5 italic opacity-60 text-[11px] font-medium">
@@ -94,10 +103,10 @@ const MessageItem = ({ message, currentAgentId }) => {
       </span>
     );
   }
+
   return (
-    <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {/* Fallback to text if decryptedText isn't present yet */}
-      {message.decryptedText || message.text || message.content}
+    <p className="text-[13px] md:text-[15px] leading-relaxed break-words">
+      {message.decryptedText}
     </p>
   );
 };
@@ -224,6 +233,10 @@ const agentPrivateKeyRef = useRef(agentPrivateKey);
   } catch (err) {
     console.error("Logout failed:", err);
   } finally {
+    await clearKeys(); 
+    agentPrivateKeyRef.current = null;
+        setMessages([]);
+    setSelectedUser(null);
     const targetUrl = slug ? `/${slug}` : '/';
     window.location.replace(targetUrl); 
   }
@@ -361,61 +374,59 @@ const handleStartCall = async (targetUserId) => {
     }, 500);
   }
 };
+// Ensure 'isFetchingRef' is a useRef defined in your component
+const fetchMessages = async (userId, limit = 30) => {
+  // 1. Use the ref instead of a local variable
+  if (isFetchingRef.current || isDualLoginConflict) return null;
+  
+  isFetchingRef.current = true;
 
-const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
-  if (isFetching || isDualLoginConflict) return null;
-  isFetching = true;
   try {
     const res = await secureFetch(`/api/messages/${userId}?limit=${limit}`, { method: 'GET' });
+    
     if (res.status === 403 || res.status === 401) {
       setIsDualLoginConflict(true);
       return null;
     }
+    
     if (!res.ok) throw new Error(`HTTP error! ${res.status}`);
     const data = await res.json();
 
     if (data.success && data.messages) {
-      return await Promise.all(data.messages.map(async (msg) => {
-        const myKey = agentPrivateKeyRef.current;
-        const myId = agentData?._id; // Ensure agentData is available in scope
+      // 2. Capture latest values from refs to avoid closure staleness
+      const myKey = agentPrivateKeyRef.current;
+      const myId = agentData?._id;
+      const selectedUser = selectedUserRef.current;
 
-        // 1. SENDER BYPASS: 
-        // If the Agent sent this, skip decryption logic entirely.
-        // We assume the message object has a 'content' field from your API response.
-        if (msg.sender?.id === myId || msg.senderId === myId) {
-          return { 
-            ...msg, 
-            decryptedText: msg.content, // Use the plain text stored in content
-            isEncrypted: false         // Tells UI to skip "Decrypting..."
-          };
+      return await Promise.all(data.messages.map(async (msg) => {
+        // 3. Sender Bypass
+        if (String(msg.senderId) === String(myId)) {
+          return { ...msg, decryptedText: msg.text || msg.content, isEncrypted: false };
         }
 
-        // 2. RECEIVER DECRYPTION: 
-        // Only decrypt if the message is encrypted and the Agent is the receiver.
-        if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
+        // 4. Receiver Decryption
+        if (msg.isEncrypted && msg.payload && selectedUser?.publicKeyJwk && myKey) {
           try {
             const clearText = await decryptMessageText(
               msg.payload, 
-              targetUserCryptoProfile.publicKeyJwk, 
+              selectedUser.publicKeyJwk, 
               myKey
             );
             return { ...msg, decryptedText: clearText, isEncrypted: false };
           } catch (e) {
-            console.error("Decryption failed for message:", msg.id, e);
             return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
           }
         }
         
-        // Default: return message as-is if no decryption needed
         return msg;
       }));
     }
-    return null;
+    return [];
   } catch (err) {
     console.error("Fetch error:", err);
-    return null;
+    return [];
   } finally {
-    isFetching = false;
+    isFetchingRef.current = false;
   }
 };
 
@@ -1938,58 +1949,46 @@ useEffect(() => {
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
- const refreshMessages = async () => {
-  // 2. Check the ref
-  if (document.visibilityState !== 'visible' || isFetchingRef.current) return;
-  
-  // 3. Set the ref
-  isFetchingRef.current = true;
+  const refreshMessages = async () => {
+    if (document.visibilityState !== 'visible' || isFetchingRef.current) return;
+    
+    isFetchingRef.current = true;
 
-  try {
-    const incomingMsgs = await fetchMessages(selectedUser._id, limit);
-    if (!incomingMsgs || incomingMsgs.length === 0) return;
+    try {
+      const incomingMsgs = await fetchMessages(selectedUser._id, limit);
+      if (!incomingMsgs || incomingMsgs.length === 0) return;
 
-    const currentKey = agentPrivateKeyRef.current;
-    const currentUser = selectedUserRef.current;
+      const processedMsgs = await Promise.all(
+        incomingMsgs.map(msg => 
+          processMessageForUI(msg, selectedUserRef.current, agentPrivateKeyRef.current)
+        )
+      );
 
-    const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
-      // Apply the same decryption logic using 'decryptedText'
-      if (msg.isEncrypted && msg.payload && currentUser?.publicKeyJwk && currentKey) {
-        try {
-          const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
-          return { ...msg, decryptedText: decrypted, isEncrypted: false };
-        } catch (err) {
-          return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+      setMessages(prev => {
+        const isNew = processedMsgs.length !== prev.length || 
+                      processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
+        
+        if (isNew) {
+          const latest = processedMsgs[processedMsgs.length - 1];
+          if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
+            lastNotifiedId.current = latest._id;
+            notificationSound.current?.play().catch(() => {});
+          }
+          return processedMsgs;
         }
-      }
-      return msg;
-    }));
-
-    setMessages(prev => {
-      // Optimization: Only update if the latest message ID is different
-      const isNew = processedMsgs.length !== prev.length || 
-                    processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
-      
-      if (isNew) {
-        const latest = processedMsgs[processedMsgs.length - 1];
-        if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
-          lastNotifiedId.current = latest._id;
-          notificationSound.current?.play().catch(() => {});
-        }
-        return processedMsgs;
-      }
-      return prev;
-    });
-  } catch (err) {
-    console.error("Refresh failed:", err);
-  } finally {
-    isFetchingRef.current = false;
-  }
-};
+        return prev;
+      });
+    } catch (err) {
+      console.error("Refresh failed:", err);
+    } finally {
+      isFetchingRef.current = false;
+    }
+  };
 
   const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
 }, [selectedUser?._id, callStatus, limit, privateKey]);
+
 
 useEffect(() => {
   const setupNotifications = async () => {
@@ -2121,6 +2120,7 @@ const handleSendMessage = async (e) => {
   if (!selectedUser || !newMessage.trim() || isUploading) return;
   
   let activeUser = selectedUser;
+  
   // 1. Silent Key Sync
   if (!activeUser.publicKeyJwk) {
     try {
@@ -2163,7 +2163,7 @@ const handleSendMessage = async (e) => {
     if (!privateKey) throw new Error("Session identity missing.");
     if (!activeUser.publicKeyJwk) throw new Error("Recipient key missing.");
 
-    // 3. Encrypt for the recipient
+    // 3. Encrypt
     const encrypted = await encryptMessageText(textToSend, activeUser.publicKeyJwk, privateKey);
     if (!encrypted.isEncrypted || !encrypted.payload) throw new Error("Encryption failed.");
 
@@ -2183,24 +2183,16 @@ const handleSendMessage = async (e) => {
     const data = await response.json();
     if (!data.success) throw new Error(data.message || "Transmission rejected.");
 
-    if (selectedUser._id !== activeUser._id) return;
+    // 5. Unified UI Processing
+    // We pass the server response directly to our processor. 
+    // We override decryptedText to the original text so it shows instantly.
+    const finalMsg = await processMessageForUI(
+      { ...data.message, text: textToSend, decryptedText: textToSend, isEncrypted: false },
+      activeUser,
+      privateKey
+    );
 
-const savedMsg = data.message; 
-let finalizedMessage = { ...savedMsg };
-
-if (finalizedMessage.isEncrypted && !finalizedMessage.payload && finalizedMessage.ciphertext) {
-   finalizedMessage.payload = { 
-       ciphertext: finalizedMessage.ciphertext, 
-       iv: finalizedMessage.iv 
-   };
-}
-const finalMsg = await processMessageForUI(
-  { ...finalizedMessage, text: textToSend, decryptedText: textToSend, isEncrypted: false },
-  activeUser,
-  privateKey
-);
-
-setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
+    setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
@@ -2208,6 +2200,7 @@ setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
     alert("Security Error: " + err.message);
   }
 };
+
 
   return (
     <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
@@ -2465,75 +2458,71 @@ setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
           </div>
         )}
         
-        {messages.map((m) => {
-          const isMe = m.senderId === agentData?._id;
-          const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
-          const displayMsg = {
-            ...m,
-          display: m.decryptedText || m.text || (m.isEncrypted ? "🔒 [Decrypting...]" : "")
-          };
+     {messages.map((m) => {
+  const isMe = m.senderId === agentData?._id;
+  const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
 
-         if (m.fileType === 'call_log') {
-  // Use optional chaining (?.) and a fallback object to prevent crashes
-  const metadata = m.callMetadata || {}; 
-  const isMissed = metadata.status === 'missed';
-  const duration = metadata.duration || 0;
+  // 1. Handle Call Logs
+  if (m.fileType === 'call_log') {
+    const metadata = m.callMetadata || {};
+    const isMissed = metadata.status === 'missed';
+    const duration = metadata.duration || 0;
+    
+    return (
+      <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-2 animate-in fade-in zoom-in duration-500`}>
+        <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-md border max-w-[80%] ${isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none mr-2' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none ml-2'} dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
+          <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+            {isMissed ? <BsTelephoneXFill size={16} /> : <BsTelephoneOutboundFill size={16} />}
+          </div>
+          <div className="flex flex-col">
+            <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
+              {isMissed ? 'Missed Voice Call' : `Voice Call • ${duration}s`}
+            </p>
+            <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
+              {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
+  // 2. Handle Standard Messages
   return (
-    <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-2 animate-in fade-in zoom-in duration-500`}>
-      <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-md border max-w-[80%] ${isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none mr-2' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none ml-2'} dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
-        <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-          {isMissed ? <BsTelephoneXFill size={16} /> : <BsTelephoneOutboundFill size={16} />}
+    <div key={msgKey} onMouseDown={() => isMe && startHold(m._id)} onMouseUp={stopHold} className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative flex flex-col ${isMe ? 'bg-green-600 text-white self-end rounded-tr-none' : 'bg-card-bg text-text-main border dark:border-slate-800 self-start rounded-tl-none'} mb-1`}>
+      {(m.fileType === 'image' || m.fileType === 'video') && (
+        <div className="relative mb-1.5 mt-0.5 group">
+          {m.fileType === 'image' ? (
+            <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="rounded-lg bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95" alt="attachment" />
+          ) : (
+            <div className="relative">
+              <video className="rounded-lg w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}><source src={m.fileUrl} type="video/mp4" /></video>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" /></div>
+            </div>
+          )}
+          <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
         </div>
-        <div className="flex flex-col">
-          <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
-            {isMissed ? 'Missed Voice Call' : `Voice Call • ${duration}s`}
-          </p>
-          <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
-            {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-        </div>
+      )}
+      
+      {/* RENDER THE CURRENT MESSAGE ONLY */}
+      <MessageItem 
+        message={m} 
+        currentAgentId={agentData?._id}
+      />
+
+      <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
+        <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+        {isMe && (
+          <div className="flex items-center ml-1">
+            {m.status === 'sending' ? <div className="w-2.5 h-2.5 border-2 border-t-blue-500 rounded-full animate-spin" /> : 
+             m.status === 'failed' ? <BsPlusLg className="rotate-45 text-red-500" size={10} onClick={() => handleResend(m)} /> :
+             <BsCheckAll className={m.status === 'seen' ? 'text-blue-500' : 'text-gray-400'} size={16} />}
+          </div>
+        )}
       </div>
     </div>
   );
-}
-
-          return (
-            <div key={msgKey} onMouseDown={() => isMe && startHold(m._id)} onMouseUp={stopHold} className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative flex flex-col ${isMe ? 'bg-green-600 text-white self-end rounded-tr-none' : 'bg-card-bg text-text-main border dark:border-slate-800 self-start rounded-tl-none'} mb-1`}>
-              {(m.fileType === 'image' || m.fileType === 'video') && (
-                <div className="relative mb-1.5 mt-0.5 group">
-                  {m.fileType === 'image' ? (
-                    <img src={m.fileUrl} onClick={() => setFullscreenImage(m.fileUrl)} className="rounded-lg bg-gray-100 object-cover w-full cursor-pointer hover:opacity-95" alt="attachment" />
-                  ) : (
-                    <div className="relative">
-                      <video className="rounded-lg w-full bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}><source src={m.fileUrl} type="video/mp4" /></video>
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><BsPlayFill size={30} className="text-white bg-black/40 p-2 rounded-full backdrop-blur-sm" /></div>
-                    </div>
-                  )}
-                  <button onClick={() => handleDownload(m.fileUrl, m.fileType)} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
-                </div>
-              )}
-              
-        {messages.map((m) => (
-  <MessageItem 
-    key={m._id || m.id} 
-    message={m} 
-    currentAgentId={agentData?._id}
-  />
-))}
-              <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
-                <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                {isMe && (
-                  <div className="flex items-center ml-1">
-                    {m.status === 'sending' ? <div className="w-2.5 h-2.5 border-2 border-t-blue-500 rounded-full animate-spin" /> : 
-                     m.status === 'failed' ? <BsPlusLg className="rotate-45 text-red-500" size={10} onClick={() => handleResend(m)} /> :
-                     <BsCheckAll className={m.status === 'seen' ? 'text-blue-500' : 'text-gray-400'} size={16} />}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+})}
         <div ref={messagesEndRef} className="h-4 shrink-0 w-full" />
       </div>
 

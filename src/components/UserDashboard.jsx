@@ -85,28 +85,43 @@ const CallStatusMessage = ({ status, time }) => {
 };
 
 const MessageItem = ({ message, isCryptoReady, privateKeyJwk, senderPublicKey }) => {
-  const [decryptedText, setDecryptedText] = useState(message.isEncrypted ? '🔒 Decrypting...' : message.text);
-  const [isDecrypting, setIsDecrypting] = useState(false);
+  // Initialize state based on whether decryption is actually required
+  const [decryptedText, setDecryptedText] = useState(() => 
+    message.isEncrypted ? '🔒 Decrypting...' : (message.text || "")
+  );
+  const [isDecrypting, setIsDecrypting] = useState(message.isEncrypted);
 
   useEffect(() => {
-    // Check if we have the encrypted payload and the keys
-    if (message.isEncrypted && message.payload?.ciphertext && isCryptoReady && privateKeyJwk && senderPublicKey) {
+    let isMounted = true;
+
+    // Guard clause: If not encrypted, just show the text
+    if (!message.isEncrypted) {
+      setDecryptedText(message.text || "");
+      setIsDecrypting(false);
+      return;
+    }
+    if (message.payload?.ciphertext && isCryptoReady && privateKeyJwk && senderPublicKey) {
       setIsDecrypting(true);
       
-      // Pass the entire message.payload object as the engine expects
       decryptMessageText(message.payload, senderPublicKey, privateKeyJwk)
         .then(text => {
-          setDecryptedText(text);
-          setIsDecrypting(false);
+          if (isMounted) {
+            setDecryptedText(text);
+            setIsDecrypting(false);
+          }
         })
         .catch((err) => {
           console.error("Decryption failed:", err);
-          setDecryptedText("🔒 [Decryption Failed]");
-          setIsDecrypting(false);
+          if (isMounted) {
+            setDecryptedText("🔒 [Decryption Failed]");
+            setIsDecrypting(false);
+          }
         });
-    } else {
-      setDecryptedText(message.text);
+    } else if (isCryptoReady && !senderPublicKey) {
+      setDecryptedText("🔒 [Waiting for keys...]");
     }
+
+    return () => { isMounted = false; };
   }, [message, isCryptoReady, privateKeyJwk, senderPublicKey]);
 
   return (
@@ -1619,7 +1634,6 @@ const processFile = (file) => {
   setCaption("");
 };
 
-
 const handleFinalSend = async () => {
   if (!previewFile || isUploading || !agent?._id) return;
 
@@ -1649,28 +1663,29 @@ const handleFinalSend = async () => {
   setIsUploading(true);
 
   try {
-    let finalCaptionText = rawCaption.trim();
-    let captionIv = null;
-    let isCaptionEncrypted = false;
+    let payload = null;
+    let isEncrypted = false;
 
     if (agent?.publicKeyJwk) {
       const encryptedCaption = await encryptMessageText(
         rawCaption.trim(),
         agent.publicKeyJwk,
-        userData._id
+        privateKeyJwk // Use the authorized private key from state
       );
       
-      // FIXED: Corrected reference from 'encryptedData' to 'encryptedCaption'
       if (!encryptedCaption.isEncrypted) {
-        console.error("⚠️ Encryption failed internally.");
-        return; 
+        throw new Error("⚠️ Encryption failed internally.");
       }
-      finalCaptionText = encryptedCaption.cipherText;
-      captionIv = encryptedCaption.iv;
-      isCaptionEncrypted = encryptedCaption.isEncrypted;
+
+      // MODIFIED: Using structured payload for backend consistency
+      payload = {
+        ciphertext: encryptedCaption.cipherText,
+        iv: encryptedCaption.iv,
+        version: "v1"
+      };
+      isEncrypted = true;
     }
 
-    // UPDATED: Removed 'token', secureFetch uses credentials: 'include'
     const urlResponse = await secureFetch('/api/messages/get-upload-url', {
       method: 'POST',
       body: JSON.stringify({ fileName: fileToUpload.name, fileType: fileToUpload.type })
@@ -1685,14 +1700,13 @@ const handleFinalSend = async () => {
       headers: { 'Content-Type': fileToUpload.type }
     });
 
-    // UPDATED: Removed 'token'
+    // MODIFIED: Sending as structured payload
     const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
-        text: finalCaptionText,
-        iv: captionIv,
-        isEncrypted: isCaptionEncrypted,
+        payload: payload,
+        isEncrypted: isEncrypted,
         fileUrl: urlData.key,
         fileType: detectedType
       })
@@ -1702,12 +1716,12 @@ const handleFinalSend = async () => {
     if (data.success) {
       const finalizedMessage = { ...data.message };
       
-      if (finalizedMessage.isEncrypted && agent?.publicKeyJwk) {
+      // Decrypt using the new payload structure
+      if (finalizedMessage.isEncrypted && finalizedMessage.payload && agent?.publicKeyJwk) {
         finalizedMessage.text = await decryptMessageText(
-          finalizedMessage.text,
-          finalizedMessage.iv,
+          finalizedMessage.payload,
           agent.publicKeyJwk,
-          userData._id
+          privateKeyJwk
         );
       }
 
@@ -1855,13 +1869,10 @@ const handleStartCall = async () => {
     handleEndCall();
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
 
-  // 1. Validate Security State before proceeding
-  // We use the new isCryptoReady and privateKey from AuthContext
-  if (!isCryptoReady || !privateKey) {
+  if (!isCryptoReady || !privateKeyJwk) {
     console.error("Security Block: E2EE layer not initialized.");
     alert("Establishing secure channel... please wait.");
     return;
@@ -1897,14 +1908,17 @@ const handleSendMessage = async (e) => {
       throw new Error("Encryption failed: Missing IV or Ciphertext.");
     }
 
-    // 3. Send securely
+    // MODIFIED: Payload structure for Unified API compliance
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
         receiverId: agent._id,
         receiverModel: 'Agent',
-        text: encryptedData.cipherText,
-        iv: encryptedData.iv,
+        payload: {
+          ciphertext: encryptedData.cipherText,
+          iv: encryptedData.iv,
+          version: "v1"
+        },
         isEncrypted: true,
         fileType: 'text',
         replyToId: replyingTo?._id
@@ -1914,10 +1928,9 @@ const handleSendMessage = async (e) => {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message);
 
-    // 4. Finalize UI
     const finalizedMessage = { 
       ...data.message, 
-      text: textToSend, // Keep the plain text for the sender's view
+      text: textToSend, // Keep plain text for sender's own UI
       status: 'sent' 
     };
 

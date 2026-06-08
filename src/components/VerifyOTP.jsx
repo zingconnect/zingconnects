@@ -43,7 +43,7 @@ const handleResend = async () => {
     }
   };
 
-  const handleVerify = async (e) => {
+const handleVerify = async (e) => {
     e.preventDefault();
     setIsVerifying(true);
 
@@ -57,7 +57,34 @@ const handleResend = async () => {
       const data = await response.json();
 
       if (response.ok) {
-       
+        // ✨ E2EE INITIALIZATION: Generate Agent Keypair
+        try {
+          // 1. Generate new asymmetric keypair (ECDSA or Ed25519)
+          const keyPair = await window.crypto.subtle.generateKey(
+            { name: "ECDSA", namedCurve: "P-256" },
+            true,
+            ["sign", "verify"]
+          );
+
+          // 2. Export keys to store in IndexedDB (using your cryptoStorage.js)
+          const privateKey = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
+          const publicKey = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+
+          await savePrivateKey(privateKey);
+          
+          // 3. Optional: POST the public key to your server
+          // This allows users to find this agent's public identity
+          await secureFetch('/api/agents/publish-key', {
+            method: 'POST',
+            body: JSON.stringify({ publicKey }),
+            credentials: 'include'
+          });
+          
+          console.log("Agent Identity established.");
+        } catch (cryptoErr) {
+          console.error("Crypto init failed:", cryptoErr);
+          // Decide if you want to block login here or proceed
+        }
 
         setServerSlug(data.slug);
         setIsSuccess(true);
@@ -71,6 +98,7 @@ const handleResend = async () => {
       setIsVerifying(false);
     }
   };
+  
   const fullLink = `${window.location.origin}/${serverSlug}`;
 
   const copyToClipboard = () => {

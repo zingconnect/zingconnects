@@ -154,7 +154,14 @@ const handleUserInquiry = async (e) => {
     const data = await response.json();
 
     if (response.ok) {
-     
+      // 1. PERSISTENCE: Store the Agent's Identity Key from the handshake
+      // This is crucial for encrypting future messages to this agent
+      if (data.agentIdentity?.publicKeyJwk) {
+        // You should create a helper in cryptoStorage.js to store peer keys
+        await savePeerPublicKey(slug, data.agentIdentity.publicKeyJwk);
+      }
+
+      // 2. AUTHENTICATION: Trigger AuthContext login
       if (typeof login === 'function') {
         await login(slug); 
       }
@@ -163,7 +170,7 @@ const handleUserInquiry = async (e) => {
         localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
       }
       
-      // 2. Navigate with replace to prevent back-button loops
+      // 3. NAVIGATION: Proceed to secure dashboard
       navigate(`/user/dashboard/${slug}`, { replace: true });
     } else {
       alert(`Connection failed: ${data.message || "Unknown error"}`);

@@ -49,10 +49,10 @@ lastNotificationEmail: {
   default: null
 },
 publicKeyJwk: {
-    type: Object,
-    default: null
-  },
-  // --- MAIN SUBSCRIPTION PLAN ---
+  identityKey: Object,   // Your existing public key
+  signedPreKey: Object,  // Added for Signal handshake
+  preKeys: [Object]      // Pool of one-time keys
+},
   plan: { 
     type: String, 
     enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], 

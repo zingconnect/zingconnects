@@ -1,6 +1,8 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { secureFetch } from "../../api/utils/api";
-import { generateE2EEKeyPair } from "../utils/cryptoEngine";
+import { generateIdentityKeyPair } from "../utils/cryptoEngine";
+import { savePrivateKey, getPrivateKey, clearKeys } from "../utils/cryptoStorage"; 
+
 
 const AuthContext = createContext(null);
 
@@ -10,65 +12,80 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
   const [privateKey, setPrivateKey] = useState(null);
-  const [isHandshaking, setIsHandshaking] = useState(false); // Add this
+  const [isHandshaking, setIsHandshaking] = useState(false);
 
+  // 1. Initial Load: Try to hydrate keys from IndexedDB
   useEffect(() => {
-    verifySession();
+    const hydrate = async () => {
+      const savedKey = await getPrivateKey();
+      if (savedKey) {
+        setPrivateKey(savedKey);
+        setIsCryptoReady(true);
+      }
+      await verifySession();
+    };
+    hydrate();
   }, []);
 
   const initializeCrypto = useCallback(async () => {
-  setIsCryptoReady(false); // Reset while generating
-  const keys = await generateE2EEKeyPair();
-  if (keys) {
-    setPrivateKey(keys.privateKeyJwk);
+    setIsCryptoReady(false);
+    // Use the function from your new cryptoEngine.js
+    const keyPair = await generateIdentityKeyPair();
+    
+    // Exporting the key for storage
+    const jwk = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
+    const pubJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+
+    // Save to IndexedDB and state
+    await savePrivateKey(jwk);
+    setPrivateKey(jwk);
+
     await secureFetch('/api/update-crypto-key', {
       method: 'PUT',
-      body: JSON.stringify({ publicKeyJwk: keys.publicKeyJwk })
+      body: JSON.stringify({ publicKeyJwk: pubJwk })
     });
-    setIsCryptoReady(true); // Signal that it's safe to encrypt
-    console.log("✅ E2EE Memory-session initialized.");
-  }
-}, []);
 
-const login = async (slug) => {
-    setIsHandshaking(true); // Signal that we are in the middle of a process
-    await verifySession();
-    setIsHandshaking(false);
-  };
+    setIsCryptoReady(true);
+    console.log("✅ E2EE Persistent-session initialized.");
+  }, []);
 
   const verifySession = async () => {
-    setIsLoading(true);
     try {
       const response = await secureFetch('/api/auth/me'); 
       if (response.ok) {
         const data = await response.json();
-        console.log("Setting Auth to True"); // <--- IS THIS LOGGING?
         setIsAuthenticated(true);
         setUserRole(data.role);
-        await initializeCrypto();
+        // Only re-init if we don't have a persistent key
+        const savedKey = await getPrivateKey();
+        if (!savedKey) await initializeCrypto();
       } else {
-        setIsAuthenticated(false);
-        setUserRole(null);
-        setPrivateKey(null);
+        await logout();
       }
     } catch (err) {
-      setIsAuthenticated(false);
-      setUserRole(null);
+      console.error("Auth verify failed:", err);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const logout = async () => {
+    await clearKeys();
+    setPrivateKey(null);
+    setIsAuthenticated(false);
+    setIsCryptoReady(false);
   };
 
   return (
     <AuthContext.Provider value={{ 
       isAuthenticated, 
       userRole, 
-      login,
       isLoading,
-      isCryptoReady, // <--- MUST BE ADDED HERE
-      privateKey, // Expose key to components
-      isHandshaking, // <--- MUST BE ADDED HERE
-      verifySession 
+      isCryptoReady,
+      privateKey,
+      isHandshaking,
+      verifySession,
+      logout
     }}>
       {children}
     </AuthContext.Provider>

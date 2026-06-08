@@ -1,517 +1,61 @@
-import dotenv from 'dotenv';
-dotenv.config(); 
-
-console.log("--- ATTEMPTING TO START SERVER ---");
-
-// 2. Standard Third-Party and Vendor Package Imports
-import express from 'express';
-import compression from 'compression'; 
-import mongoose from 'mongoose';
-import cors from 'cors';
-import path from 'path'; 
-import fs from 'fs';   
-import jwt from 'jsonwebtoken'; 
-import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
-import multer from 'multer';
-import WebSocket from 'ws';
-import nodemailer from 'nodemailer';
-import Flutterwave from 'flutterwave-node-v3';
-import axios from 'axios';
-import { fileURLToPath } from 'url';
-import webpush from 'web-push';
-import { Server } from 'socket.io';
-import http from 'http';
-import { createClient } from 'redis'; // 👈 Added Redis Import
-import cookieParser from 'cookie-parser'; // Add this import
-import { createAdapter } from '@socket.io/redis-adapter';
-
-const redisClient = createClient({
-  url: process.env.REDIS_URL,
-  socket: {
-    connectTimeout: 5000, // Wait 5s before failing
-    reconnectStrategy: (retries) => Math.min(retries * 100, 3000)
-  }
-});
-
-redisClient.on('error', (err) => console.error('🔴 Redis Error:', err));
-(async () => {
-  try {
-    await redisClient.connect();
-    console.log('⚡ Connected to Redis successfully!');
-  } catch (err) {
-    console.error('⚠️ Redis connection failed:', err.message);
-  }
-})();
-
-import { connectToDatabase } from './config/db.js';
-import { getS3Client, getPrivateUrl, uploadToS3, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from './config/s3.js';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createLiveKitToken } from './utils/livekitHelper.js';
-import { sendOfflineNotification } from './utils/mailer.js';
-import Agent from './models/Agent.js';
-import User from './models/User.js'; 
-import Message from './models/Message.js';
-import Admin from './models/Admin.js';
-import Call from './models/Call.js'; 
-import SupportMessage from './models/Support.js';
-import Transaction from './models/Transaction.js'; 
-
-// 6. Express Routing Modules
-import authRoutes from './routes/auth.js';
-import messageRoutes from './routes/message.js'; 
-import callRoutes from './routes/callRoutes.js';
-import adminRoutes from './routes/admin.js'; 
-import { authenticateToken, isAdmin, requireSuperAdmin } from './middlewares/auth.js';
-
-const app = express();
-
-const corsOptions = {
-  origin: [
-    "https://www.zingconnect.chat", 
-    "https://zingconnect.chat" // Add the non-www version too for safety
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // ADDED OPTIONS
-  credentials: true, 
-  allowedHeaders: [
-    "Content-Type", 
-    "Authorization", 
-    "X-Requested-With", 
-    "Accept", 
-    "Origin"
-  ],
-  exposedHeaders: ["Set-Cookie"]
-};
-
-app.use(compression({
-  level: 6, 
-  threshold: 1024, 
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) {
-      return false;
-    }
-    return compression.filter(req, res);
-  }
-}));
-
-app.use(cors(corsOptions));
-app.use(cookieParser(process.env.COOKIE_SECRET));
-app.disable('x-powered-by');
-
-// Create the parsers
-const jsonParser = express.json({ limit: '5mb' });
-const urlencodedParser = express.urlencoded({ limit: '5mb', extended: true });
-
-app.use((req, res, next) => {
-  const contentType = req.headers['content-type'];
-  
-  // If it's a file upload, skip the JSON/URL parser entirely
-  if (contentType && contentType.includes('multipart/form-data')) {
-    return next();
-  }
-  
-  // Otherwise, run the standard parsers
-  jsonParser(req, res, next);
-});
-
-// Repeat for urlencoded
-app.use((req, res, next) => {
-  const contentType = req.headers['content-type'];
-  if (contentType && contentType.includes('multipart/form-data')) {
-    return next();
-  }
-  urlencodedParser(req, res, next);
-});
-
-// --- 4. GLOBAL ERROR HANDLER ---
-// This handles REAL JSON errors for non-multipart routes
-app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    console.error('🔴 Bad JSON Request:', err.message);
-    return res.status(400).json({ success: false, message: "Invalid JSON format." });
-  }
-  next(err);
-});
-// --- 4. DATABASE MIDDLEWARE ---
-app.use(async (req, res, next) => {
-  if (req.path.startsWith('/api/socket.io')) return next();
-  try {
-    await connectToDatabase();
-    next();
-  } catch (error) {
-    return res.status(503).json({ success: false, message: "Database connection temporarily unavailable." });
-  }
-});
-
-const terminatingCallsCache = new Set();
-app.set('terminatingCallsCache', terminatingCallsCache);
-
-app.set('redisClient', redisClient); 
-
-
-const server = http.createServer(app);
-const pubClient = redisClient;
-const subClient = redisClient.duplicate();
-await subClient.connect();
-const io = new Server(server, {
-  path: '/api/socket.io',
-  cors: corsOptions,
-  transports: ['polling', 'websocket'],
-  allowEIO3: true,
-});
-
-io.adapter(createAdapter(pubClient, subClient));
-
-app.set('socketio', io);
-app.use('/api/calls', callRoutes);
-app.use('/api/messages', messageRoutes); 
-app.use('/api/agents', authRoutes);
-app.use('/api/admin', authenticateToken, isAdmin, adminRoutes); // Protected by default
-
-const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
-webpush.setVapidDetails(
-  `mailto:${process.env.VITE_EMAIL}`,
-  process.env.VITE_PUBLIC_KEY,
-  process.env.VITE_PRIVATE_KEY
-);
-console.log("DEBUG: VAPID Configured for:", process.env.VITE_EMAIL);
-console.log("DEBUG: Public Key defined:", !!process.env.VITE_PUBLIC_KEY);
-
-
-const upload = multer({ 
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 2 * 1024 * 1024, 
-    fieldSize: 5 * 1024 * 1024 
-  }
-});
-
-const getAgentModel = () => {
-  return mongoose.models.Agent || Agent;
-};
-
-const syncBilling = (agent, amount) => {
-  agent.subscriptionAmount = amount;
-  if (!agent.paymentDetails) agent.paymentDetails = {};
-  agent.paymentDetails.amountNgn = amount;
-  agent.paymentDetails.currency = 'NGN';
-};
-
-// --- REDIS CACHE HELPERS (Defined in index.js) ---
-const getCachedData = async (key) => {
-  if (!redisClient?.isOpen) return null;
-  try {
-    const data = await redisClient.get(key);
-    return data ? JSON.parse(data) : null;
-  } catch (err) {
-    console.error(`Cache Read Error [${key}]:`, err.message);
-    return null;
-  }
-};
-
-const setCachedData = async (key, data, ttl = 300) => {
-  if (!redisClient?.isOpen) return;
-  try {
-    await redisClient.setEx(key, ttl, JSON.stringify(data));
-  } catch (err) {
-    console.error(`Cache Write Error [${key}]:`, err.message);
-  }
-};
-
-io.on("connection", (socket) => {
-  console.log("Socket Connected:", socket.id);
-  socket.on("join-main-room", async (userId) => {
-    if (userId) {
-      socket.userId = userId; 
-      socket.join(userId.toString());
-      
-      try {
-        await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
-        io.emit("user_status_update", { 
-          userId, 
-          isOnline: true, 
-          lastSeen: new Date() 
-        });
-        console.log(`User ${userId} is online.`);
-      } catch (err) {
-        console.error("❌ Join Room DB Sync Failed:", err.message);
-      }
-    }
-  });
-  
-  socket.on("call-user", async ({ userToCall, fromId, fromName, photoUrl, roomName, voiceId }) => {
-    if (!userToCall || !roomName) return;
-    try {
-      let signedUrl = photoUrl;
-      if (photoUrl && !photoUrl.startsWith('http')) {
-        signedUrl = await getPrivateUrl(photoUrl);
-      }
-      io.to(userToCall.toString()).emit("incoming-call", { 
-        fromId, 
-        fromName, 
-        photoUrl: signedUrl, 
-        roomName: roomName.trim(),
-        voiceId: voiceId || null
-      });
-      User.findById(userToCall).select('pushSubscription').lean().then(user => {
-        if (user?.pushSubscription) {
-          const payload = JSON.stringify({
-            title: "Incoming Secure Call",
-            body: `${fromName} is calling you...`,
-            data: { url: `/dashboard/call/${roomName}` }
-          });
-          webpush.sendNotification(user.pushSubscription, payload)
-            .catch(e => console.error("Push failed:", e));
-        }
-      });
-
-    } catch (err) {
-      console.error("❌ Socket Call Signal Failed:", err.message);
-    }
-  });
-
-  socket.on("answer-call", ({ to, callId, roomName }) => {
-    if (!to || !roomName) return;
-    const cleanRoom = String(roomName).trim();
-    console.log(`📡 Handshake Accepted: Relaying call-accepted to Caller room ${to}`);
-    io.to(to.toString()).emit("call-accepted", { 
-      callId,
-      roomName: cleanRoom 
-    });
-  });
-
-  socket.on("end-call", ({ to, callId }) => {
-    if (to) {
-      const targetRoom = to.toString().trim();
-      console.log(`📴 Relaying call-ended termination sequence to: ${targetRoom}`);
-      io.to(targetRoom).emit("call-ended", { callId });
-      io.to(targetRoom).emit("end-call", { callId }); 
-    }
-  });
-
-  socket.on("reject-call", ({ to, callId }) => {
-    if (to) {
-      const targetRoom = to.toString().trim();
-      console.log(`❌ Relaying call-rejected state directly to: ${targetRoom}`);
-      io.to(targetRoom).emit("call-rejected", { callId });
-      io.to(targetRoom).emit("call-ended", { callId }); 
-    }
-  });
-
-  socket.on("disconnect", async () => {
-    console.log("Socket disconnected:", socket.id);
-    if (socket.userId) {
-      try {
-        const lastSeen = new Date();
-        await User.findByIdAndUpdate(socket.userId, { 
-          isOnline: false, 
-          lastSeen 
-        });
-        io.emit("user_status_update", { 
-          userId: socket.userId, 
-          isOnline: false, 
-          lastSeen 
-        });
-      } catch (err) {
-        console.error("❌ Offline State Sync Failed:", err.message);
-      }
-    }
-  });
-
-  socket.on("join-support-as-guest", (guestId) => {
-    if (guestId) {
-      socket.guestId = guestId;
-      socket.join(guestId); 
-      console.log(`Guest ${guestId} joined support.`);
-      io.emit("admin_new_guest_online", { guestId, timestamp: new Date() });
-    }
-  });
-
-  socket.on("guest_to_admin_message", async (payload) => {
-    try {
-      const { guestId, text } = payload;
-      await connectToDatabase(); 
-
-      if (!guestId || !text) {
-        return console.error("Database Save Denied: Missing guestId or text content.");
-      }
-      const savedMsg = await SupportMessage.create({
-        guestId: String(guestId),
-        text: text,
-        senderType: 'Guest',
-        isAdminRead: false
-      });
-      console.log("Database Success: Message stored under ID:", savedMsg._id);
-      io.emit("admin_receive_support_message", {
-        _id: savedMsg._id,
-        guestId: savedMsg.guestId,
-        text: savedMsg.text,
-        isAdmin: false,
-        timestamp: savedMsg.createdAt
-      });
-    } catch (err) {
-      console.error("Critical Database Error:", err.message);
-    }
-  });
-
-  socket.on("admin_to_guest_message", async (payload) => {
-    console.log("📥 Admin Payload Received:", payload);
-    
-    try {
-      await connectToDatabase(); 
-      const { guestId, text, senderType } = payload;
-
-      if (!guestId || !text) {
-        console.error("❌ Save Blocked: Missing guestId or text");
-        return;
-      }
-      const savedMsg = await SupportMessage.create({
-        guestId: String(guestId),
-        text: text,
-        senderType: senderType || 'Admin', 
-        isAdminRead: true
-      });
-
-      console.log("✅ Database Save Successful:", savedMsg._id);
-      socket.join(String(guestId));
-      io.to(String(guestId)).emit("guest_receive_admin_message", {
-        _id: savedMsg._id,
-        text: savedMsg.text,
-        isAdmin: true,
-        timestamp: savedMsg.createdAt
-      });
-      socket.emit("admin_message_stored", savedMsg);
-
-    } catch (err) {
-      console.error("❌ Mongoose Error Details:", err);
-    }
-  });
-});
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
-  },
-});
-
-const addDays = (date, days) => {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-};
-
-const isBase64 = (str) => {
-  if (!str) return false;
-  const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
-  return base64Regex.test(str);
-};
-
-// ==========================================
-// 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
-// ==========================================
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { 
-      firstName, 
-      lastName, 
-      email, 
-      password, 
-      dob, 
-      gender, 
-      occupation, 
-      address, 
-      bio, 
-      program, 
-      plan 
-    } = req.body;
+    const { firstName, lastName, email, password, dob, gender, occupation, address, bio, program, plan } = req.body;
 
-    // 1. INPUT VALIDATION
     if (!email) return res.status(400).json({ success: false, message: "Email required." });
-    
     const lowerEmail = String(email).toLowerCase().trim();
-    let existingAgent = await AgentModel.findOne({ email: lowerEmail });
 
-    // 🛡️ SECURITY FIX: OTP Throttling
-    if (existingAgent?.otpExpires && existingAgent.otpExpires > Date.now()) {
-      return res.status(429).json({ success: false, message: "Verification code already sent. Please wait." });
-    }
-
+    // 1. Check if already verified
+    const existingAgent = await AgentModel.findOne({ email: lowerEmail });
     if (existingAgent?.isVerified) {
       return res.status(400).json({ success: false, message: "Account already verified." });
     }
 
-    // 🛡️ SECURITY FIX: File size & Sanitization
-    let savedPhotoPath = existingAgent?.photoUrl || "";
-    if (req.file) {
-      if (req.file.size > 2 * 1024 * 1024) return res.status(400).json({ success: false, message: "Photo too large." });
-      
-      const fileKey = `profiles/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-')}`;
-      await getS3Client().send(new PutObjectCommand({
-        Bucket: process.env.IDRIVE_BUCKET_NAME,
-        Key: fileKey,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-      }));
-      savedPhotoPath = `https://${process.env.IDRIVE_BUCKET_NAME}.${process.env.IDRIVE_ENDPOINT?.replace('https://', '')}/${fileKey}`;
-    }
-
-    // 2. DATA PERSISTENCE
+    // 2. Prepare Data
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiry = Date.now() + (10 * 60 * 1000);
-    const hashedPassword = await bcrypt.hash(password || "temp123", 10);
+    const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
 
-    if (existingAgent) {
-      if (password) existingAgent.password = hashedPassword;
-      
-      // ✨ FIXED: Map incoming registration data variables safely into the existing document instance fallback
-      Object.assign(existingAgent, { 
-        otp: otpCode, 
-        otpExpires: otpExpiry, 
-        photoUrl: savedPhotoPath,
-        dob: dob || existingAgent.dob,
-        gender: gender || existingAgent.gender,
-        occupation: occupation !== undefined ? occupation : existingAgent.occupation,
-        address: address !== undefined ? address : existingAgent.address,
-        bio: bio !== undefined ? bio : existingAgent.bio,
-        program: program !== undefined ? program : existingAgent.program,
-        plan: plan || existingAgent.plan || "BASIC"
-      });
-      await existingAgent.save();
-    } else {
-      // ✨ FIXED: Pull real values from req.body instead of passing hardcoded empty strings
-      await AgentModel.create({
-        firstName: (firstName || "Agent").trim(),
-        lastName: (lastName || "").trim(),
-        email: lowerEmail,
-        password: hashedPassword,
-        slug: `${(firstName || "agent").toLowerCase()}-${Date.now().toString().slice(-4)}`,
-        photoUrl: savedPhotoPath,
-        dob: dob || null,
-        gender: gender || "",
-        occupation: occupation || "",
-        address: address || "",
-        bio: bio || "",
-        program: program || "",
-        role: 'agent',
-        status: 'pending',
-        isVerified: false,
-        isSubscribed: false,
-        plan: plan || "BASIC",
-        otp: otpCode,
-        otpExpires: otpExpiry
-      });
+    // 3. Atomic Upsert: Handle creation or OTP update
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { email: lowerEmail, $or: [{ otpExpires: { $lt: Date.now() } }, { otpExpires: { $exists: false } }] },
+      {
+        $set: {
+          otp: otpCode,
+          otpExpires: otpExpiry,
+          status: 'pending',
+          isVerified: false,
+          ...(password && { password: hashedPassword }),
+          ...(firstName && { firstName: firstName.trim() }),
+          ...(lastName && { lastName: lastName.trim() }),
+          ...(dob && { dob }),
+          ...(gender && { gender }),
+          ...(occupation && { occupation }),
+          ...(address && { address }),
+          ...(bio && { bio }),
+          ...(program && { program }),
+          ...(plan && { plan }),
+        }
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    // 4. File Upload (Atomic Post-Update)
+    if (req.file) {
+      if (req.file.size > 2 * 1024 * 1024) return res.status(400).json({ success: false, message: "Photo too large." });
+      const fileKey = `profiles/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-')}`;
+      await getS3Client().send(new PutObjectCommand({
+        Bucket: process.env.IDRIVE_BUCKET_NAME, Key: fileKey, Body: req.file.buffer, ContentType: req.file.mimetype,
+      }));
+      updatedAgent.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.${process.env.IDRIVE_ENDPOINT?.replace('https://', '')}/${fileKey}`;
+      await updatedAgent.save();
     }
 
-    // 3. EMAIL DELIVERY
     await sendVerificationEmail(lowerEmail, firstName || "Agent", otpCode);
     return res.status(200).json({ success: true, message: "Verification code sent." });
-
   } catch (err) {
-    console.error("❌ Registration Error:", err);
     next(err); 
   }
 });
@@ -586,56 +130,44 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     `
   });
 }
-
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     const { email, otp } = req.body;
 
-    if (!email || !otp) {
-      return res.status(400).json({ success: false, message: "Email and OTP are required." });
-    }
+    if (!email || !otp) return res.status(400).json({ success: false, message: "Missing credentials." });
 
-    const lowerEmail = email.toLowerCase().trim();
-    const agent = await AgentModel.findOne({ email: lowerEmail });
+    const agent = await AgentModel.findOne({ email: email.toLowerCase().trim() });
 
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid or expired verification code." 
-      });
+      return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // Update agent status
+    // Finalize verification
     agent.isVerified = true;
     agent.status = 'active';
     agent.otp = undefined;
     agent.otpExpires = undefined;
     await agent.save();
     
-    // Create Session Token
+    // Generate Token
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' } // Extended to 7d to match cookie age
+      { expiresIn: '7d' }
     );
 
-res.cookie('token', token, {
-  httpOnly: true,
-secure: process.env.NODE_ENV === 'production', 
-sameSite: 'Lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-  signed: true // <--- Add this
-});
-
-    return res.status(200).json({
-      success: true,
-      slug: agent.slug,
-      message: "Your profile is now live!"
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+      signed: true 
     });
 
+    return res.status(200).json({ success: true, slug: agent.slug, message: "Profile active." });
   } catch (err) {
     next(err); 
   }
@@ -648,7 +180,6 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
     let { publicKeyJwk } = req.body;
     
     // 1. Force structural validation
-    // If it's a string, try to parse it once here.
     if (typeof publicKeyJwk === 'string') {
       try {
         publicKeyJwk = JSON.parse(publicKeyJwk);
@@ -657,27 +188,42 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
       }
     }
 
-    // 2. Minimal JWK Schema Check
     if (!publicKeyJwk || typeof publicKeyJwk !== 'object' || !publicKeyJwk.kty) {
       return res.status(400).json({ success: false, message: "Invalid JWK structure. Missing 'kty'." });
     }
 
     const userId = req.user.id;
-    const AgentModel = mongoose.models.Agent;
-    const UserModel = mongoose.models.User;
-    const targetModel = req.user.role === 'agent' ? AgentModel : UserModel;
+    const targetModel = req.user.role === 'agent' ? mongoose.models.Agent : mongoose.models.User;
 
-    const updatedProfile = await targetModel.findByIdAndUpdate(
-      userId,
-      { $set: { publicKeyJwk } }, // Store as native Object
-      { new: true }
-    );
-
-    if (!updatedProfile) {
+    // 2. Fetch existing profile to detect Key Rotation
+    const existingProfile = await targetModel.findById(userId);
+    if (!existingProfile) {
       return res.status(404).json({ success: false, message: "Profile not found." });
     }
 
-    return res.status(200).json({ success: true, message: "Public key registered." });
+    // 3. Identity Key Rotation Logic
+    let isRotation = false;
+    if (existingProfile.publicKeyJwk && JSON.stringify(existingProfile.publicKeyJwk) !== JSON.stringify(publicKeyJwk)) {
+      isRotation = true;
+      console.log(`⚠️ Identity Key rotation detected for user: ${userId}`);
+      
+      // OPTIONAL: In a real-world scenario, you might want to flag the user 
+      // or clear their active session records here.
+      // await targetModel.findByIdAndUpdate(userId, { $set: { activeSessions: [] } });
+    }
+
+    // 4. Update the profile
+    const updatedProfile = await targetModel.findByIdAndUpdate(
+      userId,
+      { $set: { publicKeyJwk } },
+      { new: true }
+    );
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Public key registered.",
+      rotationDetected: isRotation 
+    });
 
   } catch (err) {
     next(err);
@@ -1059,14 +605,16 @@ res.cookie('token', token, {
   signed: true // <--- Add this
 });
 
-    // 5. Clean Response (Removed token from JSON body)
-    return res.json({ 
-      success: true, 
-      isNewUser, 
-      isProfileComplete: user.isProfileComplete,
-      user: cacheableUser
-    });
-    
+res.json({ 
+  success: true, 
+  user: { id: user._id, role: 'user' },
+  agentIdentity: {
+    publicKeyJwk: agent.publicKeyJwk,
+    // Add these once you implement PreKeys
+    signedPreKey: agent.signedPreKey, 
+    oneTimePreKey: agent.oneTimePreKey 
+  }
+});
   } catch (err) {
     next(err);
   }
@@ -2130,21 +1678,17 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     }
     const senderRole = await Agent.exists({ _id: myId }) ? 'Agent' : 'User';
     
-    // 1. Destructure payload components
     const { receiverId, text, ciphertext, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
 
-    // 2. Structural Validation
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
     }
     const sanitizedModel = ['Agent', 'User'].includes(receiverModel) ? receiverModel : 'User';
 
-    // 3. Cryptographic/Content Validation
     if (isEncrypted) {
       if (!ciphertext || !iv) {
         return res.status(400).json({ success: false, message: "Security violation: Payload/IV required." });
       }
-      // Validate IV length
       if (Buffer.from(iv, 'base64').length !== 12) {
         return res.status(400).json({ success: false, message: "Security violation: Invalid IV." });
       }
@@ -2152,7 +1696,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Message text cannot be blank." });
     }
 
-    // 4. Save Message using the payload structure
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
@@ -2165,6 +1708,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? new mongoose.Types.ObjectId(replyToId) : null,
       notificationSent: false
     });
+    
     await newMessage.save();
 
     const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
@@ -2175,7 +1719,6 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Recipient entity match not found." });
     }
 
-    // 5. Socket Emission (Emitting the full object ensures 'payload' is sent)
     try {
       const io = req.app.get('socketio');
       if (io) {
@@ -2218,8 +1761,15 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     } catch (mailErr) {
       console.error("❌ Email Error:", mailErr.message);
     }
-
-    return res.status(201).json({ success: true, message: newMessage });
+const savedMsg = newMessage.toObject();
+    const responseMsg = {
+      ...savedMsg,
+      id: savedMsg._id, 
+      sender: { id: myId }, 
+      decryptedText: isEncrypted ? null : text 
+    };
+    
+    return res.status(201).json({ success: true, message: responseMsg });
   } catch (err) {
     next(err);
   }
@@ -2229,7 +1779,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 // 🛡️ HARDENED CHAT FETCH ROUTE (OFFSET CHRONOLOGY STABILIZED)
 // =========================================================================
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) => {
-  try {
+try {
     await connectToDatabase();
     const myId = req.user.id;
     const { otherUserId } = req.params;
@@ -2242,7 +1792,6 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     let skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
     // 1. Fetch messages using the polymorphic refPath logic
-    // Using lean() for performance; ensure your refPath is set correctly in Message schema
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: otherUserId },
@@ -2255,36 +1804,39 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     .populate({ path: 'senderId', select: 'firstName lastName photoUrl slug', refPath: 'senderModel' })
     .populate({ path: 'receiverId', select: 'firstName lastName photoUrl slug', refPath: 'receiverModel' })
     .lean();
-
     // 2. Reverse for chronological order
     const chronologicalMessages = messages.reverse();
 
-    // 3. Process DTOs with safety checks
     const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      const msgDto = {
-        id: m._id,
-        text: m.text || "",
-        content: m.text || "",
-        isEncrypted: !!m.isEncrypted, 
-        payload: m.payload || null,
-        senderModel: m.senderModel || 'User',
-        receiverModel: m.receiverModel || 'User',
-        fileUrl: null,
-        createdAt: m.createdAt,
-        // Ensure null-safety if populate() returned null (e.g., deleted account)
-        sender: m.senderId && typeof m.senderId === 'object' ? {
-          id: m.senderId._id,
-          firstName: m.senderId.firstName || "",
-          lastName: m.senderId.lastName || "",
-          photoUrl: m.senderId.photoUrl || ""
-        } : { id: m.senderId, firstName: "Unknown", lastName: "User" },
-        receiver: m.receiverId && typeof m.receiverId === 'object' ? {
-          id: m.receiverId._id,
-          firstName: m.receiverId.firstName || "",
-          lastName: m.receiverId.lastName || ""
-        } : { id: m.receiverId, firstName: "Unknown", lastName: "User" }
-      };
+  // Helper to resolve user/agent info consistently
+  const resolveSender = (doc, id) => ({
+    id: doc?._id || id,
+    firstName: doc?.firstName || "Unknown",
+    lastName: doc?.lastName || "",
+    photoUrl: doc?.photoUrl || ""
+  });
 
+  const resolveReceiver = (doc, id) => ({
+    id: doc?._id || id,
+    firstName: doc?.firstName || "Unknown",
+    lastName: doc?.lastName || ""
+  });
+
+  const msgDto = {
+    ...m,
+    id: m._id,
+    text: m.text || "",
+    content: m.text || "",
+    isEncrypted: !!m.isEncrypted,
+    payload: m.payload || null,
+    senderModel: m.senderModel || 'User',
+    receiverModel: m.receiverModel || 'User',
+    createdAt: m.createdAt,
+    // Explicitly mapping using the correct helpers to maintain your original requirements
+    sender: resolveSender(m.senderId, m.senderId),
+    receiver: resolveReceiver(m.receiverId, m.receiverId),
+    fileUrl: null
+  };
       // 4. Handle S3 Private URL retrieval
       if (m.fileUrl && typeof m.fileUrl === 'string') {
         let fileKey = m.fileUrl;
