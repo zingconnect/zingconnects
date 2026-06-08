@@ -29,7 +29,7 @@ import {
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
 // 🔒 END-TO-END ENCRYPTION MODULES
-import { encryptMessageText, decryptMessageText } from '../utils/cryptoEngine';
+import { encryptMessageText, decryptMessageText, initializeUserE2EEKeys } from '../utils/cryptoEngine';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
 
@@ -405,16 +405,23 @@ useEffect(() => {
   return () => { isMounted = false; };
 }, [unlockAudio]);
 
-
-// Add this logic to your UserDashboard useEffect
 useEffect(() => {
   const provisionCryptoEnvironment = async () => {
     if (!isLoading && token && userData?._id && userData?.isProfileComplete) {
             if (!userData?.publicKeyJwk) {
-        console.log("🔒 Missing publicKeyJwk detected. Triggering registration...");
-        await initializeUserE2EEKeys(userData._id, token);
+        console.log("🔒 [Crypto] Missing publicKeyJwk detected. Triggering registration...");
+        try {
+          const success = await initializeUserE2EEKeys(userData._id, token); 
+          if (success) {
+            console.log("✅ [Crypto] User E2EE keys successfully provisioned and saved.");
+            } else {
+            console.error("❌ [Crypto] Key initialization failed.");
+          }
+        } catch (err) {
+          console.error("❌ [Crypto] Error during provisioning:", err);
+        }
       } else {
-        console.log("🔒 Identity already synced.");
+        console.log("🔒 [Crypto] Identity already synced.");
       }
     }
   };
@@ -1430,6 +1437,7 @@ const handleFileChange = (e) => {
   }
   e.target.value = ""; 
 };
+
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
   

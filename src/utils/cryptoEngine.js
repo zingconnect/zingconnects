@@ -1,6 +1,7 @@
 // =========================================================================
 // 🔒 ZINGCONNECT SECURE END-TO-END CRYPTOGRAPHIC LAYER (MEMORY-ONLY)
 // =========================================================================
+import { secureFetch } from "../../api/utils/api";
 
 /**
  * 🛠️ CONVERT: ArrayBuffer to Base64 (Safe)
@@ -71,6 +72,34 @@ export const generateE2EEKeyPair = async () => {
     return null;
   }
 };
+
+export const initializeUserE2EEKeys = async (userId) => {
+  try {
+    // 1. Generate the key pair in memory
+    const keyPair = await generateE2EEKeyPair();
+    if (!keyPair) throw new Error("Key generation failed");
+
+    const res = await secureFetch('/api/update-crypto-key', {
+      method: 'PUT',
+      body: JSON.stringify({ 
+        publicKeyJwk: keyPair.publicKeyJwk 
+      })
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || "Failed to register public key");
+    }
+
+    // 3. Return the keyPair so the UI can keep the private key in React state
+    // (This follows your memory-only requirement)
+    return keyPair; 
+  } catch (err) {
+    console.error("❌ Initialization error:", err);
+    return null;
+  }
+};
+
 /**
  * 🔒 ENCRYPT: Returns a structured payload object for the database.
  */

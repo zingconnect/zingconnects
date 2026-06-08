@@ -640,6 +640,7 @@ sameSite: 'Lax',
     next(err); 
   }
 });
+
 app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
