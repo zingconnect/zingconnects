@@ -563,12 +563,7 @@ async function sendVerificationEmail(email, firstName, otpCode) {
       </html>
     `
   });
-console.log("Email sent successfully to:", email);
-  } catch (error) {
-    console.error("Nodemailer Error:", error);
-    throw error; 
-  }
-
+}
 
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
