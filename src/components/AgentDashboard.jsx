@@ -58,30 +58,10 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
-const MessageItem = ({ message, privateKey, senderPublicKey, onDecrypted }) => {
-  const [isDecrypting, setIsDecrypting] = useState(false);
-
-  useEffect(() => {
-    // Check if we have all requirements to decrypt
-    if (message.isEncrypted && message.payload?.ciphertext && !message.decryptedText && privateKey && senderPublicKey) {
-      setIsDecrypting(true);
-      decryptMessageText(message.payload, senderPublicKey, privateKey)
-        .then(text => {
-          onDecrypted(text);
-          setIsDecrypting(false);
-        })
-        .catch((err) => {
-          console.error("Decryption error:", err);
-          onDecrypted("🔒 [Decryption Failed]");
-          setIsDecrypting(false);
-        });
-    }
-  }, [message._id, message.decryptedText, privateKey, senderPublicKey]); // Depend on specific IDs/States
-
-  if (isDecrypting) return <p className="text-gray-400 italic text-[13px]">Decrypting...</p>;
-
+const MessageItem = ({ message }) => {
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
+      {/* Prioritize the decrypted text we just stored in state */}
       {message.decryptedText || message.text || (message.isEncrypted ? "🔒 Encrypted" : "")}
     </p>
   );
@@ -345,6 +325,7 @@ const handleStartCall = async (targetUserId) => {
     }, 500);
   }
 };
+
 const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null) => {
   if (isFetching || isDualLoginConflict) return null;
   isFetching = true;
@@ -359,15 +340,15 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
     if (data.success && data.messages) {
       return await Promise.all(data.messages.map(async (msg) => {
         const myKey = agentPrivateKeyRef.current;
-        if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
-          try {
-            const clearText = await decryptMessageText(msg.payload, targetUserCryptoProfile.publicKeyJwk, myKey);
-            return { ...msg, text: clearText, isEncrypted: false };
-          } catch (e) {
-            return { ...msg, text: "🔒 [Decryption Failed]" };
-          }
-        }
-        return msg;
+      if (msg.isEncrypted && msg.payload && targetUserCryptoProfile?.publicKeyJwk && myKey) {
+  try {
+    const clearText = await decryptMessageText(msg.payload, targetUserCryptoProfile.publicKeyJwk, myKey);
+    return { ...msg, decryptedText: clearText, isEncrypted: false }; 
+  } catch (e) {
+    return { ...msg, decryptedText: "🔒 [Decryption Failed]" };
+  }
+}
+return msg;
       }));
     }
     return null;
@@ -1761,7 +1742,7 @@ const handleSelectUser = async (user) => {
   activeSessionRef.current = sessionId;
 
   setSelectedUser(user);
-  setMessages([]);
+  setMessages([]); // Start with empty state
   setIsInitialLoad(true);
   setLimit(30);
 
@@ -1779,32 +1760,29 @@ const handleSelectUser = async (user) => {
     }
 
     if (data.success && Array.isArray(data.messages)) {
-      setMessages(data.messages);
-      setIsInitialLoad(false);
+      // 1. Process decryption BEFORE setting messages
+      const decryptedHistory = await Promise.all(data.messages.map(async (msg) => {
+        const activeKey = freshUserData?.publicKeyJwk || user?.publicKeyJwk;
+        const privKey = agentPrivateKeyRef.current;
 
-      (async () => {
-        const targetUser = freshUserData || user;
-        const decryptedHistory = await Promise.all(data.messages.map(async (msg) => {
-          const activeKey = selectedUserRef.current?.publicKeyJwk || targetUser?.publicKeyJwk;
-          const privKey = agentPrivateKeyRef.current;
-
-          // Check for payload structure instead of msg.text/msg.iv
-          if (msg.isEncrypted && msg.payload && activeKey && privKey) {
-            try {
-              const decryptedText = await decryptMessageText(msg.payload, activeKey, privKey);
-              return { ...msg, text: decryptedText, isEncrypted: false };
-            } catch (e) {
-              return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
-            }
+        if (msg.isEncrypted && msg.payload && activeKey && privKey) {
+          try {
+            const decryptedText = await decryptMessageText(msg.payload, activeKey, privKey);
+            return { ...msg, decryptedText: decryptedText, isEncrypted: false };
+          } catch (e) {
+            return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
           }
-          return msg;
-        }));
-
-        if (activeSessionRef.current === sessionId) {
-          setMessages(decryptedHistory);
         }
-      })();
+        return msg;
+      }));
+
+      // 2. Only update state once after processing is complete
+      if (activeSessionRef.current === sessionId) {
+        setMessages(decryptedHistory);
+        setIsInitialLoad(false);
+      }
     }
+    
     await secureFetch(`/api/messages/mark-read/${user._id}`, { method: 'PATCH' });
   } catch (err) {
     setConnectionStatus('connecting');
@@ -1885,55 +1863,58 @@ useEffect(() => {
   const interval = setInterval(refreshUserList, 15000);
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
+
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
-  const refreshMessages = async () => {
-    // 2. Check the ref
-    if (document.visibilityState !== 'visible' || isFetchingRef.current) return;
-    
-    // 3. Set the ref
-    isFetchingRef.current = true;
+ const refreshMessages = async () => {
+  // 2. Check the ref
+  if (document.visibilityState !== 'visible' || isFetchingRef.current) return;
+  
+  // 3. Set the ref
+  isFetchingRef.current = true;
 
-    try {
-      const incomingMsgs = await fetchMessages(selectedUser._id, limit);
-      if (!incomingMsgs || incomingMsgs.length === 0) return;
+  try {
+    const incomingMsgs = await fetchMessages(selectedUser._id, limit);
+    if (!incomingMsgs || incomingMsgs.length === 0) return;
 
-      const currentKey = agentPrivateKeyRef.current;
-      const currentUser = selectedUserRef.current;
+    const currentKey = agentPrivateKeyRef.current;
+    const currentUser = selectedUserRef.current;
 
-      const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
-        if (msg.isEncrypted && msg.payload && currentUser?.publicKeyJwk && currentKey) {
-          try {
-            const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
-            return { ...msg, text: decrypted, isEncrypted: false };
-          } catch (err) {
-            return { ...msg, text: "🔒 [Decryption Failed]", isEncrypted: false };
-          }
+    const processedMsgs = await Promise.all(incomingMsgs.map(async (msg) => {
+      // Apply the same decryption logic using 'decryptedText'
+      if (msg.isEncrypted && msg.payload && currentUser?.publicKeyJwk && currentKey) {
+        try {
+          const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
+          return { ...msg, decryptedText: decrypted, isEncrypted: false };
+        } catch (err) {
+          return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
         }
-        return msg;
-      }));
+      }
+      return msg;
+    }));
 
-      setMessages(prev => {
-        const isNew = processedMsgs.length !== prev.length || 
-                      processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
-        if (isNew) {
-          const latest = processedMsgs[processedMsgs.length - 1];
-          if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
-            lastNotifiedId.current = latest._id;
-            notificationSound.current?.play().catch(() => {});
-          }
-          return processedMsgs;
+    setMessages(prev => {
+      // Optimization: Only update if the latest message ID is different
+      const isNew = processedMsgs.length !== prev.length || 
+                    processedMsgs[processedMsgs.length - 1]?._id !== prev[prev.length - 1]?._id;
+      
+      if (isNew) {
+        const latest = processedMsgs[processedMsgs.length - 1];
+        if (latest?.senderModel === 'User' && latest._id !== lastNotifiedId.current) {
+          lastNotifiedId.current = latest._id;
+          notificationSound.current?.play().catch(() => {});
         }
-        return prev;
-      });
-    } catch (err) {
-      console.error("Refresh failed:", err);
-    } finally {
-      // 4. Always reset the ref in finally block
-      isFetchingRef.current = false;
-    }
-  };
+        return processedMsgs;
+      }
+      return prev;
+    });
+  } catch (err) {
+    console.error("Refresh failed:", err);
+  } finally {
+    isFetchingRef.current = false;
+  }
+};
 
   const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
@@ -2082,7 +2063,6 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
-
 const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!selectedUser || !newMessage.trim() || isUploading) return;
@@ -2148,36 +2128,36 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
-    
     if (!data.success) throw new Error(data.message || "Transmission rejected.");
 
-    // 5. Finalize UI with Server Response
     if (selectedUser._id !== activeUser._id) return;
 
-    // Ensure we handle the response object correctly
     const savedMsg = data.message; 
     let finalizedMessage = { ...savedMsg };
     
-    // Ensure payload exists for decryption
     if (finalizedMessage.isEncrypted && !finalizedMessage.payload && finalizedMessage.ciphertext) {
        finalizedMessage.payload = { ciphertext: finalizedMessage.ciphertext, iv: finalizedMessage.iv };
     }
 
+    // 5. Decrypt and finalize
     if (finalizedMessage.isEncrypted && finalizedMessage.payload) {
-      try {
-        finalizedMessage.text = await decryptMessageText(
-          finalizedMessage.payload,
-          activeUser.publicKeyJwk,
-          privateKey
-        );
-        finalizedMessage.isEncrypted = false; // Successfully decrypted
-      } catch (e) {
-        console.error("Decryption Error:", e);
-        finalizedMessage.text = "🔒 [Decryption Failed]";
-      }
+      const decryptedText = await decryptMessageText(
+        finalizedMessage.payload,
+        activeUser.publicKeyJwk,
+        privateKey
+      );
+
+      // Create the final object to update the state
+      const finalMsg = { 
+        ...finalizedMessage, 
+        decryptedText: decryptedText, // Property used by MessageItem
+        isEncrypted: false 
+      };
+
+      setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
+    } else {
+      setMessages(prev => prev.map(msg => msg._id === tempId ? finalizedMessage : msg));
     }
-    
-    setMessages(prev => prev.map(msg => msg._id === tempId ? finalizedMessage : msg));
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
