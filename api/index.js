@@ -407,6 +407,8 @@ const isBase64 = (str) => {
   const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
   return base64Regex.test(str);
 };
+
+
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -494,9 +496,14 @@ app.post('/api/agents/register-init', upload.single('photo'), async (req, res, n
 // Email Template Helper
 async function sendVerificationEmail(email, firstName, otpCode) {
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
-  });
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // true for port 465
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_PASS, // Ensure this is an APP PASSWORD
+  },
+});
 
   await transporter.sendMail({
     from: `"ZingConnect Security" <${process.env.GMAIL_USER}>`,
@@ -556,7 +563,12 @@ async function sendVerificationEmail(email, firstName, otpCode) {
       </html>
     `
   });
-}
+console.log("Email sent successfully to:", email);
+  } catch (error) {
+    console.error("Nodemailer Error:", error);
+    throw error; 
+  }
+
 
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
