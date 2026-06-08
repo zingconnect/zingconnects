@@ -7,8 +7,7 @@ import {
   LiveKitRoom, AudioConference, useTracks, RoomAudioRenderer, useLocalParticipant, StartAudio, useRoomContext
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { 
-  BsSearch, BsThreeDotsVertical, BsCheckAll, BsCheck, BsPersonCircle, BsChevronLeft, BsShieldLockFill, BsCreditCard2BackFill, BsChevronDown,
+import { BsSearch, BsShieldExclamation, BsThreeDotsVertical, BsCheckAll, BsCheck, BsPersonCircle, BsChevronLeft, BsShieldLockFill, BsCreditCard2BackFill, BsChevronDown,
   BsShieldFillExclamation, BsCheckCircleFill, BsVolumeUpFill, BsDownload, BsTelephoneOutboundFill, BsPlayFill, BsMicFill,
   BsTelephoneFill, BsTelephoneXFill, BsMicMuteFill, BsXLg, BsGearFill, BsPlusLg, BsPlus, BsSend, BsSendFill, BsPaperclip,
   BsCameraFill  
@@ -76,7 +75,9 @@ const processMessageForUI = async (msg, currentUser, currentKey) => {
 };
 
 const MessageItem = ({ message, currentAgentId }) => {
-  const isSelf = message.senderId === currentAgentId;
+  // Use decryptedText as the unified display field
+  const displayText = message.decryptedText || message.text;
+
   if (message.decryptedText === "🔒 [Decryption Failed]") {
     return (
       <span className="flex items-center gap-1.5 italic text-red-500 text-[11px] font-bold">
@@ -84,19 +85,22 @@ const MessageItem = ({ message, currentAgentId }) => {
       </span>
     );
   }
-  if (message.isEncrypted && message.display === "🔒 [Decrypting...]") {
+
+  if (message.isEncrypted && displayText === "🔒 [Decrypting...]") {
     return (
       <span className="flex items-center gap-1.5 italic opacity-60 text-[11px] font-medium">
         <BsShieldLock size={12} /> Decrypting...
       </span>
     );
   }
+
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {message.display}
+      {displayText}
     </p>
   );
 };
+
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
@@ -1798,6 +1802,7 @@ const handleDisconnect = async (e) => {
     window.location.replace(targetUrl);
   }
 };
+
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
 
@@ -1805,9 +1810,8 @@ const handleSelectUser = async (user) => {
   activeSessionRef.current = sessionId;
 
   setSelectedUser(user);
-  setMessages([]); // Start with empty state
+  setMessages([]); 
   setIsInitialLoad(true);
-  setLimit(30);
 
   if (socket) socket.emit('join-chat', user._id);
 
@@ -1823,32 +1827,21 @@ const handleSelectUser = async (user) => {
     }
 
     if (data.success && Array.isArray(data.messages)) {
-      // 1. Process decryption BEFORE setting messages
-      const decryptedHistory = await Promise.all(data.messages.map(async (msg) => {
-        const activeKey = freshUserData?.publicKeyJwk || user?.publicKeyJwk;
-        const privKey = agentPrivateKeyRef.current;
+      // USE YOUR HELPER HERE:
+      const processedHistory = await Promise.all(
+        data.messages.map(msg => 
+          processMessageForUI(msg, freshUserData || user, agentPrivateKeyRef.current)
+        )
+      );
 
-        if (msg.isEncrypted && msg.payload && activeKey && privKey) {
-          try {
-            const decryptedText = await decryptMessageText(msg.payload, activeKey, privKey);
-            return { ...msg, decryptedText: decryptedText, isEncrypted: false };
-          } catch (e) {
-            return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
-          }
-        }
-        return msg;
-      }));
-
-      // 2. Only update state once after processing is complete
       if (activeSessionRef.current === sessionId) {
-        setMessages(decryptedHistory);
+        setMessages(processedHistory);
         setIsInitialLoad(false);
       }
     }
     
     await secureFetch(`/api/messages/mark-read/${user._id}`, { method: 'PATCH' });
   } catch (err) {
-    setConnectionStatus('connecting');
     console.error("Failed to load chat history:", err);
   }
 };
