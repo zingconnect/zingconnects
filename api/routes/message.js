@@ -61,8 +61,12 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
       const msgDto = {
         _id: m._id,
         text: m.text || "",
-        isEncrypted: !!m.isEncrypted, // 🛡️ Mandatory for E2EE detection
-        iv: m.iv || null,             // 🛡️ Mandatory for Decryption
+        isEncrypted: !!m.isEncrypted, 
+         payload: m.isEncrypted ? {
+      ciphertext: m.payload?.ciphertext || null,
+      iv: m.payload?.iv || m.iv, // Fallback if old messages had it at root
+      version: m.payload?.version || 1
+    } : null,        
         senderId: m.senderId?._id || m.senderId,
         senderModel: m.senderModel || 'User',
         receiverId: m.receiverId?._id || m.receiverId,
@@ -125,19 +129,23 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       }
     }
 
-    // 4. Create Message with Structured Payload
-    const newMessage = await Message.create({
-      senderId: myId,
-      senderModel: senderModelName,
-      receiverId: new mongoose.Types.ObjectId(receiverId),
-      receiverModel: targetModelName,
-      text: isEncrypted ? null : String(text || '').trim(),
-      payload: isEncrypted ? { ciphertext, iv, version: 1 } : null,
-      isEncrypted: !!isEncrypted,
-      fileType: fileType || 'text',
-      replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? replyToId : null,
-      notificationSent: false
-    });
+   // Inside router.post('/send')
+const newMessage = await Message.create({
+  senderId: myId,
+  senderModel: senderModelName,
+  receiverId: new mongoose.Types.ObjectId(receiverId),
+  receiverModel: targetModelName,
+  text: isEncrypted ? null : String(text || '').trim(),
+  payload: isEncrypted ? { 
+    ciphertext, 
+    iv, 
+    version: 1 
+  } : null,
+  isEncrypted: !!isEncrypted,
+  fileType: fileType || 'text',
+  replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? replyToId : null,
+  notificationSent: false
+});
 
     const TargetModel = targetModelName === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId)

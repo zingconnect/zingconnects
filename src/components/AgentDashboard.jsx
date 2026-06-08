@@ -58,21 +58,45 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
-const MessageItem = ({ message, currentAgentId }) => {
-  // If the message is explicitly marked as not encrypted, or if we know it's our own message
-  const isSelf = message.senderId === currentAgentId;
-  
-  if (message.isEncrypted && !isSelf) {
-    return <span className="italic opacity-60 text-[12px]">🔒 Decrypting...</span>;
+const processMessageForUI = async (msg, currentUser, currentKey) => {
+  if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
+    return { ...msg, decryptedText: msg.text || msg.content, isEncrypted: false };
   }
+  if (msg.decryptedText) return msg;
 
+  if (msg.payload && currentUser?.publicKeyJwk && currentKey) {
+    try {
+      const decrypted = await decryptMessageText(msg.payload, currentUser.publicKeyJwk, currentKey);
+      return { ...msg, decryptedText: decrypted, isEncrypted: false };
+    } catch (e) {
+      return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+    }
+  }
+  return { ...msg, decryptedText: "🔒 [Decrypting...]", isEncrypted: true };
+};
+
+const MessageItem = ({ message, currentAgentId }) => {
+  const isSelf = message.senderId === currentAgentId;
+  if (message.decryptedText === "🔒 [Decryption Failed]") {
+    return (
+      <span className="flex items-center gap-1.5 italic text-red-500 text-[11px] font-bold">
+        <BsShieldExclamation size={12} /> Decryption Failed
+      </span>
+    );
+  }
+  if (message.isEncrypted && message.display === "🔒 [Decrypting...]") {
+    return (
+      <span className="flex items-center gap-1.5 italic opacity-60 text-[11px] font-medium">
+        <BsShieldLock size={12} /> Decrypting...
+      </span>
+    );
+  }
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {message.decryptedText || message.text}
+      {message.display}
     </p>
   );
 };
-
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
@@ -2025,63 +2049,37 @@ useEffect(() => {
   window.addEventListener('storage', applyTheme);
   return () => window.removeEventListener('storage', applyTheme);
 }, []);
+
 useEffect(() => {
   if (!socket) return;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-const handleIncomingMessage = async (data, callback) => {
+
+  const handleIncomingMessage = async (data, callback) => {
     if (callback) callback({ status: 'received' });
     if (data._id && data._id === lastNotifiedId.current) return;
     lastNotifiedId.current = data._id;
 
-    const currentUser = selectedUserRef.current;
-    const currentKey = agentPrivateKeyRef.current;
-    // Get the agent's ID to compare against the sender
-    const myAgentId = agentData?._id; 
-    let processedData = { ...data };
+    // 1. USE THE UNIFIED PROCESSOR
+    // We pass agentData._id to the processor so it knows if it's the sender
+    const processedData = await processMessageForUI(
+      { ...data, isSelf: String(data.senderId) === String(agentData?._id) },
+      selectedUserRef.current,
+      agentPrivateKeyRef.current
+    );
 
-    // --- UPDATED DECRYPTION BLOCK WITH SENDER BYPASS ---
-    
-    // 1. SENDER BYPASS: If I sent this message, it is already plaintext.
-    // Use String comparison to avoid type mismatch issues.
-    if (String(processedData.senderId) === String(myAgentId)) {
-      processedData.decryptedText = processedData.text || processedData.content;
-      processedData.isEncrypted = false;
-    } 
-    // 2. RECEIVER DECRYPTION: Only process if it is encrypted and I am NOT the sender.
-    else if (processedData.isEncrypted && processedData.payload) {
-      if (currentUser?.publicKeyJwk && currentKey) {
-        try {
-          const decrypted = await decryptMessageText(
-            processedData.payload,
-            currentUser.publicKeyJwk,
-            currentKey
-          );
-          processedData.decryptedText = decrypted;
-          processedData.isEncrypted = false;
-        } catch (err) {
-          console.error("🔒 Socket decryption error:", err);
-          processedData.decryptedText = "🔒 [Decryption Failed]";
-          processedData.isEncrypted = false;
-        }
-      } else {
-        processedData.decryptedText = "🔒 [Decrypting...]";
-        processedData.isEncrypted = true; 
-      }
-    }
-
-    // --- REST OF THE LOGIC REMAINS THE SAME ---
-    const isChattingWithSender = currentUser && 
-      (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
+    // 2. State Update
+    const isChattingWithSender = selectedUserRef.current && 
+      (processedData.senderId === selectedUserRef.current._id || processedData.senderId === selectedUserRef.current.id);
     
     if (isChattingWithSender) {
       setMessages(prev => {
         if (prev.some(m => m._id === processedData._id)) return prev;
         return [...prev, processedData];
       });
-      secureFetch(`/api/messages/mark-read/${currentUser._id}`, { method: 'PATCH' }).catch(() => {});
+      secureFetch(`/api/messages/mark-read/${selectedUserRef.current._id}`, { method: 'PATCH' }).catch(() => {});
     }
 
-    // Notification Logic
+    // 3. Notification Logic
     if (processedData.senderModel === 'User') {
       notificationSound.current?.play().catch(() => {});
       if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
@@ -2179,20 +2177,22 @@ const handleSendMessage = async (e) => {
 
     if (selectedUser._id !== activeUser._id) return;
 
-    const savedMsg = data.message; 
-    let finalizedMessage = { ...savedMsg };
-    
-    if (finalizedMessage.isEncrypted && !finalizedMessage.payload && finalizedMessage.ciphertext) {
-       finalizedMessage.payload = { ciphertext: finalizedMessage.ciphertext, iv: finalizedMessage.iv };
-    }
-    const finalMsg = { 
-      ...finalizedMessage, 
-      text: textToSend,          // The original plain text
-      decryptedText: textToSend, // Instantly set the text
-      isEncrypted: false         // Force UI to show plain text immediately
-    };
+const savedMsg = data.message; 
+let finalizedMessage = { ...savedMsg };
 
-    setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
+if (finalizedMessage.isEncrypted && !finalizedMessage.payload && finalizedMessage.ciphertext) {
+   finalizedMessage.payload = { 
+       ciphertext: finalizedMessage.ciphertext, 
+       iv: finalizedMessage.iv 
+   };
+}
+const finalMsg = await processMessageForUI(
+  { ...finalizedMessage, text: textToSend, decryptedText: textToSend, isEncrypted: false },
+  activeUser,
+  privateKey
+);
+
+setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
@@ -2460,6 +2460,10 @@ const handleSendMessage = async (e) => {
         {messages.map((m) => {
           const isMe = m.senderId === agentData?._id;
           const msgKey = m._id || m.id || `temp-${m.createdAt}-${Math.random()}`;
+          const displayMsg = {
+            ...m,
+          display: m.decryptedText || m.text || (m.isEncrypted ? "🔒 [Decrypting...]" : "")
+          };
 
           if (m.fileType === 'call_log' && m.callMetadata) {
             const isMissed = m.callMetadata.status === 'missed';
@@ -2498,12 +2502,12 @@ const handleSendMessage = async (e) => {
                 </div>
               )}
               
-{ (m.text || m.isEncrypted) && (
-  <MessageItem 
-    key={m._id} 
-    message={m} 
-  />
-)}
+        {(m.text || m.isEncrypted) && (
+        <MessageItem 
+          message={displayMsg} 
+          currentAgentId={agentData?._id}
+        />
+      )}
               <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
                 <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 {isMe && (
