@@ -70,13 +70,10 @@ const handleVerify = async (e) => {
           const publicKey = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
 
           await savePrivateKey(privateKey);
-          
-          // 3. Optional: POST the public key to your server
-          // This allows users to find this agent's public identity
-          await secureFetch('/api/update-crypto-key', {
-            method: 'POST',
-            body: JSON.stringify({ publicKey }),
-          });
+        await secureFetch('/api/update-crypto-key', {
+         method: 'PUT', // Change from 'POST' to 'PUT'
+         body: JSON.stringify({ publicKeyJwk: publicKey }), 
+        });
           
           console.log("Agent Identity established.");
         } catch (cryptoErr) {
