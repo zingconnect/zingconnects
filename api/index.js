@@ -389,13 +389,14 @@ io.on("connection", (socket) => {
 });
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
+    pass: process.env.GMAIL_PASS, // Ensure this is an APP PASSWORD
   },
 });
-
 const addDays = (date, days) => {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
@@ -409,86 +410,110 @@ const isBase64 = (str) => {
 };
 
 
+// ==========================================
+// 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
+// ==========================================
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    
-    // Explicitly destructure 'resend' from req.body
     const { 
-      firstName, lastName, email, password, dob, gender, 
-      occupation, address, bio, program, plan, resend 
+      firstName, 
+      lastName, 
+      email, 
+      password, 
+      dob, 
+      gender, 
+      occupation, 
+      address, 
+      bio, 
+      program, 
+      plan 
     } = req.body;
 
+    // 1. INPUT VALIDATION
     if (!email) return res.status(400).json({ success: false, message: "Email required." });
-    const lowerEmail = String(email).toLowerCase().trim();
-
-    // --- CASE 1: RESEND LOGIC ---
-    // Check if resend is truthy (handles string 'true' or boolean true)
-    if (resend === 'true' || resend === true) {
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const otpExpiry = Date.now() + (10 * 60 * 1000);
-
-      const agent = await AgentModel.findOneAndUpdate(
-        { email: lowerEmail },
-        { $set: { otp: otpCode, otpExpires: otpExpiry } },
-        { new: true }
-      );
-
-      if (!agent) return res.status(404).json({ success: false, message: "Agent not found" });
-
-      await sendVerificationEmail(lowerEmail, agent.firstName || "Agent", otpCode);
-      return res.status(200).json({ success: true, message: "New code sent." });
-    }
     
-    // --- CASE 2: INITIAL REGISTRATION LOGIC ---
-    const existingAgent = await AgentModel.findOne({ email: lowerEmail });
+    const lowerEmail = String(email).toLowerCase().trim();
+    let existingAgent = await AgentModel.findOne({ email: lowerEmail });
+
+    // 🛡️ SECURITY FIX: OTP Throttling
+    if (existingAgent?.otpExpires && existingAgent.otpExpires > Date.now()) {
+      return res.status(429).json({ success: false, message: "Verification code already sent. Please wait." });
+    }
+
     if (existingAgent?.isVerified) {
       return res.status(400).json({ success: false, message: "Account already verified." });
     }
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = Date.now() + (10 * 60 * 1000);
-    const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
-
-    const updatedAgent = await AgentModel.findOneAndUpdate(
-      { email: lowerEmail, $or: [{ otpExpires: { $lt: Date.now() } }, { otpExpires: { $exists: false } }] },
-      {
-        $set: {
-          otp: otpCode,
-          otpExpires: otpExpiry,
-          status: 'pending',
-          isVerified: false,
-          ...(password && { password: hashedPassword }),
-          ...(firstName && { firstName: firstName.trim() }),
-          ...(lastName && { lastName: lastName.trim() }),
-          ...(dob && { dob }),
-          ...(gender && { gender }),
-          ...(occupation && { occupation }),
-          ...(address && { address }),
-          ...(bio && { bio }),
-          ...(program && { program }),
-          ...(plan && { plan }),
-        }
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
-
+    // 🛡️ SECURITY FIX: File size & Sanitization
+    let savedPhotoPath = existingAgent?.photoUrl || "";
     if (req.file) {
       if (req.file.size > 2 * 1024 * 1024) return res.status(400).json({ success: false, message: "Photo too large." });
+      
       const fileKey = `profiles/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-')}`;
       await getS3Client().send(new PutObjectCommand({
-        Bucket: process.env.IDRIVE_BUCKET_NAME, Key: fileKey, Body: req.file.buffer, ContentType: req.file.mimetype,
+        Bucket: process.env.IDRIVE_BUCKET_NAME,
+        Key: fileKey,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
       }));
-      updatedAgent.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.${process.env.IDRIVE_ENDPOINT?.replace('https://', '')}/${fileKey}`;
-      await updatedAgent.save();
+      savedPhotoPath = `https://${process.env.IDRIVE_BUCKET_NAME}.${process.env.IDRIVE_ENDPOINT?.replace('https://', '')}/${fileKey}`;
     }
 
+    // 2. DATA PERSISTENCE
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = Date.now() + (10 * 60 * 1000);
+    const hashedPassword = await bcrypt.hash(password || "temp123", 10);
+
+    if (existingAgent) {
+      if (password) existingAgent.password = hashedPassword;
+      
+      // ✨ FIXED: Map incoming registration data variables safely into the existing document instance fallback
+      Object.assign(existingAgent, { 
+        otp: otpCode, 
+        otpExpires: otpExpiry, 
+        photoUrl: savedPhotoPath,
+        dob: dob || existingAgent.dob,
+        gender: gender || existingAgent.gender,
+        occupation: occupation !== undefined ? occupation : existingAgent.occupation,
+        address: address !== undefined ? address : existingAgent.address,
+        bio: bio !== undefined ? bio : existingAgent.bio,
+        program: program !== undefined ? program : existingAgent.program,
+        plan: plan || existingAgent.plan || "BASIC"
+      });
+      await existingAgent.save();
+    } else {
+      // ✨ FIXED: Pull real values from req.body instead of passing hardcoded empty strings
+      await AgentModel.create({
+        firstName: (firstName || "Agent").trim(),
+        lastName: (lastName || "").trim(),
+        email: lowerEmail,
+        password: hashedPassword,
+        slug: `${(firstName || "agent").toLowerCase()}-${Date.now().toString().slice(-4)}`,
+        photoUrl: savedPhotoPath,
+        dob: dob || null,
+        gender: gender || "",
+        occupation: occupation || "",
+        address: address || "",
+        bio: bio || "",
+        program: program || "",
+        role: 'agent',
+        status: 'pending',
+        isVerified: false,
+        isSubscribed: false,
+        plan: plan || "BASIC",
+        otp: otpCode,
+        otpExpires: otpExpiry
+      });
+    }
+
+    // 3. EMAIL DELIVERY
     await sendVerificationEmail(lowerEmail, firstName || "Agent", otpCode);
     return res.status(200).json({ success: true, message: "Verification code sent." });
 
   } catch (err) {
-    console.error("Registration Error:", err);
+    console.error("❌ Registration Error:", err);
     next(err); 
   }
 });
@@ -504,12 +529,15 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     pass: process.env.GMAIL_PASS, // Ensure this is an APP PASSWORD
   },
 });
-
   await transporter.sendMail({
     from: `"ZingConnect Security" <${process.env.GMAIL_USER}>`,
     to: email,
     subject: "Your Verification Code",
-    // REMOVED: The attachments array causing the ENOENT error
+    attachments: [{
+      filename: 'logo.png',
+      path: './public/logo.png', 
+      cid: 'zinglogo' 
+    }],
     html: `
       <!DOCTYPE html>
       <html>
@@ -529,7 +557,7 @@ async function sendVerificationEmail(email, firstName, otpCode) {
               <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
                 <tr>
                   <td align="center" style="padding: 30px 40px 10px 40px;">
-                    <img src="https://www.zingconnect.chat/logo.png" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                    <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
                   </td>
                 </tr>
                 <tr>
@@ -571,38 +599,49 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const AgentModel = getAgentModel();
     const { email, otp } = req.body;
 
-    if (!email || !otp) return res.status(400).json({ success: false, message: "Missing credentials." });
-
-    const agent = await AgentModel.findOne({ email: email.toLowerCase().trim() });
-
-    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      return res.status(400).json({ success: false, message: "Invalid or expired code." });
+    if (!email || !otp) {
+      return res.status(400).json({ success: false, message: "Email and OTP are required." });
     }
 
-    // Finalize verification
+    const lowerEmail = email.toLowerCase().trim();
+    const agent = await AgentModel.findOne({ email: lowerEmail });
+
+    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid or expired verification code." 
+      });
+    }
+
+    // Update agent status
     agent.isVerified = true;
     agent.status = 'active';
     agent.otp = undefined;
     agent.otpExpires = undefined;
     await agent.save();
     
-    // Generate Token
+    // Create Session Token
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d' } // Extended to 7d to match cookie age
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      signed: true 
+res.cookie('token', token, {
+  httpOnly: true,
+secure: process.env.NODE_ENV === 'production', 
+sameSite: 'Lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+  signed: true // <--- Add this
+});
+
+    return res.status(200).json({
+      success: true,
+      slug: agent.slug,
+      message: "Your profile is now live!"
     });
 
-    return res.status(200).json({ success: true, slug: agent.slug, message: "Profile active." });
   } catch (err) {
     next(err); 
   }

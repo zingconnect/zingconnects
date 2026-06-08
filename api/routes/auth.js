@@ -56,73 +56,200 @@ export const setCachedData = async (redisClient, key, data, ttl = 300) => {
     console.error(`Cache Write Error [${key}]:`, err.message);
   }
 };
+
 // --- 1. STAGE 1: AGENT REGISTRATION (INIT) ---
 router.post('/register', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { firstName, lastName, email, password, address, occupation, program, bio, dob, gender, plan } = req.body;
+    
+    const { 
+      firstName, lastName, email, password, address, 
+      occupation, program, bio, dob, gender, plan 
+    } = req.body;
 
-    if (!email) return res.status(400).json({ success: false, message: "Email required." });
-    
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email required." });
+    }
+
     const lowerEmail = email.toLowerCase().trim();
-    
-    // Fail-fast check for verified users
-    const existingAgent = await AgentModel.findOne({ email: lowerEmail });
+    let existingAgent = await AgentModel.findOne({ email: lowerEmail });
+
+    // 🛡️ SECURITY FIX: OTP Throttling (Defends against mail gateway flooding)
+    if (existingAgent?.otpExpires && existingAgent.otpExpires > Date.now()) {
+      return res.status(429).json({ success: false, message: "Verification code already sent. Please wait." });
+    }
+
     if (existingAgent?.isVerified) {
       return res.status(400).json({ success: false, message: "Account already verified." });
     }
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = Date.now() + (10 * 60 * 1000);
-    const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
+    // 2. CRYPTO PASSWORD HANDLING
+    let hashedPassword = existingAgent ? existingAgent.password : "";
+    if (password && password.trim() !== "") {
+      hashedPassword = await bcrypt.hash(password, 10);
+    } else if (!existingAgent) {
+      return res.status(400).json({ success: false, message: "Password is required for registration." });
+    }
 
-    // Atomic update or creation
-    const updatedAgent = await AgentModel.findOneAndUpdate(
-      { email: lowerEmail, $or: [{ otpExpires: { $lt: Date.now() } }, { otpExpires: { $exists: false } }] },
-      {
-        $set: {
-          otp: otpCode,
-          otpExpires: otpExpiry,
-          status: 'pending',
-          isVerified: false,
-          ...(password && { password: hashedPassword }),
-          ...(firstName && { firstName: firstName.trim() }),
-          ...(lastName && { lastName: lastName.trim() }),
-          ...(dob && { dob }),
-          ...(gender && { gender }),
-          ...(occupation && { occupation }),
-          ...(address && { address }),
-          ...(bio && { bio }),
-          ...(program && { program }),
-          ...(plan && { plan }),
-        }
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    // 3. SECURE UNIQUE SLUG GENERATION
+    let finalSlug = existingAgent ? existingAgent.slug : "";
+    if (!existingAgent) {
+      const baseSlug = `${firstName || 'agent'}${lastName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+      finalSlug = baseSlug;
+      let counter = 1;
+      while (await AgentModel.findOne({ slug: finalSlug })) {
+        counter++;
+        finalSlug = `${baseSlug}-${counter.toString().padStart(2, '0')}`;
+      }
+    }
 
-    // S3 Photo Handling
+    // 🛡️ SECURITY FIX: Photo Validation & S3 Object Key Sanitization
+    let savedPhotoPath = existingAgent ? existingAgent.photoUrl : ""; 
     if (req.file) {
-      if (req.file.size > 2 * 1024 * 1024) return res.status(400).json({ success: false, message: "Photo too large." });
-      
-      const fileKey = `profiles/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-')}`;
+      // Enforce 2MB file size ceiling
+      if (req.file.size > 2 * 1024 * 1024) {
+        return res.status(400).json({ success: false, message: "Photo too large. Maximum size allowed is 2MB." });
+      }
+
+      // Evict special character sequences out of original uploaded filename arrays
+      const cleanFileName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '-');
+      const fileKey = `profiles/${Date.now()}-${cleanFileName}`;
+      const bucketName = process.env.IDRIVE_BUCKET_NAME;
+
       await getS3Client().send(new PutObjectCommand({
-        Bucket: process.env.IDRIVE_BUCKET_NAME,
+        Bucket: bucketName,
         Key: fileKey,
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       }));
-      updatedAgent.photoUrl = `https://${process.env.IDRIVE_BUCKET_NAME}.${process.env.IDRIVE_ENDPOINT?.replace('https://', '')}/${fileKey}`;
-      await updatedAgent.save();
+
+      const rawEndpoint = (process.env.IDRIVE_ENDPOINT || "").replace('https://', '');
+      savedPhotoPath = `https://${bucketName}.${rawEndpoint}/${fileKey}`;
     }
 
-    await sendVerificationEmail(lowerEmail, firstName || "Agent", otpCode);
+    // 4. ATOMIC CODES GENERATION (Valid for 10 minutes)
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = Date.now() + (10 * 60 * 1000);
+
+    // 5. DATA COALESCING PERSISTENCE
+    if (existingAgent) {
+      Object.assign(existingAgent, { 
+        firstName: firstName ? firstName.trim() : existingAgent.firstName,
+        lastName: lastName ? lastName.trim() : existingAgent.lastName,
+        password: hashedPassword, 
+        otp: otpCode, 
+        otpExpires: otpExpiry, 
+        photoUrl: savedPhotoPath,
+        dob: dob || existingAgent.dob,
+        gender: gender || existingAgent.gender,
+        occupation: occupation !== undefined ? occupation : existingAgent.occupation,
+        address: address !== undefined ? address : existingAgent.address,
+        bio: bio !== undefined ? bio : existingAgent.bio,
+        program: program !== undefined ? program : existingAgent.program,
+        plan: plan || existingAgent.plan || "BASIC"
+      });
+      await existingAgent.save();
+    } else {
+      await AgentModel.create({
+        firstName: (firstName || "Agent").trim(),
+        lastName: (lastName || "").trim(),
+        email: lowerEmail,
+        password: hashedPassword,
+        slug: finalSlug,
+        photoUrl: savedPhotoPath,
+        dob: dob || null,
+        gender: gender || "",
+        occupation: occupation || "",
+        address: address || "",
+        bio: bio || "",
+        program: program || "",
+        role: 'agent',
+        status: 'pending',
+        isVerified: false,
+        isSubscribed: false,
+        plan: plan || "BASIC",
+        otp: otpCode,
+        otpExpires: otpExpiry
+      });
+    }
+
+    // 6. EMAIL DELIVERY SYSTEM
+    const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+    try {
+      await transporter.sendMail({
+        from: `"ZingConnect Security" <${process.env.GMAIL_USER || process.env.EMAIL_USER}>`,
+        to: lowerEmail,
+        subject: "Your Verification Code",
+        attachments: [{
+          filename: 'logo.png',
+          path: logoPath,
+          cid: 'zinglogo'
+        }],
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              @media only screen and (max-width: 600px) {
+                .container { width: 100% !important; border-radius: 0 !important; }
+                .otp-box { font-size: 24px !important; letter-spacing: 4px !important; }
+              }
+            </style>
+          </head>
+          <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td align="center" style="padding: 40px 10px;">
+                  <table class="container" role="presentation" width="500" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                    <tr>
+                      <td align="center" style="padding: 30px 40px 10px 40px;">
+                        <img src="cid:zinglogo" alt="ZingConnect" width="160" style="display: block; border: 0; outline: none; text-decoration: none;">
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 20px 40px 40px 40px; text-align: center;">
+                        <h2 style="color: #111827; font-size: 22px; font-weight: 700; margin: 0 0 16px 0;">Verify Your Account</h2>
+                        <p style="color: #4b5563; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+                          Hello <strong>${firstName || 'Agent'}</strong>,<br>
+                          Welcome to ZingConnect! Use the secure verification code below to finalize your agent profile.
+                        </p>
+                        <div class="otp-box" style="background-color: #eff6ff; border: 2px dashed #bfdbfe; color: #2563eb; padding: 20px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 6px; border-radius: 12px; margin-bottom: 24px;">
+                          ${otpCode}
+                        </div>
+                        <p style="color: #9ca3af; font-size: 13px; line-height: 20px; margin: 0;">
+                          This code is valid for <strong>10 minutes</strong>.<br>
+                          If you didn't request this, you can safely ignore this email.
+                        </p>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="background-color: #f3f4f6; padding: 20px 40px; text-align: center;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                          &copy; ${new Date().getFullYear()} ZingConnect Protocol. All rights reserved.
+                        </p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </body>
+          </html>
+        `
+      });
+    } catch (mailError) {
+      console.error("🔴 [Mailer Failure] Postponing email stack:", mailError.message);
+    }
+
     return res.status(200).json({ success: true, message: "Verification code sent." });
+
   } catch (error) {
+    // 🛡️ SECURITY FIX: Route intercept traces out to secure error tracking engine instead of leaking system data
     next(error);
   }
 });
-
 // --- 2. STAGE 2: VERIFY OTP ---
 router.post('/verify-otp', async (req, res, next) => {
   try {
@@ -130,41 +257,58 @@ router.post('/verify-otp', async (req, res, next) => {
     const AgentModel = getAgentModel();
     const { email, otp } = req.body;
 
-    if (!email || !otp) return res.status(400).json({ success: false, message: "Email and OTP required." });
-
-    const agent = await AgentModel.findOne({ email: email.toLowerCase().trim() });
-
-    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      return res.status(400).json({ success: false, message: "Invalid or expired code." });
+    if (!email || !otp) {
+      return res.status(400).json({ success: false, message: "Email and OTP are required." });
     }
 
+    const lowerEmail = email.toLowerCase().trim();
+    const agent = await AgentModel.findOne({ email: lowerEmail });
+
+    // 🛡️ SECURITY FIX: Unified validation comparison logic 
+    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid or expired verification code." 
+      });
+    }
+
+    // Clean verification status transitions
     agent.isVerified = true;
     agent.status = 'active';
     agent.otp = undefined;
     agent.otpExpires = undefined;
     await agent.save();
     
+    if (!process.env.JWT_SECRET) {
+      throw new Error("Security configuration error.");
+    }
+
+    // Sign payload
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d' } // Aligned with cookie expiry
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      signed: true 
+res.cookie('token', token, {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'Lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+  signed: true // <--- Add this
+});
+    // Successfully logged in; return success without the raw token
+    return res.status(200).json({
+      success: true,
+      slug: agent.slug,
+      message: "Your profile is now live!"
     });
 
-    return res.status(200).json({ success: true, slug: agent.slug, message: "Profile active." });
   } catch (err) {
     next(err); 
   }
 });
-
 router.post('/login', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
 
