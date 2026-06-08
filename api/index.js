@@ -2263,6 +2263,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
       const msgDto = {
         id: m._id,
+        text: m.text || "",
         content: m.text || "",
         isEncrypted: !!m.isEncrypted, 
         payload: m.payload || null,

@@ -30,16 +30,6 @@ const messageSchema = new mongoose.Schema({
     default: null // Explicitly allow null for non-encrypted messages
   },
 text: { type: String, trim: false },
-
-  callMetadata: {
-    callId: { type: mongoose.Schema.Types.ObjectId, ref: 'Call' },
-    status: { 
-      type: String, 
-      enum: ['ringing', 'connected', 'missed', 'ended'], 
-      default: 'ringing' 
-    },
-    duration: { type: Number, default: 0 } // In seconds
-  },
   fileUrl: {
     type: String, // URL from S3/IDrive
     default: null

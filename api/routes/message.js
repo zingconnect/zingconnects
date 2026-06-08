@@ -61,6 +61,7 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
       const msgDto = {
         _id: m._id,
         text: m.text || "",
+        content: m.text || "",
         isEncrypted: !!m.isEncrypted, 
          payload: m.isEncrypted ? {
       ciphertext: m.payload?.ciphertext || null,

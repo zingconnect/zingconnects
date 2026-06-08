@@ -75,9 +75,8 @@ const processMessageForUI = async (msg, currentUser, currentKey) => {
 };
 
 const MessageItem = ({ message, currentAgentId }) => {
-  // Use decryptedText as the unified display field
-  const displayText = message.decryptedText || message.text;
-
+  const isDecrypted = !message.isEncrypted && message.decryptedText;
+    const isProcessing = message.isEncrypted && !message.decryptedText;
   if (message.decryptedText === "🔒 [Decryption Failed]") {
     return (
       <span className="flex items-center gap-1.5 italic text-red-500 text-[11px] font-bold">
@@ -85,18 +84,17 @@ const MessageItem = ({ message, currentAgentId }) => {
       </span>
     );
   }
-
-  if (message.isEncrypted && displayText === "🔒 [Decrypting...]") {
+  if (isProcessing) {
     return (
       <span className="flex items-center gap-1.5 italic opacity-60 text-[11px] font-medium">
         <BsShieldLock size={12} /> Decrypting...
       </span>
     );
   }
-
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {displayText}
+      {/* Fallback to text if decryptedText isn't present yet */}
+      {message.decryptedText || message.text || message.content}
     </p>
   );
 };
@@ -238,6 +236,7 @@ const agentPrivateKeyRef = useRef(agentPrivateKey);
         return <BsCheck className="text-gray-400" size={16} />;
     }
   };
+
 const handleStartCall = async (targetUserId) => {
   if (!targetUserId || !agentData) return;
   peerConnectedRef.current = false; 
@@ -1229,30 +1228,31 @@ useEffect(() => {
           const data = await response.json();
           
           if (data.success && data.messages) {
-            // Map over fresh data and merge with potential existing decryption status
             const updatedMessages = await Promise.all(
-              data.messages.map(async (msg) => {
-                // If it's encrypted and we have the keys, attempt decryption
-                if (msg.isEncrypted && msg.payload?.ciphertext && selectedUser?.publicKeyJwk) {
-                  try {
-                    const clearText = await decryptMessageText(
-                      msg.payload, 
-                      selectedUser.publicKeyJwk, 
-                      agentPrivateKeyRef.current
-                    );
-                    return { ...msg, decryptedText: clearText };
-                  } catch (e) {
-                    console.error("Sync Decryption Error:", e);
-                    return { ...msg, decryptedText: "🔒 [Decryption Failed]" };
-                  }
-                }
-                // Return as-is if not encrypted or already handled
-                return msg;
-              })
-            );
+  data.messages.map(async (msg) => {
+    if (msg.decryptedText || msg.text) return msg;
+    if (msg.isEncrypted && msg.payload?.ciphertext && selectedUser?.publicKeyJwk) {
+      try {
+        const clearText = await decryptMessageText(
+          msg.payload, 
+          selectedUser.publicKeyJwk, 
+          agentPrivateKeyRef.current
+        );
+        return { ...msg, decryptedText: clearText, isEncrypted: false };
+      } catch (e) {
+        console.error("Sync Decryption Error:", e);
+        return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
+      }
+    }
+        return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
+  })
+);
             
-            // Set the state with the newly fetched and processed messages
-            setMessages(updatedMessages);
+           setMessages(prevMessages => {
+  const newIds = new Set(updatedMessages.map(m => m.id || m._id));
+  const filteredPrev = prevMessages.filter(m => !newIds.has(m.id || m._id));
+  return [...filteredPrev, ...updatedMessages].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+});
           }
         } catch (err) {
           console.warn("Message catch-up failed:", err);
@@ -2458,26 +2458,30 @@ setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
           display: m.decryptedText || m.text || (m.isEncrypted ? "🔒 [Decrypting...]" : "")
           };
 
-          if (m.fileType === 'call_log' && m.callMetadata) {
-            const isMissed = m.callMetadata.status === 'missed';
-            return (
-              <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-2 animate-in fade-in zoom-in duration-500`}>
-                <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-md border max-w-[80%] ${isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none mr-2' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none ml-2'} dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
-                  <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-                    {isMissed ? <BsTelephoneXFill size={16} /> : <BsTelephoneOutboundFill size={16} />}
-                  </div>
-                  <div className="flex flex-col">
-                    <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
-                      {isMissed ? 'Missed Voice Call' : `Voice Call • ${m.callMetadata.duration || 0}s`}
-                    </p>
-                    <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
-                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          }
+         if (m.fileType === 'call_log') {
+  // Use optional chaining (?.) and a fallback object to prevent crashes
+  const metadata = m.callMetadata || {}; 
+  const isMissed = metadata.status === 'missed';
+  const duration = metadata.duration || 0;
+
+  return (
+    <div key={msgKey} className={`w-full flex ${isMe ? 'justify-end' : 'justify-start'} my-2 animate-in fade-in zoom-in duration-500`}>
+      <div className={`px-5 py-2.5 rounded-2xl flex items-center gap-4 shadow-md border max-w-[80%] ${isMe ? 'bg-green-600 border-green-500 text-white rounded-tr-none mr-2' : 'bg-white border-gray-200 text-slate-800 rounded-tl-none ml-2'} dark:bg-white/10 dark:backdrop-blur-md dark:border-white/10 dark:text-white`}>
+        <div className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : isMissed ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+          {isMissed ? <BsTelephoneXFill size={16} /> : <BsTelephoneOutboundFill size={16} />}
+        </div>
+        <div className="flex flex-col">
+          <p className={`text-[11px] font-black uppercase tracking-widest ${isMe ? 'text-white' : 'text-gray-700'} dark:text-white`}>
+            {isMissed ? 'Missed Voice Call' : `Voice Call • ${duration}s`}
+          </p>
+          <span className={`text-[9px] font-bold ${isMe ? 'text-white/70' : 'text-gray-400'} dark:text-white/60`}>
+            {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
           return (
             <div key={msgKey} onMouseDown={() => isMe && startHold(m._id)} onMouseUp={stopHold} className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative flex flex-col ${isMe ? 'bg-green-600 text-white self-end rounded-tr-none' : 'bg-card-bg text-text-main border dark:border-slate-800 self-start rounded-tl-none'} mb-1`}>
@@ -2495,12 +2499,13 @@ setMessages(prev => prev.map(msg => msg._id === tempId ? finalMsg : msg));
                 </div>
               )}
               
-        {(m.text || m.isEncrypted) && (
-        <MessageItem 
-          message={displayMsg} 
-          currentAgentId={agentData?._id}
-        />
-      )}
+        {messages.map((m) => (
+  <MessageItem 
+    key={m._id || m.id} 
+    message={m} 
+    currentAgentId={agentData?._id}
+  />
+))}
               <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
                 <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 {isMe && (
