@@ -64,19 +64,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  
-  const login = async (slug) => {
-  try {
-        setIsAuthenticated(true);
-        const savedKey = await getPrivateKey();
-    if (!savedKey) {
-      await initializeCrypto();
-    }
-  } catch (error) {
-    console.error("Login failed", error);
-    throw error;
-  }
-};
+
 
   const logout = async () => {
     await clearKeys();
