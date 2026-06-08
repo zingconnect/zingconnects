@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
-import { initializeSession } from "../utils/signalEngine"; 
+import { initializeSession } from "../utils/SignalEngine"; 
 import { ZingSignalStore } from "../utils/ZingSignalStore";
 import * as libsignal from 'libsignal';
 

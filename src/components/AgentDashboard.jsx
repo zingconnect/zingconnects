@@ -1910,7 +1910,7 @@ useEffect(() => {
 
   const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
-}, [selectedUser?._id, callStatus, limit]); // Removed 'privateKey' dependency
+}, [selectedUser?._id, callStatus, limit]); 
 useEffect(() => {
   const setupNotifications = async () => {
     // 1. Ensure token is available
