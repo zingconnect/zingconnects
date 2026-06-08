@@ -59,14 +59,16 @@ function urlBase64ToUint8Array(base64String) {
 const socket = io(import.meta.env.VITE_API_URL);
 
 const MessageItem = ({ message }) => {
+    if (message.isEncrypted) {
+    return <span className="italic opacity-60 text-[12px]">🔒 Decrypting...</span>;
+  }
+
   return (
     <p className="text-[13px] md:text-[15px] leading-relaxed break-words text-text-main">
-      {/* Prioritize the decrypted text we just stored in state */}
-      {message.decryptedText || message.text || (message.isEncrypted ? "🔒 Encrypted" : "")}
+      {message.decryptedText || message.text}
     </p>
   );
 };
-
 export const AgentDashboard = () => {
   const navigate = useNavigate();
   const { token, isLoading, setToken } = useAuth();
@@ -345,7 +347,7 @@ const fetchMessages = async (userId, limit = 30, targetUserCryptoProfile = null)
     const clearText = await decryptMessageText(msg.payload, targetUserCryptoProfile.publicKeyJwk, myKey);
     return { ...msg, decryptedText: clearText, isEncrypted: false }; 
   } catch (e) {
-    return { ...msg, decryptedText: "🔒 [Decryption Failed]" };
+return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
   }
 }
 return msg;
@@ -1662,7 +1664,6 @@ const handleFinalSend = async () => {
       isEncrypted = true;
     }
 
-    // UPDATED: secureFetch handles cookie-based auth for signing requests
     const urlResponse = await secureFetch('/api/messages/get-upload-url', {
       method: 'POST',
       body: JSON.stringify({ fileName: previewFile.name, fileType: previewFile.type })
@@ -1679,7 +1680,6 @@ const handleFinalSend = async () => {
 
     if (!directUpload.ok) throw new Error("Cloud upload failed");
 
-    // UPDATED: secureFetch handles cookie-based auth for confirmation
     const confirmResponse = await secureFetch('/api/messages/confirm-upload', {
       method: 'POST',
       body: JSON.stringify({
@@ -1696,14 +1696,26 @@ const handleFinalSend = async () => {
     const finalData = await confirmResponse.json();
     if (finalData.success) {
       let finalMsg = finalData.message;
+
+      // CORRECTED: Decryption logic aligned with cryptoEngine.js
       if (finalMsg.isEncrypted && selectedUser?.publicKeyJwk) {
-        finalMsg.text = await decryptMessageText(
-          finalMsg.text, 
-          finalMsg.iv, 
+        const payload = { 
+          ciphertext: finalMsg.text, 
+          iv: finalMsg.iv, 
+          version: 1 
+        };
+        
+        const decrypted = await decryptMessageText(
+          payload, 
           selectedUser.publicKeyJwk, 
-          agentData._id,
           agentPrivateKeyRef.current
         );
+        
+        finalMsg = { 
+          ...finalMsg, 
+          decryptedText: decrypted, 
+          isEncrypted: false 
+        };
       }
 
       setMessages(prev => [...prev, finalMsg]);
@@ -1991,43 +2003,45 @@ useEffect(() => {
   if (!socket) return;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
 
-  const handleIncomingMessage = async (data, callback) => {
-    if (callback) callback({ status: 'received' });
-    if (data._id && data._id === lastNotifiedId.current) return;
-    lastNotifiedId.current = data._id;
+const handleIncomingMessage = async (data, callback) => {
+  if (callback) callback({ status: 'received' });
+  if (data._id && data._id === lastNotifiedId.current) return;
+  lastNotifiedId.current = data._id;
 
-    const currentUser = selectedUserRef.current;
-    const currentKey = agentPrivateKeyRef.current;
-    let processedData = { ...data };
+  const currentUser = selectedUserRef.current;
+  const currentKey = agentPrivateKeyRef.current;
+  let processedData = { ...data };
 
-    // --- PRE-DECRYPTION BLOCK: PAYLOAD SCHEMA COMPLIANT ---
-    if (processedData.isEncrypted && processedData.payload) {
-      if (currentUser?.publicKeyJwk && currentKey) {
-        try {
-          processedData.text = await decryptMessageText(
-            processedData.payload,
-            currentUser.publicKeyJwk,
-            currentKey
-          );
-          processedData.isEncrypted = false;
-        } catch (err) {
-          console.error("🔒 Socket decryption error:", err);
-          processedData.text = "🔒 [Decryption Failed]";
-          processedData.isEncrypted = false;
-        }
-      } else {
-        processedData.text = "🔒 [Secure Channel Not Ready]";
+  // --- PRE-DECRYPTION BLOCK: PAYLOAD SCHEMA COMPLIANT ---
+  if (processedData.isEncrypted && processedData.payload) {
+    if (currentUser?.publicKeyJwk && currentKey) {
+      try {
+        // Use the same decryption call as handleFinalSend
+        const decrypted = await decryptMessageText(
+          processedData.payload,
+          currentUser.publicKeyJwk,
+          currentKey
+        );
+        // Standardize: set decryptedText and clear the flag
+        processedData.decryptedText = decrypted;
+        processedData.isEncrypted = false;
+      } catch (err) {
+        console.error("🔒 Socket decryption error:", err);
+        processedData.decryptedText = "🔒 [Decryption Failed]";
+        processedData.isEncrypted = false;
       }
+    } else {
+      processedData.decryptedText = "🔒 [Secure Channel Not Ready]";
     }
+  }
 
-    const isChattingWithSender = currentUser && 
-      (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
-    
-    if (isChattingWithSender) {
-      setMessages(prev => prev.some(m => m._id === processedData._id) ? prev : [...prev, processedData]);
-      secureFetch(`/api/messages/mark-read/${currentUser._id}`, { method: 'PATCH' }).catch(() => {});
-    }
-
+  const isChattingWithSender = currentUser && 
+    (processedData.senderId === currentUser._id || processedData.senderId === currentUser.id);
+  
+  if (isChattingWithSender) {
+    setMessages(prev => prev.some(m => m._id === processedData._id) ? prev : [...prev, processedData]);
+    secureFetch(`/api/messages/mark-read/${currentUser._id}`, { method: 'PATCH' }).catch(() => {});
+  }
     if (processedData.senderModel === 'User') {
       notificationSound.current?.play().catch(() => {});
       if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
@@ -2063,6 +2077,7 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
+
 const handleSendMessage = async (e) => {
   e.preventDefault();
   if (!selectedUser || !newMessage.trim() || isUploading) return;
@@ -2150,6 +2165,7 @@ const handleSendMessage = async (e) => {
       // Create the final object to update the state
       const finalMsg = { 
         ...finalizedMessage, 
+        text: decryptedText,
         decryptedText: decryptedText, // Property used by MessageItem
         isEncrypted: false 
       };
@@ -2465,16 +2481,9 @@ const handleSendMessage = async (e) => {
               
 { (m.text || m.isEncrypted) && (
   <MessageItem 
-  key={m._id} 
-  message={m} 
-  privateKey={agentPrivateKeyRef.current}
-  senderPublicKey={selectedUser?.publicKeyJwk}
-  onDecrypted={(text) => {
-    setMessages(prev => prev.map(msg => 
-      msg._id === m._id ? { ...msg, decryptedText: text } : msg
-    ));
-  }}
-/>
+    key={m._id} 
+    message={m} 
+  />
 )}
               <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5">
                 <span className="text-[9px] text-gray-400 font-bold uppercase">{new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

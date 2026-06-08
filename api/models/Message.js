@@ -22,15 +22,15 @@ const messageSchema = new mongoose.Schema({
     enum: ['Agent', 'User']
   },
   payload: {
-  ciphertext: { type: String }, // The encrypted message
-  iv: { type: String },         // Must be 12 bytes (16 chars in Base64)
-  version: { type: Number, default: 1 }
-},
-// Keep 'text' ONLY for non-encrypted messages (if you support them)
-text: {
-  type: String,
-  trim: false
-},
+    type: {
+      ciphertext: { type: String, required: false },
+      iv: { type: String, required: false },
+      version: { type: Number, default: 1 }
+    },
+    default: null // Explicitly allow null for non-encrypted messages
+  },
+text: { type: String, trim: false },
+
   callMetadata: {
     callId: { type: mongoose.Schema.Types.ObjectId, ref: 'Call' },
     status: { 
@@ -62,14 +62,10 @@ notificationSent: {
     enum: ['sent', 'delivered', 'seen'],
     default: 'sent'
   },
-iv: {
-  type: String,
-  default: null
-},
 isEncrypted: {
-  type: Boolean,
-  default: false
-},
+    type: Boolean,
+    default: false
+  },
   deliveredAt: { type: Date },
   seenAt: { type: Date }
 }, { 
