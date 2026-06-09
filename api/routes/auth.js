@@ -274,21 +274,25 @@ router.post('/verify-otp', async (req, res, next) => {
       });
     }
 
-    // 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
-    // This ensures your database never saves an "empty" key state.
-    if (!publicKeyJwk || 
-        !publicKeyJwk.identityKey || 
-        !publicKeyJwk.preKeys || 
-        !Array.isArray(publicKeyJwk.preKeys) || 
-        publicKeyJwk.preKeys.length === 0) {
-      
-      console.error(`❌ Registration blocked: No valid keys provided for ${lowerEmail}`);
-      return res.status(400).json({ 
-        success: false, 
-        message: "Cryptographic initialization failed. Please try again." 
-      });
-    }
-
+   // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
+if (
+  !publicKeyJwk || 
+  !publicKeyJwk.identityKey || 
+  !publicKeyJwk.preKeys || 
+  !Array.isArray(publicKeyJwk.preKeys) || 
+  publicKeyJwk.preKeys.length === 0 ||
+  // Explicitly check that no key is an empty string
+  publicKeyJwk.preKeys.some(pk => !pk.publicKey || pk.publicKey.trim() === "") || 
+  !publicKeyJwk.signedPreKey ||
+  !publicKeyJwk.signedPreKey.publicKey || 
+  publicKeyJwk.signedPreKey.publicKey.trim() === ""
+) {
+  console.error(`❌ Crypto validation failed: Empty or missing keys for: ${lowerEmail}`);
+  return res.status(400).json({ 
+    success: false, 
+    message: "Cryptographic keys could not be processed. Ensure your browser is generating keys correctly." 
+  });
+}
     // Clean verification status transitions
     agent.isVerified = true;
     agent.status = 'active';

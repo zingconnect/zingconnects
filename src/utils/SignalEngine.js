@@ -7,56 +7,59 @@ const store = new ZingSignalStore();
 
 export const SignalEngine = {
   store,
+async setupIdentity() {
+  const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
+  if (!KeyHelper) throw new Error("KeyHelper not found");
 
-  async setupIdentity() {
-    const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
-    if (!KeyHelper) throw new Error("KeyHelper not found");
+  // 1. Generate core identity components
+  const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
+  const registrationId = KeyHelper.generateRegistrationId();
+  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
 
-    // 1. Generate identity, registration ID, and signed pre-key
-    const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
-    
-    // 🛡️ SECURITY CHECK: Ensure identity keys are valid
-    if (!identityKeyPair.pubKey || identityKeyPair.pubKey.byteLength === 0) {
-      throw new Error("Identity Key generation failed: Key is empty.");
-    }
+  // Helper to extract key bytes safely regardless of structure
+  const getBytes = (obj) => {
+    if (!obj) return null;
+    // Check common locations: pubKey, public, or the object itself if it's already a buffer
+    const key = obj.pubKey || obj.public || obj;
+    return key instanceof Uint8Array ? key.buffer : key;
+  };
 
-    const registrationId = KeyHelper.generateRegistrationId();
-    const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+  // 2. Generate pre-keys with thorough validation
+  const preKeys = await Promise.all(
+    Array.from({ length: 100 }, async (_, i) => {
+      const pk = await KeyHelper.generatePreKey(i + 1);
+      const pubKey = getBytes(pk.keyPair || pk);
+      
+      if (!pubKey) {
+        throw new Error(`PreKey ${i + 1} generation failed: No public key found in ${JSON.stringify(Object.keys(pk))}`);
+      }
+      return { ...pk, extractedPubKey: pubKey };
+    })
+  );
 
-    // 2. Generate pre-keys with defensive validation
-    const preKeys = await Promise.all(
-      Array.from({ length: 100 }, async (_, i) => {
-        const pk = await KeyHelper.generatePreKey(i + 1);
-        if (!pk.keyPair?.pubKey && !pk.pubKey) {
-          throw new Error(`PreKey ${i + 1} generation failed: No public key found.`);
-        }
-        return pk;
-      })
-    );
+  // 3. Construct the bundle for backend transmission
+  const preKeyBundle = {
+    registrationId,
+    identityKey: bufferToBase64(getBytes(identityKeyPair)),
+    signedPreKey: {
+      keyId: signedPreKey.keyId,
+      publicKey: bufferToBase64(getBytes(signedPreKey.keyPair)),
+      signature: bufferToBase64(signedPreKey.signature)
+    },
+    preKeys: preKeys.map(pk => ({
+      keyId: pk.keyId,
+      publicKey: bufferToBase64(pk.extractedPubKey)
+    }))
+  };
 
-    // 3. Construct the bundle for backend transmission
-    const preKeyBundle = {
-      registrationId,
-      identityKey: bufferToBase64(identityKeyPair.pubKey),
-      signedPreKey: {
-        keyId: signedPreKey.keyId,
-        publicKey: bufferToBase64(signedPreKey.keyPair.pubKey),
-        signature: bufferToBase64(signedPreKey.signature)
-      },
-      preKeys: preKeys.map(pk => ({
-        keyId: pk.keyId,
-        publicKey: bufferToBase64(pk.keyPair?.pubKey || pk.pubKey)
-      }))
-    };
-
-    // 🛡️ Ensure atomic storage persistence
-    await Promise.all([
-      store.saveIdentity('local', identityKeyPair),
-      store.saveRegistrationId(registrationId)
-    ]);
-    
-    return { identityKeyPair, preKeyBundle };
-  },
+  // 🛡️ Ensure atomic storage persistence
+  await Promise.all([
+    store.saveIdentity('local', identityKeyPair),
+    store.saveRegistrationId(registrationId)
+  ]);
+  
+  return { identityKeyPair, preKeyBundle };
+},
 
   async encrypt(remoteUserId, clearText) {
     const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;

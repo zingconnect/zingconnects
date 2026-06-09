@@ -630,21 +630,25 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       }
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
-
-    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
-    // We reject the verification if the client didn't provide valid keys.
-    if (!publicKeyJwk || 
-        !publicKeyJwk.identityKey || 
-        !publicKeyJwk.preKeys || 
-        !Array.isArray(publicKeyJwk.preKeys) || 
-        publicKeyJwk.preKeys.length === 0) {
-      
-      console.error(`❌ Crypto validation failed for agent: ${lowerEmail}`);
-      return res.status(400).json({ 
-        success: false, 
-        message: "Cryptographic initialization failed. Please try again." 
-      });
-    }
+// 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
+if (
+  !publicKeyJwk || 
+  !publicKeyJwk.identityKey || 
+  !publicKeyJwk.preKeys || 
+  !Array.isArray(publicKeyJwk.preKeys) || 
+  publicKeyJwk.preKeys.length === 0 ||
+  // Explicitly check that no key is an empty string
+  publicKeyJwk.preKeys.some(pk => !pk.publicKey || pk.publicKey.trim() === "") || 
+  !publicKeyJwk.signedPreKey ||
+  !publicKeyJwk.signedPreKey.publicKey || 
+  publicKeyJwk.signedPreKey.publicKey.trim() === ""
+) {
+  console.error(`❌ Crypto validation failed: Empty or missing keys for: ${lowerEmail}`);
+  return res.status(400).json({ 
+    success: false, 
+    message: "Cryptographic keys could not be processed. Ensure your browser is generating keys correctly." 
+  });
+}
 
     // 4. Update agent status AND assign crypto keys
     Object.assign(agent, {
