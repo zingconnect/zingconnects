@@ -46,19 +46,22 @@ export const SignalEngine = {
     }
     
     const preKeyBundle = {
-      registrationId: registrationId,
-      identityKey: bufferToBase64(identityKeyPair.pubKey),
-      signedPreKey: {
-        keyId: signedPreKey.keyId,
-        publicKey: bufferToBase64(signedPreKey.keyPair.pubKey),
-        signature: bufferToBase64(signedPreKey.signature)
-      },
-      preKeys: preKeys.map(pk => ({
-        keyId: pk.keyId,
-        publicKey: bufferToBase64(pk.keyPair.pubKey)
-      }))
+  registrationId: registrationId,
+  identityKey: bufferToBase64(identityKeyPair.pubKey),
+  signedPreKey: {
+    keyId: signedPreKey.keyId,
+    publicKey: bufferToBase64(signedPreKey.keyPair.pubKey),
+    signature: bufferToBase64(signedPreKey.signature)
+  },
+  preKeys: preKeys.map(pk => {
+    // Explicitly handle the key
+    const pubKey = pk.keyPair.pubKey;
+    return {
+      keyId: pk.keyId,
+      publicKey: bufferToBase64(pubKey)
     };
-    
+  })
+};
     await store.saveIdentity('local', identityKeyPair);
     await store.saveRegistrationId(registrationId);
     
