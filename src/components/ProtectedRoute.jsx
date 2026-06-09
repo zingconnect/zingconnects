@@ -13,7 +13,6 @@ export const ProtectedRoute = ({ requiredRole }) => {
   );
 }
 
-  // 1. Redirect if not logged in
   if (!isAuthenticated) {
     return <Navigate to="/" state={{ from: location.pathname }} replace />;
   }
