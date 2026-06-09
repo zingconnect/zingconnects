@@ -50,15 +50,16 @@ const userSchema = new mongoose.Schema({
     default: ""
   },
 publicKeyJwk: {
-  identityKey: { type: Object, required: true }, // The long-term public key
+  identityKey: { type: String, required: false }, // Store as Base64 string
   signedPreKey: { 
-    key: Object, 
-    signature: String 
-  }, // Signed to prove authenticity
+    keyId: { type: Number, required: false },
+    publicKey: { type: String, required: false }, // Store as Base64 string
+    signature: { type: String, required: false } 
+  },
   preKeys: [{
-    keyId: Number,
-    key: Object
-  }] // A pool of one-time keys
+    keyId: { type: Number, required: true },
+    publicKey: { type: String, required: true } // Store as Base64 string
+  }]
 },
   role: { 
     type: String, 

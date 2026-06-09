@@ -142,7 +142,7 @@ const handleUserInquiry = async (e) => {
   setIsProcessing(true);
 
   try {
-    // 1. Initiate secure handshake with backend
+    // 1. Initiate secure handshake
     const response = await secureFetch('/api/users/handshake', {
       method: 'POST',
       body: JSON.stringify({ 
@@ -153,28 +153,23 @@ const handleUserInquiry = async (e) => {
 
     const data = await response.json();
 
-    if (response.ok) {
-      // 2. PERSISTENCE: Store the Agent's Identity Key using the integrated Engine/Store
-      // This ensures the key is properly indexed for future decryption sessions
-      if (data.agentIdentity?.publicKey) {
-        // Updated to use the consistent storage method in ZingSignalStore
-        await SignalEngine.store.savePeerPublicKey(slug, data.agentIdentity.publicKey);
-        console.log(`✅ Trust established with Agent: ${slug}`);
-      }
-
-      // 3. AUTHENTICATION & NAVIGATION
-      if (typeof login === 'function') {
-        await login(slug); 
-      }
+    if (!response.ok) throw new Error(data.message || "Handshake failed");
+    if (data.agentIdentity) {
+      await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
+      await SignalEngine.initializeSession(slug, data.agentIdentity);
       
-      if (rememberUser) {
-        localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
-      }
-      
-      navigate(`/user/dashboard/${slug}`, { replace: true });
-    } else {
-      alert(`Connection failed: ${data.message || "Unknown error"}`);
+      console.log(`✅ Secure session established with: ${slug}`);
     }
+
+    // 4. AUTHENTICATION & NAVIGATION
+    if (typeof login === 'function') await login(slug);
+    
+    if (rememberUser) {
+      localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
+    }
+    
+    navigate(`/user/dashboard/${slug}`, { replace: true });
+
   } catch (err) { 
     console.error("Handshake error:", err);
     alert("System error. Please try again."); 
