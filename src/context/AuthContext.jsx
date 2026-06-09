@@ -1,7 +1,7 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { secureFetch } from "../../api/utils/api";
 
-const AuthContext = createContext(null);
+export const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);

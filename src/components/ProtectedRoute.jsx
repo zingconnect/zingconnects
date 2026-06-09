@@ -1,7 +1,6 @@
 import { useContext } from 'react';
 import { Navigate, useLocation, Outlet } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext'; // Import the Context object
-import { useSignal } from '../context/SignalContext'; // Ensure this is imported correctly
 
 export const ProtectedRoute = ({ requiredRole }) => {
   const auth = useContext(AuthContext); // Direct consumption
