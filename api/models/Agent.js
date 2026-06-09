@@ -49,14 +49,15 @@ lastNotificationEmail: {
   default: null
 },
 publicKeyJwk: {
-  identityKey: { type: Object, required: false },
+  identityKey: { type: String, required: false }, // Store as Base64 string
   signedPreKey: { 
-    key: { type: Object, required: false }, 
+    keyId: { type: Number, required: false },
+    publicKey: { type: String, required: false }, // Store as Base64 string
     signature: { type: String, required: false } 
   },
   preKeys: [{
-    keyId: { type: Number, required: false },
-    key: { type: Object, required: false }
+    keyId: { type: Number, required: true },
+    publicKey: { type: String, required: true } // Store as Base64 string
   }]
 },
   plan: { 

@@ -17,24 +17,25 @@ const store = new ZingSignalStore();
 export const SignalEngine = {
   store,
 
-  async setupIdentity() {
-    // A. Generate Identity Keys
+ async setupIdentity() {
     const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     const registrationId = KeyHelper.generateRegistrationId();
-    
-    // B. Persist
-    await store.saveIdentity('local', identityKeyPair);
+    const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+    const preKeys = await KeyHelper.generatePreKeys(1, 100); 
+        const preKeyBundle = {
+      identityKey: identityKeyPair.pubKey,
+      signedPreKey: {
+        keyId: signedPreKey.keyId,
+        publicKey: signedPreKey.keyPair.pubKey,
+        signature: signedPreKey.signature
+      },
+      preKeys: preKeys.map(pk => ({
+        keyId: pk.keyId,
+        publicKey: pk.keyPair.pubKey
+      }))
+    };
+        await store.saveIdentity('local', identityKeyPair);
     await store.saveRegistrationId(registrationId);
-    
-    // C. Resolve the bundle method dynamically
-    // Some versions use 'generatePreKeyBundle', others 'generatePreKeyStoreBundle'
-    const bundleFn = KeyHelper.generatePreKeyBundle || KeyHelper.generatePreKeyStoreBundle;
-    
-    if (!bundleFn) {
-        throw new Error("Could not find a valid bundle generation method on KeyHelper.");
-    }
-
-    const preKeyBundle = await bundleFn(registrationId, 1);
     
     return { identityKeyPair, preKeyBundle };
   },
