@@ -410,6 +410,10 @@ const isBase64 = (str) => {
 };
 
 
+app.get('/api/debug', (req, res) => {
+  res.json({ status: "Express is alive!", path: req.path });
+});
+
 // ==========================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
 // ==========================================
@@ -3955,6 +3959,8 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
 });
 
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  console.log("🔍 Incoming request to /api/auth/me");
+  console.log("Headers:", req.headers);
   await connectToDatabase();
 
   try {

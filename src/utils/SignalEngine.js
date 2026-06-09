@@ -30,6 +30,8 @@ export const SignalEngine = {
     return { identityKeyPair, preKeyBundle };
   },
 
+
+
   /**
    * Initialize a new session with a remote user using their PreKey Bundle
    */
@@ -60,6 +62,10 @@ export const SignalEngine = {
     const sessionCipher = new libsignal.SessionCipher(store, remoteUserId);
     const decrypted = await sessionCipher.decrypt(ciphertextBundle);
     return new TextDecoder().decode(decrypted);
+  },
+  
+  async reset() {
+    await store.clearAll();
   }
 };
 

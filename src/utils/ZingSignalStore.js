@@ -81,5 +81,18 @@ async saveRegistrationId(id) {
     const db = await dbPromise;
     await db.delete('prekeys', keyId);
   }
+
+  async clearAll() {
+    const db = await dbPromise;
+    const tx = db.transaction(['identity', 'session', 'prekeys', 'misc'], 'readwrite');
+    await Promise.all([
+      tx.objectStore('identity').clear(),
+      tx.objectStore('session').clear(),
+      tx.objectStore('prekeys').clear(),
+      tx.objectStore('misc').clear()
+    ]);
+    await tx.done;
+  }
+
 }
 
