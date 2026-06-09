@@ -12,7 +12,10 @@ import { BsSearch, BsShieldExclamation, BsShieldLock, BsThreeDotsVertical, BsChe
   BsTelephoneFill, BsTelephoneXFill, BsMicMuteFill, BsXLg, BsGearFill, BsPlusLg, BsPlus, BsSend, BsSendFill, BsPaperclip,
   BsCameraFill  
 } from 'react-icons/bs';
-import { useAuth } from "../context/AuthContext";
+import * as AuthModule from "../context/AuthContext";
+console.log("DEBUG: AuthModule contents:", AuthModule);
+const { useAuth } = AuthModule;
+console.log("DEBUG: useAuth is:", useAuth);
 import { secureFetch } from "../../api/utils/api";
 
 
