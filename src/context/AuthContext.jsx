@@ -47,33 +47,33 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const verifySession = async () => {
-    try {
-      const response = await secureFetch('/api/agents/me'); 
-      if (response.ok) {
-        const data = await response.json();
-        setIsAuthenticated(true);
-        setUserRole(data.role);
+ // Updated verifySession snippet
+const verifySession = async () => {
+  setIsLoading(true); // Start loading
+  try {
+    const response = await secureFetch('/api/agents/me');
+    if (response.ok) {
+      const data = await response.json();
+      setIsAuthenticated(true);
+      setUserRole(data.role);
 
-        // DYNAMIC IMPORT: Accessed only when needed
-        const { SignalEngine } = await import('../utils/SignalEngine');
-        const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
-        
-        if (!savedIdentity) {
-            await initializeCrypto();
-        } else {
-            setIsCryptoReady(true);
-        }
+      const { SignalEngine } = await import('../utils/SignalEngine');
+      const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
+      
+      if (!savedIdentity) {
+        await initializeCrypto(); // This is now awaited
       } else {
-        await logout();
+        setIsCryptoReady(true);
       }
-    } catch (err) {
-      console.error("Auth verify failed:", err);
-    } finally {
-      setIsLoading(false);
+    } else {
+      await logout();
     }
-  };
-
+  } catch (err) {
+    console.error("Auth verify failed:", err);
+  } finally {
+    setIsLoading(false); // Only finish loading once everything is fully ready
+  }
+};
   const logout = async () => {
     // DYNAMIC IMPORT: Accessed only when needed
     const { SignalEngine } = await import('../utils/SignalEngine');
