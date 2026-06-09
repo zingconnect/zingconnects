@@ -107,7 +107,7 @@ export const AgentDashboard = () => {
   const { token, isLoading, setToken } = useAuth();
   const { slug } = useParams();
   const location = useLocation(); // <--- ADD THIS
-const { isCryptoReady } = useAuth();
+const { token, isLoading, setToken, isCryptoReady } = useAuth();
 
 
   const isForcedRefresh = location.state?.forceRefresh;
