@@ -9,44 +9,43 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
 
-  // 1. Initial Load: Verify identity and session
   useEffect(() => {
     verifySession();
   }, []);
 
-const initializeCrypto = useCallback(async () => {
-  setIsCryptoReady(false);
-  try {
-    const { SignalEngine } = await import('../utils/SignalEngine');
-    
-    const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
-    const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const initializeCrypto = useCallback(async () => {
+    setIsCryptoReady(false);
+    try {
+      // DYNAMIC IMPORT: Defined inside the function scope
+      const { SignalEngine } = await import('../utils/SignalEngine');
+      
+      const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
+      const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 
-    await secureFetch('/api/update-crypto-key', {
-      method: 'PUT',
-      body: JSON.stringify({ 
-        // ADD THIS: The registrationId is critical for X3DH
-        registrationId: preKeyBundle.registrationId, 
-        
-        identityKey: bufferToBase64(identityKeyPair.pubKey), 
-        signedPreKey: {
-          keyId: preKeyBundle.signedPreKey.keyId,
-          publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-          signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-        },
-        preKeys: preKeyBundle.preKeys.map(pk => ({
-          keyId: pk.keyId,
-          publicKey: bufferToBase64(pk.publicKey)
-        }))
-      })
-    });
+      await secureFetch('/api/update-crypto-key', {
+        method: 'PUT',
+        body: JSON.stringify({ 
+          registrationId: preKeyBundle.registrationId, 
+          identityKey: bufferToBase64(identityKeyPair.pubKey), 
+          signedPreKey: {
+            keyId: preKeyBundle.signedPreKey.keyId,
+            publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+            signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+          },
+          preKeys: preKeyBundle.preKeys.map(pk => ({
+            keyId: pk.keyId,
+            publicKey: bufferToBase64(pk.publicKey)
+          }))
+        })
+      });
 
-    setIsCryptoReady(true);
-    console.log("✅ E2EE Persistent-session initialized with RegID:", preKeyBundle.registrationId);
-  } catch (err) {
-    console.error("Crypto init failed:", err);
-  }
-}, []);
+      setIsCryptoReady(true);
+      console.log("✅ E2EE Persistent-session initialized.");
+    } catch (err) {
+      console.error("Crypto init failed:", err);
+    }
+  }, []);
+
   const verifySession = async () => {
     try {
       const response = await secureFetch('/api/agents/me'); 
@@ -55,8 +54,10 @@ const initializeCrypto = useCallback(async () => {
         setIsAuthenticated(true);
         setUserRole(data.role);
 
-        // Check if we already have an identity stored in IndexedDB
+        // DYNAMIC IMPORT: Accessed only when needed
+        const { SignalEngine } = await import('../utils/SignalEngine');
         const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
+        
         if (!savedIdentity) {
             await initializeCrypto();
         } else {
@@ -73,8 +74,8 @@ const initializeCrypto = useCallback(async () => {
   };
 
   const logout = async () => {
-    // Clear storage properly
-    // You should add a clearKeys method to ZingSignalStore
+    // DYNAMIC IMPORT: Accessed only when needed
+    const { SignalEngine } = await import('../utils/SignalEngine');
     await SignalEngine.store.clearAll(); 
     setIsAuthenticated(false);
     setIsCryptoReady(false);
