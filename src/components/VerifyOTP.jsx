@@ -47,30 +47,38 @@ const handleVerify = async (e) => {
   setIsVerifying(true);
 
   try {
-    // 1. Generate identity keys locally BEFORE verification
-    // This ensures we have the bundle ready to send with the OTP
+    // 1. Generate keys
     const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
     
-    // Helper for Base64 conversion
-    const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+    // 2. Enhanced Base64 helper:
+    // Some buffers in libsignal are Uint8Array, some are ArrayBuffer.
+    const toBase64 = (buf) => {
+      const bytes = new Uint8Array(buf.buffer || buf);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    };
 
-    // 2. Prepare the combined payload
+    // 3. Prepare payload with corrected key paths
     const payload = {
       email,
       otp,
       publicKeyJwk: {
-        identityKey: bufferToBase64(identityKeyPair.pubKey),
+        identityKey: toBase64(identityKeyPair.pubKey),
         signedPreKey: {
           keyId: preKeyBundle.signedPreKey.keyId,
-          publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-          signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+          publicKey: toBase64(preKeyBundle.signedPreKey.publicKey),
+          signature: toBase64(preKeyBundle.signedPreKey.signature)
         },
         preKeys: preKeyBundle.preKeys.map(pk => ({
           keyId: pk.keyId,
-          publicKey: bufferToBase64(pk.publicKey)
+          publicKey: toBase64(pk.publicKey) // Ensure this matches SignalEngine structure
         }))
       }
     };
+
     const response = await secureFetch('/api/agents/verify-otp', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -82,8 +90,7 @@ const handleVerify = async (e) => {
       throw new Error(data.message || "Invalid Code");
     }
 
-    // 4. Success state
-    console.log("✅ Agent Verified and Identity established in one step.");
+    console.log("✅ Agent Verified and Identity established.");
     setServerSlug(data.slug);
     setIsSuccess(true);
 

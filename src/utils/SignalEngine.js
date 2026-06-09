@@ -18,15 +18,22 @@ export const SignalEngine = {
   store,
 
  async setupIdentity() {
+    // 1. Generate keys
     const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     const registrationId = KeyHelper.generateRegistrationId();
+    
+    // 2. Generate SignedPreKey
     const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+    
+    // 3. Generate One-Time PreKeys
     const preKeys = await KeyHelper.generatePreKeys(1, 100); 
-        const preKeyBundle = {
-      identityKey: identityKeyPair.pubKey,
+
+    // 4. Construct bundle (Ensuring properties exist)
+    const preKeyBundle = {
+      identityKey: identityKeyPair.pubKey, // The public key buffer
       signedPreKey: {
         keyId: signedPreKey.keyId,
-        publicKey: signedPreKey.keyPair.pubKey,
+        publicKey: signedPreKey.keyPair.pubKey, // Access the pubKey from the keyPair
         signature: signedPreKey.signature
       },
       preKeys: preKeys.map(pk => ({
@@ -34,7 +41,8 @@ export const SignalEngine = {
         publicKey: pk.keyPair.pubKey
       }))
     };
-        await store.saveIdentity('local', identityKeyPair);
+    
+    await store.saveIdentity('local', identityKeyPair);
     await store.saveRegistrationId(registrationId);
     
     return { identityKeyPair, preKeyBundle };
