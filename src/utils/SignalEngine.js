@@ -1,30 +1,20 @@
 import * as libsignalModule from 'libsignal';
 import { ZingSignalStore } from './ZingSignalStore';
 
-// 1. Resolve module
-const libsignal = libsignalModule.default || libsignalModule;
-
-// 2. Map exports safely
-const KeyHelper = libsignal.keyhelper || libsignal.KeyHelper;
-const SessionBuilder = libsignal.sessionbuilder || libsignal.SessionBuilder;
-const SessionCipher = libsignal.sessioncipher || libsignal.SessionCipher;
-
-// DEBUG: This log is CRITICAL. Watch your console for the real method names.
-console.log("DEBUG: KeyHelper object:", KeyHelper);
+// 1. Resolve module safely
+const lib = libsignalModule.default || libsignalModule;
 
 const store = new ZingSignalStore();
 
-const bufferToBase64 = (buf) => {
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-};
+// Utility for Base64
+const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const toBuffer = (base64) => Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
 
 export const SignalEngine = {
   store,
-  
-async setupIdentity() {
+
+  async setupIdentity() {
+    // Access the 'lib' constant directly
     const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
     if (!KeyHelper) throw new Error("KeyHelper not found");
 
@@ -37,7 +27,6 @@ async setupIdentity() {
       preKeys.push(await KeyHelper.generatePreKey(i));
     }
     
-    // Construct bundle for the backend (Serialized to Base64)
     const preKeyBundle = {
       registrationId: registrationId,
       identityKey: bufferToBase64(identityKeyPair.pubKey),
@@ -58,9 +47,9 @@ async setupIdentity() {
     return { identityKeyPair, preKeyBundle };
   },
 
- async initializeSession(remoteUserId, preKeyBundle) {
-    // Utility to convert Base64 back to ArrayBuffer
-    const toBuffer = (base64) => Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
+  async initializeSession(remoteUserId, preKeyBundle) {
+    const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
+    if (!SessionBuilder) throw new Error("SessionBuilder not found");
 
     const signalBundle = {
       registrationId: parseInt(preKeyBundle.registrationId),
@@ -72,18 +61,19 @@ async setupIdentity() {
       }
     };
 
-    const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
     const builder = new SessionBuilder(store, remoteUserId);
     return await builder.processPreKey(signalBundle);
   },
 
   async encrypt(remoteUserId, clearText) {
+    const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
     const cipher = new SessionCipher(store, remoteUserId);
     const encoded = new TextEncoder().encode(clearText);
     return await cipher.encrypt(encoded);
   },
 
   async decrypt(remoteUserId, ciphertextBundle) {
+    const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
     const cipher = new SessionCipher(store, remoteUserId);
     const decoded = await cipher.decrypt(ciphertextBundle);
     return new TextDecoder().decode(decoded);
