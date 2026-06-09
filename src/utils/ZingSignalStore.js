@@ -34,10 +34,11 @@ async savePeerBundle(slug, bundle) {
   await db.put('identity', bundle, `peer_bundle:${slug}`);
 }
 
- async loadIdentityKey(identifier) {
-    const db = await dbPromise;
-    return await db.get('identity', identifier);
-  }
+async loadIdentityKey(identifier) {
+  const db = await dbPromise;
+  const key = await db.get('identity', identifier);
+  return key || null;
+}
 
   async saveSession(identifier, record) {
     const db = await dbPromise;

@@ -1,17 +1,21 @@
 import * as libsignalModule from 'libsignal';
 import { ZingSignalStore } from './ZingSignalStore';
 
-// 1. Resolve module
-const libsignal = libsignalModule.default || libsignalModule;
+// 1. Resolve base
+const lib = libsignalModule.default || libsignalModule;
 
-// 2. Resolve classes using a getter to bypass bundler/export issues
-const getKeyHelper = () => libsignal.KeyHelper || libsignal.keyhelper || libsignal.default?.KeyHelper;
-const getSessionBuilder = () => libsignal.SessionBuilder || libsignal.sessionbuilder || libsignal.default?.SessionBuilder;
-const getSessionCipher = () => libsignal.SessionCipher || libsignal.sessioncipher || libsignal.default?.SessionCipher;
+// 2. Validate early
+if (!lib || Object.keys(lib).length === 0) {
+  console.error("CRITICAL: libsignal failed to load. Check node_modules.");
+}
 
-// DEBUG: Verify imports
-console.log("DEBUG: KeyHelper resolved:", !!getKeyHelper());
-console.log("DEBUG: SessionBuilder resolved:", !!getSessionBuilder());
+// 3. Eagerly assign (Use fallback to ensure we find the class)
+const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
+const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
+const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
+
+// 4. Final safety check
+if (!KeyHelper) console.error("KeyHelper is still undefined. Check libsignal package.");
 
 const store = new ZingSignalStore();
 
