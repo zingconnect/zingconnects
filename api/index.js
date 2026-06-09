@@ -603,12 +603,10 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     `
   });
 }
-
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    // Destructure publicKeyJwk from the request body
     const { email, otp, publicKeyJwk } = req.body;
 
     if (!email || !otp) {
@@ -618,10 +616,12 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const lowerEmail = email.toLowerCase().trim();
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
+    // 1. Security: Check for account lockout
     if (agent?.failedOtpAttempts >= 5) {
       return res.status(429).json({ success: false, message: "Account locked." });
     }
 
+    // 2. Validate OTP and Expiry
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
       if (agent) {
         agent.failedOtpAttempts = (agent.failedOtpAttempts || 0) + 1;
@@ -630,19 +630,34 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // 3. Update agent status AND assign crypto keys in the same transaction
+    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
+    // We reject the verification if the client didn't provide valid keys.
+    if (!publicKeyJwk || 
+        !publicKeyJwk.identityKey || 
+        !publicKeyJwk.preKeys || 
+        !Array.isArray(publicKeyJwk.preKeys) || 
+        publicKeyJwk.preKeys.length === 0) {
+      
+      console.error(`❌ Crypto validation failed for agent: ${lowerEmail}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Cryptographic initialization failed. Please try again." 
+      });
+    }
+
+    // 4. Update agent status AND assign crypto keys
     Object.assign(agent, {
       isVerified: true,
       status: 'active',
       otp: undefined,
       otpExpires: undefined,
       failedOtpAttempts: 0,
-      // If provided, save the key bundle here
-      publicKeyJwk: publicKeyJwk || agent.publicKeyJwk 
+      publicKeyJwk: publicKeyJwk // Keys are confirmed valid by the gate above
     });
+    
     await agent.save();
     
-    // 4. Create Session Token
+    // 5. Create Session Token
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
@@ -665,9 +680,11 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     });
 
   } catch (err) {
+    console.error("❌ Verification Error:", err);
     next(err); 
   }
 });
+
 app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -720,34 +737,45 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
-
 app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
-const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
-const TargetModel = mongoose.model(modelName);
-        let user = await TargetModel.findById(userId, { publicKeyJwk: 1 });
-    
-    if (!user?.publicKeyJwk) {
-      return res.status(404).json({ success: false, message: "User keys unavailable." });
+    const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
+    const TargetModel = mongoose.model(modelName);
+
+    // 1. Fetch the document
+    const user = await TargetModel.findById(userId, { publicKeyJwk: 1 });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
     }
 
-    // 2. If PreKeys exist, atomically consume one
-    if (user.publicKeyJwk.preKeys?.length > 0) {
-      user = await TargetModel.findOneAndUpdate(
-        { _id: userId },
-        { $pop: { "publicKeyJwk.preKeys": -1 } },
-        { new: true, projection: { publicKeyJwk: 1 } }
-      );
+    // 🛡️ CRITICAL GATE: Use the Virtual check we defined in the schema
+    // This ensures we only allow sessions for users who have fully completed registration/verification
+    if (!user.isCryptoReady) {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Agent is not yet cryptographically initialized." 
+      });
     }
-    
-    // Note: If preKeys were empty, we simply return the identityKey 
-    // and signedPreKey, which is valid Signal Protocol behavior.
+
+    // 2. Atomically consume one preKey
+    // Note: We use findOneAndUpdate to ensure the pop happens safely in a high-concurrency environment
+    const updatedUser = await TargetModel.findOneAndUpdate(
+      { _id: userId, "publicKeyJwk.preKeys.0": { $exists: true } },
+      { $pop: { "publicKeyJwk.preKeys": -1 } },
+      { new: true, projection: { publicKeyJwk: 1 } }
+    );
+
+    // 3. Return the bundle
+    // If updatedUser is null, it means no preKeys were left; return current identity bundle
+    const bundleToReturn = updatedUser ? updatedUser.publicKeyJwk : user.publicKeyJwk;
 
     return res.status(200).json({ 
       success: true, 
-      bundle: user.publicKeyJwk 
+      bundle: bundleToReturn 
     });
+
   } catch (err) {
     console.error("❌ Key fetch failed:", err);
     res.status(500).json({ success: false, message: "Key fetch failed." });

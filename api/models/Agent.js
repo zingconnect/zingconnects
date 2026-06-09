@@ -48,18 +48,17 @@ lastNotificationEmail: {
   type: Date,
   default: null
 },
-// Inside agentSchema, update publicKeyJwk
 publicKeyJwk: {
-  registrationId: { type: Number, required: false }, // ADD THIS
-  identityKey: { type: String, required: false },
+  registrationId: { type: Number, required: true }, // Change to true
+  identityKey: { type: String, required: true },    // Change to true
   signedPreKey: { 
-    keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false },
-    signature: { type: String, required: false } 
+    keyId: { type: Number, required: true },
+    publicKey: { type: String, required: true },
+    signature: { type: String, required: true } 
   },
   preKeys: [{
-    keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false }
+    keyId: { type: Number, required: true },
+    publicKey: { type: String, required: true }
   }]
 },
   plan: { 
@@ -127,7 +126,8 @@ publicKeyJwk: {
   toObject: { virtuals: true } 
 });
 
-// TTL Index for unverified accounts
+agentSchema.index({ status: 1, isVerified: 1 });
+
 agentSchema.index({ createdAt: 1 }, { 
   expireAfterSeconds: 86400, 
   partialFilterExpression: { isVerified: false } 
@@ -146,6 +146,12 @@ agentSchema.virtual('isVoicePackageExpired').get(function() {
   return new Date() > this.voicePackageExpiry;
 });
 
+
+agentSchema.virtual('isCryptoReady').get(function() {
+  return !!(this.publicKeyJwk && 
+            this.publicKeyJwk.identityKey && 
+            this.publicKeyJwk.preKeys?.length > 0);
+});
 
 export async function rotatePreKeys(agentId, newPreKeys) {
   return await Agent.updateOne(

@@ -49,9 +49,8 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ""
   },
-// Inside agentSchema, update publicKeyJwk
 publicKeyJwk: {
-  registrationId: { type: Number, required: false }, // ADD THIS
+  registrationId: { type: Number, required: false }, 
   identityKey: { type: String, required: false },
   signedPreKey: { 
     keyId: { type: Number, required: false },
@@ -104,6 +103,11 @@ lastNotificationEmail: {
 
 // Compound index for profile searches or directory listings
 userSchema.index({ firstName: 1, lastName: 1 });
+userSchema.virtual('isCryptoReady').get(function() {
+  return !!(this.publicKeyJwk && 
+            this.publicKeyJwk.identityKey && 
+            this.publicKeyJwk.preKeys?.length > 0);
+});
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 export default User;

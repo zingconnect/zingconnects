@@ -68,34 +68,42 @@ export const SignalEngine = {
     
     return { identityKeyPair, preKeyBundle };
   },
+
+// Ensure key buffer access is consistent
+async setupIdentity() {
+  const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
+  if (!KeyHelper) throw new Error("KeyHelper not found");
+
+  const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
+  const registrationId = KeyHelper.generateRegistrationId();
+  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
   
+  const preKeys = await Promise.all(
+    Array.from({ length: 100 }, (_, i) => KeyHelper.generatePreKey(i + 1))
+  );
+  
+  const preKeyBundle = {
+    registrationId,
+    identityKey: bufferToBase64(identityKeyPair.pubKey),
+    signedPreKey: {
+      keyId: signedPreKey.keyId,
+      publicKey: bufferToBase64(signedPreKey.keyPair.pubKey),
+      signature: bufferToBase64(signedPreKey.signature)
+    },
+    preKeys: preKeys.map(pk => ({
+      keyId: pk.keyId,
+      publicKey: bufferToBase64(pk.keyPair?.pubKey || pk.pubKey)
+    }))
+  };
 
-async initializeSession(remoteUserId, preKeyBundle) {
-    const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
-    
-    // 1. Basic bundle
-    const signalBundle = {
-        registrationId: parseInt(preKeyBundle.registrationId),
-        identityKey: toBuffer(preKeyBundle.identityKey),
-        signedPreKey: {
-            keyId: preKeyBundle.signedPreKey.keyId,
-            publicKey: toBuffer(preKeyBundle.signedPreKey.publicKey),
-            signature: toBuffer(preKeyBundle.signedPreKey.signature)
-        }
-    };
-
-    // 2. Conditionally add the one-time preKey if it exists
-    if (preKeyBundle.preKeys && preKeyBundle.preKeys.length > 0) {
-        signalBundle.preKey = {
-            keyId: preKeyBundle.preKeys[0].keyId,
-            publicKey: toBuffer(preKeyBundle.preKeys[0].publicKey)
-        };
-    }
-
-    const builder = new SessionBuilder(store, remoteUserId);
-    return await builder.processPreKey(signalBundle);
-},
-
+  // 🛡️ Ensure atomic storage persistence
+  await Promise.all([
+    store.saveIdentity('local', identityKeyPair),
+    store.saveRegistrationId(registrationId)
+  ]);
+  
+  return { identityKeyPair, preKeyBundle };
+}, 
   async encrypt(remoteUserId, clearText) {
     const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
     const cipher = new SessionCipher(store, remoteUserId);

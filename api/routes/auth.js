@@ -256,7 +256,6 @@ router.post('/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    // Added publicKeyJwk to the incoming destructuring
     const { email, otp, publicKeyJwk } = req.body;
 
     if (!email || !otp) {
@@ -268,9 +267,25 @@ router.post('/verify-otp', async (req, res, next) => {
 
     // 🛡️ SECURITY FIX: Unified validation comparison logic 
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
+      // Optional: track failed attempts here as discussed
       return res.status(400).json({ 
         success: false, 
         message: "Invalid or expired verification code." 
+      });
+    }
+
+    // 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
+    // This ensures your database never saves an "empty" key state.
+    if (!publicKeyJwk || 
+        !publicKeyJwk.identityKey || 
+        !publicKeyJwk.preKeys || 
+        !Array.isArray(publicKeyJwk.preKeys) || 
+        publicKeyJwk.preKeys.length === 0) {
+      
+      console.error(`❌ Registration blocked: No valid keys provided for ${lowerEmail}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Cryptographic initialization failed. Please try again." 
       });
     }
 
@@ -280,10 +295,8 @@ router.post('/verify-otp', async (req, res, next) => {
     agent.otp = undefined;
     agent.otpExpires = undefined;
 
-    // ✨ NEW: Atomically update the crypto identity bundle
-    if (publicKeyJwk) {
-      agent.publicKeyJwk = publicKeyJwk;
-    }
+    // Save the validated crypto identity bundle
+    agent.publicKeyJwk = publicKeyJwk;
     
     await agent.save();
     
@@ -314,6 +327,7 @@ router.post('/verify-otp', async (req, res, next) => {
     });
 
   } catch (err) {
+    console.error("❌ Verification Error:", err);
     next(err); 
   }
 });

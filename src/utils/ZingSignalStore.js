@@ -12,8 +12,26 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
   },
 });
 
+const areKeysEqual = (key1, key2) => {
+  // If they are buffers, compare their bytes
+  if (key1 instanceof ArrayBuffer && key2 instanceof ArrayBuffer) {
+    const b1 = new Uint8Array(key1);
+    const b2 = new Uint8Array(key2);
+    if (b1.length !== b2.length) return false;
+    for (let i = 0; i < b1.length; i++) if (b1[i] !== b2[i]) return false;
+    return true;
+  }
+  // Otherwise default to standard comparison
+  return key1 === key2;
+};
 
 export class ZingSignalStore {
+
+  async isTrustedIdentity(identifier, identityKey, direction) {
+    const savedKey = await this.loadIdentityKey(identifier);
+    if (!savedKey) return true; // Trust on first use
+        return areKeysEqual(savedKey, identityKey); 
+  }
 
   async savePeerBundle(identifier, bundle) {
   const db = await dbPromise;
@@ -27,10 +45,10 @@ async getPeerBundle(identifier) {
   return await db.get('session', identifier);
 }
 
-  // --- IDENTITY KEYS ---
-  async saveIdentity(identifier, identityKey) {
+ async saveIdentity(identifier, identityKey) {
     const db = await dbPromise;
-    await db.put('identity', identityKey, identifier);
+    const keyToStore = identityKey.pubKey ? identityKey.pubKey : identityKey;
+    await db.put('identity', keyToStore, identifier);
   }
 
   async ensureReady() {
