@@ -104,7 +104,7 @@ const MessageItem = ({ message }) => {
 
 export const AgentDashboard = () => {
   const navigate = useNavigate();
-  const { token, isLoading, isCryptoReady, setToken } = useAuth();
+  const { token, setToken, isLoading: isAuthLoading, isCryptoReady, isAuthenticated  } = useAuth();
   const { slug } = useParams();
   const location = useLocation(); // <--- ADD THIS
 
