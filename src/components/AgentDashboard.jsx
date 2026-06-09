@@ -77,10 +77,8 @@ const { SignalEngine } = await import('../utils/SignalEngine');
 };
 const MessageItem = ({ message }) => {
   const displayContent = message.decryptedText || message.text || "";
-  
   const isFailed = displayContent.includes("[Decryption Failed]");
   const isDesynced = displayContent.includes("[Session Desync]");
-
   if (isFailed || isDesynced) {
     return (
       <span className="flex items-center gap-1.5 italic text-red-500 text-[11px] font-bold">
