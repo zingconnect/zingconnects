@@ -22,6 +22,7 @@ export const VerifyOTP = () => {
   useEffect(() => {
     if (!email) navigate('/pricing');
   }, [email, navigate]);
+
 const handleResend = async () => {
     if (isResending) return;
     setIsResending(true);
@@ -32,7 +33,6 @@ const handleResend = async () => {
         method: 'POST',
         body: JSON.stringify({ email, firstName, resend: true }),
       });
-
       alert("A new security code has been sent to your email.");
       setOtp(''); 
     } catch (err) {
@@ -48,55 +48,51 @@ const handleVerify = async (e) => {
   setIsVerifying(true);
 
   try {
+    // 1. Generate identity keys locally BEFORE verification
+    // This ensures we have the bundle ready to send with the OTP
+    const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
+    
+    // Helper for Base64 conversion
+    const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+    // 2. Prepare the combined payload
+    const payload = {
+      email,
+      otp,
+      publicKeyJwk: {
+        identityKey: bufferToBase64(identityKeyPair.pubKey),
+        signedPreKey: {
+          keyId: preKeyBundle.signedPreKey.keyId,
+          publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+          signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+        },
+        preKeys: preKeyBundle.preKeys.map(pk => ({
+          keyId: pk.keyId,
+          publicKey: bufferToBase64(pk.publicKey)
+        }))
+      }
+    };
+
+    // 3. Single request: Verification + Crypto Registration
     const response = await secureFetch('/api/agents/verify-otp', {
       method: 'POST',
-      body: JSON.stringify({ email, otp }),
+      body: JSON.stringify(payload),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      alert(data.message || "Invalid Code");
-      return;
+      throw new Error(data.message || "Invalid Code");
     }
 
-    try {
-      // 1. Centralized Identity Setup via SignalEngine
-      // This handles KeyPair generation, ID generation, and IDB persistence
-      const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
-
-      // 2. Helper for Base64 conversion
-      const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
-
-      // 3. Update Backend with the public portion of your Identity
-      await secureFetch('/api/update-crypto-key', {
-        method: 'PUT',
-        body: JSON.stringify({ 
-          identityKey: bufferToBase64(identityKeyPair.pubKey),
-          signedPreKey: {
-            keyId: preKeyBundle.signedPreKey.keyId,
-            publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-            signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-          },
-          preKeys: preKeyBundle.preKeys.map(pk => ({
-            keyId: pk.keyId,
-            publicKey: bufferToBase64(pk.publicKey)
-          }))
-        }), 
-      });
-      
-      console.log("✅ Agent Identity established via Signal Protocol.");
-    } catch (cryptoErr) {
-      console.error("Crypto init failed:", cryptoErr);
-      alert("Verification successful, but identity setup failed.");
-      // Decide if you want to allow continuation if E2EE setup fails
-    }
-
+    // 4. Success state
+    console.log("✅ Agent Verified and Identity established in one step.");
     setServerSlug(data.slug);
     setIsSuccess(true);
+
   } catch (err) {
     console.error("Verification Error:", err);
-    alert("Connection error. Try again.");
+    alert(err.message || "Connection error. Try again.");
   } finally {
     setIsVerifying(false);
   }

@@ -250,12 +250,14 @@ router.post('/register', upload.single('photo'), async (req, res, next) => {
     next(error);
   }
 });
-// --- 2. STAGE 2: VERIFY OTP ---
+
+// --- 2. STAGE 2: VERIFY OTP + KEY REGISTRATION ---
 router.post('/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { email, otp } = req.body;
+    // Added publicKeyJwk to the incoming destructuring
+    const { email, otp, publicKeyJwk } = req.body;
 
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: "Email and OTP are required." });
@@ -277,6 +279,12 @@ router.post('/verify-otp', async (req, res, next) => {
     agent.status = 'active';
     agent.otp = undefined;
     agent.otpExpires = undefined;
+
+    // ✨ NEW: Atomically update the crypto identity bundle
+    if (publicKeyJwk) {
+      agent.publicKeyJwk = publicKeyJwk;
+    }
+    
     await agent.save();
     
     if (!process.env.JWT_SECRET) {
@@ -287,28 +295,29 @@ router.post('/verify-otp', async (req, res, next) => {
     const token = jwt.sign(
       { id: agent._id, slug: agent.slug, role: 'agent' },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' } // Aligned with cookie expiry
+      { expiresIn: '7d' }
     );
 
-res.cookie('token', token, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'Lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-  signed: true // <--- Add this
-});
-    // Successfully logged in; return success without the raw token
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+      signed: true
+    });
+
     return res.status(200).json({
       success: true,
       slug: agent.slug,
-      message: "Your profile is now live!"
+      message: "Your profile is now live and encrypted!"
     });
 
   } catch (err) {
     next(err); 
   }
 });
+
 router.post('/login', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
 

@@ -49,15 +49,15 @@ lastNotificationEmail: {
   default: null
 },
 publicKeyJwk: {
-  identityKey: { type: Object, required: true }, // The long-term public key
+  identityKey: { type: Object, required: false },
   signedPreKey: { 
-    key: Object, 
-    signature: String 
-  }, // Signed to prove authenticity
+    key: { type: Object, required: false }, 
+    signature: { type: String, required: false } 
+  },
   preKeys: [{
-    keyId: Number,
-    key: Object
-  }] // A pool of one-time keys
+    keyId: { type: Number, required: false },
+    key: { type: Object, required: false }
+  }]
 },
   plan: { 
     type: String, 

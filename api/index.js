@@ -603,12 +603,12 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     `
   });
 }
-
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { email, otp } = req.body;
+    // Destructure publicKeyJwk from the request body
+    const { email, otp, publicKeyJwk } = req.body;
 
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: "Email and OTP are required." });
@@ -617,27 +617,27 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const lowerEmail = email.toLowerCase().trim();
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
-    // 1. Check if account is already locked
     if (agent?.failedOtpAttempts >= 5) {
-      return res.status(429).json({ success: false, message: "Account locked. Too many failed attempts." });
+      return res.status(429).json({ success: false, message: "Account locked." });
     }
 
-    // 2. Validate OTP
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
       if (agent) {
         agent.failedOtpAttempts = (agent.failedOtpAttempts || 0) + 1;
         await agent.save();
       }
-      return res.status(400).json({ success: false, message: "Invalid or expired verification code." });
+      return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // 3. Update agent status and clear security state
+    // 3. Update agent status AND assign crypto keys in the same transaction
     Object.assign(agent, {
       isVerified: true,
       status: 'active',
       otp: undefined,
       otpExpires: undefined,
-      failedOtpAttempts: 0 // Reset attempt counter on success
+      failedOtpAttempts: 0,
+      // If provided, save the key bundle here
+      publicKeyJwk: publicKeyJwk || agent.publicKeyJwk 
     });
     await agent.save();
     
@@ -660,7 +660,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     return res.status(200).json({
       success: true,
       slug: agent.slug,
-      message: "Your profile is now live!"
+      message: "Your profile is live and encrypted!"
     });
 
   } catch (err) {
@@ -671,44 +671,38 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
 app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
+        const { identityKey, signedPreKey, preKeys } = req.body;
     
-    // Expecting: { identityKey, signedPreKey, preKeys: [] }
-    const { identityKey, signedPreKey, preKeys } = req.body;
-    
-    // 1. Structural Validation
-    if (!identityKey?.kty || !signedPreKey?.key || !Array.isArray(preKeys) || preKeys.length === 0) {
+    // 1. Basic structural validation
+    if (!preKeys || !Array.isArray(preKeys)) {
       return res.status(400).json({ 
         success: false, 
-        message: "Invalid Key Bundle. Required: identityKey, signedPreKey, and preKeys array." 
+        message: "Key bundle requires a valid preKeys array." 
       });
     }
 
     const userId = req.user.id;
     const targetModel = req.user.role === 'agent' ? mongoose.models.Agent : mongoose.models.User;
-
-    // 2. Perform Atomic Update
-    // We store the keys so that other users can fetch them via a GET route
+    const updateQuery = {
+      $push: { "publicKeyJwk.preKeys": { $each: preKeys } }
+    };
+    if (identityKey) {
+      updateQuery.$set = { "publicKeyJwk.identityKey": identityKey };
+    }
+    if (signedPreKey) {
+      updateQuery.$set = { ...updateQuery.$set, "publicKeyJwk.signedPreKey": signedPreKey };
+    }
     const updatedProfile = await targetModel.findByIdAndUpdate(
       userId,
-      { 
-        $set: { 
-          publicKeyJwk: {
-            identityKey,
-            signedPreKey,
-            preKeys
-          }
-        } 
-      },
+      updateQuery,
       { new: true }
     );
-
     if (!updatedProfile) {
       return res.status(404).json({ success: false, message: "Profile not found." });
     }
-
     return res.status(200).json({ 
       success: true, 
-      message: "Key bundle registered successfully." 
+      message: "Key bundle updated successfully." 
     });
 
   } catch (err) {
@@ -719,7 +713,8 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
 app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
-        const TargetModel = req.query.model === 'Agent' ? Agent : User;
+const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
+const TargetModel = mongoose.model(modelName);
         let user = await TargetModel.findById(userId, { publicKeyJwk: 1 });
     
     if (!user?.publicKeyJwk) {
