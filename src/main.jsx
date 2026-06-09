@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { Buffer } from 'buffer';
 import App from './App.jsx'
 import './index.css'
+import { AuthProvider } from './context/AuthContext';
 
 // --- 1. CRITICAL POLYFILLS & AUDIO HARDWARE ROUTING ---
 window.global = window;
@@ -65,9 +66,10 @@ const setupAudio = () => {
 
 setupAudio();
 
-// --- 4. RENDER SYSTEM ---
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <AuthProvider>
+      <App />
+    </AuthProvider>
   </React.StrictMode>,
 )

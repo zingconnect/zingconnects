@@ -8,6 +8,7 @@ export const AuthProvider = ({ children }) => {
   const [userRole, setUserRole] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
+  const [token, setToken] = useState(null); // Add this state
 
   useEffect(() => {
     verifySession();
@@ -83,6 +84,8 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{ 
+      token,         
+      setToken,
       isAuthenticated, 
       userRole, 
       isLoading,
