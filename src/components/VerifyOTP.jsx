@@ -3,9 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { secureFetch } from "../../api/utils/api";
-import { initializeSession } from "../utils/SignalEngine"; 
 import { SignalEngine } from "../utils/SignalEngine";
-import * as libsignal from 'libsignal';
 
 export const VerifyOTP = () => {
   const location = useLocation();
