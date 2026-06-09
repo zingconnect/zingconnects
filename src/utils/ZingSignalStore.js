@@ -12,8 +12,6 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
   },
 });
 
-console.log("DEBUG: Checking SignalEngine.store object:", SignalEngine.store);
-console.log("DEBUG: Does savePeerBundle exist?", typeof SignalEngine.store.savePeerBundle);
 
 export class ZingSignalStore {
 

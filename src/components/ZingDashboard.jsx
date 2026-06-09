@@ -85,7 +85,6 @@ useEffect(() => {
 
     try {
       const response = await fetch('https://www.zingconnect.chat/api/admin/stats', {
-        headers: { 'Authorization': `Bearer ${token}` }
       });
       
       if (response.status === 401) {
@@ -110,8 +109,7 @@ if (activeTab === 'Agents' || activeTab === 'News Update') {
         const fetchAgents = async () => {
         const token = localStorage.getItem('adminToken');
         try {
-          const response = await fetch('https://www.zingconnect.chat/api/admin/agents', {
-            headers: { 'Authorization': `Bearer ${token}` }
+          const response = await secureFetch('https://www.zingconnect.chat/api/admin/agents', {
           });
           const data = await response.json();
           if (data.success) setAgents(data.agents);
