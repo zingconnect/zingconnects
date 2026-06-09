@@ -177,6 +177,8 @@ const hasProcessedDeepLink = useRef(false);
   const aiMediaRecorderRef = useRef(null);
   const selectedUserRef = useRef(selectedUser);
 const agentDataRef = useRef(agentData);
+const isSendingRef = useRef(false);
+
 
     const slugFromUrl = slug || agentData?.slug || '';
 
@@ -2027,19 +2029,27 @@ const handleResend = async (failedMsg) => {
     setNewMessage(failedMsg.text);
   }
 };
+
 const handleSendMessage = async (e) => {
-  e.preventDefault();
-  if (!selectedUser || !newMessage.trim() || isUploading) return;
+  if (e) e.preventDefault();
+  
+  // Guard clause: Prevent action if already sending, uploading, or missing context
+  if (!selectedUser || !newMessage.trim() || isUploading || isSendingRef.current) {
+    return;
+  }
+
+  // 1. Lock the operation
+  isSendingRef.current = true;
   
   const textToSend = newMessage.trim();
   const tempId = Date.now().toString();
   setNewMessage('');
 
-  // 1. Optimistic UI
+  // 2. Optimistic UI: Update state immediately
   const optimisticMsg = {
     _id: tempId,
     tempId: tempId,
-    text: textToSend, // Keep raw text for display
+    text: textToSend,
     senderId: agentData._id,
     senderModel: 'Agent',
     receiverId: selectedUser._id,
@@ -2051,10 +2061,14 @@ const handleSendMessage = async (e) => {
   };
   
   setMessages(prev => [...prev, optimisticMsg]);
+  // Use a slight delay to allow the DOM to render the new message before scrolling
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
+    // 3. Cryptographic Operation
     const encryptedBundle = await SignalEngine.encrypt(selectedUser._id, textToSend);
+    
+    // 4. Network Transmission
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
@@ -2065,7 +2079,10 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
+    
     if (!data.success) throw new Error(data.message || "Transmission rejected.");
+
+    // 5. Success: Update message status to 'sent'
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { 
         ...data.message, 
@@ -2077,10 +2094,15 @@ const handleSendMessage = async (e) => {
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
+    
+    // 6. Failure: Update status to 'failed' to allow user retry
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { ...msg, status: 'failed' } : msg
     ));
-    alert("Security Error: " + err.message);
+    
+  } finally {
+    // 7. Unlock the operation
+    isSendingRef.current = false;
   }
 };
 

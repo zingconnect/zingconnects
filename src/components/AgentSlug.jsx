@@ -17,9 +17,7 @@ import { SignalEngine } from '../utils/SignalEngine';
 export const AgentSlug = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { setToken } = useAuth();
-  const { login } = useAuth();
-  
+const { setToken, login } = useAuth();   
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [agentData, setAgentData] = useState(null);

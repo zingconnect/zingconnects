@@ -33,11 +33,15 @@ async getPeerBundle(identifier) {
     await db.put('identity', identityKey, identifier);
   }
 
-  async loadIdentityKey(identifier) {
-    const db = await dbPromise;
-    return await db.get('identity', identifier);
-  }
+  async ensureReady() {
+  await dbPromise; // Wait for the DB to be opened/upgraded
+}
 
+ async loadIdentityKey(identifier) {
+  await this.ensureReady(); // Add this to every public method
+  const db = await dbPromise;
+  return await db.get('identity', identifier);
+}
   // --- SESSIONS ---
   async saveSession(identifier, record) {
     const db = await dbPromise;
