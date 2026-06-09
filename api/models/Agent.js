@@ -49,16 +49,16 @@ lastNotificationEmail: {
   default: null
 },
 publicKeyJwk: {
-  registrationId: { type: Number, required: true }, // Change to true
-  identityKey: { type: String, required: true },    // Change to true
+  registrationId: { type: Number, required: false }, // Change to true
+  identityKey: { type: String, required: false },    // Change to true
   signedPreKey: { 
-    keyId: { type: Number, required: true },
-    publicKey: { type: String, required: true },
-    signature: { type: String, required: true } 
+    keyId: { type: Number, required: false },
+    publicKey: { type: String, required: false },
+    signature: { type: String, required: false } 
   },
   preKeys: [{
-    keyId: { type: Number, required: true },
-    publicKey: { type: String, required: true }
+    keyId: { type: Number, required: false },
+    publicKey: { type: String, required: false }
   }]
 },
   plan: { 
