@@ -56,6 +56,7 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 const socket = io(import.meta.env.VITE_API_URL);
+
 const processMessageForUI = async (msg) => {
 const { SignalEngine } = await import('../utils/SignalEngine');
   if (msg.decryptedText && !msg.isEncrypted) return msg;

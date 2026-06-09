@@ -1,10 +1,20 @@
+import { useContext } from 'react';
+import { Navigate, useLocation, Outlet } from 'react-router-dom';
+import { AuthContext } from '../context/AuthContext'; // Import the Context object
+import { useSignal } from '../context/SignalContext'; // Ensure this is imported correctly
+
 export const ProtectedRoute = ({ requiredRole }) => {
-  const { isAuthenticated, userRole, isLoading } = useAuth();
-  // If you implement the SignalProvider from the previous step:
+  const auth = useContext(AuthContext); // Direct consumption
   const { isReady: isCryptoReady } = useSignal(); 
   const location = useLocation();
 
-  // 1. Wait for Auth AND Crypto initialization
+  // Safety check if provider is missing
+  if (!auth) {
+    throw new Error('ProtectedRoute must be used within an AuthProvider');
+  }
+
+  const { isAuthenticated, userRole, isLoading } = auth;
+
   if (isLoading || !isCryptoReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -13,12 +23,10 @@ export const ProtectedRoute = ({ requiredRole }) => {
     );
   }
 
-  // 2. Auth checks
   if (!isAuthenticated) {
     return <Navigate to="/" state={{ from: location.pathname }} replace />;
   }
 
-  // 3. Role-based protection
   if (requiredRole && userRole !== requiredRole) {
     return <Navigate to="/unauthorized" replace />;
   }
