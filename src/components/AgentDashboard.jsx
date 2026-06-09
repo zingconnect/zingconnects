@@ -14,7 +14,6 @@ import { BsSearch, BsShieldExclamation, BsShieldLock, BsThreeDotsVertical, BsChe
 } from 'react-icons/bs';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
-import { SignalEngine } from '../utils/SignalEngine';
 
 
 const formatLastSeen = (lastSeenDate, ticker) => {
@@ -58,7 +57,7 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 const processMessageForUI = async (msg) => {
-  // 1. Bypass logic for system messages or already-decrypted content
+const { SignalEngine } = await import('../utils/SignalEngine');
   if (msg.decryptedText && !msg.isEncrypted) return msg;
   if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
     return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
@@ -104,11 +103,9 @@ const MessageItem = ({ message }) => {
 
 export const AgentDashboard = () => {
   const navigate = useNavigate();
-  const { token, isLoading, setToken } = useAuth();
+  const { token, isLoading, isCryptoReady, setToken } = useAuth();
   const { slug } = useParams();
   const location = useLocation(); // <--- ADD THIS
-const { isCryptoReady } = useAuth();
-
 
   const isForcedRefresh = location.state?.forceRefresh;
   const [agentData, setAgentData] = useState(null);
