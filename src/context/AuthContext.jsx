@@ -47,7 +47,7 @@ export const AuthProvider = ({ children }) => {
 
   const verifySession = async () => {
     try {
-      const response = await secureFetch('/api/auth/me'); 
+      const response = await secureFetch('/api/agents/me'); 
       if (response.ok) {
         const data = await response.json();
         setIsAuthenticated(true);

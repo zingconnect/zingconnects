@@ -414,6 +414,13 @@ app.get('/api/debug', (req, res) => {
   res.json({ status: "Express is alive!", path: req.path });
 });
 
+app.get('/api/test-routes', (req, res) => {
+  const routes = app._router.stack
+    .filter(r => r.route)
+    .map(r => r.route.path);
+  res.json({ registeredRoutes: routes });
+});
+
 // ==========================================
 // 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
 // ==========================================
@@ -3958,7 +3965,7 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
   }
 });
 
-app.get('/api/auth/me', authenticateToken, async (req, res) => {
+app.get('/api/agents/me', authenticateToken, async (req, res) => {
   console.log("🔍 Incoming request to /api/auth/me");
   console.log("Headers:", req.headers);
   await connectToDatabase();

@@ -1131,23 +1131,27 @@ router.post('/unlock-voice-package', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/auth/me
-// Returns the profile of the currently logged-in user or agent
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    // req.user is populated by your authenticateToken middleware
-    // We fetch the latest data to ensure the session is still valid in the DB
-    const userId = req.user.id;
-    const role = req.user.role;
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    
+    if (!userId || !role) {
+      return res.status(400).json({ success: false, message: "Invalid session data" });
+    }
     
     let profile = null;
     
     if (role === 'agent') {
       const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-      profile = await AgentModel.findById(userId).select('firstName lastName email slug role isSubscribed plan');
+      profile = await AgentModel.findById(userId)
+        .select('firstName lastName email slug role isSubscribed plan publicKeyJwk')
+        .lean();
     } else {
       const UserModel = mongoose.models.User || mongoose.model('User');
-      profile = await UserModel.findById(userId).select('email role isProfileComplete');
+      profile = await UserModel.findById(userId)
+        .select('email role isProfileComplete publicKeyJwk')
+        .lean();
     }
 
     if (!profile) {
@@ -1160,6 +1164,7 @@ router.get('/me', authenticateToken, async (req, res) => {
       profile: profile 
     });
   } catch (err) {
+    console.error("Session verification error:", err);
     return res.status(500).json({ success: false, message: "Server error during session verification" });
   }
 });
