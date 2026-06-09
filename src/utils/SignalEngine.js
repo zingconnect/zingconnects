@@ -31,8 +31,7 @@ const toBuffer = (base64) => {
 export const SignalEngine = {
   store,
 
-  async setupIdentity() {
-    // Access the 'lib' constant directly
+ async setupIdentity() {
     const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
     if (!KeyHelper) throw new Error("KeyHelper not found");
 
@@ -45,34 +44,31 @@ export const SignalEngine = {
       preKeys.push(await KeyHelper.generatePreKey(i));
     }
     
-  const preKeyBundle = {
-  registrationId: registrationId,
-  identityKey: bufferToBase64(identityKeyPair.pubKey),
-  signedPreKey: {
-    keyId: signedPreKey.keyId,
-    publicKey: bufferToBase64(signedPreKey.keyPair.pubKey),
-    signature: bufferToBase64(signedPreKey.signature)
-  },
-  preKeys: preKeys.map(pk => {
-    const pubKey = pk.keyPair.pubKey;
-    
-    return {
-      keyId: pk.keyId,
-      publicKey: bufferToBase64(pubKey)
+    const preKeyBundle = {
+      registrationId: registrationId,
+      identityKey: bufferToBase64(identityKeyPair.pubKey),
+      signedPreKey: {
+        keyId: signedPreKey.keyId,
+        // Ensure we are accessing the public key correctly
+        publicKey: bufferToBase64(signedPreKey.keyPair.pubKey),
+        signature: bufferToBase64(signedPreKey.signature)
+      },
+      preKeys: preKeys.map(pk => ({
+        keyId: pk.keyId,
+        // Check both paths just in case:
+        publicKey: bufferToBase64(pk.keyPair?.pubKey || pk.pubKey)
+      }))
     };
-  })
-};
 
-// Final sanity check before database save
-console.log("[DEBUG] Final PreKeyBundle Summary:", {
-  count: preKeyBundle.preKeys.length,
-  firstKeySample: preKeyBundle.preKeys[0].publicKey
-});
+    // DEBUG: Log the bundle before saving to ensure keys are strings
+    console.log("[DEBUG] Verifying Keys:", preKeyBundle.preKeys[0]);
+
     await store.saveIdentity('local', identityKeyPair);
     await store.saveRegistrationId(registrationId);
     
     return { identityKeyPair, preKeyBundle };
   },
+  
 
 async initializeSession(remoteUserId, preKeyBundle) {
     const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
