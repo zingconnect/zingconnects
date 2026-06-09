@@ -1,5 +1,6 @@
 import { openDB } from 'idb';
 
+import { KeyHelper } from 'libsignal';
 /**
  * 🔒 ZINGSIGNALSTORE
  * Handles persistent storage of IdentityKeys, Sessions, and PreKeys in IndexedDB.
@@ -39,16 +40,16 @@ export class ZingSignalStore {
     return await db.get('session', identifier);
   }
 
- async getLocalRegistrationId() {
-  const db = await dbPromise;
-  let id = await db.get('misc', 'registrationId');
-  if (!id) {
-    // Use the official Signal helper
-    id = libsignal.KeyHelper.generateRegistrationId(); 
-    await db.put('misc', id, 'registrationId');
+async getLocalRegistrationId() {
+    const db = await dbPromise;
+    let id = await db.get('misc', 'registrationId');
+    if (!id) {
+      // 2. Use the imported KeyHelper constant directly
+      id = KeyHelper.generateRegistrationId(); 
+      await db.put('misc', id, 'registrationId');
+    }
+    return id;
   }
-  return id;
-}
 
 // In ZingSignalStore.js
 async saveRegistrationId(id) {

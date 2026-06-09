@@ -2,31 +2,36 @@ import * as libsignalModule from 'libsignal';
 import { ZingSignalStore } from './ZingSignalStore';
 
 /**
- * Robust resolution of libsignal exports to handle both 
- * direct ESM named exports and 'default' export wrappers.
+ * Robust resolution:
+ * Some versions/bundlers place exports inside the 'default' key,
+ * while others expose them at the top level. This ensures we catch both.
  */
 const libsignal = libsignalModule.default || libsignalModule;
+
+// Extract helpers from the resolved module
 const { KeyHelper, SessionBuilder, SessionCipher } = libsignal;
+
+// Final sanity check for environment debugging
+if (!KeyHelper) {
+  console.error("CRITICAL: libsignal exports not found. Received:", libsignal);
+  throw new Error("Failed to initialize libsignal: KeyHelper is undefined.");
+}
 
 const store = new ZingSignalStore();
 
 /**
  * 🔒 ZINGCONNECT SIGNAL ENGINE
- * The Singleton orchestrator for E2EE operations.
  */
 export const SignalEngine = {
   store,
 
   async setupIdentity() {
-    // 1. Generate keys
     const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     const registrationId = KeyHelper.generateRegistrationId();
     
-    // 2. Persist using the store
     await store.saveIdentity('local', identityKeyPair);
     await store.saveRegistrationId(registrationId);
     
-    // 3. Prepare bundle for the backend
     const preKeyBundle = await KeyHelper.generatePreKeyBundle(registrationId, 1);
     
     return { identityKeyPair, preKeyBundle };
@@ -46,8 +51,7 @@ export const SignalEngine = {
 
   async encrypt(remoteUserId, clearText) {
     const sessionCipher = new SessionCipher(store, remoteUserId);
-    const encrypted = await sessionCipher.encrypt(new TextEncoder().encode(clearText));
-    return encrypted;
+    return await sessionCipher.encrypt(new TextEncoder().encode(clearText));
   },
 
   async decrypt(remoteUserId, ciphertextBundle) {
@@ -61,7 +65,6 @@ export const SignalEngine = {
   }
 };
 
-// --- PROXY EXPORTS ---
 export const { 
   initializeSession, 
   encrypt, 
