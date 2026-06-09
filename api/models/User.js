@@ -50,15 +50,16 @@ const userSchema = new mongoose.Schema({
     default: ""
   },
 publicKeyJwk: {
-  identityKey: { type: String, required: false }, // Store as Base64 string
+  registrationId: { type: Number, required: false }, // 👈 CRITICAL: Needed for E2EE
+  identityKey: { type: String, required: false }, 
   signedPreKey: { 
     keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false }, // Store as Base64 string
+    publicKey: { type: String, required: false }, 
     signature: { type: String, required: false } 
   },
   preKeys: [{
     keyId: { type: Number, required: true },
-    publicKey: { type: String, required: true } // Store as Base64 string
+    publicKey: { type: String, required: true }
   }]
 },
   role: { 

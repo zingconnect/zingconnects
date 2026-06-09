@@ -57,10 +57,24 @@ async setupIdentity() {
     return { identityKeyPair, preKeyBundle };
   },
 
-  async initializeSession(remoteUserId, preKeyBundle) {
-    const builder = new SessionBuilder(store, remoteUserId);
-    return await builder.processPreKey(preKeyBundle);
-  },
+ async initializeSession(remoteUserId, preKeyBundle) {
+  const formattedBundle = {
+    registrationId: preKeyBundle.registrationId,
+    identityKey: preKeyBundle.identityKey,
+    signedPreKey: preKeyBundle.signedPreKey,
+    preKey: preKeyBundle.preKey // The specific one-time key if present
+  };
+
+  const builder = new SessionBuilder(store, remoteUserId);
+  
+  // 2. Defensive check
+  if (typeof builder.processPreKey !== 'function') {
+    console.error("DEBUG: Builder object:", builder);
+    throw new Error("SessionBuilder.processPreKey is not a function. Check libsignal import.");
+  }
+
+  return await builder.processPreKey(formattedBundle);
+},
 
   async encrypt(remoteUserId, clearText) {
     const cipher = new SessionCipher(store, remoteUserId);

@@ -34,7 +34,7 @@ async savePeerBundle(slug, bundle) {
   await db.put('identity', bundle, `peer_bundle:${slug}`);
 }
 
-  async loadIdentityKey(identifier) {
+ async loadIdentityKey(identifier) {
     const db = await dbPromise;
     return await db.get('identity', identifier);
   }
@@ -44,29 +44,29 @@ async savePeerBundle(slug, bundle) {
     await db.put('session', record, identifier);
   }
 
+  async containsSession(identifier) {
+    const db = await dbPromise;
+    return !!(await db.get('session', identifier));
+  }
+
   async loadSession(identifier) {
     const db = await dbPromise;
     return await db.get('session', identifier);
   }
 
-  async getLocalRegistrationId() {
-    const db = await dbPromise;
-    let id = await db.get('misc', 'registrationId');
-    if (!id) {
-      // KeyHelper is now correctly mapped
-      id = KeyHelper.generateRegistrationId(); 
-      await db.put('misc', id, 'registrationId');
-    }
-    return id;
-  }
+ async loadRegistrationId(identifier) {
+  const db = await dbPromise;
+  return await db.get('misc', `regId:${identifier}`);
+}
 
-  async saveRegistrationId(id) {
-    const db = await dbPromise;
-    await db.put('misc', id, 'registrationId');
-  }
+ async saveRegistrationIdForPeer(identifier, id) {
+  const db = await dbPromise;
+  await db.put('misc', id, `regId:${identifier}`);
+}
   
-  async isTrustedIdentity(identifier, identityKey, direction) {
-    return true; 
+ async isTrustedIdentity(identifier, identityKey, direction) {
+    const savedKey = await this.loadIdentityKey(identifier);
+    return savedKey === identityKey; 
   }
 
   async savePeerPublicKey(identifier, key) {
