@@ -1,7 +1,6 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import * as libsignal from 'libsignal';
 import { secureFetch } from "../../api/utils/api";
-import { ZingSignalStore } from "../utils/ZingSignalStore"; // Your new store
+import { SignalEngine } from '../utils/SignalEngine';
 
 const AuthContext = createContext(null);
 
@@ -10,61 +9,41 @@ export const AuthProvider = ({ children }) => {
   const [userRole, setUserRole] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
-  const [privateKey, setPrivateKey] = useState(null);
-  const [isHandshaking, setIsHandshaking] = useState(false);
 
-  // 1. Initial Load: Try to hydrate keys from IndexedDB
+  // 1. Initial Load: Verify identity and session
   useEffect(() => {
-    const hydrate = async () => {
-      const savedKey = await getPrivateKey();
-      if (savedKey) {
-        setPrivateKey(savedKey);
-        setIsCryptoReady(true);
-      }
-      await verifySession();
-    };
-    hydrate();
+    verifySession();
   }, []);
 
-const initializeCrypto = useCallback(async () => {
-  setIsCryptoReady(false);
-  
-  // Helper to convert ArrayBuffer to Base64
-  const bufferToBase64 = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const initializeCrypto = useCallback(async () => {
+    setIsCryptoReady(false);
+    try {
+      // Use the centralized engine we built
+      const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
+      const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 
-  // 1. Generate Signal Identity Key & Registration ID
-  const identityKeyPair = await libsignal.KeyHelper.generateIdentityKeyPair();
-  const registrationId = libsignal.KeyHelper.generateRegistrationId();
+      await secureFetch('/api/update-crypto-key', {
+        method: 'PUT',
+        body: JSON.stringify({ 
+          identityKey: bufferToBase64(identityKeyPair.pubKey), 
+          signedPreKey: {
+            keyId: preKeyBundle.signedPreKey.keyId,
+            publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+            signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+          },
+          preKeys: preKeyBundle.preKeys.map(pk => ({
+            keyId: pk.keyId,
+            publicKey: bufferToBase64(pk.publicKey)
+          }))
+        })
+      });
 
-  // 2. Persist to ZingSignalStore
-  const store = new ZingSignalStore();
-  await store.saveIdentity('local', identityKeyPair);
-  await store.saveRegistrationId(registrationId);
-
-  // 3. Generate PreKey Bundle
-  // The '1' represents the current Signed PreKey ID
-  const preKeyBundle = await libsignal.KeyHelper.generatePreKeyBundle(registrationId, 1);
-  
-  // 4. Send to backend with Base64 serialization
-  await secureFetch('/api/update-crypto-key', {
-    method: 'PUT',
-    body: JSON.stringify({ 
-      identityKey: bufferToBase64(identityKeyPair.pubKey), 
-      signedPreKey: {
-        keyId: preKeyBundle.signedPreKey.keyId,
-        publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-        signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-      },
-      preKeys: preKeyBundle.preKeys.map(pk => ({
-        keyId: pk.keyId,
-        publicKey: bufferToBase64(pk.publicKey)
-      }))
-    })
-  });
-
-  setIsCryptoReady(true);
-  console.log("✅ E2EE Persistent-session initialized and keys uploaded.");
-}, []);
+      setIsCryptoReady(true);
+      console.log("✅ E2EE Persistent-session initialized.");
+    } catch (err) {
+      console.error("Crypto init failed:", err);
+    }
+  }, []);
 
   const verifySession = async () => {
     try {
@@ -73,9 +52,14 @@ const initializeCrypto = useCallback(async () => {
         const data = await response.json();
         setIsAuthenticated(true);
         setUserRole(data.role);
-        // Only re-init if we don't have a persistent key
-        const savedKey = await getPrivateKey();
-        if (!savedKey) await initializeCrypto();
+
+        // Check if we already have an identity stored in IndexedDB
+        const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
+        if (!savedIdentity) {
+            await initializeCrypto();
+        } else {
+            setIsCryptoReady(true);
+        }
       } else {
         await logout();
       }
@@ -87,8 +71,9 @@ const initializeCrypto = useCallback(async () => {
   };
 
   const logout = async () => {
-    await clearKeys();
-    setPrivateKey(null);
+    // Clear storage properly
+    // You should add a clearKeys method to ZingSignalStore
+    await SignalEngine.store.clearAll(); 
     setIsAuthenticated(false);
     setIsCryptoReady(false);
   };
@@ -99,8 +84,6 @@ const initializeCrypto = useCallback(async () => {
       userRole, 
       isLoading,
       isCryptoReady,
-      privateKey,
-      isHandshaking,
       verifySession,
       logout
     }}>
