@@ -690,25 +690,33 @@ handleEndCall();
   }, []);
 
 
-  useEffect(() => {
+ useEffect(() => {
+  if (isLoading || !token || !agentData?._id) return;
+  let isMounted = true; // Guard to prevent state updates on unmounted components
+
   const provisionAgentCryptoEnvironment = async () => {
-    if (isLoading || !token || !agentData?._id) return;
-    console.log("🔒 [SignalEngine] Initializing secure environment for:", agentData._id);
+    console.log("🔒 [SignalEngine] Provisioning secure environment...");
     try {
       const agentId = String(agentData._id);
-      const success = await initializeUserE2EEKeys(agentId, token);
-      if (!success) {
-        throw new Error("Identity provisioning handshake failed.");
+            const success = await initializeUserE2EEKeys(agentId, token);
+      if (!success) throw new Error("Identity provisioning failed.");
+      if (isMounted) {
+        await SignalEngine.initialize(agentId);
+        console.log("✅ [SignalEngine] Cryptographic ratchet ready.");
       }
-      await SignalEngine.initialize(agentId);
-      console.log("✅ [SignalEngine] Cryptographic ratchet environment ready.");
-
     } catch (err) {
-      console.error("❌ [SignalEngine] Initialization failed:", err);
+      if (isMounted) {
+        console.error("❌ [SignalEngine] Initialization failed:", err);
+      }
     }
   };
-  
+
   provisionAgentCryptoEnvironment();
+
+  // 4. Cleanup function
+  return () => {
+    isMounted = false;
+  };
 }, [token, isLoading, agentData?._id]);
 
 
@@ -1027,11 +1035,7 @@ const formatTime = (seconds) => {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
-useEffect(() => {
-  if (isCryptoReady && agentData?._id) {
-    SignalEngine.initialize(agentData._id); 
-  }
-}, [isCryptoReady, agentData?._id]);
+
 
 useEffect(() => {
   if (!socket || !agentData?._id) return;
@@ -1443,21 +1447,13 @@ useEffect(() => {
       
       const profileData = await profileResponse.value.json();
       
-      if (profileData.agent) {
-        // 1. Set agent state
+    if (profileData.agent) {
+        // 1. Set agent state - Only focus on UI/Context data here
         setAgentData(profileData.agent);
         setIsSubscribed(!!profileData.agent.isSubscribed); 
         if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
 
-        // 2. CRYPTO SYNC: Ensure Engine is aware of the new Agent context
-        // This is the bridge where the App's authenticated state 
-        // triggers the Engine's secure identity loading.
-        if (profileData.agent._id) {
-          // The engine will now handle checking IndexedDB for existing session state
-          await SignalEngine.initialize(profileData.agent._id);
-        }
-
-        // 3. Handle User Request
+        // 2. Handle User Request
         if (profileData.agent.isSubscribed && usersResponse.status === 'fulfilled') {
           const uRes = usersResponse.value;
           if (uRes.ok) {
@@ -1857,6 +1853,7 @@ useEffect(() => {
   const interval = setInterval(refreshUserList, 15000);
   return () => clearInterval(interval);
 }, [isSubscribed, agentData?._id, isDualLoginConflict]);
+
 useEffect(() => {
   if (!selectedUser?._id || ['calling', 'ringing', 'connected'].includes(callStatus)) return;
 
