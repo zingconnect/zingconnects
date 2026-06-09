@@ -1,4 +1,5 @@
 import { openDB } from 'idb';
+import { bufferToBase64, toBuffer } from './SignalUtils'; // Import shared helpers
 
 const DB_NAME = 'ZingConnectStorage';
 const DB_VERSION = 1;
@@ -27,48 +28,45 @@ const areKeysEqual = (key1, key2) => {
 
 export class ZingSignalStore {
 
+  async ensureReady() {
+    await dbPromise; // Wait for the DB to be opened/upgraded
+  }
+
+  // --- IDENTITY ---
   async isTrustedIdentity(identifier, identityKey, direction) {
     const savedKey = await this.loadIdentityKey(identifier);
     if (!savedKey) return true; // Trust on first use
-        return areKeysEqual(savedKey, identityKey); 
+    return areKeysEqual(savedKey, identityKey); 
   }
 
+  async saveIdentity(identifier, identityKey) {
+    const db = await dbPromise;
+    // Extract pubKey if it's an object, otherwise use the key directly
+    const rawKey = identityKey.pubKey || identityKey;
+    // Convert to Base64 for consistent storage
+    const base64Key = bufferToBase64(rawKey); 
+    await db.put('identity', base64Key, identifier);
+  }
+
+  async loadIdentityKey(identifier) {
+    await this.ensureReady();
+    const db = await dbPromise;
+    const base64Key = await db.get('identity', identifier);
+    // Convert back to ArrayBuffer so libsignal can use it
+    return base64Key ? toBuffer(base64Key) : null;
+  }
+
+  // --- SESSIONS & BUNDLES ---
   async savePeerBundle(identifier, bundle) {
-  const db = await dbPromise;
-  // We store the bundle in the 'session' object store 
-  // keyed by the peer's identifier (e.g., the agent's slug)
-  await db.put('session', bundle, identifier);
-}
+    const db = await dbPromise;
+    await db.put('session', bundle, identifier);
+  }
 
-async getPeerBundle(identifier) {
-  const db = await dbPromise;
-  return await db.get('session', identifier);
-}
+  async getPeerBundle(identifier) {
+    const db = await dbPromise;
+    return await db.get('session', identifier);
+  }
 
-async saveIdentity(identifier, identityKey) {
-  const db = await dbPromise;
-  // If identityKey is an object with pubKey, extract it
-  const rawKey = identityKey.pubKey || identityKey;
-  
-  // Convert to Base64 for consistent storage
-  const base64Key = bufferToBase64(rawKey); 
-  await db.put('identity', base64Key, identifier);
-}
-
-  async ensureReady() {
-  await dbPromise; // Wait for the DB to be opened/upgraded
-}
-
-// --- IMPROVED IDENTITY LOADING ---
-async loadIdentityKey(identifier) {
-  await this.ensureReady();
-  const db = await dbPromise;
-  const base64Key = await db.get('identity', identifier);
-  
-  // Convert back to ArrayBuffer so libsignal can use it
-  return base64Key ? toBuffer(base64Key) : null;
-}
-  // --- SESSIONS ---
   async saveSession(identifier, record) {
     const db = await dbPromise;
     await db.put('session', record, identifier);
@@ -90,13 +88,7 @@ async loadIdentityKey(identifier) {
     await db.put('misc', id, 'registrationId');
   }
   
-  // --- SIGNAL PROTOCOL INTERFACE ---
-  async isTrustedIdentity(identifier, identityKey, direction) {
-    const savedKey = await this.loadIdentityKey(identifier);
-    if (!savedKey) return true; // Trust on first use
-    return savedKey === identityKey; 
-  }
-
+  // --- PREKEYS ---
   async loadPreKey(keyId) {
     const db = await dbPromise;
     return await db.get('prekeys', keyId);
