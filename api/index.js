@@ -603,6 +603,7 @@ async function sendVerificationEmail(email, firstName, otpCode) {
     `
   });
 }
+
 app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();

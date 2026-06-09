@@ -45,20 +45,28 @@ async getPeerBundle(identifier) {
   return await db.get('session', identifier);
 }
 
- async saveIdentity(identifier, identityKey) {
-    const db = await dbPromise;
-    const keyToStore = identityKey.pubKey ? identityKey.pubKey : identityKey;
-    await db.put('identity', keyToStore, identifier);
-  }
+async saveIdentity(identifier, identityKey) {
+  const db = await dbPromise;
+  // If identityKey is an object with pubKey, extract it
+  const rawKey = identityKey.pubKey || identityKey;
+  
+  // Convert to Base64 for consistent storage
+  const base64Key = bufferToBase64(rawKey); 
+  await db.put('identity', base64Key, identifier);
+}
 
   async ensureReady() {
   await dbPromise; // Wait for the DB to be opened/upgraded
 }
 
- async loadIdentityKey(identifier) {
-  await this.ensureReady(); // Add this to every public method
+// --- IMPROVED IDENTITY LOADING ---
+async loadIdentityKey(identifier) {
+  await this.ensureReady();
   const db = await dbPromise;
-  return await db.get('identity', identifier);
+  const base64Key = await db.get('identity', identifier);
+  
+  // Convert back to ArrayBuffer so libsignal can use it
+  return base64Key ? toBuffer(base64Key) : null;
 }
   // --- SESSIONS ---
   async saveSession(identifier, record) {
