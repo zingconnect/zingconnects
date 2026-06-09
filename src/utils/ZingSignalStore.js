@@ -12,7 +12,23 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
   },
 });
 
+console.log("DEBUG: Checking SignalEngine.store object:", SignalEngine.store);
+console.log("DEBUG: Does savePeerBundle exist?", typeof SignalEngine.store.savePeerBundle);
+
 export class ZingSignalStore {
+
+  async savePeerBundle(identifier, bundle) {
+  const db = await dbPromise;
+  // We store the bundle in the 'session' object store 
+  // keyed by the peer's identifier (e.g., the agent's slug)
+  await db.put('session', bundle, identifier);
+}
+
+async getPeerBundle(identifier) {
+  const db = await dbPromise;
+  return await db.get('session', identifier);
+}
+
   // --- IDENTITY KEYS ---
   async saveIdentity(identifier, identityKey) {
     const db = await dbPromise;

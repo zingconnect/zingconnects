@@ -1056,19 +1056,18 @@ app.post('/api/users/handshake', async (req, res, next) => {
 
   try {
     await connectToDatabase();
-    const { email, agentSlug } = req.body;
+    // 1. Destructure userPublicKeyJwk from request
+    const { email, agentSlug, userPublicKeyJwk } = req.body;
     
     if (!email || !agentSlug) {
       return res.status(400).json({ success: false, message: "Email and Agent context required" });
     }
 
-    // 1. Find Agent
+    // 2. Find Agent
     const agent = await Agent.findOne({ slug: agentSlug.toLowerCase().trim() });
-    if (!agent) {
-      return res.status(400).json({ success: false, message: "Agent not found" });
-    }
+    if (!agent) return res.status(400).json({ success: false, message: "Agent not found" });
     
-    // 2. User Persistence Logic
+    // 3. User Persistence & Key Storage
     const normalizedEmail = email.toLowerCase().trim();
     let user = await User.findOne({ email: normalizedEmail });
 
@@ -1076,40 +1075,44 @@ app.post('/api/users/handshake', async (req, res, next) => {
       user = await User.create({
         email: normalizedEmail,
         connectedAgents: [agent._id],
-        lastLogin: new Date(),
-        isProfileComplete: false
+        publicKeyJwk: userPublicKeyJwk, // Save initial bundle
+        lastLogin: new Date()
       });
-    } else if (!user.connectedAgents.includes(agent._id)) {
-      user.connectedAgents.push(agent._id);
-      await user.save();
+    } else {
+      // Update User keys if provided
+      if (userPublicKeyJwk) {
+        user.publicKeyJwk = userPublicKeyJwk;
+        await user.save();
+      }
+      if (!user.connectedAgents.includes(agent._id)) {
+        user.connectedAgents.push(agent._id);
+        await user.save();
+      }
     }
-    const cacheKey = `user:profile:${user._id}`;
-    await redisClient.setEx(cacheKey, 3600, JSON.stringify({
-      _id: user._id,
-      email: user.email,
-      publicKeyJwk: user.publicKeyJwk || null
-    }));
 
-    // 4. Generate Session
-    const token = jwt.sign(
-      { id: user._id, role: 'user', activeAgentSlug: agent.slug },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    // 4. Atomic PreKey Consumption: Remove the first available preKey from Agent
+    // This prevents key reuse and ensures the session handshake is valid
+    if (agent.publicKeyJwk && agent.publicKeyJwk.preKeys && agent.publicKeyJwk.preKeys.length > 0) {
+      const consumedKey = agent.publicKeyJwk.preKeys.shift(); // Remove the first key
+      await agent.save();
+      
+      return res.json({ 
+        success: true, 
+        user: { id: user._id },
+        agentIdentity: {
+          ...agent.publicKeyJwk,
+          // Only return the consumed key so the frontend knows which one to use
+          preKeys: [consumedKey] 
+        }
+      });
+    }
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      signed: true
-    });
-    return res.json({ 
-      success: true, 
-      user: { id: user._id, role: 'user' },
-      agentIdentity: agent.publicKeyJwk // This now contains the full bundle
-    });
+    // 5. Generate Session Token (Standardized)
+    const token = jwt.sign({ id: user._id, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Lax', path: '/', signed: true });
+
+    return res.json({ success: true, agentIdentity: agent.publicKeyJwk });
+
   } catch (err) {
     next(err);
   }

@@ -66,6 +66,7 @@ const handleVerify = async (e) => {
       email,
       otp,
       publicKeyJwk: {
+        registrationId: preKeyBundle.registrationId, // ADD THIS
         identityKey: toBase64(identityKeyPair.pubKey),
         signedPreKey: {
           keyId: preKeyBundle.signedPreKey.keyId,

@@ -137,40 +137,40 @@ React.useEffect(() => {
 
 const handleUserInquiry = async (e) => {
   e.preventDefault();
-
   if (!userEmail) return alert("Please enter your email.");
   if (!slug) return alert("Agent context missing.");
 
   setIsProcessing(true);
 
   try {
-    // 1. Initiate secure handshake
+    // 1. Setup User Identity (New for Bidirectional)
+    const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
+    await SignalEngine.store.saveIdentity('local', identityKeyPair);
+
+    // 2. Initiate secure handshake, sending the user's keys
     const response = await secureFetch('/api/users/handshake', {
       method: 'POST',
       body: JSON.stringify({ 
         email: userEmail.trim(), 
-        agentSlug: slug 
+        agentSlug: slug,
+        userPublicKeyJwk: preKeyBundle // Send user's public bundle
       }),
     });
 
     const data = await response.json();
-
     if (!response.ok) throw new Error(data.message || "Handshake failed");
+
     if (data.agentIdentity) {
-      console.log("DEBUG: Checking method:", typeof SignalEngine.store.savePeerBundle);
+      // 3. Save the Agent's identity and initialize the session
+      // We pass the full bundle, including the consumed preKey
       await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
       await SignalEngine.initializeSession(slug, data.agentIdentity);
       
       console.log(`✅ Secure session established with: ${slug}`);
     }
 
-    // 4. AUTHENTICATION & NAVIGATION
+    // 4. Authenticate & Navigate
     if (typeof login === 'function') await login(slug);
-    
-    if (rememberUser) {
-      localStorage.setItem(`rememberedUserEmail_${slug}`, userEmail.trim());
-    }
-    
     navigate(`/user/dashboard/${slug}`, { replace: true });
 
   } catch (err) { 

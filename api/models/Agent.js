@@ -145,6 +145,20 @@ agentSchema.virtual('isVoicePackageExpired').get(function() {
 });
 
 
+export async function rotatePreKeys(agentId, newPreKeys) {
+  return await Agent.updateOne(
+    { _id: agentId },
+    { 
+      $push: { 
+        "publicKeyJwk.preKeys": { 
+          $each: newPreKeys,
+          $slice: -100 // Keeps only the most recent 100 keys
+        } 
+      }
+    }
+  );
+}
+
 // ✨ FIXED: Added early validation guard clauses to prevent registration loop crashes
 agentSchema.pre('validate', async function() {
   if (!this.firstName || !this.lastName) return; // Prevent loop execution if base names aren't present yet

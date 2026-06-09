@@ -56,12 +56,6 @@ export const SignalEngine = {
   preKeys: preKeys.map(pk => {
     const pubKey = pk.keyPair.pubKey;
     
-    // CONSOLE LOG: Deep inspection
-    console.log(`[DEBUG] KeyID: ${pk.keyId}`);
-    console.log(`[DEBUG] pubKey type: ${typeof pubKey}`);
-    console.log(`[DEBUG] pubKey value:`, pubKey);
-    console.log(`[DEBUG] bufferToBase64 result: '${bufferToBase64(pubKey)}'`);
-    
     return {
       keyId: pk.keyId,
       publicKey: bufferToBase64(pubKey)
@@ -82,8 +76,8 @@ console.log("[DEBUG] Final PreKeyBundle Summary:", {
 
   async initializeSession(remoteUserId, preKeyBundle) {
     const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
-    if (!SessionBuilder) throw new Error("SessionBuilder not found");
-
+    
+    // 1. Prepare the bundle correctly
     const signalBundle = {
       registrationId: parseInt(preKeyBundle.registrationId),
       identityKey: toBuffer(preKeyBundle.identityKey),
@@ -91,12 +85,17 @@ console.log("[DEBUG] Final PreKeyBundle Summary:", {
         keyId: preKeyBundle.signedPreKey.keyId,
         publicKey: toBuffer(preKeyBundle.signedPreKey.publicKey),
         signature: toBuffer(preKeyBundle.signedPreKey.signature)
+      },
+      // IMPORTANT: You MUST include a one-time preKey from the agent's preKeys array
+      preKey: {
+        keyId: preKeyBundle.preKeys[0].keyId, 
+        publicKey: toBuffer(preKeyBundle.preKeys[0].publicKey)
       }
     };
 
     const builder = new SessionBuilder(store, remoteUserId);
     return await builder.processPreKey(signalBundle);
-  },
+},
 
   async encrypt(remoteUserId, clearText) {
     const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
