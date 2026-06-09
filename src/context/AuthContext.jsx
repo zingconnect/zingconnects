@@ -1,7 +1,5 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { secureFetch } from "../../api/utils/api";
-import { SignalEngine } from '../utils/SignalEngine';
-console.log(`DEBUG: Checking SignalEngine.store object:`, p.store);
 
 const AuthContext = createContext(null);
 
@@ -15,7 +13,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     verifySession();
   }, []);
-  
+
 const initializeCrypto = useCallback(async () => {
   setIsCryptoReady(false);
   try {
