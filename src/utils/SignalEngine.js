@@ -3,22 +3,20 @@ import { ZingSignalStore } from './ZingSignalStore';
 
 // 1. Resolve module
 const libsignal = libsignalModule.default || libsignalModule;
+
+// 2. Map exports safely using ONE approach only
 const { 
   KeyHelper, 
   SessionBuilder, 
   SessionCipher 
 } = libsignal;
+
+// DEBUG: Verify imports
 console.log("DEBUG: KeyHelper:", KeyHelper);
 console.log("DEBUG: SessionBuilder:", SessionBuilder);
-// 2. Map exports safely
-const KeyHelper = libsignal.keyhelper || libsignal.KeyHelper;
-const SessionBuilder = libsignal.sessionbuilder || libsignal.SessionBuilder;
-const SessionCipher = libsignal.sessioncipher || libsignal.SessionCipher;
-
-// DEBUG: This log is CRITICAL. Watch your console for the real method names.
-console.log("DEBUG: KeyHelper object:", KeyHelper);
 
 const store = new ZingSignalStore();
+
 
 export const SignalEngine = {
   store,
@@ -64,19 +62,34 @@ async setupIdentity() {
   },
 
 async initializeSession(remoteUserId, preKeyBundle) {
-  // Convert base64/string keys to ArrayBuffer if your store returns strings
-  const signalBundle = {
-    registrationId: preKeyBundle.registrationId,
-    identityKey: Uint8Array.from(atob(preKeyBundle.identityKey), c => c.charCodeAt(0)).buffer,
-    signedPreKey: {
-      keyId: preKeyBundle.signedPreKey.keyId,
-      publicKey: Uint8Array.from(atob(preKeyBundle.signedPreKey.publicKey), c => c.charCodeAt(0)).buffer,
-      signature: Uint8Array.from(atob(preKeyBundle.signedPreKey.signature), c => c.charCodeAt(0)).buffer
+  // Helper to safely convert Base64 to ArrayBuffer
+  const toBuffer = (base64) => {
+    if (!base64) throw new Error("Missing key data for Signal handshake");
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
+    return bytes.buffer;
   };
 
-  const builder = new SessionBuilder(store, remoteUserId);
-  return await builder.processPreKey(signalBundle);
+  try {
+    const signalBundle = {
+      registrationId: parseInt(preKeyBundle.registrationId), // Ensure number type
+      identityKey: toBuffer(preKeyBundle.identityKey),
+      signedPreKey: {
+        keyId: preKeyBundle.signedPreKey.keyId,
+        publicKey: toBuffer(preKeyBundle.signedPreKey.publicKey),
+        signature: toBuffer(preKeyBundle.signedPreKey.signature)
+      }
+    };
+
+    const builder = new SessionBuilder(store, remoteUserId);
+    return await builder.processPreKey(signalBundle);
+  } catch (err) {
+    console.error("❌ Signal Session Build Failed:", err);
+    throw new Error("Failed to process pre-key bundle. Ensure your keys are valid Base64.");
+  }
 },
 
   async encrypt(remoteUserId, clearText) {
