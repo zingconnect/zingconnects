@@ -1,26 +1,26 @@
 import * as libsignalModule from 'libsignal';
 import { ZingSignalStore } from './ZingSignalStore';
 
-/**
- * Robust resolution:
- * Some versions/bundlers place exports inside the 'default' key,
- * while others expose them at the top level. This ensures we catch both.
- */
+// 1. Resolve the module correctly
 const libsignal = libsignalModule.default || libsignalModule;
 
-// Extract helpers from the resolved module
-const { KeyHelper, SessionBuilder, SessionCipher } = libsignal;
+// 2. Map lowercase exports to the capitalized constants your code expects
+// This handles the specific structure revealed by your debug logs
+const KeyHelper = libsignal.keyhelper || libsignal.KeyHelper;
+const SessionBuilder = libsignal.sessionbuilder || libsignal.SessionBuilder;
+const SessionCipher = libsignal.sessioncipher || libsignal.SessionCipher;
 
-// Final sanity check for environment debugging
+// Final sanity check
 if (!KeyHelper) {
-  console.error("CRITICAL: libsignal exports not found. Received:", libsignal);
-  throw new Error("Failed to initialize libsignal: KeyHelper is undefined.");
+  console.error("CRITICAL: Could not map KeyHelper. Received structure:", libsignal);
+  throw new Error("Failed to initialize libsignal: KeyHelper mapping failed.");
 }
 
 const store = new ZingSignalStore();
 
 /**
  * 🔒 ZINGCONNECT SIGNAL ENGINE
+ * The Singleton orchestrator for E2EE operations.
  */
 export const SignalEngine = {
   store,
@@ -51,7 +51,8 @@ export const SignalEngine = {
 
   async encrypt(remoteUserId, clearText) {
     const sessionCipher = new SessionCipher(store, remoteUserId);
-    return await sessionCipher.encrypt(new TextEncoder().encode(clearText));
+    const encrypted = await sessionCipher.encrypt(new TextEncoder().encode(clearText));
+    return encrypted;
   },
 
   async decrypt(remoteUserId, ciphertextBundle) {
@@ -65,6 +66,7 @@ export const SignalEngine = {
   }
 };
 
+// --- PROXY EXPORTS ---
 export const { 
   initializeSession, 
   encrypt, 

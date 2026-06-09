@@ -1,6 +1,10 @@
 import { openDB } from 'idb';
+import * as libsignalModule from 'libsignal';
 
-import { KeyHelper } from 'libsignal';
+// Resolve the module and map the exports exactly as your console logs require
+const libsignal = libsignalModule.default || libsignalModule;
+const KeyHelper = libsignal.keyhelper || libsignal.KeyHelper;
+
 /**
  * 🔒 ZINGSIGNALSTORE
  * Handles persistent storage of IdentityKeys, Sessions, and PreKeys in IndexedDB.
@@ -13,12 +17,11 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
     db.createObjectStore('identity');
     db.createObjectStore('session');
     db.createObjectStore('prekeys');
-    db.createObjectStore('misc'); // For registrationId, etc.
+    db.createObjectStore('misc');
   },
 });
 
 export class ZingSignalStore {
-  // --- IDENTITY KEYS ---
   async saveIdentity(identifier, identityKey) {
     const db = await dbPromise;
     await db.put('identity', identityKey, identifier);
@@ -29,7 +32,6 @@ export class ZingSignalStore {
     return await db.get('identity', identifier);
   }
 
-  // --- SESSIONS ---
   async saveSession(identifier, record) {
     const db = await dbPromise;
     await db.put('session', record, identifier);
@@ -40,34 +42,31 @@ export class ZingSignalStore {
     return await db.get('session', identifier);
   }
 
-async getLocalRegistrationId() {
+  async getLocalRegistrationId() {
     const db = await dbPromise;
     let id = await db.get('misc', 'registrationId');
     if (!id) {
-      // 2. Use the imported KeyHelper constant directly
+      // KeyHelper is now correctly mapped
       id = KeyHelper.generateRegistrationId(); 
       await db.put('misc', id, 'registrationId');
     }
     return id;
   }
 
-// In ZingSignalStore.js
-async saveRegistrationId(id) {
-  const db = await dbPromise;
-  await db.put('misc', id, 'registrationId');
-}
+  async saveRegistrationId(id) {
+    const db = await dbPromise;
+    await db.put('misc', id, 'registrationId');
+  }
   
   async isTrustedIdentity(identifier, identityKey, direction) {
-    // For now, we trust. In production, check against stored identity.
     return true; 
   }
 
   async savePeerPublicKey(identifier, key) {
-  const db = await dbPromise;
-  await db.put('identity', key, `peer:${identifier}`);
-}
+    const db = await dbPromise;
+    await db.put('identity', key, `peer:${identifier}`);
+  }
 
-  // --- REQUIRED BY LIBSIGNAL ---
   async loadPreKey(keyId) {
     const db = await dbPromise;
     return await db.get('prekeys', keyId);
@@ -94,6 +93,4 @@ async saveRegistrationId(id) {
     ]);
     await tx.done;
   }
-
 }
-
