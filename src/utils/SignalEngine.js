@@ -6,10 +6,28 @@ const lib = libsignalModule.default || libsignalModule;
 
 const store = new ZingSignalStore();
 
-// Utility for Base64
-const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
-const toBuffer = (base64) => Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
+// Robust ArrayBuffer to Base64
+const bufferToBase64 = (buf) => {
+  if (!buf) return "";
+  const bytes = new Uint8Array(buf.buffer || buf);
+  let binary = "";
+  // Use a loop instead of the spread operator to avoid call stack limits
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
 
+// Robust Base64 to ArrayBuffer
+const toBuffer = (base64) => {
+  if (!base64) return new ArrayBuffer(0);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
 export const SignalEngine = {
   store,
 
