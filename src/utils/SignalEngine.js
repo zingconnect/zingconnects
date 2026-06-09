@@ -45,7 +45,7 @@ export const SignalEngine = {
       preKeys.push(await KeyHelper.generatePreKey(i));
     }
     
-    const preKeyBundle = {
+  const preKeyBundle = {
   registrationId: registrationId,
   identityKey: bufferToBase64(identityKeyPair.pubKey),
   signedPreKey: {
@@ -54,14 +54,26 @@ export const SignalEngine = {
     signature: bufferToBase64(signedPreKey.signature)
   },
   preKeys: preKeys.map(pk => {
-    // Explicitly handle the key
     const pubKey = pk.keyPair.pubKey;
+    
+    // CONSOLE LOG: Deep inspection
+    console.log(`[DEBUG] KeyID: ${pk.keyId}`);
+    console.log(`[DEBUG] pubKey type: ${typeof pubKey}`);
+    console.log(`[DEBUG] pubKey value:`, pubKey);
+    console.log(`[DEBUG] bufferToBase64 result: '${bufferToBase64(pubKey)}'`);
+    
     return {
       keyId: pk.keyId,
       publicKey: bufferToBase64(pubKey)
     };
   })
 };
+
+// Final sanity check before database save
+console.log("[DEBUG] Final PreKeyBundle Summary:", {
+  count: preKeyBundle.preKeys.length,
+  firstKeySample: preKeyBundle.preKeys[0].publicKey
+});
     await store.saveIdentity('local', identityKeyPair);
     await store.saveRegistrationId(registrationId);
     
