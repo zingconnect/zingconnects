@@ -668,39 +668,49 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     next(err); 
   }
 });
-
 app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
-        const { identityKey, signedPreKey, preKeys } = req.body;
     
-    // 1. Basic structural validation
-    if (!preKeys || !Array.isArray(preKeys)) {
+    // 1. Extract registrationId along with other keys
+    const { registrationId, identityKey, signedPreKey, preKeys } = req.body;
+    
+    // 2. Validate structural integrity
+    if (!preKeys || !Array.isArray(preKeys) || !registrationId) {
       return res.status(400).json({ 
         success: false, 
-        message: "Key bundle requires a valid preKeys array." 
+        message: "Key bundle requires a valid preKeys array and a registrationId." 
       });
     }
 
     const userId = req.user.id;
     const targetModel = req.user.role === 'agent' ? mongoose.models.Agent : mongoose.models.User;
+
+    // 3. Update query with slice to prevent document bloat
     const updateQuery = {
-      $push: { "publicKeyJwk.preKeys": { $each: preKeys } }
+      $push: { 
+        "publicKeyJwk.preKeys": { 
+          $each: preKeys,
+          $slice: -100 // Keeps only the most recent 100 keys
+        } 
+      },
+      $set: { 
+        "publicKeyJwk.identityKey": identityKey,
+        "publicKeyJwk.signedPreKey": signedPreKey,
+        "publicKeyJwk.registrationId": registrationId // Persist the ID
+      }
     };
-    if (identityKey) {
-      updateQuery.$set = { "publicKeyJwk.identityKey": identityKey };
-    }
-    if (signedPreKey) {
-      updateQuery.$set = { ...updateQuery.$set, "publicKeyJwk.signedPreKey": signedPreKey };
-    }
+
     const updatedProfile = await targetModel.findByIdAndUpdate(
       userId,
       updateQuery,
       { new: true }
     );
+
     if (!updatedProfile) {
       return res.status(404).json({ success: false, message: "Profile not found." });
     }
+
     return res.status(200).json({ 
       success: true, 
       message: "Key bundle updated successfully." 
@@ -4024,15 +4034,19 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error("🔴 FULL ERROR STACK:", err);
-  res.status(500).json({
-    success: false,
-    message: "Debug Info",
-    error: err.message,
-    stack: err.stack // This will point to the exact line
+  // 1. Check if 'err' exists before logging or using it
+  const errorMessage = err ? err.message : 'Unknown internal server error';
+  const errorStack = err ? err.stack : 'No stack trace available';
+  
+  console.error("❌ Server Error:", err || 'Undefined error object');
+
+  res.status(500).json({ 
+    success: false, 
+    message: errorMessage,
+    // Only send the stack trace in development mode for security
+    stack: process.env.NODE_ENV === 'development' ? errorStack : undefined 
   });
 });
-
 // 🚀 Server Activation Layer
 const PORT = process.env.PORT || 5000;
 

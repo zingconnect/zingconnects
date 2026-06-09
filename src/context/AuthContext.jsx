@@ -1,6 +1,7 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { secureFetch } from "../../api/utils/api";
 import { SignalEngine } from '../utils/SignalEngine';
+console.log(`DEBUG: Checking SignalEngine.store object:`, p.store);
 
 const AuthContext = createContext(null);
 
@@ -14,37 +15,40 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     verifySession();
   }, []);
+  
+const initializeCrypto = useCallback(async () => {
+  setIsCryptoReady(false);
+  try {
+    const { SignalEngine } = await import('../utils/SignalEngine');
+    
+    const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
+    const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 
-  const initializeCrypto = useCallback(async () => {
-    setIsCryptoReady(false);
-    try {
-      // Use the centralized engine we built
-      const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
-      const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+    await secureFetch('/api/update-crypto-key', {
+      method: 'PUT',
+      body: JSON.stringify({ 
+        // ADD THIS: The registrationId is critical for X3DH
+        registrationId: preKeyBundle.registrationId, 
+        
+        identityKey: bufferToBase64(identityKeyPair.pubKey), 
+        signedPreKey: {
+          keyId: preKeyBundle.signedPreKey.keyId,
+          publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+          signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+        },
+        preKeys: preKeyBundle.preKeys.map(pk => ({
+          keyId: pk.keyId,
+          publicKey: bufferToBase64(pk.publicKey)
+        }))
+      })
+    });
 
-      await secureFetch('/api/update-crypto-key', {
-        method: 'PUT',
-        body: JSON.stringify({ 
-          identityKey: bufferToBase64(identityKeyPair.pubKey), 
-          signedPreKey: {
-            keyId: preKeyBundle.signedPreKey.keyId,
-            publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-            signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-          },
-          preKeys: preKeyBundle.preKeys.map(pk => ({
-            keyId: pk.keyId,
-            publicKey: bufferToBase64(pk.publicKey)
-          }))
-        })
-      });
-
-      setIsCryptoReady(true);
-      console.log("✅ E2EE Persistent-session initialized.");
-    } catch (err) {
-      console.error("Crypto init failed:", err);
-    }
-  }, []);
-
+    setIsCryptoReady(true);
+    console.log("✅ E2EE Persistent-session initialized with RegID:", preKeyBundle.registrationId);
+  } catch (err) {
+    console.error("Crypto init failed:", err);
+  }
+}, []);
   const verifySession = async () => {
     try {
       const response = await secureFetch('/api/agents/me'); 

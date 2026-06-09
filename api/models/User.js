@@ -49,17 +49,18 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ""
   },
+// Inside agentSchema, update publicKeyJwk
 publicKeyJwk: {
-  registrationId: { type: Number, required: false }, // 👈 CRITICAL: Needed for E2EE
-  identityKey: { type: String, required: false }, 
+  registrationId: { type: Number, required: false }, // ADD THIS
+  identityKey: { type: String, required: false },
   signedPreKey: { 
     keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false }, 
+    publicKey: { type: String, required: false },
     signature: { type: String, required: false } 
   },
   preKeys: [{
-    keyId: { type: Number, required: true },
-    publicKey: { type: String, required: true }
+    keyId: { type: Number, required: false },
+    publicKey: { type: String, required: false }
   }]
 },
   role: { 

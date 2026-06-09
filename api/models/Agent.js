@@ -48,7 +48,9 @@ lastNotificationEmail: {
   type: Date,
   default: null
 },
+// Inside agentSchema, update publicKeyJwk
 publicKeyJwk: {
+  registrationId: { type: Number, required: false }, // ADD THIS
   identityKey: { type: String, required: false },
   signedPreKey: { 
     keyId: { type: Number, required: false },
@@ -56,8 +58,8 @@ publicKeyJwk: {
     signature: { type: String, required: false } 
   },
   preKeys: [{
-    keyId: { type: Number, required: false }, // Changed to false
-    publicKey: { type: String, required: false } // Changed to false
+    keyId: { type: Number, required: false },
+    publicKey: { type: String, required: false }
   }]
 },
   plan: { 
