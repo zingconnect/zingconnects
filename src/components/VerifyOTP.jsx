@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
+import { secureFetch } from "../../api/utils/api";
 import { initializeSession } from "../utils/SignalEngine"; 
 import { SignalEngine } from "../utils/SignalEngine";
 import * as libsignal from 'libsignal';
@@ -72,8 +73,6 @@ const handleVerify = async (e) => {
         }))
       }
     };
-
-    // 3. Single request: Verification + Crypto Registration
     const response = await secureFetch('/api/agents/verify-otp', {
       method: 'POST',
       body: JSON.stringify(payload),
