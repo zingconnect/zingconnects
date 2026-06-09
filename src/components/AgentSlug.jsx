@@ -133,6 +133,8 @@ useEffect(() => {
 React.useEffect(() => {
   return () => { isMounted.current = false; };
 }, []);
+
+
 const handleUserInquiry = async (e) => {
   e.preventDefault();
 
@@ -155,6 +157,7 @@ const handleUserInquiry = async (e) => {
 
     if (!response.ok) throw new Error(data.message || "Handshake failed");
     if (data.agentIdentity) {
+      console.log("DEBUG: Checking method:", typeof SignalEngine.store.savePeerBundle);
       await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
       await SignalEngine.initializeSession(slug, data.agentIdentity);
       

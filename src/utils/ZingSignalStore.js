@@ -27,6 +27,13 @@ export class ZingSignalStore {
     await db.put('identity', identityKey, identifier);
   }
 
+// Add this inside the ZingSignalStore class in ZingSignalStore.js
+async savePeerBundle(slug, bundle) {
+  const db = await dbPromise;
+  // Use the slug as the key to retrieve this peer's keys later
+  await db.put('identity', bundle, `peer_bundle:${slug}`);
+}
+
   async loadIdentityKey(identifier) {
     const db = await dbPromise;
     return await db.get('identity', identifier);

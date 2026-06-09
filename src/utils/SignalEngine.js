@@ -17,6 +17,10 @@ const store = new ZingSignalStore();
 export const SignalEngine = {
   store,
 
+  async savePeerBundle(slug, bundle) {
+     return await store.savePeerBundle(slug, bundle);
+  },
+  
 async setupIdentity() {
     // 1. Generate identity keys
     const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
