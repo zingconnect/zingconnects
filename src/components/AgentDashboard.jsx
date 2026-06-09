@@ -1408,6 +1408,7 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
 }, [isDualLoginConflict]);
+
 useEffect(() => {
   let isMounted = true;
 
@@ -1907,6 +1908,8 @@ useEffect(() => {
   const interval = setInterval(refreshMessages, 5000);
   return () => clearInterval(interval);
 }, [selectedUser?._id, callStatus, limit]); 
+
+
 useEffect(() => {
   const setupNotifications = async () => {
     // 1. Ensure token is available
@@ -1953,7 +1956,7 @@ useEffect(() => {
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     setupNotifications();
   }
-}, [token]); // token should be stable; this effect runs once on login
+}, [token]); 
 
 
 useEffect(() => {
