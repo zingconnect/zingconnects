@@ -16,24 +16,36 @@ const store = new ZingSignalStore();
 
 export const SignalEngine = {
   store,
-
- async setupIdentity() {
-    // 1. Generate keys
+async setupIdentity() {
+    // --- DEBUG INSPECTION ---
+    console.log("DEBUG: KeyHelper object structure:", KeyHelper);
+    console.log("DEBUG: KeyHelper keys:", Object.keys(KeyHelper));
+    
+    // Check if KeyHelper is a class instance or a static module
+    // If KeyHelper is a class, you may need to instantiate it: new KeyHelper()
+    
+    // 1. Generate identity keys
     const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     const registrationId = KeyHelper.generateRegistrationId();
     
     // 2. Generate SignedPreKey
+    // Note: If this fails, look at the console log to see if it is named 
+    // generateSignedPreKey, generateSignedPreKeyBundle, or similar.
     const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
     
     // 3. Generate One-Time PreKeys
+    // If 'generatePreKeys' is missing, the console logs above will reveal the correct name
+    if (typeof KeyHelper.generatePreKeys !== 'function') {
+        console.error("CRITICAL: generatePreKeys is not a function on KeyHelper. Available methods:", Object.getOwnPropertyNames(KeyHelper));
+    }
     const preKeys = await KeyHelper.generatePreKeys(1, 100); 
 
-    // 4. Construct bundle (Ensuring properties exist)
+    // 4. Construct bundle
     const preKeyBundle = {
-      identityKey: identityKeyPair.pubKey, // The public key buffer
+      identityKey: identityKeyPair.pubKey,
       signedPreKey: {
         keyId: signedPreKey.keyId,
-        publicKey: signedPreKey.keyPair.pubKey, // Access the pubKey from the keyPair
+        publicKey: signedPreKey.keyPair.pubKey,
         signature: signedPreKey.signature
       },
       preKeys: preKeys.map(pk => ({
