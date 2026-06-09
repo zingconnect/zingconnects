@@ -74,24 +74,27 @@ console.log("[DEBUG] Final PreKeyBundle Summary:", {
     return { identityKeyPair, preKeyBundle };
   },
 
-  async initializeSession(remoteUserId, preKeyBundle) {
+async initializeSession(remoteUserId, preKeyBundle) {
     const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
     
-    // 1. Prepare the bundle correctly
+    // 1. Basic bundle
     const signalBundle = {
-      registrationId: parseInt(preKeyBundle.registrationId),
-      identityKey: toBuffer(preKeyBundle.identityKey),
-      signedPreKey: {
-        keyId: preKeyBundle.signedPreKey.keyId,
-        publicKey: toBuffer(preKeyBundle.signedPreKey.publicKey),
-        signature: toBuffer(preKeyBundle.signedPreKey.signature)
-      },
-      // IMPORTANT: You MUST include a one-time preKey from the agent's preKeys array
-      preKey: {
-        keyId: preKeyBundle.preKeys[0].keyId, 
-        publicKey: toBuffer(preKeyBundle.preKeys[0].publicKey)
-      }
+        registrationId: parseInt(preKeyBundle.registrationId),
+        identityKey: toBuffer(preKeyBundle.identityKey),
+        signedPreKey: {
+            keyId: preKeyBundle.signedPreKey.keyId,
+            publicKey: toBuffer(preKeyBundle.signedPreKey.publicKey),
+            signature: toBuffer(preKeyBundle.signedPreKey.signature)
+        }
     };
+
+    // 2. Conditionally add the one-time preKey if it exists
+    if (preKeyBundle.preKeys && preKeyBundle.preKeys.length > 0) {
+        signalBundle.preKey = {
+            keyId: preKeyBundle.preKeys[0].keyId,
+            publicKey: toBuffer(preKeyBundle.preKeys[0].publicKey)
+        };
+    }
 
     const builder = new SessionBuilder(store, remoteUserId);
     return await builder.processPreKey(signalBundle);
