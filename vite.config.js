@@ -16,18 +16,16 @@ export default defineConfig({
       protocolImports: true,
     }),
   ],
- build: {
+  build: {
     sourcemap: false, 
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
-        // Keeps chunk names predictable and prevents cache collisions
         manualChunks(id) {
           if (id.includes('node_modules')) {
             return 'vendor';
           }
         },
-        // Helps browser handle hashed assets better
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash].[ext]'
@@ -40,8 +38,12 @@ export default defineConfig({
       ],
     },
   },
+  // Ensure libsignal is NOT excluded here
   optimizeDeps: {
-    // This tells Vite to bypass these during the dependency pre-bundling step
     exclude: ['flutterwave-node-v3', 'aws-sdk'] 
+  },
+  // Force Vite to bundle libsignal for the browser
+  ssr: {
+    noExternal: ['libsignal']
   }
 })

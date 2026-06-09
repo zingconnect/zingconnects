@@ -1,14 +1,24 @@
-// Corrected imports: use the named exports directly
-import { KeyHelper, SessionBuilder, SessionCipher } from 'libsignal';
+import * as libsignalModule from 'libsignal';
 import { ZingSignalStore } from './ZingSignalStore';
+
+/**
+ * Robust resolution of libsignal exports to handle both 
+ * direct ESM named exports and 'default' export wrappers.
+ */
+const libsignal = libsignalModule.default || libsignalModule;
+const { KeyHelper, SessionBuilder, SessionCipher } = libsignal;
 
 const store = new ZingSignalStore();
 
+/**
+ * 🔒 ZINGCONNECT SIGNAL ENGINE
+ * The Singleton orchestrator for E2EE operations.
+ */
 export const SignalEngine = {
   store,
 
   async setupIdentity() {
-    // 1. Generate keys using the imported KeyHelper constant
+    // 1. Generate keys
     const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     const registrationId = KeyHelper.generateRegistrationId();
     
@@ -16,7 +26,7 @@ export const SignalEngine = {
     await store.saveIdentity('local', identityKeyPair);
     await store.saveRegistrationId(registrationId);
     
-    // 3. Prepare bundle - FIX: Use KeyHelper (the imported constant), not libsignal
+    // 3. Prepare bundle for the backend
     const preKeyBundle = await KeyHelper.generatePreKeyBundle(registrationId, 1);
     
     return { identityKeyPair, preKeyBundle };
@@ -24,10 +34,9 @@ export const SignalEngine = {
 
   async initializeSession(remoteUserId, preKeyBundle) {
     try {
-      // FIX: Use the imported SessionBuilder constant
       const sessionBuilder = new SessionBuilder(store, remoteUserId);
       await sessionBuilder.processPreKey(preKeyBundle);
-      console.log(`✅ Session established with: ${remoteUserId}`);
+      console.log(`✅ Session successfully established with: ${remoteUserId}`);
       return true;
     } catch (error) {
       console.error("❌ X3DH Handshake failed:", error);
@@ -36,13 +45,12 @@ export const SignalEngine = {
   },
 
   async encrypt(remoteUserId, clearText) {
-    // FIX: Use the imported SessionCipher constant
     const sessionCipher = new SessionCipher(store, remoteUserId);
-    return await sessionCipher.encrypt(new TextEncoder().encode(clearText));
+    const encrypted = await sessionCipher.encrypt(new TextEncoder().encode(clearText));
+    return encrypted;
   },
 
   async decrypt(remoteUserId, ciphertextBundle) {
-    // FIX: Use the imported SessionCipher constant
     const sessionCipher = new SessionCipher(store, remoteUserId);
     const decrypted = await sessionCipher.decrypt(ciphertextBundle);
     return new TextDecoder().decode(decrypted);
@@ -52,3 +60,11 @@ export const SignalEngine = {
     await store.clearAll();
   }
 };
+
+// --- PROXY EXPORTS ---
+export const { 
+  initializeSession, 
+  encrypt, 
+  decrypt, 
+  setupIdentity 
+} = SignalEngine;
