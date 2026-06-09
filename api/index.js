@@ -3966,7 +3966,7 @@ app.post('/api/admin/support/reply', authenticateToken, isAdmin, async (req, res
 });
 
 app.get('/api/agents/me', authenticateToken, async (req, res) => {
-  console.log("🔍 Incoming request to /api/auth/me");
+  console.log("🔍 Incoming request to /api/agents/me");
   console.log("Headers:", req.headers);
   await connectToDatabase();
 
@@ -4024,10 +4024,12 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error("🔴 Protected Application Fault:", err.stack);
-  res.status(err.status || 500).json({
+  console.error("🔴 FULL ERROR STACK:", err);
+  res.status(500).json({
     success: false,
-    message: "An internal server error occurred safely."
+    message: "Debug Info",
+    error: err.message,
+    stack: err.stack // This will point to the exact line
   });
 });
 

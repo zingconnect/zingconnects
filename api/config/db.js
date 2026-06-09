@@ -20,8 +20,7 @@ const commonOpts = {
 };
 
 export async function connectToDatabase() {
-  // 1. If already connected, return the cached connection immediately
-  if (cached.conn && mongoose.connection.readyState === 1) {
+  if (cached.conn && (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2)) {
     return cached.conn;
   }
 
@@ -68,6 +67,7 @@ export async function connectToDatabase() {
     return await cached.promise;
   } catch (err) {
     cached.promise = null;
+    mongoose.disconnect(); 
     throw err;
   }
 }
