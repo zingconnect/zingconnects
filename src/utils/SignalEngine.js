@@ -14,44 +14,41 @@ console.log("DEBUG: KeyHelper object:", KeyHelper);
 
 const store = new ZingSignalStore();
 
+const bufferToBase64 = (buf) => {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+};
+
 export const SignalEngine = {
   store,
   
 async setupIdentity() {
-    // --- DEBUG INSPECTION ---
-    console.log("DEBUG: KeyHelper object structure:", KeyHelper);
-    console.log("DEBUG: KeyHelper keys:", Object.keys(KeyHelper));
-    
-    // Check if KeyHelper is a class instance or a static module
-    // If KeyHelper is a class, you may need to instantiate it: new KeyHelper()
-    
-    // 1. Generate identity keys
+    const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
+    if (!KeyHelper) throw new Error("KeyHelper not found");
+
     const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     const registrationId = KeyHelper.generateRegistrationId();
-    
-    // 2. Generate SignedPreKey
-    // Note: If this fails, look at the console log to see if it is named 
-    // generateSignedPreKey, generateSignedPreKeyBundle, or similar.
     const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
     
-    // 3. Generate One-Time PreKeys
-    // If 'generatePreKeys' is missing, the console logs above will reveal the correct name
-    if (typeof KeyHelper.generatePreKeys !== 'function') {
-        console.error("CRITICAL: generatePreKeys is not a function on KeyHelper. Available methods:", Object.getOwnPropertyNames(KeyHelper));
+    const preKeys = [];
+    for (let i = 1; i <= 100; i++) {
+      preKeys.push(await KeyHelper.generatePreKey(i));
     }
-    const preKeys = await KeyHelper.generatePreKeys(1, 100); 
-
-    // 4. Construct bundle
+    
+    // Construct bundle for the backend (Serialized to Base64)
     const preKeyBundle = {
-      identityKey: identityKeyPair.pubKey,
+      registrationId: registrationId,
+      identityKey: bufferToBase64(identityKeyPair.pubKey),
       signedPreKey: {
         keyId: signedPreKey.keyId,
-        publicKey: signedPreKey.keyPair.pubKey,
-        signature: signedPreKey.signature
+        publicKey: bufferToBase64(signedPreKey.keyPair.pubKey),
+        signature: bufferToBase64(signedPreKey.signature)
       },
       preKeys: preKeys.map(pk => ({
         keyId: pk.keyId,
-        publicKey: pk.keyPair.pubKey
+        publicKey: bufferToBase64(pk.keyPair.pubKey)
       }))
     };
     
@@ -61,9 +58,23 @@ async setupIdentity() {
     return { identityKeyPair, preKeyBundle };
   },
 
-  async initializeSession(remoteUserId, preKeyBundle) {
+ async initializeSession(remoteUserId, preKeyBundle) {
+    // Utility to convert Base64 back to ArrayBuffer
+    const toBuffer = (base64) => Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
+
+    const signalBundle = {
+      registrationId: parseInt(preKeyBundle.registrationId),
+      identityKey: toBuffer(preKeyBundle.identityKey),
+      signedPreKey: {
+        keyId: preKeyBundle.signedPreKey.keyId,
+        publicKey: toBuffer(preKeyBundle.signedPreKey.publicKey),
+        signature: toBuffer(preKeyBundle.signedPreKey.signature)
+      }
+    };
+
+    const SessionBuilder = lib.SessionBuilder || lib.sessionbuilder || lib.default?.SessionBuilder;
     const builder = new SessionBuilder(store, remoteUserId);
-    return await builder.processPreKey(preKeyBundle);
+    return await builder.processPreKey(signalBundle);
   },
 
   async encrypt(remoteUserId, clearText) {
