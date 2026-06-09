@@ -98,4 +98,14 @@ const verifySession = async () => {
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+// Replace the bottom of AuthContext.js with this:
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  
+  if (context === undefined || context === null) {
+    // This will help you identify if the provider is simply not being found
+    throw new Error('useAuth must be used within an AuthProvider. Is the component inside the App tree?');
+  }
+  
+  return context;
+};
