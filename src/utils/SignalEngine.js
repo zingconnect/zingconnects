@@ -3,7 +3,13 @@ import { ZingSignalStore } from './ZingSignalStore';
 
 // 1. Resolve module
 const libsignal = libsignalModule.default || libsignalModule;
-
+const { 
+  KeyHelper, 
+  SessionBuilder, 
+  SessionCipher 
+} = libsignal;
+console.log("DEBUG: KeyHelper:", KeyHelper);
+console.log("DEBUG: SessionBuilder:", SessionBuilder);
 // 2. Map exports safely
 const KeyHelper = libsignal.keyhelper || libsignal.KeyHelper;
 const SessionBuilder = libsignal.sessionbuilder || libsignal.SessionBuilder;
@@ -57,23 +63,20 @@ async setupIdentity() {
     return { identityKeyPair, preKeyBundle };
   },
 
- async initializeSession(remoteUserId, preKeyBundle) {
-  const formattedBundle = {
+async initializeSession(remoteUserId, preKeyBundle) {
+  // Convert base64/string keys to ArrayBuffer if your store returns strings
+  const signalBundle = {
     registrationId: preKeyBundle.registrationId,
-    identityKey: preKeyBundle.identityKey,
-    signedPreKey: preKeyBundle.signedPreKey,
-    preKey: preKeyBundle.preKey // The specific one-time key if present
+    identityKey: Uint8Array.from(atob(preKeyBundle.identityKey), c => c.charCodeAt(0)).buffer,
+    signedPreKey: {
+      keyId: preKeyBundle.signedPreKey.keyId,
+      publicKey: Uint8Array.from(atob(preKeyBundle.signedPreKey.publicKey), c => c.charCodeAt(0)).buffer,
+      signature: Uint8Array.from(atob(preKeyBundle.signedPreKey.signature), c => c.charCodeAt(0)).buffer
+    }
   };
 
   const builder = new SessionBuilder(store, remoteUserId);
-  
-  // 2. Defensive check
-  if (typeof builder.processPreKey !== 'function') {
-    console.error("DEBUG: Builder object:", builder);
-    throw new Error("SessionBuilder.processPreKey is not a function. Check libsignal import.");
-  }
-
-  return await builder.processPreKey(formattedBundle);
+  return await builder.processPreKey(signalBundle);
 },
 
   async encrypt(remoteUserId, clearText) {

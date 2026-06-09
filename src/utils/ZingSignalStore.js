@@ -49,10 +49,11 @@ async savePeerBundle(slug, bundle) {
     return !!(await db.get('session', identifier));
   }
 
-  async loadSession(identifier) {
-    const db = await dbPromise;
-    return await db.get('session', identifier);
-  }
+ async loadSession(identifier) {
+  const db = await dbPromise;
+  const session = await db.get('session', identifier);
+  return session || null; // MUST return null if not found, not undefined
+}
 
  async loadRegistrationId(identifier) {
   const db = await dbPromise;
