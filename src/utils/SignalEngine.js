@@ -1,6 +1,6 @@
 import * as libsignalModule from 'libsignal';
 import { ZingSignalStore } from './ZingSignalStore';
-import { bufferToBase64 } from './SignalUtils'; // Helper imported correctly
+import { bufferToBase64, prepareBundleForSignal } from './SignalUtils';
 
 const lib = libsignalModule.default || libsignalModule;
 const store = new ZingSignalStore();
@@ -80,10 +80,11 @@ async setupIdentity() {
   },
 
 async initializeSession(remoteUserId, peerBundle) {
+  const formattedBundle = prepareBundleForSignal(peerBundle);
   const lib = libsignalModule.default || libsignalModule;
   const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
-    const builder = new SessionBuilder(store, remoteUserId);
-    await builder.processPreKey(peerBundle);
+  const builder = new SessionBuilder(store, remoteUserId);
+    await builder.processPreKey(formattedBundle);
   
   console.log(`✅ Session initialized for ${remoteUserId}`);
 },

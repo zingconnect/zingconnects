@@ -140,13 +140,9 @@ const handleUserInquiry = async (e) => {
   setIsProcessing(true);
 
   try {
-    // 1. Setup User Identity and save to store
+    // 1. Setup User Identity
     const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
     await SignalEngine.store.saveIdentity('local', identityKeyPair);
-
-    // Verify identity was persisted correctly
-  const identity = await SignalEngine.store.loadIdentityKey('local');
-    if (!identity) throw new Error("Local identity was not saved correctly.");
 
     // 2. Initiate secure handshake
     const response = await secureFetch('/api/users/handshake', {
@@ -161,23 +157,11 @@ const handleUserInquiry = async (e) => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "Handshake failed");
 
+    // 3. Initialize secure session
     if (data.agentIdentity) {
-      const bundle = {
-        registrationId: parseInt(data.agentIdentity.registrationId),
-        identityKey: toBuffer(data.agentIdentity.identityKey),
-        signedPreKey: {
-          keyId: data.agentIdentity.signedPreKey.keyId,
-          publicKey: toBuffer(data.agentIdentity.signedPreKey.publicKey),
-          signature: toBuffer(data.agentIdentity.signedPreKey.signature)
-        },
-        preKey: {
-          keyId: data.agentIdentity.preKeys[0].keyId,
-          publicKey: toBuffer(data.agentIdentity.preKeys[0].publicKey)
-        }
-      };
-
-      await SignalEngine.store.savePeerBundle(slug, bundle);
-      await SignalEngine.initializeSession(slug, bundle);
+      // Pass the raw bundle; the Engine handles conversion internally
+      await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
+      await SignalEngine.initializeSession(slug, data.agentIdentity);
       console.log(`✅ Secure session established with: ${slug}`);
     }
 
@@ -192,6 +176,7 @@ const handleUserInquiry = async (e) => {
     setIsProcessing(false);
   }
 };
+
 
 const handleAgentLogin = async (e) => {
   e.preventDefault();
