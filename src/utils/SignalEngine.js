@@ -130,32 +130,32 @@ async initialize(userId) {
 
 async sendMessage(remoteUserId, messageText) {
   const lib = libsignalModule.default || libsignalModule;
-  const address = getAddress(lib, remoteUserId);
   
-  // 1. Check if the session is already established
-  let session = await store.loadSession(remoteUserId);
+  // Normalize the ID: Ensure it's a string and trimmed
+  const normalizedId = String(remoteUserId).trim();
+  const address = new lib.ProtocolAddress(normalizedId, 1);
+  
+  let session = await store.loadSession(normalizedId);
 
-  // 2. If no session, perform the X3DH handshake
   if (!session) {
-    console.log(`🔒 Establishing new session for ${remoteUserId}`);
+    console.log(`🔒 Establishing new session for ${normalizedId}`);
     
-    // Fetch the remote bundle
-    const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
-    if (!response.ok) throw new Error("Could not fetch crypto bundle");
+    // Pass the model type if needed by your API
+    const response = await secureFetch(`/api/crypto/bundle/${normalizedId}?model=User`);
+    const data = await response.json();
     
-    const rawBundle = await response.json();
-    const preparedBundle = prepareBundleForSignal(rawBundle);
+    if (!data.success || !data.bundle) {
+        throw new Error("Could not fetch valid crypto bundle");
+    }
+
+    const preparedBundle = prepareBundleForSignal(data.bundle);
     
-    // Build the session
-    // The SessionBuilder uses the 'store' instance to save the record automatically
     const sessionBuilder = new lib.SessionBuilder(store, address);
     await sessionBuilder.processPreKey(preparedBundle);
     
-    // Verify persistence
-    session = await store.loadSession(remoteUserId);
-    if (!session) {
-      throw new Error("Critical: Session handshake completed but failed to persist to IndexedDB.");
-    }
+    // Verify persistence using the same normalized ID
+    session = await store.loadSession(normalizedId);
+    if (!session) throw new Error("Failed to persist session.");
   }
 
   // 3. Encrypt using the established session

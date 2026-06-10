@@ -77,19 +77,19 @@ async getIdentityKey(identifier) {
     return await db.get('session', identifier);
   }
 
- async saveSession(identifier, record) {
+async saveSession(identifier, record) {
   const db = await dbPromise;
-  const serialized = record.serialize(); 
-  await db.put('session', serialized, identifier);
+  console.log(`DEBUG: Saving session for: ${identifier}`);
+  const data = record.serialize(); 
+  await db.put('session', data, identifier);
 }
 
-
- async loadSession(identifier) {
+async loadSession(identifier) {
   const db = await dbPromise;
   const data = await db.get('session', identifier);
-  
+  console.log(`DEBUG: Attempting to load session for: ${identifier}, Found: ${!!data}`);
   if (!data) return null;
-    return libsignalModule.SessionRecord.deserialize(data);
+  return libsignalModule.SessionRecord.deserialize(data);
 }
 
   async getLocalRegistrationId() {

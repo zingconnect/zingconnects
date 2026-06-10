@@ -2048,7 +2048,6 @@ const handleResend = async (failedMsg) => {
 const handleSendMessage = async (e) => {
   if (e) e.preventDefault();
 
-  // Guard: Ensure SignalEngine is imported and ready
   if (typeof SignalEngine === 'undefined') {
     console.error("SignalEngine is not imported in this component.");
     return;
@@ -2081,25 +2080,14 @@ const handleSendMessage = async (e) => {
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    // Cryptographic Operation
-    const encryptedBundle = await SignalEngine.encrypt(selectedUser._id, textToSend);
-    
-    // Network Transmission
-    const response = await secureFetch('/api/messages/send', {
-      method: 'POST',
-      body: JSON.stringify({
-        receiverId: selectedUser._id,
-        receiverModel: selectedUser.modelType || 'User',
-        ...encryptedBundle 
-      })
-    });
+    // 🛡️ FIX: Use the engine's built-in sendMessage, which handles
+    // the X3DH handshake/session creation automatically.
+    const result = await SignalEngine.sendMessage(selectedUser._id, textToSend);
 
-    const data = await response.json();
-    if (!data.success) throw new Error(data.message || "Transmission rejected.");
-
+    // Update UI based on successful transmission
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { 
-        ...data.message, 
+        ...result.message, 
         decryptedText: textToSend, 
         isEncrypted: false,
         status: 'sent' 
@@ -2115,6 +2103,7 @@ const handleSendMessage = async (e) => {
     isSendingRef.current = false;
   }
 };
+
 
   return (
     <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
