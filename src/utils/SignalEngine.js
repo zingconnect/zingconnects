@@ -79,28 +79,16 @@ async initializeSession(remoteUserId, peerBundle) {
   const address = new lib.ProtocolAddress(remoteUserId, 1);
   const SessionBuilder = new (lib.SessionBuilder || lib.default?.SessionBuilder)(store, address);
 
-  // 1. Try the standard way
-  try {
-    await SessionBuilder.initIncoming(formattedBundle);
-    console.log(`✅ Session initialized`);
-    return;
-  } catch (e) {
-    console.warn("Attempt 1 failed, trying alternative structure...");
+  // Check if your library has a 'PreKeyBundle' class
+  if (lib.PreKeyBundle) {
+      const bundleInstance = new lib.PreKeyBundle(formattedBundle);
+      await SessionBuilder.initIncoming(bundleInstance);
+  } else {
+      // Fallback: pass as is
+      await SessionBuilder.initIncoming(formattedBundle);
   }
-
-  // 2. Try wrapping as { registrationId, identityKey, signedPreKey, preKey }
-  // Some versions require the PREKEY to be explicitly mapped:
-  const altBundle = {
-      ...formattedBundle,
-      preKey: formattedBundle.preKey || formattedBundle.preKey
-  };
   
-  try {
-      await SessionBuilder.initIncoming(altBundle);
-      console.log(`✅ Session initialized (Alternative)`);
-  } catch (e) {
-      console.error("Critical Failure: Even with alternative structure:", e);
-  }
+  console.log(`✅ Session initialized for ${remoteUserId}`);
 },
 
 async sendMessage(remoteUserId, messageText) {
