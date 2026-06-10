@@ -1,4 +1,5 @@
 import * as libsignalModule from 'libsignal';
+import { Buffer } from 'buffer'; 
 import { ZingSignalStore } from './ZingSignalStore';
 import { bufferToBase64, prepareBundleForSignal } from './SignalUtils';
 
@@ -55,24 +56,32 @@ async setupIdentity() {
 },
 
 async encrypt(remoteUserId, clearText) {
-    const lib = libsignalModule.default || libsignalModule;
-    const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
-    const address = getAddress(lib, remoteUserId);
-    const cipher = new SessionCipher(store, address);
-    
+  const lib = libsignalModule.default || libsignalModule;
+  const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
+  const address = getAddress(lib, remoteUserId);
+  const cipher = new SessionCipher(store, address);
     const encoded = new TextEncoder().encode(clearText);
-    return await cipher.encrypt(encoded);
-  },
+  const bufferMessage = Buffer.from(encoded); 
+  
+  return await cipher.encrypt(bufferMessage);
+},
 
-  async decrypt(remoteUserId, ciphertextBundle) {
-    const lib = libsignalModule.default || libsignalModule;
-    const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
-    const address = getAddress(lib, remoteUserId);
-    const cipher = new SessionCipher(store, address);
-    
-    const decoded = await cipher.decrypt(ciphertextBundle);
-    return new TextDecoder().decode(decoded);
-  },
+async decrypt(remoteUserId, ciphertextBundle) {
+  const lib = libsignalModule.default || libsignalModule;
+  const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
+  const address = getAddress(lib, remoteUserId);
+  const cipher = new SessionCipher(store, address);
+  
+  // 🛡️ FIX: Ensure ciphertextBundle is a Buffer if it arrives as Uint8Array
+  const bundle = Buffer.isBuffer(ciphertextBundle) 
+    ? ciphertextBundle 
+    : Buffer.from(ciphertextBundle);
+  
+  const decrypted = await cipher.decrypt(bundle);
+  return new TextDecoder().decode(decrypted);
+},
+
+
   async reset() {
     await store.clearAll();
   },

@@ -1,23 +1,16 @@
-// SignalUtils.js
+import { Buffer } from 'buffer';
+
 export const bufferToBase64 = (buf) => {
   if (!buf) return "";
-  // Ensure we are working with a Uint8Array
-  const bytes = new Uint8Array(buf.buffer ? buf.buffer : buf);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+  // Ensure we are working with a Buffer, then convert to Base64 string
+  const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  return buffer.toString('base64');
 };
 
 export const toBuffer = (base64) => {
-  if (!base64) return new ArrayBuffer(0);
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
+  if (!base64) return Buffer.alloc(0);
+  // Directly convert Base64 string to Buffer
+  return Buffer.from(base64, 'base64');
 };
 
 export const prepareBundleForSignal = (bundle) => {
@@ -29,7 +22,6 @@ export const prepareBundleForSignal = (bundle) => {
       publicKey: toBuffer(bundle.signedPreKey.publicKey),
       signature: toBuffer(bundle.signedPreKey.signature),
     },
-    // If the bundle has 'preKey' (singular), use it. If 'preKeys' (array), use the first.
     preKey: bundle.preKey ? {
       keyId: bundle.preKey.keyId,
       publicKey: toBuffer(bundle.preKey.publicKey)
