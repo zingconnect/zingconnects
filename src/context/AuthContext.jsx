@@ -53,7 +53,6 @@ export const AuthProvider = ({ children }) => {
   }
 };
 
-
  // Updated verifySession snippet
 const verifySession = async () => {
   setIsLoading(true); // Start loading

@@ -104,10 +104,11 @@ async initializeSession(remoteUserId, peerBundle) {
 async loadIdentity(identifier) {
     return await this.store.loadIdentity(identifier);
   },
-
+  
 async initialize(userId) {
     console.log("🛡️ Initializing Engine for:", userId);
-const identity = await this.store.loadIdentity('local');
+    // If you need to perform an async setup (like loading keys), do it here
+    const identity = await store.loadIdentity('local');
     if (!identity) {
       await this.setupIdentity();
     }
@@ -155,5 +156,3 @@ export const initializeSession = SignalEngine.initializeSession.bind(SignalEngin
 export const sendMessage = SignalEngine.sendMessage.bind(SignalEngine);
 export const receiveMessage = SignalEngine.receiveMessage.bind(SignalEngine);
 export const signalStore = store;
-
-export default SignalEngine;
