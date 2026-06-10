@@ -145,7 +145,7 @@ const handleUserInquiry = async (e) => {
     await SignalEngine.store.saveIdentity('local', identityKeyPair);
 
     // Verify identity was persisted correctly
-    const identity = await SignalEngine.store.loadIdentity('local');
+  const identity = await SignalEngine.store.loadIdentityKey('local');
     if (!identity) throw new Error("Local identity was not saved correctly.");
 
     // 2. Initiate secure handshake
