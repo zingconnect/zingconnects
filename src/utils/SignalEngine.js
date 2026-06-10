@@ -140,7 +140,6 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
   if (!session) {
     console.log(`🔒 Establishing new session for ${remoteUserId}`);
     
-    // Fetch the bundle
     const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
     if (!response.ok) throw new Error("Could not fetch crypto bundle");
     
@@ -149,24 +148,14 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
     
     const preparedBundle = prepareBundleForSignal(data.bundle);
     
-    // 🛡️ Robust SessionBuilder Initialization
     const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
     if (!SessionBuilder) {
       throw new Error("SessionBuilder could not be found in libsignal module");
     }
 
     const sessionBuilder = new SessionBuilder(store, address);
-
-    // Verify method existence
-    if (typeof sessionBuilder.processPreKey !== 'function') {
-      console.error("SessionBuilder prototype methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(sessionBuilder)));
-      throw new Error("processPreKey is not a function on SessionBuilder");
-    }
-
-await sessionBuilder.initOutgoing(preparedBundle);
-    console.log("DEBUG: SessionBuilder handshake successful.");
+    await sessionBuilder.initOutgoing(preparedBundle);
     
-    // Verify persistence
     session = await store.loadSession(remoteUserId);
     if (!session) {
       throw new Error("Critical: Session handshake completed but failed to persist.");
@@ -176,13 +165,18 @@ await sessionBuilder.initOutgoing(preparedBundle);
   // 3. Encrypt using the session
   const encrypted = await this.encrypt(remoteUserId, messageText);
   
-  // 4. Send to server
+  // 
+  
+  // 4. Send to server with backend-compliant payload
   const response = await secureFetch('/api/messages/send', {
     method: 'POST',
     body: JSON.stringify({
       receiverId: remoteUserId,
-      receiverModel: receiverModel, 
-      ...encrypted
+      receiverModel: receiverModel,
+      isEncrypted: true,           // 🛡️ Required by backend
+      ciphertext: encrypted.body,  // 🛡️ Mapped from Signal body
+      iv: encrypted.iv || '',      // 🛡️ Required by backend validation
+      fileType: 'text'
     })
   });
 
@@ -190,7 +184,7 @@ await sessionBuilder.initOutgoing(preparedBundle);
   if (!result.success) throw new Error(result.message || "Transmission rejected.");
   
   return result;
-}, 
+},
 
 async receiveMessage(remoteUserId, messageBundle) {
   const lib = libsignalModule.default || libsignalModule;
