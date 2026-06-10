@@ -4,27 +4,22 @@ import { bufferToBase64, prepareBundleForSignal } from './SignalUtils';
 
 const lib = libsignalModule.default || libsignalModule;
 const store = new ZingSignalStore();
+console.log("DEBUG: libsignal keys:", Object.keys(lib));
 
 export const SignalEngine = {
   store,
 async setupIdentity() {
   const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
   if (!KeyHelper) throw new Error("KeyHelper not found");
-
-  // 1. Generate core identity components
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
   const registrationId = KeyHelper.generateRegistrationId();
   const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
-
-  // Helper to extract key bytes safely regardless of structure
   const getBytes = (obj) => {
     if (!obj) return null;
     // Check common locations: pubKey, public, or the object itself if it's already a buffer
     const key = obj.pubKey || obj.public || obj;
     return key instanceof Uint8Array ? key.buffer : key;
   };
-
-  // 2. Generate pre-keys with thorough validation
   const preKeys = await Promise.all(
     Array.from({ length: 100 }, async (_, i) => {
       const pk = await KeyHelper.generatePreKey(i + 1);
@@ -36,8 +31,6 @@ async setupIdentity() {
       return { ...pk, extractedPubKey: pubKey };
     })
   );
-
-  // 3. Construct the bundle for backend transmission
   const preKeyBundle = {
     registrationId,
     identityKey: bufferToBase64(getBytes(identityKeyPair)),
@@ -81,18 +74,26 @@ async setupIdentity() {
 
 async initializeSession(remoteUserId, peerBundle) {
   const lib = libsignalModule.default || libsignalModule;
-  
   const formattedBundle = prepareBundleForSignal(peerBundle);
-    const address = new lib.SignalProtocolAddress(remoteUserId, 1);
+    const Address = lib.SignalProtocolAddress || lib.Address;
+  
+  if (!Address) {
+    throw new Error("Could not find Address constructor in libsignal library. Available keys: " + Object.keys(lib));
+  }
+
+  const address = new Address(remoteUserId, 1);
     const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
   const builder = new SessionBuilder(store, address);
-    try {
-    await builder.processPreKeyBundle(formattedBundle);
-    console.log(`✅ Session initialized for ${remoteUserId}`);
-  } catch (error) {
-    console.error("Failed to process preKey bundle:", error);
-    throw error;
+    if (typeof builder.processPreKeyBundle === 'function') {
+      await builder.processPreKeyBundle(formattedBundle);
+  } else if (typeof builder.processPreKey === 'function') {
+      await builder.processPreKey(formattedBundle);
+  } else {
+      console.error("Available methods on builder:", Object.getOwnPropertyNames(Object.getPrototypeOf(builder)));
+      throw new Error("Could not find processPreKeyBundle or processPreKey method.");
   }
+  
+  console.log(`✅ Session initialized for ${remoteUserId}`);
 },
 
 async sendMessage(remoteUserId, messageText) {
