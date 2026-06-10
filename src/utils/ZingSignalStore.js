@@ -48,11 +48,10 @@ export class ZingSignalStore {
     await db.put('identity', base64Key, identifier);
   }
 
-  async loadIdentityKey(identifier) {
+  async loadIdentity(identifier) {
     await this.ensureReady();
     const db = await dbPromise;
     const base64Key = await db.get('identity', identifier);
-    // Convert back to ArrayBuffer so libsignal can use it
     return base64Key ? toBuffer(base64Key) : null;
   }
 
