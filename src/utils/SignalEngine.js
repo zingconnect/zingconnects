@@ -155,3 +155,5 @@ export const initializeSession = SignalEngine.initializeSession.bind(SignalEngin
 export const sendMessage = SignalEngine.sendMessage.bind(SignalEngine);
 export const receiveMessage = SignalEngine.receiveMessage.bind(SignalEngine);
 export const signalStore = store;
+
+export default SignalEngine;

@@ -59,22 +59,37 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
+let cachedSignalEngine = null;
+
 const processMessageForUI = async (msg) => {
-const { SignalEngine } = await import('../utils/SignalEngine');
+  // 1. Singleton caching: Only import once
+  if (!cachedSignalEngine) {
+    const module = await import('../utils/SignalEngine');
+    cachedSignalEngine = module.default || module.SignalEngine;
+  }
+
+  if (!cachedSignalEngine) {
+    console.error("Critical: SignalEngine failed to load.");
+    return { ...msg, decryptedText: "🔒 [Engine Error]", isEncrypted: false };
+  }
+
   if (msg.decryptedText && !msg.isEncrypted) return msg;
+  
   if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
     return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
   }
+
   try {
     const payload = msg.payload || { ciphertext: msg.ciphertext, iv: msg.iv };
-    const decrypted = await SignalEngine.decrypt(msg.senderId, payload);
-    
+    // 2. Use the cached engine
+    const decrypted = await cachedSignalEngine.decrypt(msg.senderId, payload);
     return { ...msg, decryptedText: decrypted, isEncrypted: false };
   } catch (e) {
     console.error("Signal Ratchet Error:", e);
     return { ...msg, decryptedText: "🔒 [Session Desync - Re-initiating...]", isEncrypted: false };
   }
 };
+
 const MessageItem = ({ message }) => {
   const displayContent = message.decryptedText || message.text || "";
   
@@ -689,18 +704,26 @@ handleEndCall();
     return () => clearInterval(interval);
   }, []);
 
-
- useEffect(() => {
+useEffect(() => {
   if (isLoading || !token || !agentData?._id) return;
-  let isMounted = true; // Guard to prevent state updates on unmounted components
+  
+  let isMounted = true;
 
   const provisionAgentCryptoEnvironment = async () => {
     console.log("🔒 [SignalEngine] Provisioning secure environment...");
     try {
+      // 1. SAFE DYNAMIC IMPORT: Use the Singleton/Module pattern
+      const module = await import('../utils/SignalEngine');
+      const SignalEngine = module.default || module.SignalEngine;
+
+      // 2. Perform Provisioning
       const agentId = String(agentData._id);
-            const success = await initializeUserE2EEKeys(agentId, token);
+      const success = await initializeUserE2EEKeys(agentId, token);
+      
       if (!success) throw new Error("Identity provisioning failed.");
+      
       if (isMounted) {
+        // 3. Initialize the Engine instance
         await SignalEngine.initialize(agentId);
         console.log("✅ [SignalEngine] Cryptographic ratchet ready.");
       }
@@ -713,7 +736,6 @@ handleEndCall();
 
   provisionAgentCryptoEnvironment();
 
-  // 4. Cleanup function
   return () => {
     isMounted = false;
   };
