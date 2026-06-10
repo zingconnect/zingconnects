@@ -1,3 +1,6 @@
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
 export const ProtectedRoute = ({ requiredRole }) => {
   const { isAuthenticated, userRole, isLoading, isCryptoReady } = useAuth();
   const location = useLocation();
