@@ -2060,6 +2060,7 @@ const handleSendMessage = async (e) => {
   isSendingRef.current = true;
   const textToSend = newMessage.trim();
   const tempId = Date.now().toString();
+  const modelType = selectedUser.modelType || 'User'; // Define once
   setNewMessage('');
 
   const optimisticMsg = {
@@ -2069,7 +2070,7 @@ const handleSendMessage = async (e) => {
     senderId: agentData._id,
     senderModel: 'Agent',
     receiverId: selectedUser._id,
-    receiverModel: selectedUser.modelType || 'User',
+    receiverModel: modelType, // Use the unified modelType
     status: 'sending',
     isEncrypted: true,
     createdAt: new Date().toISOString(),
@@ -2080,20 +2081,19 @@ const handleSendMessage = async (e) => {
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    // 🛡️ FIX: Pass the dynamic model type to the engine
-    const modelType = selectedUser.modelType || 'User';
+    // 🛡️ Pass the dynamic model type correctly to the updated Engine
     const result = await SignalEngine.sendMessage(
       selectedUser._id, 
       modelType, 
       textToSend
     );
 
-    // Update UI based on successful transmission
+    // Update UI
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { 
         ...result.message, 
         decryptedText: textToSend, 
-        isEncrypted: false,
+        isEncrypted: false, // UI shows decrypted version
         status: 'sent' 
       } : msg
     ));

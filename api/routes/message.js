@@ -105,7 +105,8 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
 
-    const { receiverId, text, receiverModel, fileType, replyToId, iv, isEncrypted, ciphertext } = req.body;
+    // 1. Extract payload object (the full schema-compliant object)
+    const { receiverId, text, receiverModel, fileType, replyToId, isEncrypted, payload } = req.body;
 
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier." });
@@ -114,19 +115,19 @@ router.post('/send', authenticateToken, async (req, res, next) => {
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
     const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
 
-    // 1. Properly construct the payload object for E2EE
+    // 2. Validate encryption payload against Schema requirements
     let payloadData = null;
     if (isEncrypted) {
-      if (!ciphertext || !iv) {
-        return res.status(400).json({ success: false, message: "Encryption payload missing." });
+      if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || payload.counter === undefined) {
+        return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
       }
-      if (Buffer.from(iv, 'base64').length !== 12) {
-        return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
+      if (Buffer.from(payload.iv, 'base64').length !== 12) {
+        return res.status(400).json({ success: false, message: "Security violation: Invalid IV length." });
       }
-      payloadData = { ciphertext, iv };
+      payloadData = payload; // Directly assign the validated object
     }
 
-    // 2. Create message using the defined payloadData
+    // 3. Create message using the nested payload
     const newMessage = await Message.create({
       senderId: myId,
       senderModel: senderModelName,
@@ -140,16 +141,13 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       notificationSent: false
     });
 
-    // 3. Socket, Push, and Email logic
-    const TargetModel = targetModelName === 'Agent' ? Agent : User;
-    const receiver = await TargetModel.findById(receiverId).select('pushSubscription lastNotificationEmail email firstName lastName');
+    // 4. Socket emission
+    const io = req.app.get('socketio');
+    if (io) {
+      io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
+    }
 
-    if (receiver) {
-      const io = req.app.get('socketio');
-      if (io) io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
-          }
-
-    // 4. Return the Sanitized DTO
+    // 5. Sanitized DTO for the response
     const savedMsg = newMessage.toObject();
     const responseMsg = {
       _id: savedMsg._id,

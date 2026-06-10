@@ -132,11 +132,14 @@ async initialize(userId) {
 async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
   const lib = libsignalModule.default || libsignalModule;
   const address = getAddress(lib, remoteUserId);
+
+  const identityKeyPair = await store.getIdentityKeyPair();
+  if (!identityKeyPair) {
+    throw new Error("Identity Private Key missing! Please ensure you are logged in.");
+  }
   
-  // 1. Load session from store
   let session = await store.loadSession(remoteUserId);
 
-  // 2. If no session, perform the X3DH handshake
   if (!session) {
     console.log(`🔒 Establishing new session for ${remoteUserId}`);
     
@@ -162,20 +165,22 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
     }
   }
 
-  // 3. Encrypt using the session
   const encrypted = await this.encrypt(remoteUserId, messageText);
   
-  // 
-  
-  // 4. Send to server with backend-compliant payload
   const response = await secureFetch('/api/messages/send', {
     method: 'POST',
     body: JSON.stringify({
       receiverId: remoteUserId,
       receiverModel: receiverModel,
-      isEncrypted: true,           // 🛡️ Required by backend
-      ciphertext: encrypted.body,  // 🛡️ Mapped from Signal body
-      iv: encrypted.iv || '',      // 🛡️ Required by backend validation
+      isEncrypted: true,
+      payload: {
+        ciphertext: encrypted.body,
+        iv: encrypted.iv || '',
+        ephemeralKey: encrypted.ephemeralKey || '',
+        counter: encrypted.counter || 0,
+        previousCounter: encrypted.previousCounter || 0,
+        type: encrypted.type === 3 ? 'prekey' : 'message'
+      },
       fileType: 'text'
     })
   });
