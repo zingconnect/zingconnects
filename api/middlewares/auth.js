@@ -4,8 +4,11 @@ import { connectToDatabase } from '../config/db.js';
 
 export const authenticateToken = async (req, res, next) => {
 
-  console.log("Incoming request cookies:", req.signedCookies);
-
+console.log("--- AUTH DEBUG ---");
+  console.log("All Cookies:", req.cookies); // Standard cookies
+  console.log("Signed Cookies:", req.signedCookies); // Signed cookies
+  console.log("Authorization Header:", req.headers.authorization);
+  
 const token = req.signedCookies?.token;
   if (!token) {
     console.warn("Auth failed: No signed cookie token detected.");

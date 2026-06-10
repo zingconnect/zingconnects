@@ -165,7 +165,7 @@ io.adapter(createAdapter(pubClient, subClient));
 app.set('socketio', io);
 app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
-app.use('/api/agents', authenticateToken, authRoutes);
+app.use('/api/agents', authRoutes);
 app.use('/api/admin', authenticateToken, isAdmin, adminRoutes); // Protected by default
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
