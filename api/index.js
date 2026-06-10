@@ -165,7 +165,7 @@ io.adapter(createAdapter(pubClient, subClient));
 app.set('socketio', io);
 app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
-app.use('/api/agents', authRoutes);
+app.use('/api/agents', authenticateToken, authRoutes);
 app.use('/api/admin', authenticateToken, isAdmin, adminRoutes); // Protected by default
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
@@ -1122,7 +1122,7 @@ app.post('/api/users/handshake', async (req, res, next) => {
     const token = jwt.sign({ id: user._id, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.cookie('token', token, { 
         httpOnly: true, 
-        secure: process.env.NODE_ENV === 'production', 
+        secure: true, 
         sameSite: 'Lax', 
         path: '/', 
         signed: true 
@@ -4073,12 +4073,8 @@ app.use((err, req, res, next) => {
 });
 // 🚀 Server Activation Layer
 const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`--- SERVER ACTIVE ON PORT ${PORT} ---`);
+});
 
-if (process.env.NODE_ENV !== 'production') {
-  server.listen(PORT, () => {
-    console.log(`--- LOCAL SERVER ACTIVE ON PORT ${PORT} ---`);
-  });
-}
-
-// 📦 Export the finalized application instance
 export default app;
