@@ -76,18 +76,19 @@ async initializeSession(remoteUserId, peerBundle) {
   const lib = libsignalModule.default || libsignalModule;
   const formattedBundle = prepareBundleForSignal(peerBundle);
   
-  // Use the 'ProtocolAddress' confirmed by your debug logs
-  const address = new lib.ProtocolAddress(remoteUserId, 1);
+  // LOG THE BUNDLE TO VERIFY STRUCTURE
+  console.log("DEBUG: Bundle being sent to initIncoming:", formattedBundle);
   
+  const address = new lib.ProtocolAddress(remoteUserId, 1);
   const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
   const builder = new SessionBuilder(store, address);
   
-  // Based on your previous debug output, 'initIncoming' is the correct method
   if (typeof builder.initIncoming === 'function') {
+    // Some library versions require the raw peerBundle instead of the "prepared" one
+    // Try passing the raw peerBundle if the prepared one fails
     await builder.initIncoming(formattedBundle);
   } else {
-    throw new Error("Could not find 'initIncoming' method. Available: " + 
-      Object.getOwnPropertyNames(Object.getPrototypeOf(builder)));
+    throw new Error("initIncoming not found.");
   }
   
   console.log(`✅ Session initialized for ${remoteUserId}`);

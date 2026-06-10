@@ -1139,15 +1139,16 @@ app.post('/api/users/handshake', async (req, res, next) => {
       const consumedKey = agent.publicKeyJwk.preKeys.shift(); // Remove the first key
       await agent.save();
       
-      return res.json({ 
-        success: true, 
-        user: { id: user._id },
-        agentIdentity: {
-          ...agent.publicKeyJwk,
-          // Only return the consumed key so the frontend knows which one to use
-          preKeys: [consumedKey] 
-        }
-      });
+return res.json({ 
+  success: true, 
+  user: { id: user._id },
+  agentIdentity: {
+    registrationId: agent.publicKeyJwk.registrationId,
+    identityKey: agent.publicKeyJwk.identityKey,
+    signedPreKey: agent.publicKeyJwk.signedPreKey,
+    preKey: consumedKey // Note: Signal often expects 'preKey' (singular) for the consumed key
+  }
+});
     }
 
     // 5. Generate Session Token (Standardized)
