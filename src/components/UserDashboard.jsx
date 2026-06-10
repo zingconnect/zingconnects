@@ -1166,15 +1166,13 @@ useEffect(() => {
       remoteAudio.volume = 0;
     }
   };
-
   socket.on("voice-state-updated", handleVoiceUpdate);
   return () => socket.off("voice-state-updated", handleVoiceUpdate);
 }, [socket, isSpeakerOn]);
-useEffect(() => {
-  if (isLoading) return;
 
+useEffect(() => {
+  // 1. Only run if we actually have a reason to fetch
   let isMounted = true;
-  setLoading(true);
 
   const fetchUserSession = async () => {
     try {
@@ -1183,42 +1181,40 @@ useEffect(() => {
         : '/api/users/my-session';
       
       const response = await secureFetch(endpoint, { method: 'GET' });
-      if (!response.ok) throw new Error("Auth error");
+      if (!response.ok) return;
 
       const data = await response.json();
       
       if (isMounted) {
-        setAgent(data.agent);
-        setUserData(data.user);
+        // Only update if data actually changed to prevent unnecessary re-renders
+        setAgent(prev => JSON.stringify(prev) !== JSON.stringify(data.agent) ? data.agent : prev);
+        setUserData(prev => JSON.stringify(prev) !== JSON.stringify(data.user) ? data.user : prev);
         
-        // 🔒 NON-BLOCKING ENGINE INIT
         if (data.user?._id) {
-            // We call it, but we DO NOT 'await' it here.
-            // This allows setLoading(false) to run immediately.
-            SignalEngine.initialize(data.user._id)
-                .then(() => console.log("✅ SignalEngine ready in background"))
-                .catch(err => console.error("❌ SignalEngine background init failed:", err));
+            SignalEngine.initialize(data.user._id).catch(console.error);
         }
-
         if (!data.user?.isProfileComplete) setShowOnboarding(true);
       }
     } catch (err) {
       console.error("Session fetch error:", err);
     } finally {
-      if (isMounted) {
-        setLoading(false); // UI renders now, regardless of whether Engine finished
-      }
+      if (isMounted) setLoading(false);
     }
   };
 
+  // 2. Initial fetch
   fetchUserSession();
+
+  // 3. Polling logic separated
   const interval = setInterval(fetchUserSession, 30000);
 
   return () => {
     isMounted = false;
     clearInterval(interval);
   };
-}, [slugFromUrl, isLoading]);
+  // 4. Remove 'isLoading' from dependencies. 
+  // It should not be the trigger for this specific fetch.
+}, [slugFromUrl]);
 
 useEffect(() => {
   const targetAgentId = agent?._id || agent?.id;
