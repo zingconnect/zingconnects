@@ -75,23 +75,22 @@ async setupIdentity() {
 async initializeSession(remoteUserId, peerBundle) {
   const lib = libsignalModule.default || libsignalModule;
   const formattedBundle = prepareBundleForSignal(peerBundle);
-    const Address = lib.SignalProtocolAddress || lib.Address;
   
-  if (!Address) {
-    throw new Error("Could not find Address constructor in libsignal library. Available keys: " + Object.keys(lib));
+  // Use 'ProtocolAddress' as found in your debug logs
+  const address = new lib.ProtocolAddress(remoteUserId, 1);
+  
+  const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
+  const builder = new SessionBuilder(store, address);
+  
+  // Use the method name found in your library version
+  // Based on common libsignal variations, it's either processPreKeyBundle or processPreKey
+  const processMethod = builder.processPreKeyBundle || builder.processPreKey;
+  
+  if (typeof processMethod !== 'function') {
+    throw new Error("Could not find a valid processing method on SessionBuilder. Available methods: " + Object.getOwnPropertyNames(Object.getPrototypeOf(builder)));
   }
 
-  const address = new Address(remoteUserId, 1);
-    const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
-  const builder = new SessionBuilder(store, address);
-    if (typeof builder.processPreKeyBundle === 'function') {
-      await builder.processPreKeyBundle(formattedBundle);
-  } else if (typeof builder.processPreKey === 'function') {
-      await builder.processPreKey(formattedBundle);
-  } else {
-      console.error("Available methods on builder:", Object.getOwnPropertyNames(Object.getPrototypeOf(builder)));
-      throw new Error("Could not find processPreKeyBundle or processPreKey method.");
-  }
+  await processMethod.call(builder, formattedBundle);
   
   console.log(`✅ Session initialized for ${remoteUserId}`);
 },
