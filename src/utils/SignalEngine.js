@@ -75,29 +75,27 @@ async setupIdentity() {
 async initializeSession(remoteUserId, peerBundle) {
   const lib = libsignalModule.default || libsignalModule;
   const bundle = prepareBundleForSignal(peerBundle);
-
-  // Ensure mandatory fields are present as expected by the vendor
   const preKeyBundle = {
     identityKey: bundle.identityKey,
     registrationId: bundle.registrationId,
     signedPreKey: bundle.signedPreKey,
-    preKey: bundle.preKey
+    preKey: bundle.preKey || null
   };
 
   const address = new lib.ProtocolAddress(remoteUserId, 1);
   const SessionBuilder = new (lib.SessionBuilder || lib.default?.SessionBuilder)(store, address);
 
-  // Use a direct try/catch to silence the vendor's internal post-check noise
-  try {
+ try {
     await SessionBuilder.initIncoming(preKeyBundle);
   } catch (err) {
-    // Check if the session was actually saved despite the vendor throwing an error
+    // Check if the session was actually saved
     const session = await store.loadSession(remoteUserId);
-    if (!session) {
-      console.error("Session failed to persist to store:", err);
-      throw err; // Re-throw only if the session really didn't save
+    if (session) {
+      console.log(`✅ Session successfully persisted for ${remoteUserId}`);
+    } else {
+      console.error("Critical: Handshake truly failed to persist", err);
+      throw err;
     }
-    console.warn("Library threw a post-check error, but session persisted successfully.");
   }
 
   console.log(`✅ Session initialized for ${remoteUserId}`);
