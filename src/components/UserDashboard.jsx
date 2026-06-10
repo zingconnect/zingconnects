@@ -2196,9 +2196,10 @@ if (!loading && !agent) {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-[55px] md:h-[65px] bg-[#f0f2f5] px-3 md:px-6 flex justify-between items-center z-20 border-b border-gray-200 shadow-sm">
           <div className="flex items-center gap-2 md:gap-4 flex-1">
-            <button onClick={() => navigate(-1)} className="p-1 md:hidden text-gray-600">
-              <BsChevronLeft size={20} />
-            </button>
+            <button  onClick={() => navigate(`/agent/${slugFromUrl}`)} 
+            className="p-1 md:hidden text-gray-600">
+           <BsChevronLeft size={20} />
+          </button>
             
             <div className="relative">
               <div className="w-9 h-9 md:w-11 md:h-11 bg-white rounded-full overflow-hidden border border-gray-200 flex items-center justify-center">
