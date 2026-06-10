@@ -2,6 +2,7 @@ import * as libsignalModule from 'libsignal';
 import { Buffer } from 'buffer'; 
 import { ZingSignalStore } from './ZingSignalStore';
 import { bufferToBase64, prepareBundleForSignal } from './SignalUtils';
+import { secureFetch } from "../../api/utils/api";
 
 const lib = libsignalModule.default || libsignalModule;
 const getAddress = (lib, userId) => new lib.ProtocolAddress(userId, 1);
@@ -130,47 +131,51 @@ async initialize(userId) {
 
 async sendMessage(remoteUserId, messageText) {
   const lib = libsignalModule.default || libsignalModule;
+  const address = getAddress(lib, remoteUserId);
   
-  // Normalize the ID: Ensure it's a string and trimmed
-  const normalizedId = String(remoteUserId).trim();
-  const address = new lib.ProtocolAddress(normalizedId, 1);
-  
-  let session = await store.loadSession(normalizedId);
+  // 1. Load session from store
+  let session = await store.loadSession(remoteUserId);
 
+  // 2. If no session, perform the X3DH handshake
   if (!session) {
-    console.log(`🔒 Establishing new session for ${normalizedId}`);
+    console.log(`🔒 Establishing new session for ${remoteUserId}`);
     
-    // Pass the model type if needed by your API
-    const response = await secureFetch(`/api/crypto/bundle/${normalizedId}?model=User`);
+    // Fetch the bundle using your existing secureFetch
+    const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}`);
+    if (!response.ok) throw new Error("Could not fetch crypto bundle");
+    
     const data = await response.json();
+    if (!data.bundle) throw new Error("Bundle data missing from response");
     
-    if (!data.success || !data.bundle) {
-        throw new Error("Could not fetch valid crypto bundle");
-    }
-
     const preparedBundle = prepareBundleForSignal(data.bundle);
     
+    // Build the session
     const sessionBuilder = new lib.SessionBuilder(store, address);
     await sessionBuilder.processPreKey(preparedBundle);
     
-    // Verify persistence using the same normalized ID
-    session = await store.loadSession(normalizedId);
-    if (!session) throw new Error("Failed to persist session.");
+    // Verify persistence
+    session = await store.loadSession(remoteUserId);
+    if (!session) {
+      throw new Error("Critical: Session handshake completed but failed to persist.");
+    }
   }
 
-  // 3. Encrypt using the established session
   const encrypted = await this.encrypt(remoteUserId, messageText);
   
-  // 4. Emit the message
-  socket.emit('message', {
-    to: remoteUserId,
-    ciphertext: encrypted.body,
-    type: encrypted.type, // 3: PreKeyMessage (initial), 1: Normal
-    registrationId: await store.getLocalRegistrationId()
+ const response = await secureFetch('/api/messages/send', {
+    method: 'POST',
+    body: JSON.stringify({
+      receiverId: remoteUserId,
+      receiverModel: receiverModel, // 🛡️ Dynamic assignment
+      ...encrypted
+    })
   });
 
-  return { success: true };
-},
+  const result = await response.json();
+  if (!result.success) throw new Error(result.message || "Transmission rejected.");
+  
+  return result;
+}, 
 
 async receiveMessage(remoteUserId, messageBundle) {
   const lib = libsignalModule.default || libsignalModule;

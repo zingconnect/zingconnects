@@ -2080,9 +2080,13 @@ const handleSendMessage = async (e) => {
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    // 🛡️ FIX: Use the engine's built-in sendMessage, which handles
-    // the X3DH handshake/session creation automatically.
-    const result = await SignalEngine.sendMessage(selectedUser._id, textToSend);
+    // 🛡️ FIX: Pass the dynamic model type to the engine
+    const modelType = selectedUser.modelType || 'User';
+    const result = await SignalEngine.sendMessage(
+      selectedUser._id, 
+      modelType, 
+      textToSend
+    );
 
     // Update UI based on successful transmission
     setMessages(prev => prev.map(msg => 
@@ -2103,7 +2107,6 @@ const handleSendMessage = async (e) => {
     isSendingRef.current = false;
   }
 };
-
 
   return (
     <div className="h-screen w-screen bg-page-bg flex overflow-hidden font-sans antialiased text-text-main relative transition-colors duration-300">
