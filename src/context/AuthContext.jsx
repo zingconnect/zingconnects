@@ -15,21 +15,14 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
  const initializeCrypto = async () => {
-  // 1. Reset state safely
   setIsCryptoReady(false);
-  
+  setIsLoading(true); // Ensure the app knows we are working
   try {
-    // 2. FIXED DYNAMIC IMPORT: Handle named vs default exports
-    const module = await import('../utils/SignalEngine');
-    const SignalEngine = module.SignalEngine || module.default;
-
-    if (!SignalEngine) throw new Error("SignalEngine module could not be loaded");
-
-    // 3. Generate Identity
+    const { SignalEngine } = await import('../utils/SignalEngine');
+    
     const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
     const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 
-    // 4. Update Server
     const response = await secureFetch('/api/update-crypto-key', {
       method: 'PUT',
       body: JSON.stringify({ 
@@ -47,59 +40,45 @@ export const AuthProvider = ({ children }) => {
       })
     });
 
-    if (!response.ok) throw new Error(`Server returned ${response.status}`);
+    if (!response.ok) throw new Error("Failed to update keys on server");
 
     setIsCryptoReady(true);
     console.log("✅ E2EE Persistent-session initialized.");
-    return true; // Return success status
   } catch (err) {
     console.error("Crypto init failed:", err);
+    // CRITICAL: Prevent infinite loading
     setIsCryptoReady(false);
-    return false; // Return failure status
+  } finally {
+    setIsLoading(false);
   }
 };
 
+
+ // Updated verifySession snippet
 const verifySession = async () => {
-  setIsLoading(true);
+  setIsLoading(true); // Start loading
   try {
     const response = await secureFetch('/api/agents/me');
-    
-    // 1. If not authenticated, clear session and exit
-    if (!response.ok) {
-      await logout();
-      return;
-    }
+    if (response.ok) {
+      const data = await response.json();
+      setIsAuthenticated(true);
+      setUserRole(data.role);
 
-    const data = await response.json();
-    setIsAuthenticated(true);
-    setUserRole(data.role);
-
-    // 2. SAFE DYNAMIC IMPORT: Handle module resolution
-    const module = await import('../utils/SignalEngine');
-    const SignalEngine = module.SignalEngine || module.default;
-
-    if (!SignalEngine?.store) {
-      throw new Error("SignalEngine or its store is not defined");
-    }
-
-    // 3. Load Identity
-    const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
-    
-    if (!savedIdentity) {
-      // 4. Await the crypto initialization
-      const cryptoSuccess = await initializeCrypto();
-      if (!cryptoSuccess) {
-        throw new Error("Cryptography initialization failed");
+      const { SignalEngine } = await import('../utils/SignalEngine');
+      const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
+      
+      if (!savedIdentity) {
+        await initializeCrypto(); // This is now awaited
+      } else {
+        setIsCryptoReady(true);
       }
     } else {
-      setIsCryptoReady(true);
+      await logout();
     }
   } catch (err) {
-    console.error("Auth verification sequence failed:", err);
-    // Ensure we don't leave the user in a broken authenticated state
-    setIsAuthenticated(false);
+    console.error("Auth verify failed:", err);
   } finally {
-    setIsLoading(false); // Only toggle loading once the entire chain is complete
+    setIsLoading(false); // Only finish loading once everything is fully ready
   }
 };
 
