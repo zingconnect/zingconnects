@@ -1171,9 +1171,7 @@ useEffect(() => {
 }, [socket, isSpeakerOn]);
 
 useEffect(() => {
-  // 1. Only run if we actually have a reason to fetch
   let isMounted = true;
-
   const fetchUserSession = async () => {
     try {
       const endpoint = slugFromUrl 
@@ -1184,7 +1182,6 @@ useEffect(() => {
       if (!response.ok) return;
 
       const data = await response.json();
-      
       if (isMounted) {
         // Only update if data actually changed to prevent unnecessary re-renders
         setAgent(prev => JSON.stringify(prev) !== JSON.stringify(data.agent) ? data.agent : prev);
