@@ -36,6 +36,25 @@ async getIdentityKey(identifier) {
     return await this.loadIdentity(identifier);
   }
 
+// Inside your ZingSignalStore class
+async getIdentityKeyPair() {
+  try {
+    if (!this.userDoc || !this.userDoc.publicKeyJwk) {
+      throw new Error("User identity keys not found in store.");
+    }
+
+    const privKey = await this.db.get('identityKey', 'privateKey'); 
+    const pubKey = this.userDoc.publicKeyJwk.identityKey; // From your DB record
+
+    return {
+      pubKey: this.lib.Curve.decodePoint(Buffer.from(pubKey, 'base64')),
+      privKey: privKey // This should be the ArrayBuffer representation
+    };
+  } catch (err) {
+    console.error("Error in getIdentityKeyPair:", err);
+    return null;
+  }
+}
   async isTrustedIdentity(identifier, identityKey, direction) {
     const savedKey = await this.loadIdentityKey(identifier);
     if (!savedKey) return true; // Trust on first use
