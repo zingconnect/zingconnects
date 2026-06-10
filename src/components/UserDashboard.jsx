@@ -83,35 +83,6 @@ const CallStatusMessage = ({ status, time }) => {
   );
 };
 
-const processed = await Promise.all(
-  data.messages.map(async (msg) => {
-    // If the message is encrypted, we delegate decryption to the SignalEngine
-    if (msg.isEncrypted && msg.payload) {
-      try {
-        const decryptedText = await SignalEngine.decrypt(msg.senderId, msg.payload);
-        return { 
-          ...msg, 
-          decryptedText, 
-          isEncrypted: false 
-        };
-      } catch (e) {
-        console.error("SignalEngine Decryption Error:", e);
-        return { 
-          ...msg, 
-          decryptedText: "🔒 [Decryption Failed]", 
-          isEncrypted: false 
-        };
-      }
-    }
-    // If not encrypted, treat the existing 'text' or 'content' as the decryptedText
-    return { 
-      ...msg, 
-      decryptedText: msg.text || msg.content || "", 
-      isEncrypted: false 
-    };
-  })
-);
-
 const MessageItem = ({ message, isMe }) => {
   // If the engine has processed this, decryptedText will be populated.
   // If the engine is still working, it will return a loading state.
