@@ -32,12 +32,19 @@ export class ZingSignalStore {
     await dbPromise; // Wait for the DB to be opened/upgraded
   }
 
-  // --- IDENTITY ---
+async getIdentityKey(identifier) {
+    return await this.loadIdentity(identifier);
+  }
+
   async isTrustedIdentity(identifier, identityKey, direction) {
     const savedKey = await this.loadIdentityKey(identifier);
     if (!savedKey) return true; // Trust on first use
     return areKeysEqual(savedKey, identityKey); 
   }
+
+  async getOurIdentity() {
+  return await this.loadIdentity('local');
+}
 
   async saveIdentity(identifier, identityKey) {
     const db = await dbPromise;
@@ -80,10 +87,19 @@ export class ZingSignalStore {
     return (await db.get('session', identifier)) || null;
   }
 
-  // --- REGISTRATION ---
   async getLocalRegistrationId() {
     const db = await dbPromise;
     return await db.get('misc', 'registrationId');
+  }
+
+  async loadSignedPreKey(keyId) {
+    const db = await dbPromise;
+    return await db.get('prekeys', keyId);
+  }
+
+  async saveSignedPreKey(keyId, keyPair) {
+    const db = await dbPromise;
+    await db.put('prekeys', keyPair, keyId);
   }
 
   async saveRegistrationId(id) {
