@@ -190,12 +190,10 @@ const handleAgentLogin = async (e) => {
   };
 
   try {
-    const response = await secureFetch(`${import.meta.env.VITE_API_URL}/api/agents/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
+ const response = await secureFetch('/api/agents/login', {
+  method: 'POST',
+  body: JSON.stringify(payload),
+});
     const data = await response.json();
 
     if (!isMounted.current) return;
