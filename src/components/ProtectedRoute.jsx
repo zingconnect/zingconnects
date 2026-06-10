@@ -31,11 +31,10 @@ export const ProtectedRoute = ({ requiredRole }) => {
     return <Navigate to="/" state={{ from: location.pathname }} replace />;
   }
 
-  // 3. Authenticated but Crypto failed
-  if (!isCryptoReady) {
-    console.error("ProtectedRoute: Crypto initialization failed. Redirecting to /");
-    return <Navigate to="/" replace />;
-  }
+ if (!isCryptoReady) {
+  console.error("DEBUG: Redirecting because isCryptoReady is false. Auth State:", { isAuthenticated, isLoading, isCryptoReady });
+  return <Navigate to="/" replace />;
+}
 
   // 4. Role-based protection
   if (requiredRole && userRole !== requiredRole) {

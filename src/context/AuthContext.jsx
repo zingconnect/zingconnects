@@ -9,6 +9,7 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isCryptoReady, setIsCryptoReady] = useState(false);
   const [token, setToken] = useState(null); // Add this state
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     verifySession();
@@ -70,6 +71,7 @@ const verifySession = async () => {
     }
 
     const data = await response.json();
+    setUser(data);
     setIsAuthenticated(true);
     setUserRole(data.role);
 
@@ -79,11 +81,7 @@ const verifySession = async () => {
     if (!SignalEngine?.store) {
       throw new Error("SignalEngine or its store is not defined");
     }
-
-    // --- MODIFIED SECTION ---
-    // Change .loadIdentityKey to .loadIdentity to match ZingSignalStore.js
-    const savedIdentity = await SignalEngine.store.loadIdentity('local');
-    
+    const savedIdentity = await SignalEngine.store.loadIdentity('local');    
     if (!savedIdentity) {
       const cryptoSuccess = await initializeCrypto();
       if (!cryptoSuccess) {
@@ -92,7 +90,6 @@ const verifySession = async () => {
     } else {
       setIsCryptoReady(true);
     }
-    // ------------------------
 
   } catch (err) {
     console.error("Auth verification sequence failed:", err);
@@ -103,7 +100,6 @@ const verifySession = async () => {
 };
 
   const logout = async () => {
-    // DYNAMIC IMPORT: Accessed only when needed
     const { SignalEngine } = await import('../utils/SignalEngine');
     await SignalEngine.store.clearAll(); 
     setIsAuthenticated(false);
@@ -112,6 +108,8 @@ const verifySession = async () => {
 
   return (
     <AuthContext.Provider value={{ 
+      user, 
+      setUser, 
       token,         
       setToken,
       isAuthenticated, 
