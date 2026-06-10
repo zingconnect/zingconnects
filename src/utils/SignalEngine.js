@@ -163,7 +163,7 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
       throw new Error("processPreKey is not a function on SessionBuilder");
     }
 
-    await sessionBuilder.processPreKey(preparedBundle);
+await sessionBuilder.initOutgoing(preparedBundle);
     console.log("DEBUG: SessionBuilder handshake successful.");
     
     // Verify persistence
