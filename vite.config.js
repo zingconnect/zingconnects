@@ -21,11 +21,17 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            return 'vendor';
-          }
-        },
+        // vite.config.js
+manualChunks(id) {
+  if (id.includes('node_modules')) {
+    // Separate heavy crypto/signal libs from the core React framework
+    if (id.includes('libsignal') || id.includes('buffer')) {
+      return 'crypto-vendor';
+    }
+    // Keep React and core tools in the main vendor chunk
+    return 'vendor';
+  }
+},
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash].[ext]'

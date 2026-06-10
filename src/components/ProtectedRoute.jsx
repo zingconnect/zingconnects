@@ -2,11 +2,11 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export const ProtectedRoute = ({ requiredRole }) => {
-  const { isAuthenticated, userRole, isLoading } = useAuth();
+const { isAuthenticated, userRole, isLoading, isCryptoReady } = useAuth();
   const location = useLocation();
 
- if (isLoading) {
-  return (
+if (isLoading || !isCryptoReady) {
+    return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="w-8 h-8 border-[3px] border-blue-600 border-t-transparent rounded-full animate-spin" />
     </div>

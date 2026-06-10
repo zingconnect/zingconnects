@@ -77,7 +77,36 @@ async setupIdentity() {
   
   async reset() {
     await store.clearAll();
+  },
+async sendMessage(remoteUserId, messageText) {
+  const lib = libsignalModule.default || libsignalModule;
+    const hasSession = await store.loadSession(remoteUserId);
+  if (!hasSession) {
+    const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
+    const bundle = await response.json();
+        const sessionBuilder = new lib.SessionBuilder(store, remoteUserId);
+    await sessionBuilder.processPreKey(bundle);
   }
+  const encrypted = await this.encrypt(remoteUserId, messageText);
+    socket.emit('message', {
+    to: remoteUserId,
+    ciphertext: encrypted.body,
+    type: encrypted.type, // 3: PreKeyMessage, 1: Normal
+    registrationId: await store.getLocalRegistrationId()
+  });
+},
+
+async receiveMessage(remoteUserId, messageBundle) {
+  const lib = libsignalModule.default || libsignalModule;
+  const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
+  
+  // 1. Decrypt (SessionCipher handles Type 3 to Type 1 transition automatically)
+  const cipher = new SessionCipher(store, remoteUserId);
+  const decrypted = await cipher.decrypt(messageBundle);
+  
+  return new TextDecoder().decode(decrypted);
+}
+
 };
 
 export const { encrypt, decrypt, setupIdentity, store: signalStore } = SignalEngine;
