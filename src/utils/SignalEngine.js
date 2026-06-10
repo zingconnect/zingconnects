@@ -129,7 +129,7 @@ async initialize(userId) {
     return true;
   },
 
-async sendMessage(remoteUserId, messageText) {
+async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
   const lib = libsignalModule.default || libsignalModule;
   const address = getAddress(lib, remoteUserId);
   
@@ -140,8 +140,8 @@ async sendMessage(remoteUserId, messageText) {
   if (!session) {
     console.log(`🔒 Establishing new session for ${remoteUserId}`);
     
-    // Fetch the bundle using your existing secureFetch
-    const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}`);
+    // Fetch the bundle
+    const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
     if (!response.ok) throw new Error("Could not fetch crypto bundle");
     
     const data = await response.json();
@@ -149,9 +149,22 @@ async sendMessage(remoteUserId, messageText) {
     
     const preparedBundle = prepareBundleForSignal(data.bundle);
     
-    // Build the session
-    const sessionBuilder = new lib.SessionBuilder(store, address);
+    // 🛡️ Robust SessionBuilder Initialization
+    const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
+    if (!SessionBuilder) {
+      throw new Error("SessionBuilder could not be found in libsignal module");
+    }
+
+    const sessionBuilder = new SessionBuilder(store, address);
+
+    // Verify method existence
+    if (typeof sessionBuilder.processPreKey !== 'function') {
+      console.error("SessionBuilder prototype methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(sessionBuilder)));
+      throw new Error("processPreKey is not a function on SessionBuilder");
+    }
+
     await sessionBuilder.processPreKey(preparedBundle);
+    console.log("DEBUG: SessionBuilder handshake successful.");
     
     // Verify persistence
     session = await store.loadSession(remoteUserId);
@@ -160,13 +173,15 @@ async sendMessage(remoteUserId, messageText) {
     }
   }
 
+  // 3. Encrypt using the session
   const encrypted = await this.encrypt(remoteUserId, messageText);
   
- const response = await secureFetch('/api/messages/send', {
+  // 4. Send to server
+  const response = await secureFetch('/api/messages/send', {
     method: 'POST',
     body: JSON.stringify({
       receiverId: remoteUserId,
-      receiverModel: receiverModel, // 🛡️ Dynamic assignment
+      receiverModel: receiverModel, 
       ...encrypted
     })
   });
