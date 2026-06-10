@@ -3,8 +3,8 @@ import { ZingSignalStore } from './ZingSignalStore';
 import { bufferToBase64, prepareBundleForSignal } from './SignalUtils';
 
 const lib = libsignalModule.default || libsignalModule;
+const getAddress = (lib, userId) => new lib.ProtocolAddress(userId, 1);
 const store = new ZingSignalStore();
-console.log("DEBUG: libsignal keys:", Object.keys(lib));
 
 export const SignalEngine = {
   store,
@@ -54,20 +54,25 @@ async setupIdentity() {
   return { identityKeyPair, preKeyBundle };
 },
 
-  async encrypt(remoteUserId, clearText) {
+async encrypt(remoteUserId, clearText) {
+    const lib = libsignalModule.default || libsignalModule;
     const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
-    const cipher = new SessionCipher(store, remoteUserId);
+    const address = getAddress(lib, remoteUserId);
+    const cipher = new SessionCipher(store, address);
+    
     const encoded = new TextEncoder().encode(clearText);
     return await cipher.encrypt(encoded);
   },
 
   async decrypt(remoteUserId, ciphertextBundle) {
+    const lib = libsignalModule.default || libsignalModule;
     const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
-    const cipher = new SessionCipher(store, remoteUserId);
+    const address = getAddress(lib, remoteUserId);
+    const cipher = new SessionCipher(store, address);
+    
     const decoded = await cipher.decrypt(ciphertextBundle);
     return new TextDecoder().decode(decoded);
   },
-  
   async reset() {
     await store.clearAll();
   },
@@ -115,17 +120,19 @@ async initialize(userId) {
   },
 
 async sendMessage(remoteUserId, messageText) {
-  const lib = libsignalModule.default || libsignalModule;
+    const lib = libsignalModule.default || libsignalModule;
     const hasSession = await store.loadSession(remoteUserId);
- if (!hasSession) {
-  const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
-  const rawBundle = await response.json();
-  // Ensure the bundle is prepared before the builder processes it
-  const preparedBundle = prepareBundleForSignal(rawBundle);
-  
-  const sessionBuilder = new lib.SessionBuilder(store, remoteUserId);
-  await sessionBuilder.processPreKey(preparedBundle);
-}
+
+    if (!hasSession) {
+      const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
+      const rawBundle = await response.json();
+      const preparedBundle = prepareBundleForSignal(rawBundle);
+      
+      // 🛡️ FIX: Use ProtocolAddress object here as well
+      const address = getAddress(lib, remoteUserId);
+      const sessionBuilder = new lib.SessionBuilder(store, address);
+      await sessionBuilder.processPreKey(preparedBundle);
+    }
   const encrypted = await this.encrypt(remoteUserId, messageText);
     socket.emit('message', {
     to: remoteUserId,
@@ -139,8 +146,11 @@ async receiveMessage(remoteUserId, messageBundle) {
   const lib = libsignalModule.default || libsignalModule;
   const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
   
-  // 1. Decrypt (SessionCipher handles Type 3 to Type 1 transition automatically)
-  const cipher = new SessionCipher(store, remoteUserId);
+  // 🛡️ FIX: Create the ProtocolAddress object for the session
+  const address = new lib.ProtocolAddress(remoteUserId, 1);
+  
+  // 1. Decrypt using the ProtocolAddress object
+  const cipher = new SessionCipher(store, address);
   const decrypted = await cipher.decrypt(messageBundle);
   
   return new TextDecoder().decode(decrypted);
