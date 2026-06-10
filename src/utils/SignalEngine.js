@@ -80,24 +80,33 @@ async setupIdentity() {
   },
 
 async initializeSession(remoteUserId, peerBundle) {
-  const formattedBundle = prepareBundleForSignal(peerBundle);
   const lib = libsignalModule.default || libsignalModule;
-  const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
-  const builder = new SessionBuilder(store, remoteUserId);
-    await builder.processPreKey(formattedBundle);
   
-  console.log(`✅ Session initialized for ${remoteUserId}`);
+  const formattedBundle = prepareBundleForSignal(peerBundle);
+    const address = new lib.SignalProtocolAddress(remoteUserId, 1);
+    const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
+  const builder = new SessionBuilder(store, address);
+    try {
+    await builder.processPreKeyBundle(formattedBundle);
+    console.log(`✅ Session initialized for ${remoteUserId}`);
+  } catch (error) {
+    console.error("Failed to process preKey bundle:", error);
+    throw error;
+  }
 },
 
 async sendMessage(remoteUserId, messageText) {
   const lib = libsignalModule.default || libsignalModule;
     const hasSession = await store.loadSession(remoteUserId);
-  if (!hasSession) {
-    const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
-    const bundle = await response.json();
-        const sessionBuilder = new lib.SessionBuilder(store, remoteUserId);
-    await sessionBuilder.processPreKey(bundle);
-  }
+ if (!hasSession) {
+  const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
+  const rawBundle = await response.json();
+  // Ensure the bundle is prepared before the builder processes it
+  const preparedBundle = prepareBundleForSignal(rawBundle);
+  
+  const sessionBuilder = new lib.SessionBuilder(store, remoteUserId);
+  await sessionBuilder.processPreKey(preparedBundle);
+}
   const encrypted = await this.encrypt(remoteUserId, messageText);
     socket.emit('message', {
     to: remoteUserId,
