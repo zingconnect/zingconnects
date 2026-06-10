@@ -76,22 +76,31 @@ async initializeSession(remoteUserId, peerBundle) {
   const lib = libsignalModule.default || libsignalModule;
   const formattedBundle = prepareBundleForSignal(peerBundle);
   
-  // LOG THE BUNDLE TO VERIFY STRUCTURE
-  console.log("DEBUG: Bundle being sent to initIncoming:", formattedBundle);
-  
   const address = new lib.ProtocolAddress(remoteUserId, 1);
-  const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
-  const builder = new SessionBuilder(store, address);
-  
-  if (typeof builder.initIncoming === 'function') {
-    // Some library versions require the raw peerBundle instead of the "prepared" one
-    // Try passing the raw peerBundle if the prepared one fails
-    await builder.initIncoming(formattedBundle);
-  } else {
-    throw new Error("initIncoming not found.");
+  const SessionBuilder = new (lib.SessionBuilder || lib.default?.SessionBuilder)(store, address);
+
+  // 1. Try the standard way
+  try {
+    await SessionBuilder.initIncoming(formattedBundle);
+    console.log(`✅ Session initialized`);
+    return;
+  } catch (e) {
+    console.warn("Attempt 1 failed, trying alternative structure...");
   }
+
+  // 2. Try wrapping as { registrationId, identityKey, signedPreKey, preKey }
+  // Some versions require the PREKEY to be explicitly mapped:
+  const altBundle = {
+      ...formattedBundle,
+      preKey: formattedBundle.preKey || formattedBundle.preKey
+  };
   
-  console.log(`✅ Session initialized for ${remoteUserId}`);
+  try {
+      await SessionBuilder.initIncoming(altBundle);
+      console.log(`✅ Session initialized (Alternative)`);
+  } catch (e) {
+      console.error("Critical Failure: Even with alternative structure:", e);
+  }
 },
 
 async sendMessage(remoteUserId, messageText) {
