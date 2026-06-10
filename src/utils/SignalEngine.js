@@ -101,6 +101,16 @@ async initializeSession(remoteUserId, peerBundle) {
   console.log(`✅ Session initialized for ${remoteUserId}`);
 },
 
+async initialize(userId) {
+    console.log("🛡️ Initializing Engine for:", userId);
+    // If you need to perform an async setup (like loading keys), do it here
+    const identity = await store.loadIdentity('local');
+    if (!identity) {
+      await this.setupIdentity();
+    }
+    return true;
+  },
+
 async sendMessage(remoteUserId, messageText) {
   const lib = libsignalModule.default || libsignalModule;
     const hasSession = await store.loadSession(remoteUserId);

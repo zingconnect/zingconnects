@@ -1407,45 +1407,43 @@ const handleFileChange = (e) => {
 
 const handleProfileSubmit = async (e) => {
   e.preventDefault();
-  
+
   const rawPhone = formData.phone?.raw || '';
   if (!rawPhone || rawPhone.length < 10) {
     alert("Please enter a valid phone number with country code.");
     return;
   }
 
-  setIsUploading(true); 
+  setIsUploading(true);
   const data = new FormData();
-  
+
   const fileToUpload = onboardingFile || previewFile;
   if (fileToUpload) data.append('photo', fileToUpload);
 
-  Object.keys(formData).forEach(key => {
+  Object.keys(formData).forEach((key) => {
     if (formData[key] != null) {
       data.append(key, key === 'phone' ? JSON.stringify(formData[key]) : formData[key]);
     }
   });
 
   try {
-    // 1. Fire the API call and Engine init in parallel to save time
-    const [response] = await Promise.all([
-      secureFetch('/api/users/update-user-onboarding', {
-        method: 'PUT',
-        body: data
-      }),
-      // SignalEngine.initialize is now your fast, non-blocking registration
-      SignalEngine.initialize(userData._id || Date.now().toString()) 
-    ]);
+    const response = await secureFetch('/api/users/update-user-onboarding', {
+      method: 'PUT',
+      body: data,
+    });
 
     const result = await response.json();
 
     if (response.ok && result.success) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
+      // Initialize Signal identity only after the user record is confirmed
+      await SignalEngine.setupIdentity();
+
       if (setUserData) setUserData(result.user);
-      
+
       console.log("🛡️ Profile & Security synced.");
-      
+
       setShowOnboarding(false);
       setOnboardingFile(null);
       setPreviewFile(null);
