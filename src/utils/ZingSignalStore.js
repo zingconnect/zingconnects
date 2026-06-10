@@ -55,6 +55,10 @@ export class ZingSignalStore {
     return base64Key ? toBuffer(base64Key) : null;
   }
 
+  async loadIdentityKey(identifier) {
+    return await this.loadIdentity(identifier);
+}
+
   // --- SESSIONS & BUNDLES ---
   async savePeerBundle(identifier, bundle) {
     const db = await dbPromise;

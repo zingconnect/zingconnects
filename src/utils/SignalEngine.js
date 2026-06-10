@@ -104,10 +104,9 @@ async initializeSession(remoteUserId, peerBundle) {
 async loadIdentity(identifier) {
     return await this.store.loadIdentity(identifier);
   },
-  
+
 async initialize(userId) {
     console.log("🛡️ Initializing Engine for:", userId);
-    // If you need to perform an async setup (like loading keys), do it here
     const identity = await store.loadIdentity('local');
     if (!identity) {
       await this.setupIdentity();

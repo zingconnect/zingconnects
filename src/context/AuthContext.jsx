@@ -64,7 +64,6 @@ const verifySession = async () => {
   try {
     const response = await secureFetch('/api/agents/me');
     
-    // 1. If not authenticated, clear session and exit
     if (!response.ok) {
       await logout();
       return;
@@ -74,7 +73,6 @@ const verifySession = async () => {
     setIsAuthenticated(true);
     setUserRole(data.role);
 
-    // 2. SAFE DYNAMIC IMPORT: Handle module resolution
     const module = await import('../utils/SignalEngine');
     const SignalEngine = module.SignalEngine || module.default;
 
@@ -82,11 +80,11 @@ const verifySession = async () => {
       throw new Error("SignalEngine or its store is not defined");
     }
 
-    // 3. Load Identity
-    const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
+    // --- MODIFIED SECTION ---
+    // Change .loadIdentityKey to .loadIdentity to match ZingSignalStore.js
+    const savedIdentity = await SignalEngine.store.loadIdentity('local');
     
     if (!savedIdentity) {
-      // 4. Await the crypto initialization
       const cryptoSuccess = await initializeCrypto();
       if (!cryptoSuccess) {
         throw new Error("Cryptography initialization failed");
@@ -94,12 +92,13 @@ const verifySession = async () => {
     } else {
       setIsCryptoReady(true);
     }
+    // ------------------------
+
   } catch (err) {
     console.error("Auth verification sequence failed:", err);
-    // Ensure we don't leave the user in a broken authenticated state
     setIsAuthenticated(false);
   } finally {
-    setIsLoading(false); // Only toggle loading once the entire chain is complete
+    setIsLoading(false);
   }
 };
 
