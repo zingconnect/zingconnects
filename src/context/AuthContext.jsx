@@ -47,11 +47,12 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
- // Updated verifySession snippet
 const verifySession = async () => {
-  setIsLoading(true); // Start loading
+  setIsLoading(true);
   try {
     const response = await secureFetch('/api/agents/me');
+
+    // 1. Handle success: User is authenticated
     if (response.ok) {
       const data = await response.json();
       setIsAuthenticated(true);
@@ -61,19 +62,30 @@ const verifySession = async () => {
       const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
       
       if (!savedIdentity) {
-        await initializeCrypto(); // This is now awaited
+        await initializeCrypto();
       } else {
         setIsCryptoReady(true);
       }
-    } else {
-      await logout();
+    } 
+    // 2. Handle 401 specifically: The user is truly NOT authenticated
+    else if (response.status === 401) {
+      console.warn("Session invalid/expired. Logging out.");
+      await logout(); 
+    } 
+    // 3. Handle other errors (500s, 403s): Do NOT logout yet!
+    else {
+      console.error(`Auth check failed with status: ${response.status}`);
+      // Don't call logout() here, allow the app to retry or show an error
     }
   } catch (err) {
-    console.error("Auth verify failed:", err);
+    console.error("Auth verify failed (Network error):", err);
+    // Keep isAuthenticated as false, but don't wipe the SignalEngine store
+    // so the user can try again without re-initializing the whole crypto stack
   } finally {
-    setIsLoading(false); // Only finish loading once everything is fully ready
+    setIsLoading(false);
   }
 };
+
   const logout = async () => {
     // DYNAMIC IMPORT: Accessed only when needed
     const { SignalEngine } = await import('../utils/SignalEngine');
