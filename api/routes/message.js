@@ -42,7 +42,6 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
       ]
     };
 
-    // Pagination logic for historical fetch
     if (beforeId && mongoose.isValidObjectId(beforeId)) {
       const ref = await Message.findById(beforeId).select('createdAt');
       if (ref) query.createdAt = { $lt: ref.createdAt };
@@ -59,14 +58,13 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
       const msgDto = {
         _id: m._id,
         id: m._id,
-        // Encryption Payload
         isEncrypted: !!m.isEncrypted, 
-        payload: m.isEncrypted ? {
-          ciphertext: m.payload?.ciphertext || null,
-          iv: m.payload?.iv || m.iv, 
-          version: m.payload?.version || 1
+        // Ensure payload is explicitly constructed for the client
+        payload: m.isEncrypted && m.payload ? {
+          ciphertext: m.payload.ciphertext,
+          iv: m.payload.iv,
+          version: m.payload.version || 1
         } : null,
-        // Metadata
         text: m.text || "",
         senderId: m.senderId?._id || m.senderId,
         senderModel: m.senderModel || 'User',
@@ -81,7 +79,6 @@ router.get('/:otherUserId', authenticateToken, async (req, res, next) => {
         fileUrl: null
       };
 
-      // S3 Private URL retrieval
       if (m.fileUrl && ['image', 'video'].includes(m.fileType)) {
         try {
           msgDto.fileUrl = await getPrivateUrl(m.fileUrl);
@@ -117,6 +114,8 @@ router.post('/send', authenticateToken, async (req, res, next) => {
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
     const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
 
+    // 1. Properly construct the payload object for E2EE
+    let payloadData = null;
     if (isEncrypted) {
       if (!ciphertext || !iv) {
         return res.status(400).json({ success: false, message: "Encryption payload missing." });
@@ -124,38 +123,38 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       if (Buffer.from(iv, 'base64').length !== 12) {
         return res.status(400).json({ success: false, message: "Security violation: IV must be 12 bytes." });
       }
+      payloadData = { ciphertext, iv };
     }
 
+    // 2. Create message using the defined payloadData
     const newMessage = await Message.create({
       senderId: myId,
       senderModel: senderModelName,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: targetModelName,
       text: isEncrypted ? null : String(text || '').trim(),
-      payload: isEncrypted ? payload : null, // Assuming payload was destructured from req.body
+      payload: payloadData, 
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? replyToId : null,
       notificationSent: false
     });
 
+    // 3. Socket, Push, and Email logic
     const TargetModel = targetModelName === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId).select('pushSubscription lastNotificationEmail email firstName lastName');
 
     if (receiver) {
-      // Socket, Push, and Email logic here...
       const io = req.app.get('socketio');
       if (io) io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
-      // ... (Keep existing notification and email logic)
-    }
+          }
 
-    // Return the Sanitized DTO
+    // 4. Return the Sanitized DTO
     const savedMsg = newMessage.toObject();
     const responseMsg = {
       _id: savedMsg._id,
       id: savedMsg._id,
       text: savedMsg.text || "",
-      content: savedMsg.text || "",
       isEncrypted: !!savedMsg.isEncrypted,
       payload: savedMsg.payload || null,
       senderId: myId,

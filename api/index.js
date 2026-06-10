@@ -2210,13 +2210,15 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     }
     const senderRole = await Agent.exists({ _id: myId }) ? 'Agent' : 'User';
     
-    const { receiverId, text, ciphertext, receiverModel, fileType, replyToId, iv, isEncrypted } = req.body;
+    const { receiverId, text, ciphertext, iv, receiverModel, fileType, replyToId, isEncrypted } = req.body;
 
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
     }
     const sanitizedModel = ['Agent', 'User'].includes(receiverModel) ? receiverModel : 'User';
 
+    // 1. Construct payload object and validate encryption requirements
+    let payloadData = null;
     if (isEncrypted) {
       if (!ciphertext || !iv) {
         return res.status(400).json({ success: false, message: "Security violation: Payload/IV required." });
@@ -2224,17 +2226,19 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       if (Buffer.from(iv, 'base64').length !== 12) {
         return res.status(400).json({ success: false, message: "Security violation: Invalid IV." });
       }
+      payloadData = { ciphertext, iv };
     } else if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ success: false, message: "Message text cannot be blank." });
     }
 
+    // 2. Create message with correctly defined payloadData
     const newMessage = new Message({
       senderId: myId,
       senderModel: senderRole,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: sanitizedModel,
       text: isEncrypted ? null : String(text).trim(), 
-      payload: isEncrypted ? payload : null, 
+      payload: payloadData, 
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
       replyToId: (replyToId && mongoose.Types.ObjectId.isValid(replyToId)) ? new mongoose.Types.ObjectId(replyToId) : null,
@@ -2243,6 +2247,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     
     await newMessage.save();
 
+    // 3. Socket Notification
     const TargetModel = sanitizedModel === 'Agent' ? Agent : User;
     const receiver = await TargetModel.findById(receiverId)
       .select('pushSubscription lastNotificationEmail email firstName lastName');
@@ -2260,7 +2265,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       console.error("⚠️ Socket emission warning:", socketErr.message);
     }
 
-    // 6. Notifications Logic
+    // 4. Notifications Logic
     const baseUrl = "https://www.zingconnect.chat";
     const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'ZingConnect';
@@ -2293,21 +2298,22 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     } catch (mailErr) {
       console.error("❌ Email Error:", mailErr.message);
     }
-const savedMsg = newMessage.toObject();
-    const responseMsg = {
-      ...savedMsg,
-      id: savedMsg._id,
-      sender: { id: myId },
-      payload: savedMsg.payload, 
-      isEncrypted: savedMsg.isEncrypted
-    };
-    
-    return res.status(201).json({ success: true, message: responseMsg });
+
+    const savedMsg = newMessage.toObject();
+    return res.status(201).json({ 
+      success: true, 
+      message: {
+        ...savedMsg,
+        id: savedMsg._id,
+        sender: { id: myId }
+      } 
+    });
 
   } catch (err) {
     next(err);
   }
 });
+
 app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -2337,7 +2343,7 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
     const chronologicalMessages = messages.reverse();
 
     const processedMessages = await Promise.all(chronologicalMessages.map(async (m) => {
-      // 1. DTO Construction
+      // 1. DTO Construction with Explicit Payload handling
       const msgDto = {
         _id: m._id,
         id: m._id,
@@ -2345,9 +2351,12 @@ app.get('/api/messages/:otherUserId', authenticateToken, async (req, res, next) 
         senderModel: m.senderModel || 'User',
         receiverId: m.receiverId?._id || m.receiverId,
         receiverModel: m.receiverModel || 'User',
-        // E2EE Data: Always pass payload as-is for the SignalEngine to process
         isEncrypted: !!m.isEncrypted,
-        payload: m.payload || null, 
+        // Ensure payload is explicitly passed if exists
+        payload: m.isEncrypted && m.payload ? {
+            ciphertext: m.payload.ciphertext,
+            iv: m.payload.iv
+        } : null,
         text: m.text || "",
         fileType: m.fileType || 'text',
         createdAt: m.createdAt,

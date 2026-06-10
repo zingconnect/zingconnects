@@ -14,6 +14,8 @@ import { BsSearch, BsShieldExclamation, BsShieldLock, BsThreeDotsVertical, BsChe
 } from 'react-icons/bs';
 import { useAuth } from "../context/AuthContext";
 import { secureFetch } from "../../api/utils/api";
+import { SignalEngine } from '../utils/SignalEngine';
+
 
 
 const formatLastSeen = (lastSeenDate, ticker) => {
@@ -179,8 +181,6 @@ const hasProcessedDeepLink = useRef(false);
   const selectedUserRef = useRef(selectedUser);
 const agentDataRef = useRef(agentData);
 const isSendingRef = useRef(false);
-
-
     const slugFromUrl = slug || agentData?.slug || '';
 
 
@@ -1735,10 +1735,11 @@ const handleDisconnect = async (e) => {
     window.location.replace(targetUrl);
   }
 };
+
 const handleSelectUser = async (user) => {
   if (window.innerWidth < 1024) setShowSidebar(false);
 
-  // 1. Session tracking to prevent race conditions
+  // 1. Session tracking
   const sessionId = Math.random().toString(36).substring(7);
   activeSessionRef.current = sessionId;
 
@@ -1749,25 +1750,28 @@ const handleSelectUser = async (user) => {
   if (socket) socket.emit('join-chat', user._id);
 
   try {
+    // 2. Ensure SignalEngine is ready before fetching history
+    await SignalEngine.initialize(agentData._id); 
+
     const response = await secureFetch(`/api/messages/${user._id}?limit=30`, { method: 'GET' });
     if (!response.ok) throw new Error("Failed to fetch messages");
 
     const data = await response.json();
-    const freshUserData = data.user || data.clientDetails;
-
-    if (freshUserData) {
-      setSelectedUser(prev => ({ ...prev, ...freshUserData }));
-    }
+    if (data.user) setSelectedUser(prev => ({ ...prev, ...data.user }));
 
     if (data.success && Array.isArray(data.messages)) {
+      // 3. Process history safely
       const processedHistory = await Promise.all(
         data.messages.map(async (msg) => {
           if (!msg.isEncrypted) return msg;
           
           try {
-            const decryptedText = await SignalEngine.decrypt(user._id, msg.payload);
+            // Ensure we use the correct structure for your payload
+            const payload = msg.payload || { ciphertext: msg.ciphertext, iv: msg.iv };
+            const decryptedText = await SignalEngine.decrypt(user._id, payload);
             return { ...msg, decryptedText, isEncrypted: false };
           } catch (e) {
+            console.error("Decryption failed for msg", msg._id, e);
             return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
           }
         })
@@ -1782,6 +1786,7 @@ const handleSelectUser = async (user) => {
     await secureFetch(`/api/messages/mark-read/${user._id}`, { method: 'PATCH' });
   } catch (err) {
     console.error("Failed to load chat history:", err);
+    setIsInitialLoad(false);
   }
 };
 
@@ -2036,20 +2041,22 @@ const handleResend = async (failedMsg) => {
 
 const handleSendMessage = async (e) => {
   if (e) e.preventDefault();
-  
-  // Guard clause: Prevent action if already sending, uploading, or missing context
+
+  // Guard: Ensure SignalEngine is imported and ready
+  if (typeof SignalEngine === 'undefined') {
+    console.error("SignalEngine is not imported in this component.");
+    return;
+  }
+
   if (!selectedUser || !newMessage.trim() || isUploading || isSendingRef.current) {
     return;
   }
 
-  // 1. Lock the operation
   isSendingRef.current = true;
-  
   const textToSend = newMessage.trim();
   const tempId = Date.now().toString();
   setNewMessage('');
 
-  // 2. Optimistic UI: Update state immediately
   const optimisticMsg = {
     _id: tempId,
     tempId: tempId,
@@ -2065,14 +2072,13 @@ const handleSendMessage = async (e) => {
   };
   
   setMessages(prev => [...prev, optimisticMsg]);
-  // Use a slight delay to allow the DOM to render the new message before scrolling
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    // 3. Cryptographic Operation
+    // Cryptographic Operation
     const encryptedBundle = await SignalEngine.encrypt(selectedUser._id, textToSend);
     
-    // 4. Network Transmission
+    // Network Transmission
     const response = await secureFetch('/api/messages/send', {
       method: 'POST',
       body: JSON.stringify({
@@ -2083,10 +2089,8 @@ const handleSendMessage = async (e) => {
     });
 
     const data = await response.json();
-    
     if (!data.success) throw new Error(data.message || "Transmission rejected.");
 
-    // 5. Success: Update message status to 'sent'
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { 
         ...data.message, 
@@ -2098,14 +2102,10 @@ const handleSendMessage = async (e) => {
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
-    
-    // 6. Failure: Update status to 'failed' to allow user retry
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { ...msg, status: 'failed' } : msg
     ));
-    
   } finally {
-    // 7. Unlock the operation
     isSendingRef.current = false;
   }
 };
