@@ -129,26 +129,47 @@ async initialize(userId) {
   },
 
 async sendMessage(remoteUserId, messageText) {
-    const lib = libsignalModule.default || libsignalModule;
-    const hasSession = await store.loadSession(remoteUserId);
+  const lib = libsignalModule.default || libsignalModule;
+  const address = getAddress(lib, remoteUserId);
+  
+  // 1. Check if the session is already established
+  let session = await store.loadSession(remoteUserId);
 
-    if (!hasSession) {
-      const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
-      const rawBundle = await response.json();
-      const preparedBundle = prepareBundleForSignal(rawBundle);
-      
-      // 🛡️ FIX: Use ProtocolAddress object here as well
-      const address = getAddress(lib, remoteUserId);
-      const sessionBuilder = new lib.SessionBuilder(store, address);
-      await sessionBuilder.processPreKey(preparedBundle);
+  // 2. If no session, perform the X3DH handshake
+  if (!session) {
+    console.log(`🔒 Establishing new session for ${remoteUserId}`);
+    
+    // Fetch the remote bundle
+    const response = await secureFetch(`/api/users/crypto-bundle/${remoteUserId}`);
+    if (!response.ok) throw new Error("Could not fetch crypto bundle");
+    
+    const rawBundle = await response.json();
+    const preparedBundle = prepareBundleForSignal(rawBundle);
+    
+    // Build the session
+    // The SessionBuilder uses the 'store' instance to save the record automatically
+    const sessionBuilder = new lib.SessionBuilder(store, address);
+    await sessionBuilder.processPreKey(preparedBundle);
+    
+    // Verify persistence
+    session = await store.loadSession(remoteUserId);
+    if (!session) {
+      throw new Error("Critical: Session handshake completed but failed to persist to IndexedDB.");
     }
+  }
+
+  // 3. Encrypt using the established session
   const encrypted = await this.encrypt(remoteUserId, messageText);
-    socket.emit('message', {
+  
+  // 4. Emit the message
+  socket.emit('message', {
     to: remoteUserId,
     ciphertext: encrypted.body,
-    type: encrypted.type, // 3: PreKeyMessage, 1: Normal
+    type: encrypted.type, // 3: PreKeyMessage (initial), 1: Normal
     registrationId: await store.getLocalRegistrationId()
   });
+
+  return { success: true };
 },
 
 async receiveMessage(remoteUserId, messageBundle) {

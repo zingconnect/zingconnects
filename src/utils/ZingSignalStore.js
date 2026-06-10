@@ -77,15 +77,20 @@ async getIdentityKey(identifier) {
     return await db.get('session', identifier);
   }
 
-  async saveSession(identifier, record) {
-    const db = await dbPromise;
-    await db.put('session', record, identifier);
-  }
+ async saveSession(identifier, record) {
+  const db = await dbPromise;
+  const serialized = record.serialize(); 
+  await db.put('session', serialized, identifier);
+}
 
-  async loadSession(identifier) {
-    const db = await dbPromise;
-    return (await db.get('session', identifier)) || null;
-  }
+
+ async loadSession(identifier) {
+  const db = await dbPromise;
+  const data = await db.get('session', identifier);
+  
+  if (!data) return null;
+    return libsignalModule.SessionRecord.deserialize(data);
+}
 
   async getLocalRegistrationId() {
     const db = await dbPromise;
