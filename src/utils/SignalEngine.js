@@ -76,21 +76,19 @@ async initializeSession(remoteUserId, peerBundle) {
   const lib = libsignalModule.default || libsignalModule;
   const formattedBundle = prepareBundleForSignal(peerBundle);
   
-  // Use 'ProtocolAddress' as found in your debug logs
+  // Use the 'ProtocolAddress' confirmed by your debug logs
   const address = new lib.ProtocolAddress(remoteUserId, 1);
   
   const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
   const builder = new SessionBuilder(store, address);
   
-  // Use the method name found in your library version
-  // Based on common libsignal variations, it's either processPreKeyBundle or processPreKey
-  const processMethod = builder.processPreKeyBundle || builder.processPreKey;
-  
-  if (typeof processMethod !== 'function') {
-    throw new Error("Could not find a valid processing method on SessionBuilder. Available methods: " + Object.getOwnPropertyNames(Object.getPrototypeOf(builder)));
+  // Based on your previous debug output, 'initIncoming' is the correct method
+  if (typeof builder.initIncoming === 'function') {
+    await builder.initIncoming(formattedBundle);
+  } else {
+    throw new Error("Could not find 'initIncoming' method. Available: " + 
+      Object.getOwnPropertyNames(Object.getPrototypeOf(builder)));
   }
-
-  await processMethod.call(builder, formattedBundle);
   
   console.log(`✅ Session initialized for ${remoteUserId}`);
 },
