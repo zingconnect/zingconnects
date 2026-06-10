@@ -132,7 +132,6 @@ React.useEffect(() => {
   return () => { isMounted.current = false; };
 }, []);
 
-
 const handleUserInquiry = async (e) => {
   e.preventDefault();
   if (!userEmail) return alert("Please enter your email.");
@@ -141,17 +140,21 @@ const handleUserInquiry = async (e) => {
   setIsProcessing(true);
 
   try {
-    // 1. Setup User Identity (New for Bidirectional)
+    // 1. Setup User Identity and save to store
     const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
     await SignalEngine.store.saveIdentity('local', identityKeyPair);
 
-    // 2. Initiate secure handshake, sending the user's keys
+    // Verify identity was persisted correctly
+    const identity = await SignalEngine.store.loadIdentity('local');
+    if (!identity) throw new Error("Local identity was not saved correctly.");
+
+    // 2. Initiate secure handshake
     const response = await secureFetch('/api/users/handshake', {
       method: 'POST',
-      body: JSON.stringify({ 
-        email: userEmail.trim(), 
+      body: JSON.stringify({
+        email: userEmail.trim(),
         agentSlug: slug,
-        userPublicKeyJwk: preKeyBundle // Send user's public bundle
+        userPublicKeyJwk: preKeyBundle
       }),
     });
 
@@ -159,11 +162,22 @@ const handleUserInquiry = async (e) => {
     if (!response.ok) throw new Error(data.message || "Handshake failed");
 
     if (data.agentIdentity) {
-      // 3. Save the Agent's identity and initialize the session
-      // We pass the full bundle, including the consumed preKey
-      await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
-      await SignalEngine.initializeSession(slug, data.agentIdentity);
-      
+      const bundle = {
+        registrationId: parseInt(data.agentIdentity.registrationId),
+        identityKey: toBuffer(data.agentIdentity.identityKey),
+        signedPreKey: {
+          keyId: data.agentIdentity.signedPreKey.keyId,
+          publicKey: toBuffer(data.agentIdentity.signedPreKey.publicKey),
+          signature: toBuffer(data.agentIdentity.signedPreKey.signature)
+        },
+        preKey: {
+          keyId: data.agentIdentity.preKeys[0].keyId,
+          publicKey: toBuffer(data.agentIdentity.preKeys[0].publicKey)
+        }
+      };
+
+      await SignalEngine.store.savePeerBundle(slug, bundle);
+      await SignalEngine.initializeSession(slug, bundle);
       console.log(`✅ Secure session established with: ${slug}`);
     }
 
@@ -171,11 +185,11 @@ const handleUserInquiry = async (e) => {
     if (typeof login === 'function') await login(slug);
     navigate(`/user/dashboard/${slug}`, { replace: true });
 
-  } catch (err) { 
+  } catch (err) {
     console.error("Handshake error:", err);
-    alert("System error. Please try again."); 
-  } finally { 
-    setIsProcessing(false); 
+    alert("System error. Please try again.");
+  } finally {
+    setIsProcessing(false);
   }
 };
 

@@ -78,6 +78,16 @@ async setupIdentity() {
   async reset() {
     await store.clearAll();
   },
+
+async initializeSession(remoteUserId, peerBundle) {
+  const lib = libsignalModule.default || libsignalModule;
+  const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
+    const builder = new SessionBuilder(store, remoteUserId);
+    await builder.processPreKey(peerBundle);
+  
+  console.log(`✅ Session initialized for ${remoteUserId}`);
+},
+
 async sendMessage(remoteUserId, messageText) {
   const lib = libsignalModule.default || libsignalModule;
     const hasSession = await store.loadSession(remoteUserId);
@@ -109,4 +119,10 @@ async receiveMessage(remoteUserId, messageBundle) {
 
 };
 
-export const { encrypt, decrypt, setupIdentity, store: signalStore } = SignalEngine;
+export const encrypt = SignalEngine.encrypt.bind(SignalEngine);
+export const decrypt = SignalEngine.decrypt.bind(SignalEngine);
+export const setupIdentity = SignalEngine.setupIdentity.bind(SignalEngine);
+export const initializeSession = SignalEngine.initializeSession.bind(SignalEngine);
+export const sendMessage = SignalEngine.sendMessage.bind(SignalEngine);
+export const receiveMessage = SignalEngine.receiveMessage.bind(SignalEngine);
+export const signalStore = store;
