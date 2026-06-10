@@ -14,45 +14,51 @@ export const AuthProvider = ({ children }) => {
     verifySession();
   }, []);
 
-  const initializeCrypto = useCallback(async () => {
+ const initializeCrypto = async () => {
+  setIsCryptoReady(false);
+  setIsLoading(true); // Ensure the app knows we are working
+  try {
+    const { SignalEngine } = await import('../utils/SignalEngine');
+    
+    const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
+    const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+    const response = await secureFetch('/api/update-crypto-key', {
+      method: 'PUT',
+      body: JSON.stringify({ 
+        registrationId: preKeyBundle.registrationId, 
+        identityKey: bufferToBase64(identityKeyPair.pubKey), 
+        signedPreKey: {
+          keyId: preKeyBundle.signedPreKey.keyId,
+          publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+          signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+        },
+        preKeys: preKeyBundle.preKeys.map(pk => ({
+          keyId: pk.keyId,
+          publicKey: bufferToBase64(pk.publicKey)
+        }))
+      })
+    });
+
+    if (!response.ok) throw new Error("Failed to update keys on server");
+
+    setIsCryptoReady(true);
+    console.log("✅ E2EE Persistent-session initialized.");
+  } catch (err) {
+    console.error("Crypto init failed:", err);
+    // CRITICAL: Prevent infinite loading
     setIsCryptoReady(false);
-    try {
-      // DYNAMIC IMPORT: Defined inside the function scope
-      const { SignalEngine } = await import('../utils/SignalEngine');
-      
-      const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
-      const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+  } finally {
+    setIsLoading(false);
+  }
+};
 
-      await secureFetch('/api/update-crypto-key', {
-        method: 'PUT',
-        body: JSON.stringify({ 
-          registrationId: preKeyBundle.registrationId, 
-          identityKey: bufferToBase64(identityKeyPair.pubKey), 
-          signedPreKey: {
-            keyId: preKeyBundle.signedPreKey.keyId,
-            publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-            signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-          },
-          preKeys: preKeyBundle.preKeys.map(pk => ({
-            keyId: pk.keyId,
-            publicKey: bufferToBase64(pk.publicKey)
-          }))
-        })
-      });
 
-      setIsCryptoReady(true);
-      console.log("✅ E2EE Persistent-session initialized.");
-    } catch (err) {
-      console.error("Crypto init failed:", err);
-    }
-  }, []);
-
+ // Updated verifySession snippet
 const verifySession = async () => {
-  setIsLoading(true);
+  setIsLoading(true); // Start loading
   try {
     const response = await secureFetch('/api/agents/me');
-
-    // 1. Handle success: User is authenticated
     if (response.ok) {
       const data = await response.json();
       setIsAuthenticated(true);
@@ -62,27 +68,17 @@ const verifySession = async () => {
       const savedIdentity = await SignalEngine.store.loadIdentityKey('local');
       
       if (!savedIdentity) {
-        await initializeCrypto();
+        await initializeCrypto(); // This is now awaited
       } else {
         setIsCryptoReady(true);
       }
-    } 
-    // 2. Handle 401 specifically: The user is truly NOT authenticated
-    else if (response.status === 401) {
-      console.warn("Session invalid/expired. Logging out.");
-      await logout(); 
-    } 
-    // 3. Handle other errors (500s, 403s): Do NOT logout yet!
-    else {
-      console.error(`Auth check failed with status: ${response.status}`);
-      // Don't call logout() here, allow the app to retry or show an error
+    } else {
+      await logout();
     }
   } catch (err) {
-    console.error("Auth verify failed (Network error):", err);
-    // Keep isAuthenticated as false, but don't wipe the SignalEngine store
-    // so the user can try again without re-initializing the whole crypto stack
+    console.error("Auth verify failed:", err);
   } finally {
-    setIsLoading(false);
+    setIsLoading(false); // Only finish loading once everything is fully ready
   }
 };
 
