@@ -1,6 +1,6 @@
 import * as libsignalModule from 'libsignal';
 import { Buffer } from 'buffer'; 
-import { ZingSignalStore, dbPromise } from './ZingSignalStore';
+import { ZingSignalStore} from './ZingSignalStore';
 import { bufferToBase64, prepareBundleForSignal } from './SignalUtils';
 import { secureFetch } from "../../api/utils/api";
 
@@ -50,7 +50,6 @@ async setupIdentity() {
     }))
   };
 
- const db = await dbPromise; // Ensure you have access to your dbPromise
   await Promise.all([
     store.saveIdentity('local', identityKeyPair.pubKey), // Save pubKey
     db.put('identity', identityKeyPair.privKey, 'local_priv'), // Save privKey
