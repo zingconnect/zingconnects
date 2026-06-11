@@ -1,6 +1,6 @@
 import * as libsignalModule from 'libsignal';
 import { Buffer } from 'buffer'; 
-import { ZingSignalStore } from './ZingSignalStore';
+import { ZingSignalStore, dbPromise } from './ZingSignalStore';
 import { bufferToBase64, prepareBundleForSignal } from './SignalUtils';
 import { secureFetch } from "../../api/utils/api";
 

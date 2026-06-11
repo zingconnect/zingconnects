@@ -2045,6 +2045,24 @@ const handleResend = async (failedMsg) => {
   }
 };
 
+const resetAndRefresh = async () => {
+  const { signalStore } = await import('../utils/SignalEngine');
+  await signalStore.clearAll();
+  console.log("Storage cleared. Refresh the page to re-initialize.");
+};
+
+useEffect(() => {
+  const resetDB = async () => {
+    try {
+      await signalStore.clearAll();
+      console.log("✅ Storage cleared. Please refresh the page.");
+    } catch (err) {
+      console.error("Failed to clear storage", err);
+    }
+  };
+  // resetDB(); // Uncomment this line, run app, then comment it out again
+}, []);
+
 const handleSendMessage = async (e) => {
   if (e) e.preventDefault();
 
