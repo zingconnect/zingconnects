@@ -1,5 +1,6 @@
 import { openDB } from 'idb';
-import { bufferToBase64, toBuffer } from './SignalUtils'; // Import shared helpers
+import { bufferToBase64, toBuffer } from './SignalUtils'; 
+import * as libsignalModule from 'libsignal';
 
 const DB_NAME = 'ZingConnectStorage';
 const DB_VERSION = 1;
@@ -112,9 +113,11 @@ async saveSession(identifier, record) {
 async loadSession(identifier) {
   const db = await dbPromise;
   const data = await db.get('session', identifier);
+  
   console.log(`DEBUG: Attempting to load session for: ${identifier}, Found: ${!!data}`);
+  
   if (!data) return null;
-  return libsignalModule.SessionRecord.deserialize(data);
+    return this.lib.SessionRecord.deserialize(data);
 }
 
   async getLocalRegistrationId() {
