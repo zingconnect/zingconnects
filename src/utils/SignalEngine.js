@@ -8,8 +8,38 @@ const lib = libsignalModule.default || libsignalModule;
 const getAddress = (lib, userId) => new lib.ProtocolAddress(userId, 1);
 const store = new ZingSignalStore(lib);
 
+let _lib = null;
+let _store = null;
+
+const getLib = () => {
+  if (!_lib) _lib = libsignalModule.default || libsignalModule;
+  return _lib;
+};
+
+const getStore = () => {
+  if (!_store) _store = new ZingSignalStore(getLib());
+  return _store;
+};
+
+const prepareBundleForSignal = (bundle) => {
+  const lib = getLib();
+  return {
+    identityKey: lib.Curve.decodePoint(toBuffer(bundle.identityKey)),
+    registrationId: bundle.registrationId,
+    signedPreKey: {
+      keyId: bundle.signedPreKey.keyId,
+      publicKey: lib.Curve.decodePoint(toBuffer(bundle.signedPreKey.publicKey)),
+      signature: toBuffer(bundle.signedPreKey.signature)
+    },
+    preKey: bundle.preKey ? {
+      keyId: bundle.preKey.keyId,
+      publicKey: lib.Curve.decodePoint(toBuffer(bundle.preKey.publicKey))
+    } : null
+  };
+};
+
 export const SignalEngine = {
-  store,
+get store() { return getStore(); },
 
 async setupIdentity() {
   const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
@@ -65,15 +95,18 @@ async setupIdentity() {
 },
 
 async encrypt(remoteUserId, clearText) {
-  const lib = libsignalModule.default || libsignalModule;
+  const lib = getLib();
+  const store = this.store; // Use the getter
   const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
-  const address = getAddress(lib, remoteUserId);
+  const address = new lib.ProtocolAddress(remoteUserId, 1);
   const cipher = new SessionCipher(store, address);
-    const encoded = new TextEncoder().encode(clearText);
+  
+  const encoded = new TextEncoder().encode(clearText);
   const bufferMessage = Buffer.from(encoded); 
   
   return await cipher.encrypt(bufferMessage);
 },
+
 
 async decrypt(remoteUserId, ciphertextBundle) {
   const lib = libsignalModule.default || libsignalModule;
@@ -82,6 +115,7 @@ async decrypt(remoteUserId, ciphertextBundle) {
   const cipher = new SessionCipher(store, address);
   
   // 🛡️ FIX: Ensure ciphertextBundle is a Buffer if it arrives as Uint8Array
+
   const bundle = Buffer.isBuffer(ciphertextBundle) 
     ? ciphertextBundle 
     : Buffer.from(ciphertextBundle);
@@ -96,44 +130,24 @@ async decrypt(remoteUserId, ciphertextBundle) {
   },
 
 async initializeSession(remoteUserId, peerBundle) {
-  console.log("DEBUG: PreKeyBundle identityKey is instance of Buffer:", Buffer.isBuffer(preKeyBundle.identityKey));
-  const lib = libsignalModule.default || libsignalModule;
-  const bundle = prepareBundleForSignal(peerBundle);
-const prepareBundleForSignal = (bundle) => {
-  return {
-    identityKey: lib.Curve.decodePoint(toBuffer(bundle.identityKey)),
-    registrationId: bundle.registrationId,
-    signedPreKey: {
-      keyId: bundle.signedPreKey.keyId,
-      publicKey: lib.Curve.decodePoint(toBuffer(bundle.signedPreKey.publicKey)),
-      signature: toBuffer(bundle.signedPreKey.signature)
-    },
-    preKey: bundle.preKey ? {
-      keyId: bundle.preKey.keyId,
-      publicKey: lib.Curve.decodePoint(toBuffer(bundle.preKey.publicKey))
-    } : null
-  };
-};
+    const lib = getLib();
+    // 1. Prepare the bundle first
+    const preKeyBundle = prepareBundleForSignal(peerBundle);
+    
+    // 2. Now you can safely log it
+    console.log("DEBUG: PreKeyBundle identityKey is instance of Buffer:", Buffer.isBuffer(preKeyBundle.identityKey));
 
-  const address = new lib.ProtocolAddress(remoteUserId, 1);
-  const SessionBuilder = new (lib.SessionBuilder || lib.default?.SessionBuilder)(store, address);
+    const address = new lib.ProtocolAddress(remoteUserId, 1);
+    const sessionBuilder = new lib.SessionBuilder(this.store, address);
 
- try {
-    await SessionBuilder.initIncoming(preKeyBundle);
-  } catch (err) {
-    // Check if the session was actually saved
-    const session = await store.loadSession(remoteUserId);
-    if (session) {
-      console.log(`✅ Session successfully persisted for ${remoteUserId}`);
-    } else {
-      console.error("Critical: Handshake truly failed to persist", err);
-      throw err;
+    try {
+      await sessionBuilder.initIncoming(preKeyBundle);
+    } catch (err) {
+      const session = await this.store.loadSession(remoteUserId);
+      if (!session) throw err;
     }
-  }
-
-  console.log(`✅ Session initialized for ${remoteUserId}`);
-},
-
+  },
+  
 async loadIdentity(identifier) {
     return await this.store.loadIdentity(identifier);
   },
@@ -148,8 +162,9 @@ async initialize(userId) {
   },
 
 async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
-  const lib = libsignalModule.default || libsignalModule;
-  const address = getAddress(lib, remoteUserId);
+  const lib = getLib();
+  const store = getStore();
+  const address = new lib.ProtocolAddress(remoteUserId, 1);
 
   const identityKeyPair = await store.getIdentityKeyPair();
   if (!identityKeyPair) {
@@ -168,13 +183,8 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
     if (!data.bundle) throw new Error("Bundle data missing from response");
     
     const preparedBundle = prepareBundleForSignal(data.bundle);
+    const sessionBuilder = new lib.SessionBuilder(store, address);
     
-    const SessionBuilder = lib.SessionBuilder || lib.default?.SessionBuilder;
-    if (!SessionBuilder) {
-      throw new Error("SessionBuilder could not be found in libsignal module");
-    }
-
-    const sessionBuilder = new SessionBuilder(store, address);
     await sessionBuilder.initOutgoing(preparedBundle);
     
     session = await store.loadSession(remoteUserId);
@@ -189,7 +199,7 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
     method: 'POST',
     body: JSON.stringify({
       receiverId: remoteUserId,
-      receiverModel: receiverModel,
+      receiverModel,
       isEncrypted: true,
       payload: {
         ciphertext: encrypted.body,
@@ -210,13 +220,11 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
 },
 
 async receiveMessage(remoteUserId, messageBundle) {
-  const lib = libsignalModule.default || libsignalModule;
+  const lib = getLib();
+  const store = this.store; // Use the getter
   const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
-  
-  // 🛡️ FIX: Create the ProtocolAddress object for the session
   const address = new lib.ProtocolAddress(remoteUserId, 1);
   
-  // 1. Decrypt using the ProtocolAddress object
   const cipher = new SessionCipher(store, address);
   const decrypted = await cipher.decrypt(messageBundle);
   

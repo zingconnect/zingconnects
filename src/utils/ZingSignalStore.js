@@ -40,26 +40,17 @@ async getIdentityKey(identifier) {
     return await this.loadIdentity(identifier);
   }
 
-  async getIdentityKeyPair() {
-  try {
-    const db = await dbPromise; // Access the DB via the promise
-        const pubKeyBase64 = await db.get('identity', 'local');
-    const privKey = await db.get('identity', 'local_priv');
+async getIdentityKeyPair() {
+  const db = await dbPromise;
+  const pubKeyBase64 = await db.get('identity', 'local');
+  const privKey = await db.get('identity', 'local_priv');
 
-    if (!pubKeyBase64 || !privKey) {
-      throw new Error("Identity keys (pub/priv) missing in IndexedDB.");
-    }
+  if (!pubKeyBase64 || !privKey) return null;
 
-    // 2. Return the pair in the format libsignal expects
-    // We use the 'lib' instance passed during store initialization
-    return {
-      pubKey: this.lib.Curve.decodePoint(toBuffer(pubKeyBase64)),
-      privKey: privKey // Already an ArrayBuffer from storage
-    };
-  } catch (err) {
-    console.error("❌ Error in getIdentityKeyPair:", err.message);
-    return null;
-  }
+  return {
+    pubKey: this.lib.Curve.decodePoint(toBuffer(pubKeyBase64)),
+    privKey: privKey // Ensure this is the correct format for libsignal
+  };
 }
 
   async isTrustedIdentity(identifier, identityKey, direction) {
