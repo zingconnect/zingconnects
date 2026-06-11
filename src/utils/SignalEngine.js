@@ -21,23 +21,6 @@ const getStore = () => {
   return _store;
 };
 
-const prepareBundleForSignal = (bundle) => {
-  const lib = getLib();
-  return {
-    identityKey: lib.Curve.decodePoint(toBuffer(bundle.identityKey)),
-    registrationId: bundle.registrationId,
-    signedPreKey: {
-      keyId: bundle.signedPreKey.keyId,
-      publicKey: lib.Curve.decodePoint(toBuffer(bundle.signedPreKey.publicKey)),
-      signature: toBuffer(bundle.signedPreKey.signature)
-    },
-    preKey: bundle.preKey ? {
-      keyId: bundle.preKey.keyId,
-      publicKey: lib.Curve.decodePoint(toBuffer(bundle.preKey.publicKey))
-    } : null
-  };
-};
-
 export const SignalEngine = {
 get store() { return getStore(); },
 
@@ -109,21 +92,19 @@ async encrypt(remoteUserId, clearText) {
 
 
 async decrypt(remoteUserId, ciphertextBundle) {
-  const lib = libsignalModule.default || libsignalModule;
-  const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
-  const address = getAddress(lib, remoteUserId);
-  const cipher = new SessionCipher(store, address);
+  const lib = getLib();
+  const store = this.store; 
   
-  // 🛡️ FIX: Ensure ciphertextBundle is a Buffer if it arrives as Uint8Array
-
-  const bundle = Buffer.isBuffer(ciphertextBundle) 
+  const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
+  const address = new lib.ProtocolAddress(remoteUserId, 1);
+  const cipher = new SessionCipher(store, address);
+    const bundle = Buffer.isBuffer(ciphertextBundle) 
     ? ciphertextBundle 
     : Buffer.from(ciphertextBundle);
   
   const decrypted = await cipher.decrypt(bundle);
   return new TextDecoder().decode(decrypted);
 },
-
 
   async reset() {
     await store.clearAll();
