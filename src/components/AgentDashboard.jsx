@@ -2047,8 +2047,6 @@ const handleResend = async (failedMsg) => {
   }
 };
 
-
-
 const handleSendMessage = async (e) => {
   if (e) e.preventDefault();
 
@@ -2092,6 +2090,9 @@ const handleSendMessage = async (e) => {
       textToSend
     );
 
+    if (!(await SignalEngine.store.containsKey('local'))) {
+   await SignalEngine.initialize(userId);
+}
     // Update UI
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { 

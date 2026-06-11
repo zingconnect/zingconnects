@@ -32,6 +32,13 @@ export class ZingSignalStore {
     this.lib = lib; 
   }
 
+  get lib() {
+    if (!this._lib) {
+      console.error("ZingSignalStore: libsignal was undefined at construction.");
+    }
+    return this._lib;
+  }
+
   async ensureReady() {
     await dbPromise; // Wait for the DB to be opened/upgraded
   }
@@ -41,17 +48,21 @@ async getIdentityKey(identifier) {
   }
 
 async getIdentityKeyPair() {
-  const db = await dbPromise;
-  const pubKeyBase64 = await db.get('identity', 'local');
-  const privKey = await db.get('identity', 'local_priv');
+    const db = await dbPromise;
+    const pubKeyBase64 = await db.get('identity', 'local');
+    const privKey = await db.get('identity', 'local_priv');
 
-  if (!pubKeyBase64 || !privKey) return null;
-
-  return {
-    pubKey: this.lib.Curve.decodePoint(toBuffer(pubKeyBase64)),
-    privKey: privKey // Ensure this is the correct format for libsignal
-  };
-}
+    if (!pubKeyBase64 || !privKey) return null;
+    const keyBuffer = toBuffer(pubKeyBase64);
+    
+    if (!this.lib || !this.lib.Curve) {
+        throw new Error("libsignal library not loaded in ZingSignalStore");
+    }
+    return {
+      pubKey: this.lib.Curve.decodePoint(keyBuffer),
+      privKey: privKey
+    };
+  }
 
   async isTrustedIdentity(identifier, identityKey, direction) {
     const savedKey = await this.loadIdentityKey(identifier);
