@@ -96,14 +96,24 @@ async decrypt(remoteUserId, ciphertextBundle) {
   },
 
 async initializeSession(remoteUserId, peerBundle) {
+  console.log("DEBUG: PreKeyBundle identityKey is instance of Buffer:", Buffer.isBuffer(preKeyBundle.identityKey));
   const lib = libsignalModule.default || libsignalModule;
   const bundle = prepareBundleForSignal(peerBundle);
-  const preKeyBundle = {
-    identityKey: bundle.identityKey,
+const prepareBundleForSignal = (bundle) => {
+  return {
+    identityKey: lib.Curve.decodePoint(toBuffer(bundle.identityKey)),
     registrationId: bundle.registrationId,
-    signedPreKey: bundle.signedPreKey,
-    preKey: bundle.preKey || null
+    signedPreKey: {
+      keyId: bundle.signedPreKey.keyId,
+      publicKey: lib.Curve.decodePoint(toBuffer(bundle.signedPreKey.publicKey)),
+      signature: toBuffer(bundle.signedPreKey.signature)
+    },
+    preKey: bundle.preKey ? {
+      keyId: bundle.preKey.keyId,
+      publicKey: lib.Curve.decodePoint(toBuffer(bundle.preKey.publicKey))
+    } : null
   };
+};
 
   const address = new lib.ProtocolAddress(remoteUserId, 1);
   const SessionBuilder = new (lib.SessionBuilder || lib.default?.SessionBuilder)(store, address);

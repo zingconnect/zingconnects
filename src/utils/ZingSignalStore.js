@@ -110,14 +110,16 @@ async saveSession(identifier, record) {
   await db.put('session', data, identifier);
 }
 
+// Add these to ZingSignalStore
 async loadSession(identifier) {
-  const db = await dbPromise;
-  const data = await db.get('session', identifier);
-  
-  console.log(`DEBUG: Attempting to load session for: ${identifier}, Found: ${!!data}`);
-  
-  if (!data) return null;
-    return this.lib.SessionRecord.deserialize(data);
+    const db = await dbPromise;
+    const record = await db.get('session', identifier);
+    return record ? this.lib.SessionRecord.deserialize(record) : null;
+}
+
+async containsKey(identifier) {
+    const db = await dbPromise;
+    return !!(await db.get('identity', identifier));
 }
 
   async getLocalRegistrationId() {
