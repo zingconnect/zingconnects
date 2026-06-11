@@ -37,10 +37,10 @@ async setupIdentity() {
     })
   );
 
-  // 1. Persist everything to the store
+  // 1. Persist everything using the existing store methods
   await Promise.all([
-    store.saveIdentity('local', identityKeyPair.pubKey),
-    store.savePrivateIdentityKey('local', identityKeyPair.privKey),
+    // Use the combined method you created in ZingSignalStore
+    store.saveIdentityKeyPair(identityKeyPair),
     store.saveRegistrationId(registrationId),
     store.saveSignedPreKey(signedPreKey.keyId, signedPreKey),
     ...preKeys.map(pk => store.savePreKey(pk.keyId, pk))
