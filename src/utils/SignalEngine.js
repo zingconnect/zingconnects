@@ -19,23 +19,34 @@ async setupIdentity() {
   const registrationId = KeyHelper.generateRegistrationId();
   const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
   
-  // Helper to extract keys
   const getBytes = (obj) => {
     if (!obj) return null;
     const key = obj.pubKey || obj.public || obj;
     return key instanceof Uint8Array ? key.buffer : key;
   };
+
   const preKeys = await Promise.all(
     Array.from({ length: 100 }, async (_, i) => {
       const pk = await KeyHelper.generatePreKey(i + 1);
       const pubKey = getBytes(pk.keyPair || pk);
       
       if (!pubKey) {
-        throw new Error(`PreKey ${i + 1} generation failed: No public key found in ${JSON.stringify(Object.keys(pk))}`);
+        throw new Error(`PreKey ${i + 1} generation failed`);
       }
       return { ...pk, extractedPubKey: pubKey };
     })
   );
+
+  // 1. Persist everything to the store
+  await Promise.all([
+    store.saveIdentity('local', identityKeyPair.pubKey),
+    store.savePrivateIdentityKey('local', identityKeyPair.privKey),
+    store.saveRegistrationId(registrationId),
+    store.saveSignedPreKey(signedPreKey.keyId, signedPreKey),
+    ...preKeys.map(pk => store.savePreKey(pk.keyId, pk))
+  ]);
+  
+  // 2. Prepare the bundle for the server
   const preKeyBundle = {
     registrationId,
     identityKey: bufferToBase64(getBytes(identityKeyPair)),
@@ -50,12 +61,6 @@ async setupIdentity() {
     }))
   };
 
-  await Promise.all([
-    store.saveIdentity('local', identityKeyPair.pubKey), // Save pubKey
-    db.put('identity', identityKeyPair.privKey, 'local_priv'), // Save privKey
-    store.saveRegistrationId(registrationId)
-  ]);
-  
   return { identityKeyPair, preKeyBundle };
 },
 

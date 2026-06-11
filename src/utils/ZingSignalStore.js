@@ -132,6 +132,16 @@ async loadSession(identifier) {
     await db.put('prekeys', keyPair, keyId);
   }
 
+async saveIdentityKeyPair(identityKeyPair) {
+  const db = await dbPromise;
+  const tx = db.transaction(['identity'], 'readwrite');
+    const pubKeyBase64 = bufferToBase64(identityKeyPair.pubKey);
+  await tx.objectStore('identity').put(pubKeyBase64, 'local');
+    await tx.objectStore('identity').put(identityKeyPair.privKey, 'local_priv');
+  
+  await tx.done;
+}
+
   async saveRegistrationId(id) {
     const db = await dbPromise;
     await db.put('misc', id, 'registrationId');
