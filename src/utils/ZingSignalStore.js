@@ -27,6 +27,9 @@ const areKeysEqual = (key1, key2) => {
 };
 
 export class ZingSignalStore {
+  constructor(lib) {
+    this.lib = lib; 
+  }
 
   async ensureReady() {
     await dbPromise; // Wait for the DB to be opened/upgraded
@@ -36,25 +39,28 @@ async getIdentityKey(identifier) {
     return await this.loadIdentity(identifier);
   }
 
-// Inside your ZingSignalStore class
-async getIdentityKeyPair() {
+  async getIdentityKeyPair() {
   try {
-    if (!this.userDoc || !this.userDoc.publicKeyJwk) {
-      throw new Error("User identity keys not found in store.");
+    const db = await dbPromise; // Access the DB via the promise
+        const pubKeyBase64 = await db.get('identity', 'local');
+    const privKey = await db.get('identity', 'local_priv');
+
+    if (!pubKeyBase64 || !privKey) {
+      throw new Error("Identity keys (pub/priv) missing in IndexedDB.");
     }
 
-    const privKey = await this.db.get('identityKey', 'privateKey'); 
-    const pubKey = this.userDoc.publicKeyJwk.identityKey; // From your DB record
-
+    // 2. Return the pair in the format libsignal expects
+    // We use the 'lib' instance passed during store initialization
     return {
-      pubKey: this.lib.Curve.decodePoint(Buffer.from(pubKey, 'base64')),
-      privKey: privKey // This should be the ArrayBuffer representation
+      pubKey: this.lib.Curve.decodePoint(toBuffer(pubKeyBase64)),
+      privKey: privKey // Already an ArrayBuffer from storage
     };
   } catch (err) {
-    console.error("Error in getIdentityKeyPair:", err);
+    console.error("❌ Error in getIdentityKeyPair:", err.message);
     return null;
   }
 }
+
   async isTrustedIdentity(identifier, identityKey, direction) {
     const savedKey = await this.loadIdentityKey(identifier);
     if (!savedKey) return true; // Trust on first use

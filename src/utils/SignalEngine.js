@@ -6,19 +6,22 @@ import { secureFetch } from "../../api/utils/api";
 
 const lib = libsignalModule.default || libsignalModule;
 const getAddress = (lib, userId) => new lib.ProtocolAddress(userId, 1);
-const store = new ZingSignalStore();
+const store = new ZingSignalStore(lib);
 
 export const SignalEngine = {
   store,
+
 async setupIdentity() {
   const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
   if (!KeyHelper) throw new Error("KeyHelper not found");
+  
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
   const registrationId = KeyHelper.generateRegistrationId();
   const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+  
+  // Helper to extract keys
   const getBytes = (obj) => {
     if (!obj) return null;
-    // Check common locations: pubKey, public, or the object itself if it's already a buffer
     const key = obj.pubKey || obj.public || obj;
     return key instanceof Uint8Array ? key.buffer : key;
   };
@@ -47,9 +50,10 @@ async setupIdentity() {
     }))
   };
 
-  // 🛡️ Ensure atomic storage persistence
+ const db = await dbPromise; // Ensure you have access to your dbPromise
   await Promise.all([
-    store.saveIdentity('local', identityKeyPair),
+    store.saveIdentity('local', identityKeyPair.pubKey), // Save pubKey
+    db.put('identity', identityKeyPair.privKey, 'local_priv'), // Save privKey
     store.saveRegistrationId(registrationId)
   ]);
   
