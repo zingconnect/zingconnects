@@ -758,34 +758,25 @@ app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
     const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
     const TargetModel = mongoose.model(modelName);
 
-    // 1. Fetch only necessary fields
-    const user = await TargetModel.findById(userId, { publicKeyJwk: 1 });
-
-    if (!user || !user.isCryptoReady) {
-      return res.status(403).json({ success: false, message: "Not initialized." });
-    }
-
-    // 2. Atomic Pop: We capture the document BEFORE and AFTER to identify the consumed key
-    // Using findOneAndUpdate to remove the first key
+    // Atomic: Find user, ensure crypto ready, AND pop the first prekey
     const updatedUser = await TargetModel.findOneAndUpdate(
-      { _id: userId, "publicKeyJwk.preKeys.0": { $exists: true } },
+      { _id: userId, isCryptoReady: true, "publicKeyJwk.preKeys.0": { $exists: true } },
       { $pop: { "publicKeyJwk.preKeys": -1 } },
-      { new: false } // Return the OLD document to see which key was at index 0
+      { new: false } 
     );
 
     if (!updatedUser) {
-      return res.status(404).json({ success: false, message: "No keys available." });
+      return res.status(404).json({ success: false, message: "No keys available or user not ready." });
     }
 
-    const consumedPreKey = updatedUser.publicKeyJwk.preKeys[0];
-
-    // 3. Return the specific bundle
+    const { publicKeyJwk } = updatedUser;
+    
     return res.status(200).json({ 
       success: true, 
-      registrationId: updatedUser.publicKeyJwk.registrationId,
-      identityKey: updatedUser.publicKeyJwk.identityKey,
-      signedPreKey: updatedUser.publicKeyJwk.signedPreKey,
-      preKey: consumedPreKey // The client MUST use this specific key
+      registrationId: publicKeyJwk.registrationId,
+      identityKey: publicKeyJwk.identityKey,
+      signedPreKey: publicKeyJwk.signedPreKey,
+      preKey: publicKeyJwk.preKeys[0] // The specific key just popped
     });
   } catch (err) {
     next(err);

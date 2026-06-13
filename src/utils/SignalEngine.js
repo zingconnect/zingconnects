@@ -156,10 +156,14 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
     if (!response.ok) throw new Error("Could not fetch crypto bundle");
     
     const data = await response.json();
-    if (!data.bundle) throw new Error("Bundle data missing from response");
+    
+    // MODIFICATION: The backend returns keys at the root, so check 'success' instead of 'data.bundle'
+    if (!data.success) throw new Error("Bundle data missing from response");
     
     const sessionBuilder = new lib.SessionBuilder(store, address);
-    await sessionBuilder.initOutgoing(prepareBundleForSignal(data.bundle));
+    
+    // MODIFICATION: Pass 'data' directly, not 'data.bundle'
+    await sessionBuilder.initOutgoing(prepareBundleForSignal(data));
     
     session = await store.loadSession(remoteUserId);
     if (!session) throw new Error("Session handshake completed but failed to persist.");
@@ -184,7 +188,7 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
       payload: {
         ciphertext: encrypted.body,
         iv: encrypted.iv || '',
-        ephemeralKey: encrypted.ephemeralKey || '', 
+        ephemeralKey: encrypted.ephemeralKey || '',
         counter: encrypted.counter ?? 0,
         type: encrypted.type === 3 ? 'prekey' : 'message'
       }
