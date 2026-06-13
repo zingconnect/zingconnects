@@ -62,6 +62,7 @@ import authRoutes from './routes/auth.js';
 import messageRoutes from './routes/message.js'; 
 import callRoutes from './routes/callRoutes.js';
 import adminRoutes from './routes/admin.js'; 
+import cryptoRoutes from './routes/cryptoRoutes.js';
 import { authenticateToken, isAdmin, requireSuperAdmin } from './middlewares/auth.js';
 
 const app = express();
@@ -166,6 +167,7 @@ app.set('socketio', io);
 app.use('/api/calls', callRoutes);
 app.use('/api/messages', messageRoutes); 
 app.use('/api/agents', authRoutes);
+app.use('/api/crypto', cryptoRoutes);
 app.use('/api/admin', authenticateToken, isAdmin, adminRoutes); // Protected by default
 
 const flw = new Flutterwave(process.env.VITE_FLW_PUBLIC_KEY, process.env.VITE_FLW_SECRET_KEY);
