@@ -147,7 +147,7 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
   const store = getStore();
   const address = new lib.ProtocolAddress(remoteUserId, 1);
 
-  // 1. Ensure the session exists before we try to touch the Ratchet
+  // 1. Ensure the session exists
   let session = await store.loadSession(remoteUserId);
 
   if (!session) {
@@ -156,19 +156,20 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
     if (!response.ok) throw new Error("Could not fetch crypto bundle");
     
     const data = await response.json();
+    if (!data.bundle) throw new Error("Bundle data missing from response");
+    
     const sessionBuilder = new lib.SessionBuilder(store, address);
     await sessionBuilder.initOutgoing(prepareBundleForSignal(data.bundle));
     
     session = await store.loadSession(remoteUserId);
+    if (!session) throw new Error("Session handshake completed but failed to persist.");
   }
 
-  // 2. Encryption wrapped in a try/catch to handle Ratchet failures
+  // 2. Encrypt ONCE. The Ratchet advances here.
   let encrypted;
   try {
     encrypted = await this.encrypt(remoteUserId, messageText);
   } catch (err) {
-    // If the Ratchet fails here, it usually means the remote user sent a message 
-    // that wasn't processed correctly, causing a chain desync.
     console.error("Encryption failed: Possible Ratchet Desync.", err);
     throw new Error("Encryption failed. Please refresh the chat to re-sync.");
   }
@@ -183,6 +184,8 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
       payload: {
         ciphertext: encrypted.body,
         iv: encrypted.iv || '',
+        ephemeralKey: encrypted.ephemeralKey || '', 
+        counter: encrypted.counter ?? 0,
         type: encrypted.type === 3 ? 'prekey' : 'message'
       }
     })
