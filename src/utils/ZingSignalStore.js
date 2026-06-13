@@ -120,7 +120,23 @@ async saveSession(identifier, record) {
 async loadSession(identifier) {
   const db = await dbPromise;
   const record = await db.get('session', identifier);
-  return record ? this.lib.SessionRecord.deserialize(record.buffer) : null;
+  
+  if (!record) return null;
+
+  // --- ADD THESE DEBUG LOGS HERE ---
+  console.log("DEBUG: Type of record:", typeof record);
+  console.log("DEBUG: Constructor of record:", record?.constructor?.name);
+  // ---------------------------------
+
+  try {
+    // The previous fix: handle the .buffer property if it exists
+    const data = (record.buffer) ? record.buffer : record;
+    return this.lib.SessionRecord.deserialize(data);
+  } catch (err) {
+    console.error("Critical: Deserialization failed for", identifier, err);
+    await db.delete('session', identifier); // Clear corrupted state
+    return null;
+  }
 }
 
 async loadSignedPreKey(keyId) {

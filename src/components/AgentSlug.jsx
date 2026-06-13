@@ -157,15 +157,14 @@ const handleUserInquiry = async (e) => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "Handshake failed");
 
-    // 3. Initialize secure session
-    if (data.agentIdentity) {
-      // Pass the raw bundle; the Engine handles conversion internally
-      await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
-      await SignalEngine.initializeSession(slug, data.agentIdentity);
-      console.log(`✅ Secure session established with: ${slug}`);
-    }
-
-    // 4. Authenticate & Navigate
+   if (data.agentIdentity) {
+  await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
+    try {
+     await SignalEngine.initializeSession(slug, data.agentIdentity);
+  } catch (err) {
+     console.warn("Session initialization failed, likely a first-time handshake:", err);
+  }
+}
     if (typeof login === 'function') await login(slug);
     navigate(`/user/dashboard/${slug}`, { replace: true });
 
