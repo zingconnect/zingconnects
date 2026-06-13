@@ -18,7 +18,18 @@ const messageSchema = new mongoose.Schema({
     enum: ['Agent', 'User']
   },
 
- 
+  receiverId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    refPath: 'receiverModel',
+    index: true // Crucial: You will frequently query messages by receiver
+  },
+  receiverModel: {
+    type: String,
+    required: true,
+    enum: ['Agent', 'User']
+  },
+
   payload: {
     ciphertext: { type: String, required: true }, // Encrypted blob
     iv: { type: String, required: true },         // Initialization Vector
@@ -43,7 +54,7 @@ const messageSchema = new mongoose.Schema({
 // --- INDEXING STRATEGY ---
 // Crucial for performance without revealing content
 messageSchema.index({ conversationId: 1, createdAt: -1 });
-messageSchema.index({ senderId: 1, createdAt: -1 });
+messageSchema.index({ conversationId: 1, receiverId: 1, createdAt: -1 });
 
 const Message = mongoose.models.Message || mongoose.model('Message', messageSchema);
 export default Message;

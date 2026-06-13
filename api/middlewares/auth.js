@@ -9,14 +9,17 @@ console.log("--- AUTH DEBUG ---");
   console.log("Signed Cookies:", req.signedCookies); // Signed cookies
   console.log("Authorization Header:", req.headers.authorization);
   
-const token = req.signedCookies?.token;
+const token = 
+    req.signedCookies?.token || 
+    req.cookies?.token || 
+    req.headers['authorization']?.split(' ')[1];
+
   if (!token) {
-    console.warn("Auth failed: No signed cookie token detected.");
+    console.warn("Auth failed: No token found in any location.");
     return res.status(401).json({ success: false, message: "Access Denied: No token provided" });
   }
 
   try {
-    // 1. Verify token first (no DB required)
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     req.user.id = decoded.id || decoded._id;
