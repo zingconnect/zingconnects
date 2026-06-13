@@ -1,5 +1,22 @@
 import mongoose from 'mongoose';
 
+
+const preKeySchema = new mongoose.Schema({
+  keyId: { type: Number, required: true },
+  publicKey: { type: String, required: true }
+}, { _id: false });
+
+const jwkSchema = new mongoose.Schema({
+  registrationId: { type: Number, required: true },
+  identityKey: { type: String, required: true },
+  signedPreKey: { 
+    keyId: { type: Number, required: true },
+    publicKey: { type: String, required: true },
+    signature: { type: String, required: true } 
+  },
+  preKeys: [preKeySchema]
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -50,18 +67,9 @@ const userSchema = new mongoose.Schema({
     default: ""
   },
 publicKeyJwk: {
-  registrationId: { type: Number, required: false }, 
-  identityKey: { type: String, required: false },
-  signedPreKey: { 
-    keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false },
-    signature: { type: String, required: false } 
+    type: jwkSchema,
+    default: null
   },
-  preKeys: [{
-    keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false }
-  }]
-},
   role: { 
     type: String, 
     default: 'user' // 👈 Added: Simplifies callerModel logic in controllers

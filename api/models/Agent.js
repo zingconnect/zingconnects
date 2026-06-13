@@ -1,5 +1,21 @@
 import mongoose from 'mongoose';
 
+const preKeySchema = new mongoose.Schema({
+  keyId: { type: Number, required: true },
+  publicKey: { type: String, required: true }
+}, { _id: false });
+
+const jwkSchema = new mongoose.Schema({
+  registrationId: { type: Number, required: true },
+  identityKey: { type: String, required: true },
+  signedPreKey: { 
+    keyId: { type: Number, required: true },
+    publicKey: { type: String, required: true },
+    signature: { type: String, required: true } 
+  },
+  preKeys: [preKeySchema]
+}, { _id: false });
+
 export const agentSchema = new mongoose.Schema({
   firstName: { 
     type: String, 
@@ -49,18 +65,9 @@ lastNotificationEmail: {
   default: null
 },
 publicKeyJwk: {
-  registrationId: { type: Number, required: false }, // Change to true
-  identityKey: { type: String, required: false },    // Change to true
-  signedPreKey: { 
-    keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false },
-    signature: { type: String, required: false } 
+    type: jwkSchema,
+    default: null 
   },
-  preKeys: [{
-    keyId: { type: Number, required: false },
-    publicKey: { type: String, required: false }
-  }]
-},
   plan: { 
     type: String, 
     enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], 

@@ -630,41 +630,51 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       }
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
-// 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
-if (
-  !publicKeyJwk || 
-  !publicKeyJwk.identityKey || 
-  !publicKeyJwk.preKeys || 
-  !Array.isArray(publicKeyJwk.preKeys) || 
-  publicKeyJwk.preKeys.length === 0 ||
-  // Explicitly check that no key is an empty string
-  publicKeyJwk.preKeys.some(pk => !pk.publicKey || pk.publicKey.trim() === "") || 
-  !publicKeyJwk.signedPreKey ||
-  !publicKeyJwk.signedPreKey.publicKey || 
-  publicKeyJwk.signedPreKey.publicKey.trim() === ""
-) {
-  console.error(`❌ Crypto validation failed: Empty or missing keys for: ${lowerEmail}`);
-  return res.status(400).json({ 
-    success: false, 
-    message: "Cryptographic keys could not be processed. Ensure your browser is generating keys correctly." 
-  });
-}
 
-    // 4. Update agent status AND assign crypto keys
-    Object.assign(agent, {
-      isVerified: true,
-      status: 'active',
-      otp: undefined,
-      otpExpires: undefined,
-      failedOtpAttempts: 0,
-      publicKeyJwk: publicKeyJwk // Keys are confirmed valid by the gate above
-    });
-    
-    await agent.save();
-    
+    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
+    if (
+      !publicKeyJwk || 
+      !publicKeyJwk.identityKey || 
+      !publicKeyJwk.preKeys || 
+      !Array.isArray(publicKeyJwk.preKeys) || 
+      publicKeyJwk.preKeys.length === 0 ||
+      publicKeyJwk.preKeys.some(pk => !pk.publicKey || pk.publicKey.trim() === "") || 
+      !publicKeyJwk.signedPreKey ||
+      !publicKeyJwk.signedPreKey.publicKey || 
+      publicKeyJwk.signedPreKey.publicKey.trim() === ""
+    ) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Cryptographic keys invalid. Ensure your browser is generating keys correctly." 
+      });
+    }
+
+    // 4. Atomic Update: Finalize account activation and store keys
+    // This replaces Object.assign and .save() to ensure data consistency
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { email: lowerEmail },
+      { 
+        $set: {
+          isVerified: true,
+          status: 'active',
+          publicKeyJwk: publicKeyJwk,
+          failedOtpAttempts: 0
+        },
+        $unset: { 
+          otp: "", 
+          otpExpires: "" 
+        }
+      },
+      { new: true } 
+    );
+
+    if (!updatedAgent) {
+      return res.status(404).json({ success: false, message: "Agent profile not found." });
+    }
+
     // 5. Create Session Token
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug, role: 'agent' },
+      { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -680,7 +690,7 @@ if (
 
     return res.status(200).json({
       success: true,
-      slug: agent.slug,
+      slug: updatedAgent.slug,
       message: "Your profile is live and encrypted!"
     });
 
@@ -748,44 +758,40 @@ app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
     const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
     const TargetModel = mongoose.model(modelName);
 
-    // 1. Fetch the document
+    // 1. Fetch only necessary fields
     const user = await TargetModel.findById(userId, { publicKeyJwk: 1 });
 
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found." });
+    if (!user || !user.isCryptoReady) {
+      return res.status(403).json({ success: false, message: "Not initialized." });
     }
 
-    // 🛡️ CRITICAL GATE: Use the Virtual check we defined in the schema
-    // This ensures we only allow sessions for users who have fully completed registration/verification
-    if (!user.isCryptoReady) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Agent is not yet cryptographically initialized." 
-      });
-    }
-
-    // 2. Atomically consume one preKey
-    // Note: We use findOneAndUpdate to ensure the pop happens safely in a high-concurrency environment
+    // 2. Atomic Pop: We capture the document BEFORE and AFTER to identify the consumed key
+    // Using findOneAndUpdate to remove the first key
     const updatedUser = await TargetModel.findOneAndUpdate(
       { _id: userId, "publicKeyJwk.preKeys.0": { $exists: true } },
       { $pop: { "publicKeyJwk.preKeys": -1 } },
-      { new: true, projection: { publicKeyJwk: 1 } }
+      { new: false } // Return the OLD document to see which key was at index 0
     );
 
-    // 3. Return the bundle
-    // If updatedUser is null, it means no preKeys were left; return current identity bundle
-    const bundleToReturn = updatedUser ? updatedUser.publicKeyJwk : user.publicKeyJwk;
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: "No keys available." });
+    }
 
+    const consumedPreKey = updatedUser.publicKeyJwk.preKeys[0];
+
+    // 3. Return the specific bundle
     return res.status(200).json({ 
       success: true, 
-      bundle: bundleToReturn 
+      registrationId: updatedUser.publicKeyJwk.registrationId,
+      identityKey: updatedUser.publicKeyJwk.identityKey,
+      signedPreKey: updatedUser.publicKeyJwk.signedPreKey,
+      preKey: consumedPreKey // The client MUST use this specific key
     });
-
   } catch (err) {
-    console.error("❌ Key fetch failed:", err);
-    res.status(500).json({ success: false, message: "Key fetch failed." });
+    next(err);
   }
 });
+
 
 app.post('/api/agents/login', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
@@ -1103,47 +1109,47 @@ app.post('/api/users/handshake', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Email and Agent context required" });
     }
 
-    // 1. Find Agent
-    const agent = await Agent.findOne({ slug: agentSlug.toLowerCase().trim() });
-    if (!agent) return res.status(400).json({ success: false, message: "Agent not found" });
-    
-    // 2. User Persistence (Same logic as before)
+    // 1. Atomic User Persistence
     const normalizedEmail = email.toLowerCase().trim();
-    let user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOneAndUpdate(
+      { email: normalizedEmail },
+      { 
+        $set: { publicKeyJwk: userPublicKeyJwk, lastLogin: new Date() },
+        $addToSet: { connectedAgents: (await Agent.findOne({ slug: agentSlug.toLowerCase().trim() }))._id }
+      },
+      { upsert: true, new: true }
+    );
 
-    if (!user) {
-      user = await User.create({ email: normalizedEmail, connectedAgents: [agent._id], publicKeyJwk: userPublicKeyJwk, lastLogin: new Date() });
-    } else {
-      if (userPublicKeyJwk) { user.publicKeyJwk = userPublicKeyJwk; await user.save(); }
-      if (!user.connectedAgents.includes(agent._id)) { user.connectedAgents.push(agent._id); await user.save(); }
+    // 2. Atomic PreKey Consumption
+    // $pop removes and returns the first element (-1) of the preKeys array.
+    // We set { new: false } to capture the document state BEFORE the removal,
+    // so we can return the key that was just consumed.
+    const agentResult = await Agent.findOneAndUpdate(
+      { 
+        slug: agentSlug.toLowerCase().trim(),
+        "publicKeyJwk.preKeys.0": { $exists: true } 
+      },
+      { $pop: { "publicKeyJwk.preKeys": -1 } },
+      { new: false }
+    );
+
+    if (!agentResult) {
+      return res.status(404).json({ success: false, message: "No pre-keys available." });
     }
 
-    // 3. Generate Session Token (Unified for all successful handshakes)
+    // 3. Token generation
     const token = jwt.sign({ id: user._id, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.cookie('token', token, { 
-        httpOnly: true, 
-        secure: true, 
-        sameSite: 'Lax', 
-        path: '/', 
-        signed: true 
-    });
+    res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', signed: true });
 
-    // 4. Atomic PreKey Consumption
-    let consumedKey = null;
-    if (agent.publicKeyJwk?.preKeys?.length > 0) {
-      consumedKey = agent.publicKeyJwk.preKeys.shift();
-      await agent.save();
-    }
-
-    // 5. Unified Response
+    // 4. Return the identity bundle + the consumed preKey
     return res.json({ 
       success: true, 
       user: { id: user._id },
       agentIdentity: {
-        registrationId: agent.publicKeyJwk.registrationId,
-        identityKey: agent.publicKeyJwk.identityKey,
-        signedPreKey: agent.publicKeyJwk.signedPreKey,
-        preKey: consumedKey // Will be null if no keys were left
+        registrationId: agentResult.publicKeyJwk.registrationId,
+        identityKey: agentResult.publicKeyJwk.identityKey,
+        signedPreKey: agentResult.publicKeyJwk.signedPreKey,
+        preKey: agentResult.publicKeyJwk.preKeys[0] // The specific key consumed
       }
     });
 

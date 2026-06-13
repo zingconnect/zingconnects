@@ -113,16 +113,20 @@ async getIdentityKeyPair() {
 
 async saveSession(identifier, record) {
   const db = await dbPromise;
-  console.log(`DEBUG: Saving session for: ${identifier}`);
-  const data = record.serialize(); 
+  const data = new Uint8Array(record.serialize()); 
   await db.put('session', data, identifier);
 }
 
-// Add these to ZingSignalStore
 async loadSession(identifier) {
+  const db = await dbPromise;
+  const record = await db.get('session', identifier);
+  return record ? this.lib.SessionRecord.deserialize(record.buffer) : null;
+}
+
+async loadSignedPreKey(keyId) {
     const db = await dbPromise;
-    const record = await db.get('session', identifier);
-    return record ? this.lib.SessionRecord.deserialize(record) : null;
+    const record = await db.get('prekeys', keyId);
+    return record; 
 }
 
 async containsKey(identifier) {
@@ -135,10 +139,7 @@ async containsKey(identifier) {
     return await db.get('misc', 'registrationId');
   }
 
-  async loadSignedPreKey(keyId) {
-    const db = await dbPromise;
-    return await db.get('prekeys', keyId);
-  }
+ 
 
   async saveSignedPreKey(keyId, keyPair) {
     const db = await dbPromise;
