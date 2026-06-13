@@ -124,8 +124,6 @@ app.use((req, res, next) => {
   urlencodedParser(req, res, next);
 });
 
-// --- 4. GLOBAL ERROR HANDLER ---
-// This handles REAL JSON errors for non-multipart routes
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     console.error('🔴 Bad JSON Request:', err.message);
@@ -142,6 +140,13 @@ app.use(async (req, res, next) => {
   } catch (error) {
     return res.status(503).json({ success: false, message: "Database connection temporarily unavailable." });
   }
+});
+
+app.use((req, res, next) => {
+  if (req.url.includes('/api/crypto')) {
+    console.log("DEBUG: Request received for crypto path:", req.url);
+  }
+  next();
 });
 
 const terminatingCallsCache = new Set();
