@@ -59,28 +59,26 @@ function urlBase64ToUint8Array(base64String) {
 
 const socket = io(import.meta.env.VITE_API_URL);
 
-const processMessageForUI = async (msg) => {
-const module = await import('../utils/SignalEngine');
-const SignalEngine = module.default || module.SignalEngine;
-
-if (!SignalEngine) {
-  console.error("Critical: SignalEngine failed to load.");
-  return;
-}
+// This should be outside the component or passed in
+const processMessageForUI = async (msg, engineInstance) => {
+  if (!engineInstance) {
+    console.error("Critical: SignalEngine instance missing.");
+    return { ...msg, decryptedText: "🔒 [Engine Offline]" };
+  }
   if (msg.decryptedText && !msg.isEncrypted) return msg;
-  if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
+    if (msg.isSystem || msg.type === 'call_metadata' || !msg.isEncrypted) {
     return { ...msg, decryptedText: msg.text || msg.content || "", isEncrypted: false };
   }
   try {
     const payload = msg.payload || { ciphertext: msg.ciphertext, iv: msg.iv };
-    const decrypted = await SignalEngine.decrypt(msg.senderId, payload);
-    
+    const decrypted = await engineInstance.decrypt(msg.senderId, payload);
     return { ...msg, decryptedText: decrypted, isEncrypted: false };
   } catch (e) {
     console.error("Signal Ratchet Error:", e);
-    return { ...msg, decryptedText: "🔒 [Session Desync - Re-initiating...]", isEncrypted: false };
+    return { ...msg, decryptedText: "🔒 [Session Desync - Refresh Required]", isEncrypted: false };
   }
 };
+
 const MessageItem = ({ message }) => {
   const displayContent = message.decryptedText || message.text || "";
   
@@ -1745,9 +1743,13 @@ const handleDisconnect = async (e) => {
 };
 
 const handleSelectUser = async (user) => {
+  if (!isEngineReady) {
+    alert("Securing channels... please wait a moment.");
+    return;
+  }
+
   if (window.innerWidth < 1024) setShowSidebar(false);
 
-  // 1. Session tracking
   const sessionId = Math.random().toString(36).substring(7);
   activeSessionRef.current = sessionId;
 
@@ -1758,9 +1760,6 @@ const handleSelectUser = async (user) => {
   if (socket) socket.emit('join-chat', user._id);
 
   try {
-    // 2. Ensure SignalEngine is ready before fetching history
-    await SignalEngine.initialize(agentData._id); 
-
     const response = await secureFetch(`/api/messages/${user._id}?limit=30`, { method: 'GET' });
     if (!response.ok) throw new Error("Failed to fetch messages");
 
@@ -1768,21 +1767,9 @@ const handleSelectUser = async (user) => {
     if (data.user) setSelectedUser(prev => ({ ...prev, ...data.user }));
 
     if (data.success && Array.isArray(data.messages)) {
-      // 3. Process history safely
+      // Use the refactored processMessageForUI helper
       const processedHistory = await Promise.all(
-        data.messages.map(async (msg) => {
-          if (!msg.isEncrypted) return msg;
-          
-          try {
-            // Ensure we use the correct structure for your payload
-            const payload = msg.payload || { ciphertext: msg.ciphertext, iv: msg.iv };
-            const decryptedText = await SignalEngine.decrypt(user._id, payload);
-            return { ...msg, decryptedText, isEncrypted: false };
-          } catch (e) {
-            console.error("Decryption failed for msg", msg._id, e);
-            return { ...msg, decryptedText: "🔒 [Decryption Failed]", isEncrypted: false };
-          }
-        })
+        data.messages.map(msg => processMessageForUI(msg, SignalEngine))
       );
 
       if (activeSessionRef.current === sessionId) {
@@ -1797,6 +1784,14 @@ const handleSelectUser = async (user) => {
     setIsInitialLoad(false);
   }
 };
+
+useEffect(() => {
+  if (agentData?._id && !isEngineReady) {
+    SignalEngine.initialize(agentData._id)
+      .then(() => setIsEngineReady(true))
+      .catch(err => console.error("Signal Initialization Failed", err));
+  }
+}, [agentData?._id]);
 
 useEffect(() => {
   if (hasProcessedDeepLink.current || users.length === 0) return;

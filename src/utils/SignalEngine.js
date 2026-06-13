@@ -147,35 +147,33 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
   const store = getStore();
   const address = new lib.ProtocolAddress(remoteUserId, 1);
 
-  const identityKeyPair = await store.getIdentityKeyPair();
-  if (!identityKeyPair) {
-    throw new Error("Identity Private Key missing! Please ensure you are logged in.");
-  }
-  
+  // 1. Ensure the session exists before we try to touch the Ratchet
   let session = await store.loadSession(remoteUserId);
 
   if (!session) {
     console.log(`🔒 Establishing new session for ${remoteUserId}`);
-    
     const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
     if (!response.ok) throw new Error("Could not fetch crypto bundle");
     
     const data = await response.json();
-    if (!data.bundle) throw new Error("Bundle data missing from response");
-    
-    const preparedBundle = prepareBundleForSignal(data.bundle);
     const sessionBuilder = new lib.SessionBuilder(store, address);
-    
-    await sessionBuilder.initOutgoing(preparedBundle);
+    await sessionBuilder.initOutgoing(prepareBundleForSignal(data.bundle));
     
     session = await store.loadSession(remoteUserId);
-    if (!session) {
-      throw new Error("Critical: Session handshake completed but failed to persist.");
-    }
   }
 
-  const encrypted = await this.encrypt(remoteUserId, messageText);
-  
+  // 2. Encryption wrapped in a try/catch to handle Ratchet failures
+  let encrypted;
+  try {
+    encrypted = await this.encrypt(remoteUserId, messageText);
+  } catch (err) {
+    // If the Ratchet fails here, it usually means the remote user sent a message 
+    // that wasn't processed correctly, causing a chain desync.
+    console.error("Encryption failed: Possible Ratchet Desync.", err);
+    throw new Error("Encryption failed. Please refresh the chat to re-sync.");
+  }
+
+  // 3. Transmission
   const response = await secureFetch('/api/messages/send', {
     method: 'POST',
     body: JSON.stringify({
@@ -185,12 +183,8 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
       payload: {
         ciphertext: encrypted.body,
         iv: encrypted.iv || '',
-        ephemeralKey: encrypted.ephemeralKey || '',
-        counter: encrypted.counter || 0,
-        previousCounter: encrypted.previousCounter || 0,
         type: encrypted.type === 3 ? 'prekey' : 'message'
-      },
-      fileType: 'text'
+      }
     })
   });
 
