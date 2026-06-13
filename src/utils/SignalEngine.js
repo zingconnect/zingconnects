@@ -151,8 +151,8 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
   let session = await store.loadSession(remoteUserId);
 
   if (!session) {
-    console.log(`🔒 Establishing new session for ${remoteUserId}`);
-    const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
+   console.log("DEBUG: Fetching bundle for:", remoteUserId, "with model:", receiverModel);
+const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
     if (!response.ok) throw new Error("Could not fetch crypto bundle");
     
     const data = await response.json();

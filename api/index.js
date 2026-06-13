@@ -752,6 +752,7 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
     next(err);
   }
 });
+
 app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -762,7 +763,7 @@ app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
     const updatedUser = await TargetModel.findOneAndUpdate(
       { _id: userId, isCryptoReady: true, "publicKeyJwk.preKeys.0": { $exists: true } },
       { $pop: { "publicKeyJwk.preKeys": -1 } },
-      { new: false } 
+    { returnDocument: 'before' }
     );
 
     if (!updatedUser) {
