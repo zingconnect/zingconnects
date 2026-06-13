@@ -7,14 +7,14 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-   nodePolyfills({
-  globals: {
-    Buffer: true, // This is often the culprit
-    global: false, // Try setting this to false first
-    process: true,
-  },
-  protocolImports: true,
-}),
+    nodePolyfills({
+      globals: {
+        Buffer: true,
+        global: true,
+        process: true,
+      },
+      protocolImports: true,
+    }),
   ],
   build: {
     sourcemap: false, 
@@ -24,7 +24,6 @@ export default defineConfig({
         // vite.config.js
 manualChunks(id) {
   if (id.includes('node_modules')) {
-    // Separate heavy crypto/signal libs from the core React framework
     if (id.includes('libsignal') || id.includes('buffer')) {
       return 'crypto-vendor';
     }
