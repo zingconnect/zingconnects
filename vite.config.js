@@ -7,14 +7,14 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    nodePolyfills({
-      globals: {
-        Buffer: true,
-        global: true,
-        process: true,
-      },
-      protocolImports: true,
-    }),
+   nodePolyfills({
+  globals: {
+    Buffer: true, // This is often the culprit
+    global: false, // Try setting this to false first
+    process: true,
+  },
+  protocolImports: true,
+}),
   ],
   build: {
     sourcemap: false, 

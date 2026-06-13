@@ -29,12 +29,18 @@ const areKeysEqual = (key1, key2) => {
 
 export class ZingSignalStore {
   constructor(lib) {
+    // This assignment will now successfully trigger the setter below
     this.lib = lib; 
   }
 
+  set lib(value) {
+    this._lib = value;
+  }
+
+  // The getter remains for access
   get lib() {
     if (!this._lib) {
-      console.error("ZingSignalStore: libsignal was undefined at construction.");
+      console.error(`ZingSignalStore: libsignal was undefined at construction.`);
     }
     return this._lib;
   }
