@@ -31,9 +31,9 @@ export const ProtectedRoute = ({ requiredRole }) => {
     return <Navigate to="/" state={{ from: location.pathname }} replace />;
   }
 
- if (!isCryptoReady) {
-  console.error("DEBUG: Redirecting because isCryptoReady is false. Auth State:", { isAuthenticated, isLoading, isCryptoReady });
-  return <Navigate to="/" replace />;
+if (!isCryptoReady) {
+  console.warn("User authenticated but crypto not ready. Redirecting to setup.");
+  return <Navigate to="/crypto-setup" replace />; // Create a setup page
 }
 
   // 4. Role-based protection
