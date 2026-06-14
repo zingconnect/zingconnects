@@ -106,7 +106,7 @@ router.post('/send', authenticateToken, async (req, res, next) => {
     }
 
     // 1. Extract payload object (the full schema-compliant object)
-    const { receiverId, text, receiverModel, fileType, replyToId, isEncrypted, payload } = req.body;
+    const { conversationId, receiverId, text, receiverModel, fileType, replyToId, isEncrypted, payload } = req.body;
 
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier." });
@@ -117,18 +117,16 @@ router.post('/send', authenticateToken, async (req, res, next) => {
 
     // 2. Validate encryption payload against Schema requirements
     let payloadData = null;
-    if (isEncrypted) {
-      if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || payload.counter === undefined) {
-        return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
-      }
-      if (Buffer.from(payload.iv, 'base64').length !== 12) {
-        return res.status(400).json({ success: false, message: "Security violation: Invalid IV length." });
-      }
-      payloadData = payload; // Directly assign the validated object
-    }
+   if (isEncrypted) {
+  if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
+      payload.counter === undefined || payload.previousCounter === undefined) { // ADDED previousCounter
+    return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
+  }
+}
 
     // 3. Create message using the nested payload
     const newMessage = await Message.create({
+      conversationId,
       senderId: myId,
       senderModel: senderModelName,
       receiverId: new mongoose.Types.ObjectId(receiverId),

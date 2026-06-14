@@ -142,28 +142,41 @@ async initialize(userId) {
     return true;
   },
 
-async sendMessage(remoteUserId, receiverModel = 'User', messageText) {
+async sendMessage(remoteUserId, receiverModel = 'User', messageText, conversationId) {
   const lib = getLib();
   const store = getStore();
   const address = new lib.ProtocolAddress(remoteUserId, 1);
 
-  // 1. Ensure the session exists
+  // 1. Ensure the session exists using a lock to prevent race conditions
   let session = await store.loadSession(remoteUserId);
 
   if (!session) {
-console.log("DEBUG: Calling API with userId:", remoteUserId);
-const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
-    if (!response.ok) throw new Error("Could not fetch crypto bundle");
-    
-    const data = await response.json();
-        if (!data.success) throw new Error("Bundle data missing from response");
-    
-    const sessionBuilder = new lib.SessionBuilder(store, address);
-    await sessionBuilder.initOutgoing(prepareBundleForSignal(data));
+    if (!this.handshakeLock) {
+      this.handshakeLock = (async () => {
+        try {
+          console.log("DEBUG: Performing X3DH Handshake for:", remoteUserId);
+          const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
+          if (!response.ok) throw new Error("Could not fetch crypto bundle");
+
+          const data = await response.json();
+          if (!data.success) throw new Error("Bundle data missing from response");
+
+          const sessionBuilder = new lib.SessionBuilder(store, address);
+          await sessionBuilder.initOutgoing(prepareBundleForSignal(data));
+        } catch (err) {
+          console.error("Handshake failed:", err);
+          throw err;
+        }
+      })();
+    }
+    await this.handshakeLock;
+    this.handshakeLock = null;
     
     session = await store.loadSession(remoteUserId);
     if (!session) throw new Error("Session handshake completed but failed to persist.");
   }
+
+  // 2. Encrypt
   let encrypted;
   try {
     encrypted = await this.encrypt(remoteUserId, messageText);
@@ -172,10 +185,11 @@ const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${r
     throw new Error("Encryption failed. Please refresh the chat to re-sync.");
   }
 
-  // 3. Transmission
+  // 3. Transmission with schema-compliant payload
   const response = await secureFetch('/api/messages/send', {
     method: 'POST',
     body: JSON.stringify({
+      conversationId, // Required by Message schema
       receiverId: remoteUserId,
       receiverModel,
       isEncrypted: true,
@@ -184,6 +198,7 @@ const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${r
         iv: encrypted.iv || '',
         ephemeralKey: encrypted.ephemeralKey || '',
         counter: encrypted.counter ?? 0,
+        previousCounter: encrypted.previousCounter ?? 0, // Required by Message schema
         type: encrypted.type === 3 ? 'prekey' : 'message'
       }
     })
@@ -191,7 +206,7 @@ const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${r
 
   const result = await response.json();
   if (!result.success) throw new Error(result.message || "Transmission rejected.");
-  
+
   return result;
 },
 

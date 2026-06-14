@@ -763,6 +763,10 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
 app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: "Invalid User ID format." });
+    }
+
     const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
     const TargetModel = mongoose.model(modelName);
 
@@ -2214,9 +2218,7 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     const senderRole = await Agent.exists({ _id: myId }) ? 'Agent' : 'User';
-    
-    // Extract payload from req.body
-    const { receiverId, text, receiverModel, fileType, replyToId, isEncrypted, payload } = req.body;
+    const { conversationId, receiverId, text, receiverModel, fileType, replyToId, isEncrypted, payload } = req.body;
 
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
@@ -2225,18 +2227,16 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
 
     // 1. Construct and validate payload
     let payloadData = null;
-    if (isEncrypted) {
-      // Validate the nested payload object against your Schema requirements
-      if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || payload.counter === undefined) {
-        return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
-      }
-      payloadData = payload; 
-    } else if (!text || typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ success: false, message: "Message text cannot be blank." });
-    }
+   if (isEncrypted) {
+  if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
+      payload.counter === undefined || payload.previousCounter === undefined) { // ADDED previousCounter
+    return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
+  }
+}
 
     // 2. Create message with fully structured payload
     const newMessage = new Message({
+      conversationId,
       senderId: myId,
       senderModel: senderRole,
       receiverId: new mongoose.Types.ObjectId(receiverId),

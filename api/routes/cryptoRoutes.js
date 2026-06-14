@@ -7,6 +7,11 @@ const router = express.Router();
 router.get('/bundle/:userId', authenticateToken, async (req, res, next) => {
   try {
     const { userId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: "Invalid User ID format." });
+    }
+    
     const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
     
     // 1. First, find the user to see if they exist at all
