@@ -176,7 +176,6 @@ const handleUserInquiry = async (e) => {
   }
 };
 
-
 const handleAgentLogin = async (e) => {
   e.preventDefault();
   setIsProcessing(true);
@@ -189,23 +188,28 @@ const handleAgentLogin = async (e) => {
   };
 
   try {
- const response = await secureFetch('/api/agents/login', {
-  method: 'POST',
-  body: JSON.stringify(payload),
-});
+    const response = await secureFetch('/api/agents/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    
     const data = await response.json();
 
     if (!isMounted.current) return;
 
     if (response.ok) {
-            if (typeof login === 'function') {
-        login(payload.targetSlug);
+      // 1. Await the login state update. 
+      // Ensure your AuthProvider login function calls verifySession() internally.
+      if (typeof login === 'function') {
+        await login(payload.targetSlug); 
       }
       
       if (rememberAgent) {
         localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
       }
       
+      // 2. Navigation will now be guarded by the updated isAuthenticated state
+      // resulting from the successful login/verifySession call.
       navigate(`/agent/dashboard/${payload.targetSlug}`);
     } else {
       console.error("Login Server Error:", data.message);

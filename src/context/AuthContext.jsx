@@ -118,6 +118,7 @@ const verifySession = async () => {
       isLoading,
       isCryptoReady,
       verifySession,
+      initializeCrypto,
       logout
     }}>
       {children}

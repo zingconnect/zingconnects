@@ -30,10 +30,20 @@ export const ProtectedRoute = ({ requiredRole }) => {
     return <Navigate to="/" state={{ from: location.pathname }} replace />;
   }
 
-  // 4. Crypto not ready (after attempt)
   if (!isCryptoReady) {
-    return <div className="text-center mt-20">Secure session initialization failed. Please try logging out and back in.</div>;
-  }
+  return (
+    <div className="text-center mt-20 p-6">
+      <h2 className="text-xl font-bold mb-4">Connection Secured, but Encryption Uninitialized</h2>
+      <button 
+        onClick={() => window.location.reload()}
+        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+      >
+        Retry Secure Handshake
+      </button>
+      <p className="mt-4 text-sm text-gray-500">If this persists, please log out and back in.</p>
+    </div>
+  );
+}
 
   // 5. Role-based protection
   if (requiredRole && userRole !== requiredRole) {
