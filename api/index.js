@@ -760,41 +760,50 @@ app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
   }
 });
 
-app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res) => {
+app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res, next) => {
   try {
     const { userId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ success: false, message: "Invalid User ID format." });
+      return res.status(400).json({ success: false, message: "Invalid ID format." });
     }
 
     const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
     const TargetModel = mongoose.model(modelName);
 
-    // Atomic: Find user, ensure crypto ready, AND pop the first prekey
-    const updatedUser = await TargetModel.findOneAndUpdate(
-      { _id: userId, isCryptoReady: true, "publicKeyJwk.preKeys.0": { $exists: true } },
-      { $pop: { "publicKeyJwk.preKeys": -1 } },
-    { returnDocument: 'before' }
-    );
-
-    if (!updatedUser) {
-      return res.status(404).json({ success: false, message: "No keys available or user not ready." });
+    // 1. Fetch user to check state and existence
+    const user = await TargetModel.findById(userId).select('publicKeyJwk isCryptoReady');
+    
+    if (!user) return res.status(404).json({ success: false, message: "User not found." });
+    if (!user.isCryptoReady) return res.status(403).json({ success: false, message: "User crypto not initialized." });
+    if (!user.publicKeyJwk?.preKeys || user.publicKeyJwk.preKeys.length === 0) {
+      return res.status(404).json({ success: false, message: "No pre-keys remaining. Please re-register keys." });
     }
 
-    const { publicKeyJwk } = updatedUser;
-    
+    // 2. Safely extract the key
+    const preKey = user.publicKeyJwk.preKeys[0];
+
+    // 3. Atomically remove ONLY the specific key we just retrieved
+    const result = await TargetModel.updateOne(
+      { _id: userId },
+      { $pull: { "publicKeyJwk.preKeys": { keyId: preKey.keyId } } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(500).json({ success: false, message: "Failed to consume pre-key." });
+    }
+
     return res.status(200).json({ 
       success: true, 
-      registrationId: publicKeyJwk.registrationId,
-      identityKey: publicKeyJwk.identityKey,
-      signedPreKey: publicKeyJwk.signedPreKey,
-      preKey: publicKeyJwk.preKeys[0] // The specific key just popped
+      registrationId: user.publicKeyJwk.registrationId,
+      identityKey: user.publicKeyJwk.identityKey,
+      signedPreKey: user.publicKeyJwk.signedPreKey,
+      preKey: preKey
     });
   } catch (err) {
+    console.error("Bundle Fetch Error:", err);
     next(err);
   }
 });
-
 
 app.post('/api/agents/login', async (req, res, next) => {
   const redisClient = req.app.get('redisClient');

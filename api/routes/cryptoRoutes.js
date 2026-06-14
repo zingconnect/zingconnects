@@ -7,46 +7,35 @@ const router = express.Router();
 router.get('/bundle/:userId', authenticateToken, async (req, res, next) => {
   try {
     const { userId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ success: false, message: "Invalid User ID format." });
-    }
-    
     const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
-    
-    // 1. First, find the user to see if they exist at all
     const TargetModel = mongoose.model(modelName);
-    const userExists = await TargetModel.findById(userId);
-    
-    if (!userExists) {
-      return res.status(404).json({ success: false, message: "User not found." });
-    }
 
-    // 2. Perform the atomic update checking ONLY for the existence of keys
-    // We removed 'isCryptoReady: true' as it is not present in your current schema
-    const updatedUser = await TargetModel.findOneAndUpdate(
-      { _id: userId, "publicKeyJwk.preKeys.0": { $exists: true } },
-      { $pop: { "publicKeyJwk.preKeys": -1 } },
-      { returnDocument: 'before' }
-    );
+    // 1. Fetch only the necessary data
+    const user = await TargetModel.findById(userId).select('publicKeyJwk');
 
-    if (!updatedUser) {
+    if (!user || !user.publicKeyJwk?.preKeys?.length) {
       return res.status(404).json({ success: false, message: "No pre-keys available for this user." });
     }
 
-    const { publicKeyJwk } = updatedUser;
-    
+    // 2. Safely get the first key
+    const preKey = user.publicKeyJwk.preKeys[0];
+
+    // 3. Atomically remove the key we just fetched
+    await TargetModel.updateOne(
+      { _id: userId },
+      { $pull: { "publicKeyJwk.preKeys": { keyId: preKey.keyId } } }
+    );
+
     return res.status(200).json({ 
       success: true, 
-      registrationId: publicKeyJwk.registrationId,
-      identityKey: publicKeyJwk.identityKey,
-      signedPreKey: publicKeyJwk.signedPreKey,
-      preKey: publicKeyJwk.preKeys[0]
+      registrationId: user.publicKeyJwk.registrationId,
+      identityKey: user.publicKeyJwk.identityKey,
+      signedPreKey: user.publicKeyJwk.signedPreKey,
+      preKey: preKey
     });
   } catch (err) {
     console.error("Bundle Fetch Error:", err);
     next(err);
   }
 });
-
 export default router;

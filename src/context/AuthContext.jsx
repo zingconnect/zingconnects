@@ -71,38 +71,29 @@ const verifySession = async () => {
     }
 
     const data = await response.json();
-    if (!data.success || !data.profile) {
-      throw new Error("Invalid response structure from server");
-    }
-
-    // 2. Set Auth State
     const profile = data.profile;
     setUser(profile);
     setIsAuthenticated(true);
     setUserRole(data.role);
 
-    // 3. Initialize/Check Crypto
+    // 2. Initialize/Check Crypto
     const module = await import('../utils/SignalEngine');
     const SignalEngine = module.SignalEngine || module.default;
 
-    if (!SignalEngine?.store) throw new Error("SignalEngine store not found");
-
     const savedIdentity = await SignalEngine.store.loadIdentity('local');
-    
-    // Check if server-side key exists (derived from profile)
-    const serverKeysExist = !!(profile.publicKeyJwk && profile.publicKeyJwk.identityKey);
+    const serverKeysExist = !!(profile.publicKeyJwk?.identityKey);
 
     if (!savedIdentity || !serverKeysExist) {
-      console.log("Crypto sync required. Starting initialization...");
       const success = await initializeCrypto();
-      if (!success) throw new Error("Cryptography initialization failed");
+      // Only set crypto readiness if the handshake succeeded
+      setIsCryptoReady(success); 
     } else {
       setIsCryptoReady(true);
-      console.log("✅ Crypto session restored from local storage.");
     }
   } catch (err) {
     console.error("Auth verification sequence failed:", err);
-    setIsAuthenticated(false);
+    // Keep isAuthenticated(true) if it succeeded above, 
+    // but flag crypto as failed
     setIsCryptoReady(false);
   } finally {
     setIsLoading(false);
