@@ -826,7 +826,7 @@ app.post('/api/agents/login', async (req, res, next) => {
     const newSessionId = crypto.randomBytes(16).toString('hex');
     agent.currentSessionId = newSessionId;
     await agent.save();
-
+console.log("DEBUG: Session updated for Agent:", agent._id, "New Session:", newSessionId);
     // PRIME THE CACHE
     const cacheKey = `agent:profile:${agent._id}`;
     const cacheableAgent = {
@@ -853,11 +853,11 @@ app.post('/api/agents/login', async (req, res, next) => {
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,
-  sameSite: 'Lax',
+  secure: true,              // Required for SameSite: 'None'
+  sameSite: 'None',          // REQUIRED for cross-site/cross-origin cookies
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
-  signed: true // <--- Add this
+  signed: true
 });
     // Successfully logged in; token is now in the HttpOnly cookie
     return res.json({ 

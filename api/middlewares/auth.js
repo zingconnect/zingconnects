@@ -31,7 +31,10 @@ const token =
       console.error("Redis client not found in app context!");
       return res.status(503).json({ success: false, message: "Service temporarily unavailable" });
     }
-
+console.log("DEBUG: Checking session:", {
+  tokenSession: decoded.sessionId,
+  dbSession: agent.currentSessionId
+});
     // 3. Agent Logic
     if (decoded.role === 'agent') {
       const cacheKey = `agent:profile:${req.user.id}`;
@@ -58,11 +61,13 @@ const token =
     }
 
     next();
-  } catch (err) {
-    console.error("AUTH MIDDLEWARE CRASH:", err);
-    if (err.name === 'TokenExpiredError') return res.status(401).json({ success: false, message: "Token expired" });
-    return res.status(403).json({ success: false, message: "Invalid token" });
-  }
+ } catch (err) {
+  console.error("JWT Verification failed. Error Name:", err.name, "Message:", err.message);
+  if (err.name === 'TokenExpiredError') return res.status(401).json({ success: false, message: "Token expired" });
+  if (err.name === 'JsonWebTokenError') return res.status(403).json({ success: false, message: "Invalid token signature or format" });
+  
+  return res.status(403).json({ success: false, message: "Invalid token" });
+}
 };
 
 export const isAdmin = (req, res, next) => {
