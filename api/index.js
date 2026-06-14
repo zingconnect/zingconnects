@@ -862,13 +862,12 @@ console.log("DEBUG: Session updated for Agent:", agent._id, "New Session:", newS
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,              // Required for SameSite: 'None'
-  sameSite: 'None',          // REQUIRED for cross-site/cross-origin cookies
-  maxAge: 7 * 24 * 60 * 60 * 1000,
+  secure: true,
+  sameSite: 'None', // Temporarily change to None for testing ONLY
   path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
   signed: true
 });
-    // Successfully logged in; token is now in the HttpOnly cookie
     return res.json({ 
       success: true, 
       slug: agent.slug 

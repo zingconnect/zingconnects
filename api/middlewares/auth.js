@@ -8,6 +8,9 @@ console.log("--- AUTH DEBUG ---");
   console.log("All Cookies:", req.cookies); // Standard cookies
   console.log("Signed Cookies:", req.signedCookies); // Signed cookies
   console.log("Authorization Header:", req.headers.authorization);
+  console.log("--- RAW REQUEST HEADERS ---");
+  console.log(req.headers); 
+  console.log("Cookie Header received by server:", req.headers.cookie);
   
 const token = 
     req.signedCookies?.token || 
