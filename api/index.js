@@ -686,14 +686,15 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
-      signed: true
-    });
+   res.cookie('token', token, {
+  httpOnly: true,
+  secure: true,        // Keep this true
+  sameSite: 'None',    // CRITICAL: Change to 'None' for cross-origin/deployment testing
+  path: '/',
+  domain: '.zingconnect.chat', // Add the dot prefix to include all subdomains
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  signed: true
+});
 
     return res.status(200).json({
       success: true,
@@ -863,7 +864,7 @@ console.log("DEBUG: Session updated for Agent:", agent._id, "New Session:", newS
 res.cookie('token', token, {
   httpOnly: true,
   secure: true,
-  sameSite: 'Lax', 
+  sameSite: 'None', 
   path: '/',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   signed: true
