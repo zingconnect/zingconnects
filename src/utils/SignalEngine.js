@@ -175,15 +175,19 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText, conversatio
     session = await store.loadSession(remoteUserId);
     if (!session) throw new Error("Session handshake completed but failed to persist.");
   }
-
-  // 2. Encrypt
   let encrypted;
-  try {
-    encrypted = await this.encrypt(remoteUserId, messageText);
-  } catch (err) {
-    console.error("Encryption failed: Possible Ratchet Desync.", err);
-    throw new Error("Encryption failed. Please refresh the chat to re-sync.");
-  }
+ try {
+  encrypted = await this.encrypt(remoteUserId, messageText);
+} catch (err) {
+  console.error("Encryption failed: Ratchet Desync.", err);
+  
+  // PURGE the corrupted session to allow re-handshake
+  await this.store.removeSession(remoteUserId); 
+  
+  // Trigger a re-handshake immediately
+  this.handshakeLock = null; 
+  throw new Error("Ratchet desync detected. Refreshing session...");
+}
 
   // 3. Transmission with schema-compliant payload
   const response = await secureFetch('/api/messages/send', {

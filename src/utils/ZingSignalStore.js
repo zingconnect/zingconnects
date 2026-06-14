@@ -123,18 +123,13 @@ async loadSession(identifier) {
   
   if (!record) return null;
 
-  // --- ADD THESE DEBUG LOGS HERE ---
-  console.log("DEBUG: Type of record:", typeof record);
-  console.log("DEBUG: Constructor of record:", record?.constructor?.name);
-  // ---------------------------------
-
   try {
-    // The previous fix: handle the .buffer property if it exists
-    const data = (record.buffer) ? record.buffer : record;
+    // Force conversion to Uint8Array which is the standard expected by libsignal
+    const data = record instanceof Uint8Array ? record : new Uint8Array(record);
     return this.lib.SessionRecord.deserialize(data);
   } catch (err) {
     console.error("Critical: Deserialization failed for", identifier, err);
-    await db.delete('session', identifier); // Clear corrupted state
+    await db.delete('session', identifier);
     return null;
   }
 }
