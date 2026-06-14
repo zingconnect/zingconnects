@@ -3,9 +3,13 @@ import mongoose from 'mongoose';
 import { connectToDatabase } from '../config/db.js';
 
 export const authenticateToken = async (req, res, next) => {
-  // DEBUG: Inspecting inputs
-  console.log("--- AUTH DEBUG ---");
-  console.log("Cookie Header received:", req.headers.cookie);
+console.log("DEBUG: Cookie Header:", req.headers.cookie);
+  console.log("DEBUG: Signed Cookies:", req.signedCookies);
+  console.log("DEBUG: Unsigned Cookies:", req.cookies);
+
+  if (!req.signedCookies?.token && req.cookies?.token) {
+    console.error("ALERT: Cookie found, but signature check FAILED. Check COOKIE_SECRET.");
+  }
   
   const token = 
     req.signedCookies?.token || 
