@@ -394,10 +394,9 @@ router.post('/login', async (req, res, next) => {
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,          // Required for SameSite: None
-  sameSite: 'None',      // Must be 'None' for cross-origin/deployment
-  domain: '.zingconnect.chat', // The leading dot includes all subdomains
-  path: '/',
+  secure: true,        // Required for HTTPS (must be true in production)
+  sameSite: 'Lax',     // Perfect for same-domain communication
+  path: '/',           // Ensures the cookie is sent for all routes
   maxAge: 7 * 24 * 60 * 60 * 1000,
   signed: true
 });

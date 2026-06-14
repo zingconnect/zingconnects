@@ -686,12 +686,11 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
-   res.cookie('token', token, {
+ res.cookie('token', token, {
   httpOnly: true,
-  secure: true,        // Keep this true
-  sameSite: 'None',    // CRITICAL: Change to 'None' for cross-origin/deployment testing
-  path: '/',
-  domain: '.zingconnect.chat', // Add the dot prefix to include all subdomains
+  secure: true,        // Required for HTTPS (must be true in production)
+  sameSite: 'Lax',     // Perfect for same-domain communication
+  path: '/',           // Ensures the cookie is sent for all routes
   maxAge: 7 * 24 * 60 * 60 * 1000,
   signed: true
 });
@@ -863,10 +862,9 @@ console.log("DEBUG: Session updated for Agent:", agent._id, "New Session:", newS
     );
 res.cookie('token', token, {
   httpOnly: true,
-  secure: true,          // Required for SameSite: None
-  sameSite: 'None',      // Must be 'None' for cross-origin/deployment
-  domain: 'zingconnect.chat', // The leading dot includes all subdomains
-  path: '/',
+  secure: true,        // Required for HTTPS (must be true in production)
+  sameSite: 'Lax',     // Perfect for same-domain communication
+  path: '/',           // Ensures the cookie is sent for all routes
   maxAge: 7 * 24 * 60 * 60 * 1000,
   signed: true
 });

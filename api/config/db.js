@@ -24,12 +24,10 @@ export async function connectToDatabase() {
     return cached.conn;
   }
 
-  // 2. If a connection process is already active, await that same promise
   if (cached.promise) {
     return cached.promise;
   }
 
-  // 3. Initiate new connection attempt
   cached.promise = (async () => {
     const primaryURI = process.env.AGENT_DB_URI || process.env.MONGODB_URI;
     const reserveURI = process.env.USER_DB_URI;

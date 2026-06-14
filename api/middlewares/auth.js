@@ -53,12 +53,11 @@ if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== de
     return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
 }
       
-      if (!agentSession) {
-        await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
-      }
+if (agent) { 
+    await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
+}
     }
 
-    // 4. Admin Logic
     if (['admin', 'superadmin'].includes(decoded.role)) {
       const AdminModel = mongoose.models.Admin || mongoose.model('Admin');
       await AdminModel.updateOne({ _id: req.user.id }, { $set: { lastLogin: new Date() } });
