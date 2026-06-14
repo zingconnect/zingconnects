@@ -30,26 +30,24 @@ export const authenticateToken = async (req, res, next) => {
       return res.status(503).json({ success: false, message: "Service unavailable" });
     }
 
-    // 3. Agent Logic
-    if (decoded.role === 'agent') {
-      const cacheKey = `agent:profile:${req.user.id}`;
-      let agentSession = await redisClient.get(cacheKey);
-      
-      // Fetch Agent model safely
-      const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
-      const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
-      
-      if (!agent) return res.status(404).json({ success: false, message: "Agent context not found." });
+  if (decoded.role === 'agent') {
+  const cacheKey = `agent:profile:${req.user.id}`;
+  const AgentModel = mongoose.models.Agent || mongoose.model('Agent');
+  
+  // 1. Initialize 'agent' variable FIRST
+  const agent = await AgentModel.findById(req.user.id).select('currentSessionId');
+  
+  if (!agent) return res.status(404).json({ success: false, message: "Agent context not found." });
 
-      // LOGGING: Now safe because 'agent' is defined
-      console.log("DEBUG: Checking session:", {
-        tokenSession: decoded.sessionId,
-        dbSession: agent.currentSessionId
-      });
-      
-      if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
-        return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
-      }
+  // 2. Now it is safe to log and use 'agent'
+  console.log("DEBUG: Checking session:", {
+    tokenSession: decoded.sessionId,
+    dbSession: agent.currentSessionId
+  });
+
+  if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+    return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
+  }
       
       if (!agentSession) {
         await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
