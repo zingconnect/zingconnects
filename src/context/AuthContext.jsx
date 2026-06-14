@@ -15,13 +15,8 @@ export const AuthProvider = ({ children }) => {
     verifySession();
   }, []);
 
-  const login = async (slug) => {
-    setIsLoading(true);
-    await verifySession();
-    setIsLoading(false);
-  };
-
  const initializeCrypto = async () => {
+  // 1. Reset state safely
   setIsCryptoReady(false);
   
   try {
@@ -122,7 +117,6 @@ const verifySession = async () => {
       userRole, 
       isLoading,
       isCryptoReady,
-      login,
       verifySession,
       initializeCrypto,
       logout

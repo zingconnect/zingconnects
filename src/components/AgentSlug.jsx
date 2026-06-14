@@ -199,7 +199,7 @@ const handleAgentLogin = async (e) => {
 
     if (response.ok) {
       // 1. Await the login state update. 
-      // Ensure login() inside AuthContext performs a verified re-check of the session
+      // Ensure your AuthProvider login function calls verifySession() internally.
       if (typeof login === 'function') {
         await login(payload.targetSlug); 
       }
@@ -208,12 +208,9 @@ const handleAgentLogin = async (e) => {
         localStorage.setItem(`rememberedAgentEmail_${payload.targetSlug}`, loginEmail.trim());
       }
       
-      // 2. CRITICAL FIX: Ensure the UI has a moment to register the new 'isAuthenticated' state.
-      // We use a small requestAnimationFrame or setTimeout to clear the execution stack
-      // before navigating, which helps React's state transition complete.
-      setTimeout(() => {
-        navigate(`/agent/dashboard/${payload.targetSlug}`, { replace: true });
-      }, 50);
+      // 2. Navigation will now be guarded by the updated isAuthenticated state
+      // resulting from the successful login/verifySession call.
+      navigate(`/agent/dashboard/${payload.targetSlug}`);
     } else {
       console.error("Login Server Error:", data.message);
       alert(data.message || "Invalid Credentials");
