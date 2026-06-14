@@ -39,15 +39,16 @@ export const authenticateToken = async (req, res, next) => {
   
   if (!agent) return res.status(404).json({ success: false, message: "Agent context not found." });
 
-  // 2. Now it is safe to log and use 'agent'
-  console.log("DEBUG: Checking session:", {
+ console.log("DEBUG AUTH: Comparing Sessions", {
     tokenSession: decoded.sessionId,
-    dbSession: agent.currentSessionId
-  });
+    dbSession: agent.currentSessionId,
+    match: decoded.sessionId === agent.currentSessionId
+});
 
-  if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+if (agent.currentSessionId && decoded.sessionId && agent.currentSessionId !== decoded.sessionId) {
+    console.warn("DEBUG AUTH: SESSION REJECTED - Dual Login detected.");
     return res.status(403).json({ success: false, message: "Dual login detected.", reason: "dual_login" });
-  }
+}
       
       if (!agentSession) {
         await AgentModel.findByIdAndUpdate(req.user.id, { $set: { lastActive: new Date() } });
