@@ -124,10 +124,11 @@ const previousScrollTopRef = useRef(0);
 const scrollSentinelRef = useRef(null); 
 const videoRef = useRef(null);
 const canvasRef = useRef(null);
-const [showCamera, setShowCamera] = useState(false);
 
+const [showCamera, setShowCamera] = useState(false);
   const [agent, setAgent] = useState(null);
   const [userData, setUserData] = useState(null);
+  const [isEngineReady, setIsEngineReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('online');
   const [messages, setMessages] = useState([]);
@@ -384,21 +385,25 @@ useEffect(() => {
 
 useEffect(() => {
   const initSecurityEnvironment = async () => {
+    // Only attempt init if we aren't loading and have the necessary IDs
     if (!isLoading && token && userData?._id && userData?.isProfileComplete) {
       try {
         console.log("🔒 [Crypto] Initializing SignalEngine session...");
         await SignalEngine.initialize(userData._id);
         
+        // This is the missing link!
+        setIsEngineReady(true);
+        
         console.log("✅ [Crypto] SignalEngine session is active and secure.");
       } catch (err) {
         console.error("❌ [Crypto] Failed to initialize secure environment:", err);
+        setIsEngineReady(false); // Ensure state reflects failure
       }
     }
   };
 
   initSecurityEnvironment();
 }, [token, isLoading, userData?._id, userData?.isProfileComplete]);
-
 
 useEffect(() => {
   if (!socket) return;
@@ -1788,11 +1793,12 @@ const handleStartCall = async () => {
 
 const handleSendMessage = async (e) => {
   e.preventDefault();
-  
-  // 1. Check readiness (Ensure you added this to SignalEngine as discussed)
-  if (!SignalEngine.isReady()) {
-    console.error("Security Block: SignalEngine not initialized.");
-    alert("Establishing secure channel... please wait.");
+
+  // 1. Use the state provided by your AuthContext (isCryptoReady)
+  // This is the most reliable way to know if the engine is truly initialized
+  if (!isCryptoReady) {
+    console.warn("Security Block: SignalEngine not initialized.");
+    alert("Establishing secure channel... please wait a few seconds.");
     return;
   }
 
@@ -1802,10 +1808,11 @@ const handleSendMessage = async (e) => {
   const tempId = Date.now().toString();
   setNewMessage('');
 
+  // 2. Add message to UI with 'sending' status
   const pendingMessage = {
     _id: tempId,
     senderId: userData._id,
-    text: textToSend, // UI displays this
+    text: textToSend,
     status: 'sending',
     createdAt: new Date().toISOString(),
     isTemp: true
@@ -1814,16 +1821,17 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, pendingMessage]);
 
   try {
-    // 2. DELEGATE TO ENGINE: This handles encryption + session-building + transmission
+    // 3. Delegate encryption and transmission to the Engine
+    // Ensure SignalEngine.sendMessage handles the X3DH handshake internally
     const result = await SignalEngine.sendMessage(
       agent._id, 
       'Agent', 
       textToSend, 
-      replyingTo?._id // Pass conversation context if needed
+      replyingTo?._id
     );
 
-    // 3. Update UI on success
-    if (result.success) {
+    // 4. Update UI upon success
+    if (result && result.success) {
       setMessages(prev => prev.map(m => m._id === tempId ? { 
         ...result.message, 
         decryptedText: textToSend, 
@@ -1832,11 +1840,11 @@ const handleSendMessage = async (e) => {
       
       setReplyingTo(null);
     } else {
-      throw new Error(result.message || "Transmission failed.");
+      throw new Error(result?.message || "Transmission failed.");
     }
-
   } catch (err) {
     console.error("Message transmission failed:", err);
+    // 5. Update UI upon failure
     setMessages(prev => prev.map(m => m._id === tempId ? { ...m, status: 'failed' } : m));
   }
 };
@@ -1864,16 +1872,12 @@ function AudioTracks({ active }) {
   return null; // This component doesn't need to render anything visual
 };
 
-const MessageBubble = ({ m, isMe, onReply }) => {
+const MessageBubble = ({ m, isMe, onReply, isCryptoReady, privateKeyJwk, agentPublicKey }) => {
   const controls = useAnimation();
   
   const bind = useDrag(({ active, movement: [x], last }) => {
     const xMovement = Math.min(Math.max(0, x), 100); 
-
-    if (active) {
-      controls.set({ x: xMovement });
-    }
-
+    if (active) controls.set({ x: xMovement });
     if (last) {
       if (xMovement > 60) {
         onReply(m);
@@ -1884,8 +1888,8 @@ const MessageBubble = ({ m, isMe, onReply }) => {
   }, { axis: 'x' });
 
   return (
-    <div className={`relative group w-full flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-      {/* Hidden Reply Icon */}
+    <div className={`relative group w-full flex ${isMe ? 'justify-end' : 'justify-start'} mb-3`}>
+      {/* Reply Icon */}
       <div className="absolute left-[-40px] inset-y-0 flex items-center opacity-0 group-active:opacity-100 transition-opacity">
         <div className="bg-gray-200 p-2 rounded-full cursor-pointer">
           <BsReplyFill className="text-gray-600" size={18} />
@@ -1895,20 +1899,49 @@ const MessageBubble = ({ m, isMe, onReply }) => {
       <motion.div 
         {...bind()} 
         animate={controls}
-        className={`max-w-[85%] md:max-w-[65%] px-3 py-1.5 rounded-lg shadow-sm relative animate-in fade-in slide-in-from-bottom-1 ${
+        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 flex flex-col ${
           isMe 
             ? 'bg-[#dcf8c6] self-end rounded-tr-none' 
             : 'bg-white self-start rounded-tl-none border border-gray-200'
-        } mb-1`}
+        }`}
       >
-        {/* Component only needs the message object. 
-            The SignalEngine handles all state internally. */}
-        <MessageItem message={m} isMe={isMe} />
+        {/* 1. Media Rendering */}
+        {(m.fileType === 'image' || m.fileType === 'video') && (
+          <div className="relative mb-2 mt-1">
+             {/* ... (keep your existing image/video logic here) ... */}
+          </div>
+        )}
+
+        {/* 2. Decrypted Text Rendering */}
+        {m.text && (
+          <MessageItem 
+            message={m} 
+            isMe={isMe} 
+            isCryptoReady={isCryptoReady}
+            privateKeyJwk={privateKeyJwk}
+            senderPublicKey={agentPublicKey}
+          />
+        )}
+
+        {/* 3. Footer (Time & Status) */}
+        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
+          <span className="text-[9px] text-gray-400 font-bold uppercase">
+            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {isMe && (
+            <div className="flex items-center ml-1">
+              {m.status === 'sending' && <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />}
+              {m.status === 'failed' && <button className="bg-red-500 text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase">Retry</button>}
+              {(!m.status || m.status === 'sent' || m.status === 'seen') && (
+                <BsCheckAll className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} size={16} />
+              )}
+            </div>
+          )}
+        </div>
       </motion.div>
     </div>
   );
 };
-
 
 if (loading && !agent) {
   return (
@@ -2254,89 +2287,36 @@ onClick={() => navigate(`/user/profile/${slugFromUrl}`)}
     </p>
   </div>
 
-  {/* 3. Message List */}
-  {messages.map((m) => {
-    const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
+ {messages.map((m) => {
+  const msgKey = m._id || m.tempId || `temp-${m.createdAt}`;
 
-    if (m.fileType === 'voice_call') {
-      return (
-        <CallStatusMessage 
-          key={msgKey}
-          status={m.status}
-          time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        />
-      );
-    }
-
-    const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
-
+  // 1. Voice calls stay as their own component
+  if (m.fileType === 'voice_call') {
     return (
-      <div 
-        key={msgKey} 
-        className={`max-w-[85%] md:max-w-[75%] px-3 py-1.5 rounded-lg shadow-sm relative z-10 animate-in fade-in slide-in-from-bottom-2 flex flex-col shrink-0 ${
-          isMe ? 'bg-[#dcf8c6] self-end rounded-tr-none' : 'bg-white self-start rounded-tl-none'
-        } mb-3`}
-      >
-        {/* Media Handling */}
-        {(m.fileType === 'image' || m.fileType === 'video') && (
-          <div className="relative mb-2 mt-1 group">
-            {m.fileType === 'image' ? (
-              <>
-                <img 
-                  src={m.fileUrl} 
-                  alt="attachment" 
-                  onClick={() => setFullscreenImage(m.fileUrl)} 
-                  className="rounded-lg bg-gray-100 object-cover w-full max-w-[260px] max-h-[300px] md:max-w-[380px] md:max-h-[450px] cursor-pointer" 
-                  onError={(e) => { e.target.onerror = null; e.target.src = 'https://via.placeholder.com/150?text=Image+Unavailable'; }}
-                />
-                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'image'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
-              </>
-            ) : (
-              <div className="relative">
-                <video className="rounded-lg w-full max-w-[260px] md:max-w-[380px] max-h-[450px] bg-black cursor-pointer" onClick={() => setFullscreenVideo(m.fileUrl)}>
-                  <source src={m.fileUrl} type="video/mp4" />
-                </video>
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="bg-black/40 p-3 rounded-full text-white"><BsPlayFill size={30} /></div></div>
-                <button onClick={(e) => { e.stopPropagation(); handleDownload(m.fileUrl, 'video'); }} className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><BsDownload size={14} /></button>
-              </div>
-            )}
-          </div>
-        )}
-
-      {m.text && (
-  <MessageBubble 
-    m={m} 
-    isMe={isMe} 
-    onReply={setReplyingTo}
-  >
-    <MessageItem 
-      message={m} 
-      isMe={isMe} 
-      isCryptoReady={isCryptoReady} 
-      privateKeyJwk={privateKeyJwk} 
-      // Fallback to null if agent not loaded yet
-      senderPublicKey={agent?.publicKeyJwk || null} 
-    />
-  </MessageBubble>
-)}
-
-        <div className="flex items-center justify-end gap-1 mt-1 border-t border-black/5 pt-0.5 min-w-[70px]">
-          <span className="text-[9px] text-gray-400 font-bold uppercase">
-            {new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-          {isMe && (
-            <div className="flex items-center ml-1">
-              {m.status === 'sending' && <div className="w-2.5 h-2.5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />}
-              {m.status === 'failed' && <button onClick={() => handleResend(m)} className="bg-red-500 text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase">Retry</button>}
-              {(!m.status || m.status === 'sent' || m.status === 'seen') && (
-                <BsCheckAll className={m.status === 'seen' ? "text-blue-500" : "text-gray-400"} size={16} />
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <CallStatusMessage 
+        key={msgKey}
+        status={m.status}
+        time={new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      />
     );
-  })}
+  }
+
+  // 2. Everything else is a single MessageBubble
+  const isMe = m.senderModel === 'User' || m.senderId === userData?._id;
+
+  return (
+    <MessageBubble 
+      key={msgKey}
+      m={m} 
+      isMe={isMe} 
+      onReply={setReplyingTo}
+      // Pass all necessary data into the bubble
+      isCryptoReady={isCryptoReady}
+      privateKeyJwk={privateKeyJwk}
+      agentPublicKey={agent?.publicKeyJwk}
+    />
+  );
+})}
 
 <div ref={messagesEndRef} className="h-12 shrink-0 w-full clear-both" />
 </main>
