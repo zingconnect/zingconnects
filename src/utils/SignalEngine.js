@@ -35,11 +35,11 @@ async setupIdentity() {
   const registrationId = KeyHelper.generateRegistrationId();
   const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
   
-  const getBytes = (obj) => {
-    if (!obj) return null;
-    const key = obj.pubKey || obj.public || obj;
-    return key instanceof Uint8Array ? key.buffer : key;
-  };
+ const getBytes = (obj) => {
+  if (!obj) return null;
+  const key = obj.pubKey || obj.public || obj;
+  return key instanceof Uint8Array ? key : new Uint8Array(key);
+};
 
   const preKeys = await Promise.all(
     Array.from({ length: 100 }, async (_, i) => {
@@ -146,7 +146,7 @@ async initialize(userId) {
     return true;
   },
 
-async sendMessage(remoteUserId, receiverModel = 'User', messageText, conversationId) {
+async sendMessage(remoteUserId, receiverModel, messageText, conversationId) {
   const lib = getLib();
   const store = getStore();
   

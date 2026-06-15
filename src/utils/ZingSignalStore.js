@@ -102,14 +102,13 @@ async getIdentityKeyPair() {
 
 async loadIdentityKeyPair() {
   const db = await dbPromise;
-  const pubKeyBase64 = await db.get('identity', 'local');
+  const pubKey = await db.get('identity', 'local_pub');
   const privKey = await db.get('identity', 'local_priv');
   
-  if (!pubKeyBase64 || !privKey) return null;
-
+  if (!pubKey || !privKey) return null;
   return {
-    pubKey: this.lib.Curve.decodePoint(toBuffer(pubKeyBase64)),
-    privKey: privKey // Ensure this matches what your libsignal version expects (Buffer vs object)
+    pubKey: pubKey, 
+    privKey: privKey
   };
 }
 
@@ -126,7 +125,7 @@ async loadIdentityKeyPair() {
 
 async saveSession(identifier, record) {
   const db = await dbPromise;
-  const data = new Uint8Array(record.serialize()); 
+  const data = record.serialize(); 
   await db.put('session', data, identifier);
 }
 
@@ -137,9 +136,7 @@ async loadSession(identifier) {
   if (!record) return null;
 
   try {
-    // Force conversion to Uint8Array which is the standard expected by libsignal
-    const data = record instanceof Uint8Array ? record : new Uint8Array(record);
-    return this.lib.SessionRecord.deserialize(data);
+    return this.lib.SessionRecord.deserialize(record);
   } catch (err) {
     console.error("Critical: Deserialization failed for", identifier, err);
     await db.delete('session', identifier);
@@ -173,9 +170,10 @@ async containsKey(identifier) {
 async saveIdentityKeyPair(identityKeyPair) {
   const db = await dbPromise;
   const tx = db.transaction(['identity'], 'readwrite');
-    const pubKeyBase64 = bufferToBase64(identityKeyPair.pubKey);
-  await tx.objectStore('identity').put(pubKeyBase64, 'local');
-    await tx.objectStore('identity').put(identityKeyPair.privKey, 'local_priv');
+  
+  // Store the raw Uint8Array (binary), NOT the Base64 string
+  await tx.objectStore('identity').put(identityKeyPair.pubKey, 'local_pub');
+  await tx.objectStore('identity').put(identityKeyPair.privKey, 'local_priv');
   
   await tx.done;
 }
