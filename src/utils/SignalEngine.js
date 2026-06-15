@@ -164,13 +164,11 @@ async sendMessage(remoteUserId, receiverModel, messageText, conversationId, isRe
 
       const data = await response.json();
       if (!data.success) throw new Error("Bundle data missing");
-
-      // Initialize session using the bundle
-      const sessionBuilder = new lib.SessionBuilder(store, address);
-      await sessionBuilder.initOutgoing(prepareBundleForSignal(data));
-      
-      // Crucial: Manually persist the identity to prevent signature verification drift
-      await store.saveIdentity(remoteUserId, toBuffer(data.identityKey));
+// Inside sendMessage -> Handshake block
+const sessionBuilder = new lib.SessionBuilder(store, address);
+const bundle = prepareBundleForSignal(data);
+await sessionBuilder.initOutgoing(bundle);
+await store.saveIdentity(remoteUserId, bundle.identityKey);
     } catch (err) {
       throw new Error(`Handshake failed: ${err.message}`);
     }
