@@ -1788,6 +1788,8 @@ const handleStartCall = async () => {
 
 const handleSendMessage = async (e) => {
   e.preventDefault();
+  
+  // 1. Check readiness (Ensure you added this to SignalEngine as discussed)
   if (!SignalEngine.isReady()) {
     console.error("Security Block: SignalEngine not initialized.");
     alert("Establishing secure channel... please wait.");
@@ -1803,7 +1805,7 @@ const handleSendMessage = async (e) => {
   const pendingMessage = {
     _id: tempId,
     senderId: userData._id,
-    text: textToSend,
+    text: textToSend, // UI displays this
     status: 'sending',
     createdAt: new Date().toISOString(),
     isTemp: true
@@ -1812,34 +1814,26 @@ const handleSendMessage = async (e) => {
   setMessages(prev => [...prev, pendingMessage]);
 
   try {
-    // 2. Engine-Driven Encryption
-    // The engine manages session keys, IVs, and ratchet headers internally.
-    const encryptedBundle = await SignalEngine.encrypt(agent._id, textToSend);
+    // 2. DELEGATE TO ENGINE: This handles encryption + session-building + transmission
+    const result = await SignalEngine.sendMessage(
+      agent._id, 
+      'Agent', 
+      textToSend, 
+      replyingTo?._id // Pass conversation context if needed
+    );
 
-    // 3. Payload Delivery
-    const response = await secureFetch('/api/messages/send', {
-      method: 'POST',
-      body: JSON.stringify({
-        receiverId: agent._id,
-        receiverModel: 'Agent',
-        ...encryptedBundle, // Contains ciphertext, iv, and ratchet session headers
-        isEncrypted: true,
-        fileType: 'text',
-        replyToId: replyingTo?._id
-      })
-    });
-
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || "Transmission failed.");
-
-    // 4. Update UI
-    setMessages(prev => prev.map(m => m._id === tempId ? { 
-      ...data.message, 
-      decryptedText: textToSend, // Engine-compatible field
-      status: 'sent' 
-    } : m));
-    
-    setReplyingTo(null);
+    // 3. Update UI on success
+    if (result.success) {
+      setMessages(prev => prev.map(m => m._id === tempId ? { 
+        ...result.message, 
+        decryptedText: textToSend, 
+        status: 'sent' 
+      } : m));
+      
+      setReplyingTo(null);
+    } else {
+      throw new Error(result.message || "Transmission failed.");
+    }
 
   } catch (err) {
     console.error("Message transmission failed:", err);

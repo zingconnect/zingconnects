@@ -10,6 +10,7 @@ const store = new ZingSignalStore(lib);
 
 let _lib = null;
 let _store = null;
+let isEngineReady = false;
 
 const getLib = () => {
   if (!_lib) _lib = libsignalModule.default || libsignalModule;
@@ -23,6 +24,8 @@ const getStore = () => {
 
 export const SignalEngine = {
 get store() { return getStore(); },
+
+isReady: () => isEngineReady,
 
 async setupIdentity() {
   const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
@@ -139,6 +142,7 @@ async initialize(userId) {
     if (!identity) {
       await this.setupIdentity();
     }
+    isEngineReady = true; // Mark as ready
     return true;
   },
 
