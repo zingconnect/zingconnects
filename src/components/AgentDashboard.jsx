@@ -696,35 +696,37 @@ handleEndCall();
   }, []);
 
 
- useEffect(() => {
+useEffect(() => {
   if (isLoading || !token || !agentData?._id) return;
-  let isMounted = true; // Guard to prevent state updates on unmounted components
 
-  const provisionAgentCryptoEnvironment = async () => {
-    console.log("🔒 [SignalEngine] Provisioning secure environment...");
+  const runSecurityPipeline = async () => {
     try {
-      const agentId = String(agentData._id);
-            const success = await initializeUserE2EEKeys(agentId, token);
-      if (!success) throw new Error("Identity provisioning failed.");
-      if (isMounted) {
-        await SignalEngine.initialize(agentId);
-        console.log("✅ [SignalEngine] Cryptographic ratchet ready.");
+      // 1. Device Authorization Check
+      const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
+      const authRes = await secureFetch('/api/agents/check-device', {
+        method: 'POST',
+        body: JSON.stringify({ deviceId })
+      });
+      const { authorized } = await authRes.json();
+
+      if (!authorized) {
+        setDeviceStatus('UNAUTHORIZED');
+        return; // Block everything
+      }
+
+      // 2. If Authorized, then provision keys
+      const success = await initializeUserE2EEKeys(String(agentData._id), token);
+      if (success) {
+        await SignalEngine.initialize(String(agentData._id));
+        setIsEngineReady(true);
       }
     } catch (err) {
-      if (isMounted) {
-        console.error("❌ [SignalEngine] Initialization failed:", err);
-      }
+      console.error("Security Pipeline Failure:", err);
     }
   };
 
-  provisionAgentCryptoEnvironment();
-
-  // 4. Cleanup function
-  return () => {
-    isMounted = false;
-  };
+  runSecurityPipeline();
 }, [token, isLoading, agentData?._id]);
-
 
   useEffect(() => {
     if (!room) return;
@@ -1467,8 +1469,8 @@ useEffect(() => {
           try {
             // Re-generate your bundle via SignalEngine
             const newBundle = await SignalEngine.generateBundle(); 
-            await secureFetch('/api/update-crypto-key', { 
-              method: 'PUT', 
+            await secureFetch('/api/crypto/add-device', { 
+              method: 'POST', 
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(newBundle) 
             });
@@ -2069,8 +2071,12 @@ const handleResend = async (failedMsg) => {
 const handleSendMessage = async (e) => {
   if (e) e.preventDefault();
 
-  if (typeof SignalEngine === 'undefined') {
-    console.error("SignalEngine is not imported in this component.");
+  // 1. Pre-flight Security Guard
+  // The UI should prevent clicking if !isEngineReady, 
+  // but we enforce it here as a final safety layer.
+  if (!isEngineReady) {
+    console.error("SignalEngine not ready. Aborting send.");
+    alert("Secure channel is still initializing. Please wait.");
     return;
   }
 
@@ -2081,17 +2087,16 @@ const handleSendMessage = async (e) => {
   isSendingRef.current = true;
   const textToSend = newMessage.trim();
   const tempId = Date.now().toString();
-  const modelType = selectedUser.modelType || 'User'; // Define once
+  const modelType = selectedUser.modelType || 'User';
   setNewMessage('');
 
   const optimisticMsg = {
     _id: tempId,
-    tempId: tempId,
     text: textToSend,
     senderId: agentData._id,
     senderModel: 'Agent',
     receiverId: selectedUser._id,
-    receiverModel: modelType, // Use the unified modelType
+    receiverModel: modelType,
     status: 'sending',
     isEncrypted: true,
     createdAt: new Date().toISOString(),
@@ -2102,28 +2107,23 @@ const handleSendMessage = async (e) => {
   setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
   try {
-    // 🛡️ Pass the dynamic model type correctly to the updated Engine
     const result = await SignalEngine.sendMessage(
       selectedUser._id, 
       modelType, 
       textToSend
     );
-
-    if (!(await SignalEngine.store.containsKey('local'))) {
-   await SignalEngine.initialize(userId);
-}
-    // Update UI
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { 
         ...result.message, 
-        decryptedText: textToSend, 
-        isEncrypted: false, // UI shows decrypted version
+        decryptedText: textToSend, // Keep local copy for UI sync
+        isEncrypted: false, 
         status: 'sent' 
       } : msg
     ));
 
   } catch (err) {
     console.error("HandleSendMessage Error:", err);
+    // 5. Explicit Failure State
     setMessages(prev => prev.map(msg => 
       msg._id === tempId ? { ...msg, status: 'failed' } : msg
     ));

@@ -144,27 +144,33 @@ const handleUserInquiry = async (e) => {
     const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity();
     await SignalEngine.store.saveIdentity('local', identityKeyPair);
 
-    // 2. Initiate secure handshake
+    // 2. Generate a local deviceId (e.g., random integer or based on browser storage)
+    // Ensure your SignalEngine.store supports retrieving/generating this
+    const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
+
+    // 3. Initiate secure handshake
     const response = await secureFetch('/api/users/handshake', {
       method: 'POST',
       body: JSON.stringify({
         email: userEmail.trim(),
         agentSlug: slug,
-        userPublicKeyJwk: preKeyBundle
+        userPublicKeyJwk: preKeyBundle,
+        deviceId // CRITICAL: Pass the device ID to the handshake
       }),
     });
 
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "Handshake failed");
 
-   if (data.agentIdentity) {
-  await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
-    try {
-     await SignalEngine.initializeSession(slug, data.agentIdentity);
-  } catch (err) {
-     console.warn("Session initialization failed, likely a first-time handshake:", err);
-  }
-}
+    if (data.agentIdentity) {
+      await SignalEngine.store.savePeerBundle(slug, data.agentIdentity);
+      try {
+        await SignalEngine.initializeSession(slug, data.agentIdentity);
+      } catch (err) {
+        console.warn("Session initialization failed:", err);
+      }
+    }
+    
     if (typeof login === 'function') await login(slug);
     navigate(`/user/dashboard/${slug}`, { replace: true });
 

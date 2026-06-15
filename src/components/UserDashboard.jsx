@@ -385,20 +385,32 @@ useEffect(() => {
 
 useEffect(() => {
   const initSecurityEnvironment = async () => {
-    // Only attempt init if we aren't loading and have the necessary IDs
-    if (!isLoading && token && userData?._id && userData?.isProfileComplete) {
-      try {
-        console.log("🔒 [Crypto] Initializing SignalEngine session...");
-        await SignalEngine.initialize(userData._id);
-        
-        // This is the missing link!
-        setIsEngineReady(true);
-        
-        console.log("✅ [Crypto] SignalEngine session is active and secure.");
-      } catch (err) {
-        console.error("❌ [Crypto] Failed to initialize secure environment:", err);
-        setIsEngineReady(false); // Ensure state reflects failure
+    if (isLoading || !token || !userData?._id || !userData?.isProfileComplete) return;
+
+    try {
+      const deviceId = await getDeviceId(); // Ensure this is your helper
+      const deviceRes = await secureFetch('/api/agents/check-device', {
+        method: 'POST',
+        body: JSON.stringify({ deviceId })
+      });
+      
+      const { authorized, reason } = await deviceRes.json();
+
+      if (!authorized) {
+        console.warn("🚫 Device not authorized:", reason);
+        setDeviceStatus('UNAUTHORIZED'); 
+        return;
       }
+
+      // 4. Only initialize if authorized
+      console.log("🔒 [Crypto] Initializing SignalEngine session...");
+      await SignalEngine.initialize(userData._id);
+      setIsEngineReady(true);
+      setDeviceStatus('AUTHORIZED');
+
+    } catch (err) {
+      console.error("❌ Security sequence failed:", err);
+      setIsEngineReady(false);
     }
   };
 

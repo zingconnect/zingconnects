@@ -43,60 +43,54 @@ const handleResend = async () => {
   };
 
   const handleVerify = async (e) => {
-  e.preventDefault();
-  setIsVerifying(true);
+    e.preventDefault();
+    setIsVerifying(true);
 
-  try {
-    // 1. Generate keys
-    // Result contains { identityKeyPair, preKeyBundle } 
-    // preKeyBundle already has all fields encoded as Base64 strings by SignalEngine
-    const result = await SignalEngine.setupIdentity();
-    
-    // 🛡️ SECURITY CHECK: Ensure keys were generated properly
-    if (!result?.preKeyBundle || !result?.identityKeyPair) {
-      throw new Error("Security initialization failed. Please refresh and try again.");
+    try {
+      // 1. Generate identity
+      const result = await SignalEngine.setupIdentity();
+      if (!result?.preKeyBundle || !result?.identityKeyPair) {
+        throw new Error("Security initialization failed.");
+      }
+
+      // 2. Generate or retrieve the unique deviceId for this browser session
+      const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
+      
+      const { preKeyBundle } = result;
+
+      // 3. Prepare payload with deviceId
+      const payload = {
+        email,
+        otp,
+        publicKeyJwk: preKeyBundle,
+        deviceId // Now including device identification
+      };
+
+      if (!payload.publicKeyJwk.preKeys || payload.publicKeyJwk.preKeys.length === 0) {
+        throw new Error("Key bundle generation failed.");
+      }
+
+      const response = await secureFetch('/api/agents/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Registration Failure");
+
+      // 4. Success: Save the device context
+      console.log("✅ Agent Verified. Identity linked to device:", deviceId);
+      setServerSlug(data.slug);
+      setIsSuccess(true);
+
+    } catch (err) {
+      console.error("Verification Error:", err);
+      alert(err.message || "Connection error. Try again.");
+    } finally {
+      setIsVerifying(false);
     }
-
-    const { preKeyBundle } = result;
-
-    // 2. Prepare payload
-    // We pass preKeyBundle directly. No need for redundant toBase64 calls here.
-    const payload = {
-      email,
-      otp,
-      publicKeyJwk: preKeyBundle
-    };
-
-    // 🛡️ SECURITY CHECK: Ensure preKeys aren't empty before sending
-    if (!payload.publicKeyJwk.preKeys || payload.publicKeyJwk.preKeys.length === 0) {
-      throw new Error("Key bundle generation failed. Please try again.");
-    }
-
-    // 3. Send to backend
-    const response = await secureFetch('/api/agents/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Invalid Code or Registration Failure");
-    }
-
-    // 4. Success
-    console.log("✅ Agent Verified and Identity established.");
-    setServerSlug(data.slug);
-    setIsSuccess(true);
-
-  } catch (err) {
-    console.error("Verification Error:", err);
-    alert(err.message || "Connection error. Try again.");
-  } finally {
-    setIsVerifying(false);
-  }
-};
+  };
 
   const fullLink = `${window.location.origin}/${serverSlug}`;
 

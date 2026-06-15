@@ -5,16 +5,17 @@ const preKeySchema = new mongoose.Schema({
   keyId: { type: Number, required: true },
   publicKey: { type: String, required: true }
 }, { _id: false });
-
-const jwkSchema = new mongoose.Schema({
+const deviceSchema = new mongoose.Schema({
+  deviceId: { type: Number, required: true }, // e.g., 1, 2, 3
   registrationId: { type: Number, required: true },
-  identityKey: { type: String, required: true },
+  identityKey: { type: String, required: true }, // Base64
   signedPreKey: { 
     keyId: { type: Number, required: true },
     publicKey: { type: String, required: true },
     signature: { type: String, required: true } 
   },
-  preKeys: [preKeySchema]
+  preKeys: [preKeySchema],
+  lastActive: { type: Date, default: Date.now }
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -66,10 +67,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ""
   },
-publicKeyJwk: {
-    type: jwkSchema,
-    default: null
-  },
+devices: [deviceSchema],
   role: { 
     type: String, 
     default: 'user' // 👈 Added: Simplifies callerModel logic in controllers
@@ -112,10 +110,8 @@ lastNotificationEmail: {
 // Compound index for profile searches or directory listings
 userSchema.index({ firstName: 1, lastName: 1 });
 userSchema.virtual('isCryptoReady').get(function() {
-  return !!(this.publicKeyJwk && 
-            this.publicKeyJwk.identityKey && 
-            this.publicKeyJwk.preKeys?.length > 0);
+  // Checks if the devices array exists and has at least one registered device
+  return Array.isArray(this.devices) && this.devices.length > 0;
 });
-
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 export default User;

@@ -5,15 +5,17 @@ const preKeySchema = new mongoose.Schema({
   publicKey: { type: String, required: true }
 }, { _id: false });
 
-const jwkSchema = new mongoose.Schema({
+const deviceSchema = new mongoose.Schema({
+  deviceId: { type: Number, required: true }, // e.g., 1, 2, 3
   registrationId: { type: Number, required: true },
-  identityKey: { type: String, required: true },
+  identityKey: { type: String, required: true }, // Base64
   signedPreKey: { 
     keyId: { type: Number, required: true },
     publicKey: { type: String, required: true },
     signature: { type: String, required: true } 
   },
-  preKeys: [preKeySchema]
+  preKeys: [preKeySchema],
+  lastActive: { type: Date, default: Date.now }
 }, { _id: false });
 
 export const agentSchema = new mongoose.Schema({
@@ -64,10 +66,7 @@ lastNotificationEmail: {
   type: Date,
   default: null
 },
-publicKeyJwk: {
-    type: jwkSchema,
-    default: null 
-  },
+devices: [deviceSchema],
   plan: { 
     type: String, 
     enum: ['BASIC', 'GROWTH', 'PROFESSIONAL'], 
@@ -154,26 +153,28 @@ agentSchema.virtual('isVoicePackageExpired').get(function() {
 });
 
 
+// In your Agent schema file
 agentSchema.virtual('isCryptoReady').get(function() {
-  return !!(this.publicKeyJwk && 
-            this.publicKeyJwk.identityKey && 
-            this.publicKeyJwk.preKeys?.length > 0);
+  // Now checks if the devices array is populated
+  return Array.isArray(this.devices) && this.devices.length > 0;
 });
 
-export async function rotatePreKeys(agentId, newPreKeys) {
+export async function rotatePreKeys(agentId, deviceId, newPreKeys) {
   return await Agent.updateOne(
-    { _id: agentId },
+    { 
+      _id: agentId, 
+      "devices.deviceId": deviceId // Target the specific device
+    },
     { 
       $push: { 
-        "publicKeyJwk.preKeys": { 
+        "devices.$.preKeys": { 
           $each: newPreKeys,
-          $slice: -100 // Keeps only the most recent 100 keys
+          $slice: -100 // Keeps only the most recent 100 keys for THIS device
         } 
       }
     }
   );
 }
-
 // ✨ FIXED: Added early validation guard clauses to prevent registration loop crashes
 agentSchema.pre('validate', async function() {
   if (!this.firstName || !this.lastName) return; // Prevent loop execution if base names aren't present yet

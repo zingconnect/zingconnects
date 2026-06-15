@@ -251,12 +251,16 @@ router.post('/register', upload.single('photo'), async (req, res, next) => {
   }
 });
 
-// --- 2. STAGE 2: VERIFY OTP + KEY REGISTRATION ---
 router.post('/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { email, otp, publicKeyJwk } = req.body;
+    
+    // Deconstruct the new fields sent from the frontend
+    const { 
+      email, otp, deviceId, registrationId, 
+      identityKey, signedPreKey, preKeys 
+    } = req.body;
 
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: "Email and OTP are required." });
@@ -265,73 +269,74 @@ router.post('/verify-otp', async (req, res, next) => {
     const lowerEmail = email.toLowerCase().trim();
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
-    // 🛡️ SECURITY FIX: Unified validation comparison logic 
+    // 1. Validate OTP and Expiry
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      // Optional: track failed attempts here as discussed
       return res.status(400).json({ 
         success: false, 
         message: "Invalid or expired verification code." 
       });
     }
 
-   // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
-if (
-  !publicKeyJwk || 
-  !publicKeyJwk.identityKey || 
-  !publicKeyJwk.preKeys || 
-  !Array.isArray(publicKeyJwk.preKeys) || 
-  publicKeyJwk.preKeys.length === 0 ||
-  // Explicitly check that no key is an empty string
-  publicKeyJwk.preKeys.some(pk => !pk.publicKey || pk.publicKey.trim() === "") || 
-  !publicKeyJwk.signedPreKey ||
-  !publicKeyJwk.signedPreKey.publicKey || 
-  publicKeyJwk.signedPreKey.publicKey.trim() === ""
-) {
-  console.error(`❌ Crypto validation failed: Empty or missing keys for: ${lowerEmail}`);
-  return res.status(400).json({ 
-    success: false, 
-    message: "Cryptographic keys could not be processed. Ensure your browser is generating keys correctly." 
-  });
-}
-    // Clean verification status transitions
-    agent.isVerified = true;
-    agent.status = 'active';
-    agent.otp = undefined;
-    agent.otpExpires = undefined;
-
-    // Save the validated crypto identity bundle
-    agent.publicKeyJwk = publicKeyJwk;
-    
-    await agent.save();
-    
-    if (!process.env.JWT_SECRET) {
-      throw new Error("Security configuration error.");
+    // 2. 🛡️ CRITICAL SECURITY GATE: Validate Device Bundle
+    if (!deviceId || !identityKey || !preKeys || !Array.isArray(preKeys) || preKeys.length === 0 || !signedPreKey) {
+      console.error(`❌ Crypto validation failed: Missing device fields for: ${lowerEmail}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Cryptographic keys invalid. Ensure your browser is generating keys correctly." 
+      });
     }
 
-    // Sign payload
+    // 3. Atomic Update: Push new device to the 'devices' array
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { email: lowerEmail },
+      { 
+        $set: { 
+          isVerified: true, 
+          status: 'active' 
+        },
+        $push: { 
+          devices: {
+            deviceId,
+            registrationId,
+            identityKey,
+            signedPreKey,
+            preKeys,
+            lastActive: new Date()
+          }
+        },
+        $unset: { otp: "", otpExpires: "" } 
+      },
+      { new: true }
+    );
+
+    if (!updatedAgent) {
+      return res.status(404).json({ success: false, message: "Agent profile not found." });
+    }
+
+    // 4. Create Session Token
     const token = jwt.sign(
-      { id: agent._id, slug: agent.slug, role: 'agent' },
+      { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: true,
       sameSite: 'Lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       signed: true
     });
 
     return res.status(200).json({
       success: true,
-      slug: agent.slug,
-      message: "Your profile is now live and encrypted!"
+      slug: updatedAgent.slug,
+      message: "Device registered and profile live!"
     });
 
   } catch (err) {
-    console.error("❌ Verification Error:", err);
+    console.error("Verification Error:", err);
     next(err); 
   }
 });
@@ -480,7 +485,7 @@ router.get('/profile/me', authenticateToken, async (req, res, next) => {
       req.user.id,
       { $set: { lastActive: new Date() } },
       { new: true }
-    ).select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive publicKeyJwk lastActive createdAt');
+    ).select('+currentSessionId +expiryDate +voicePackageExpiry device email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive publicKeyJwk lastActive createdAt');
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -536,7 +541,8 @@ router.get('/profile/me', authenticateToken, async (req, res, next) => {
       expiryDate: agent.expiryDate || null,
       voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
       voicePackageActive: !!agent.voicePackageActive,
-      publicKeyJwk: agent.publicKeyJwk || null, // ADD THIS
+     devices: agent.devices || [],      // Include the devices array
+  isCryptoReady: agent.isCryptoReady,
       status: isOnline ? 'online' : 'offline',
       lastActive: agent.lastActive,
       paymentDetails: {
@@ -855,15 +861,15 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
         Body: req.file.buffer,
         ContentType: req.file.mimetype,
       }));
-      updateData.photoUrl = fileKey; // Only add photoUrl if a file exists
+      updateData.photoUrl = fileKey;
     }
 
-    // 3. Atomic Update
+    // 3. Atomic Update (Removed publicKeyJwk, added devices)
     const updatedUser = await User.findByIdAndUpdate(
       userId, 
       { $set: updateData },
       { new: true, runValidators: true }
-    ).select('firstName lastName isProfileComplete photoUrl publicKeyJwk dob gender city state phone'); 
+    ).select('firstName lastName isProfileComplete photoUrl dob gender city state phone devices'); 
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
@@ -879,11 +885,15 @@ router.put('/update-user-onboarding', authenticateToken, upload.single('photo'),
       }
     }
 
-    // 5. Return Whitelisted Response
+    // 5. Whitelisted Response with Virtuals
+    const userJson = updatedUser.toJSON();
     return res.json({ 
       success: true, 
       message: "Onboarding complete", 
-      user: updatedUser 
+      user: {
+        ...userJson,
+        isCryptoReady: userJson.isCryptoReady // Frontend uses this to trigger signal handshake
+      }
     });
 
   } catch (err) {

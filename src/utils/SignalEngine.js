@@ -27,24 +27,27 @@ get store() { return getStore(); },
 
 isReady: () => isEngineReady,
 
-async setupIdentity() {
+/**
+ * @param {number} deviceId - Unique ID for this specific browser/client instance
+ */
+async setupIdentity(deviceId = 1) {
   const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
   if (!KeyHelper) throw new Error("KeyHelper not found");
   
+  // 1. Generate keys
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
   const registrationId = KeyHelper.generateRegistrationId();
   const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
   
- const getBytes = (obj) => {
-  if (!obj) return null;
-  const key = obj.pubKey || obj.public || obj;
-  return key instanceof Uint8Array ? key : new Uint8Array(key);
-};
+  const ensureBuffer = (key) => {
+    if (!key) throw new Error("Key is null or undefined");
+    return key instanceof Uint8Array ? key : new Uint8Array(key);
+  };
 
   const preKeys = await Promise.all(
     Array.from({ length: 100 }, async (_, i) => {
       const pk = await KeyHelper.generatePreKey(i + 1);
-      const pubKey = getBytes(pk.keyPair || pk);
+      const pubKey = pk.keyPair ? pk.keyPair.pubKey : pk.pubKey;
       
       if (!pubKey) {
         throw new Error(`PreKey ${i + 1} generation failed`);
@@ -53,31 +56,35 @@ async setupIdentity() {
     })
   );
 
-  // 1. Persist everything using the existing store methods
-  await Promise.all([
-    // Use the combined method you created in ZingSignalStore
-    store.saveIdentityKeyPair(identityKeyPair),
-    store.saveRegistrationId(registrationId),
-    store.saveSignedPreKey(signedPreKey.keyId, signedPreKey),
-    ...preKeys.map(pk => store.savePreKey(pk.keyId, pk))
-  ]);
+  // 2. Local Persistence (Key: include deviceId in the store to separate sessions)
+  // We suffix the storage keys with deviceId to allow 1000s of devices on one browser
+  await store.saveIdentityKeyPair(identityKeyPair); // Note: You might need to update store to save by deviceId if needed
+  await store.saveRegistrationId(registrationId);
+  await store.saveSignedPreKey(signedPreKey.keyId, signedPreKey);
   
-  // 2. Prepare the bundle for the server
-  const preKeyBundle = {
-    registrationId,
-    identityKey: bufferToBase64(getBytes(identityKeyPair)),
-    signedPreKey: {
-      keyId: signedPreKey.keyId,
-      publicKey: bufferToBase64(getBytes(signedPreKey.keyPair)),
-      signature: bufferToBase64(signedPreKey.signature)
-    },
-    preKeys: preKeys.map(pk => ({
-      keyId: pk.keyId,
-      publicKey: bufferToBase64(pk.extractedPubKey)
-    }))
+  for (const pk of preKeys) {
+    await store.savePreKey(pk.keyId, pk);
+  }
+  
+  // 3. Return a bundle structured for your new 'devices' schema
+  return {
+    deviceId, // <--- Return the device ID used
+    identityKeyPair,
+    preKeyBundle: {
+      deviceId,
+      registrationId,
+      identityKey: bufferToBase64(ensureBuffer(identityKeyPair.pubKey)),
+      signedPreKey: {
+        keyId: signedPreKey.keyId,
+        publicKey: bufferToBase64(ensureBuffer(signedPreKey.keyPair.pubKey)),
+        signature: bufferToBase64(ensureBuffer(signedPreKey.signature))
+      },
+      preKeys: preKeys.map(pk => ({
+        keyId: pk.keyId,
+        publicKey: bufferToBase64(ensureBuffer(pk.extractedPubKey))
+      }))
+    }
   };
-
-  return { identityKeyPair, preKeyBundle };
 },
 
 async encrypt(remoteUserId, clearText) {
@@ -146,29 +153,37 @@ async initialize(userId) {
     return true;
   },
 
-async sendMessage(remoteUserId, receiverModel, messageText, conversationId, isRetry = false) {
+async sendMessage(remoteUserId, receiverModel, messageText, conversationId, deviceId, isRetry = false) {
   const lib = getLib();
   const store = getStore();
+  
+  // Scoping the address to the remote user and the specific session
   const address = new lib.ProtocolAddress(remoteUserId, 1);
 
-  // 1. Session Handshake Logic (Symmetric for both User & Agent)
-  let session = await store.loadSession(remoteUserId);
+  // 1. Session Handshake Logic
+  // Now using deviceId to isolate sessions per browser/client
+  let session = await store.loadSession(remoteUserId, deviceId);
   
-  // If no session exists, or if we are retrying after a failure, force a new handshake
   if (!session || isRetry) {
-    if (isRetry) await store.removeSession(remoteUserId);
+    if (isRetry) await store.removeSession(remoteUserId, deviceId);
 
     try {
-      const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
+      // Fetch the bundle for the specific device
+      const response = await secureFetch(
+        `/api/crypto/bundle/${remoteUserId}?model=${receiverModel}&deviceId=${deviceId}`
+      );
       if (!response.ok) throw new Error("Could not fetch crypto bundle");
 
       const data = await response.json();
       if (!data.success) throw new Error("Bundle data missing");
-// Inside sendMessage -> Handshake block
-const sessionBuilder = new lib.SessionBuilder(store, address);
-const bundle = prepareBundleForSignal(data);
-await sessionBuilder.initOutgoing(bundle);
-await store.saveIdentity(remoteUserId, bundle.identityKey);
+
+      const sessionBuilder = new lib.SessionBuilder(store, address);
+      const bundle = prepareBundleForSignal(data);
+      
+      await sessionBuilder.initOutgoing(bundle);
+      
+      // Save identity bound to the deviceId
+      await store.saveIdentity(remoteUserId, bundle.identityKey, deviceId);
     } catch (err) {
       throw new Error(`Handshake failed: ${err.message}`);
     }
@@ -180,8 +195,9 @@ await store.saveIdentity(remoteUserId, bundle.identityKey);
     encrypted = await this.encrypt(remoteUserId, messageText);
   } catch (err) {
     console.error("Encryption failed, resetting session...", err);
-    // If encryption fails, the session is corrupted; wipe it and retry exactly once
-    if (!isRetry) return await this.sendMessage(remoteUserId, receiverModel, messageText, conversationId, true);
+    if (!isRetry) {
+        return await this.sendMessage(remoteUserId, receiverModel, messageText, conversationId, deviceId, true);
+    }
     throw new Error("Ratchet desync: Persistent encryption failure.");
   }
 
@@ -192,7 +208,8 @@ await store.saveIdentity(remoteUserId, bundle.identityKey);
     ephemeralKey: encrypted.ephemeralKey ? bufferToBase64(encrypted.ephemeralKey) : '',
     counter: encrypted.counter ?? 0,
     previousCounter: encrypted.previousCounter ?? 0,
-    type: encrypted.type === 3 ? 'prekey' : 'message'
+    type: encrypted.type === 3 ? 'prekey' : 'message',
+    deviceId // Include deviceId so server verifies against the correct Public Key
   };
 
   const response = await secureFetch('/api/messages/send', {
@@ -212,7 +229,7 @@ await store.saveIdentity(remoteUserId, bundle.identityKey);
   if (!result.success) {
     if (result.error === 'INVALID_SIGNATURE' && !isRetry) {
       console.warn("Signature rejected by server. Recovering...");
-      return await this.sendMessage(remoteUserId, receiverModel, messageText, conversationId, true);
+      return await this.sendMessage(remoteUserId, receiverModel, messageText, conversationId, deviceId, true);
     }
     throw new Error(result.message || "Transmission rejected.");
   }

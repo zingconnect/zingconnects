@@ -612,7 +612,8 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { email, otp, publicKeyJwk } = req.body;
+    // Expecting the new device structure from req.body
+    const { email, otp, deviceId, registrationId, identityKey, signedPreKey, preKeys } = req.body;
 
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: "Email and OTP are required." });
@@ -635,34 +636,33 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
-    if (
-      !publicKeyJwk || 
-      !publicKeyJwk.identityKey || 
-      !publicKeyJwk.preKeys || 
-      !Array.isArray(publicKeyJwk.preKeys) || 
-      publicKeyJwk.preKeys.length === 0 ||
-      publicKeyJwk.preKeys.some(pk => !pk.publicKey || pk.publicKey.trim() === "") || 
-      !publicKeyJwk.signedPreKey ||
-      !publicKeyJwk.signedPreKey.publicKey || 
-      publicKeyJwk.signedPreKey.publicKey.trim() === ""
-    ) {
+    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle for the NEW device
+    if (!deviceId || !identityKey || !preKeys || !Array.isArray(preKeys) || preKeys.length === 0 || !signedPreKey) {
       return res.status(400).json({ 
         success: false, 
         message: "Cryptographic keys invalid. Ensure your browser is generating keys correctly." 
       });
     }
 
-    // 4. Atomic Update: Finalize account activation and store keys
-    // This replaces Object.assign and .save() to ensure data consistency
+    // 4. Atomic Update: Add the device to the devices array
     const updatedAgent = await AgentModel.findOneAndUpdate(
       { email: lowerEmail },
       { 
         $set: {
           isVerified: true,
           status: 'active',
-          publicKeyJwk: publicKeyJwk,
           failedOtpAttempts: 0
+        },
+        // Push the new device object into the array
+        $push: { 
+          devices: {
+            deviceId,
+            registrationId,
+            identityKey,
+            signedPreKey,
+            preKeys,
+            createdAt: new Date()
+          } 
         },
         $unset: { 
           otp: "", 
@@ -683,19 +683,19 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
- res.cookie('token', token, {
-  httpOnly: true,
-  secure: true,        // Required for HTTPS (must be true in production)
-  sameSite: 'Lax',     // Perfect for same-domain communication
-  path: '/',           // Ensures the cookie is sent for all routes
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  signed: true
-});
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      signed: true
+    });
 
     return res.status(200).json({
       success: true,
       slug: updatedAgent.slug,
-      message: "Your profile is live and encrypted!"
+      message: "Device registered and profile live!"
     });
 
   } catch (err) {
@@ -704,96 +704,93 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
   }
 });
 
-app.put('/api/update-crypto-key', authenticateToken, async (req, res, next) => {
+// POST: Register or Add a new Device
+app.post('/api/crypto/add-device', authenticateToken, async (req, res, next) => {
   try {
     await connectToDatabase();
     
-    // 1. Extract registrationId along with other keys
-    const { registrationId, identityKey, signedPreKey, preKeys } = req.body;
+    // Expecting deviceId (e.g., 1), registrationId, identityKey, signedPreKey, and preKeys
+    const { deviceId, registrationId, identityKey, signedPreKey, preKeys } = req.body;
     
-    // 2. Validate structural integrity
-    if (!preKeys || !Array.isArray(preKeys) || !registrationId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Key bundle requires a valid preKeys array and a registrationId." 
-      });
+    if (!deviceId || !preKeys || !registrationId) {
+      return res.status(400).json({ success: false, message: "Missing required device credentials." });
     }
 
     const userId = req.user.id;
-    const targetModel = req.user.role === 'agent' ? mongoose.models.Agent : mongoose.models.User;
+    const TargetModel = req.user.role === 'agent' ? mongoose.model('Agent') : mongoose.model('User');
 
-    // 3. Update query with slice to prevent document bloat
-    const updateQuery = {
-      $push: { 
-        "publicKeyJwk.preKeys": { 
-          $each: preKeys,
-          $slice: -100 // Keeps only the most recent 100 keys
-        } 
-      },
-      $set: { 
-        "publicKeyJwk.identityKey": identityKey,
-        "publicKeyJwk.signedPreKey": signedPreKey,
-        "publicKeyJwk.registrationId": registrationId // Persist the ID
+    // Atomically push the new device to the devices array
+    const result = await TargetModel.updateOne(
+      { _id: userId },
+      { 
+        $push: { 
+          devices: {
+            deviceId: deviceId,
+            registrationId,
+            identityKey,
+            signedPreKey,
+            preKeys: {
+              $each: preKeys,
+              $slice: -100 // Maintain a window of 100 pre-keys
+            }
+          }
+        }
       }
-    };
-
-    const updatedProfile = await targetModel.findByIdAndUpdate(
-      userId,
-      updateQuery,
-      { new: true }
     );
 
-    if (!updatedProfile) {
+    if (result.matchedCount === 0) {
       return res.status(404).json({ success: false, message: "Profile not found." });
     }
 
-    return res.status(200).json({ 
-      success: true, 
-      message: "Key bundle updated successfully." 
-    });
-
+    return res.status(200).json({ success: true, message: "Device registered successfully." });
   } catch (err) {
     next(err);
   }
 });
 
+// GET: Fetch Bundle for a specific Device ID
 app.get('/api/crypto/bundle/:userId', authenticateToken, async (req, res, next) => {
   try {
     const { userId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ success: false, message: "Invalid ID format." });
-    }
-
+    const deviceId = parseInt(req.query.deviceId) || 1;
     const modelName = req.query.model === 'Agent' ? 'Agent' : 'User';
     const TargetModel = mongoose.model(modelName);
 
-    // 1. Fetch user to check state and existence
-    const user = await TargetModel.findById(userId).select('publicKeyJwk isCryptoReady');
+    // 1. Fetch only the specific device entry
+    const user = await TargetModel.findOne(
+      { _id: userId, "devices.deviceId": deviceId },
+      { "devices.$": 1 } 
+    );
     
-    if (!user) return res.status(404).json({ success: false, message: "User not found." });
-    if (!user.isCryptoReady) return res.status(403).json({ success: false, message: "User crypto not initialized." });
-    if (!user.publicKeyJwk?.preKeys || user.publicKeyJwk.preKeys.length === 0) {
-      return res.status(404).json({ success: false, message: "No pre-keys remaining. Please re-register keys." });
+    if (!user || !user.devices || user.devices.length === 0) {
+      return res.status(404).json({ success: false, message: "Device/User not found." });
     }
 
-    // 2. Safely extract the key
-    const preKey = user.publicKeyJwk.preKeys[0];
+    const device = user.devices[0];
 
-    // 3. Atomically remove ONLY the specific key we just retrieved
+    // 2. Validate PreKey availability
+    if (!device.preKeys || device.preKeys.length === 0) {
+      return res.status(404).json({ success: false, message: "No pre-keys remaining." });
+    }
+
+    const preKey = device.preKeys[0];
+
+    // 3. Atomically consume the specific pre-key
     const result = await TargetModel.updateOne(
-      { _id: userId },
-      { $pull: { "publicKeyJwk.preKeys": { keyId: preKey.keyId } } }
+      { _id: userId, "devices.deviceId": deviceId },
+      { $pull: { "devices.$.preKeys": { keyId: preKey.keyId } } }
     );
 
     if (result.modifiedCount === 0) {
       return res.status(500).json({ success: false, message: "Failed to consume pre-key." });
     }
 
+    // 4. Return the bundle
     return res.status(200).json({ 
       success: true, 
-      registrationId: user.publicKeyJwk.registrationId,
-      identityKey: user.publicKeyJwk.identityKey,
-      signedPreKey: user.publicKeyJwk.signedPreKey,
+      registrationId: device.registrationId,
+      identityKey: device.identityKey,
+      signedPreKey: device.signedPreKey,
       preKey: preKey
     });
   } catch (err) {
@@ -814,9 +811,10 @@ app.post('/api/agents/login', async (req, res, next) => {
     }
 
     const AgentModel = getAgentModel();
+    // 1. ADDED 'devices' to the select clause
     const agent = await AgentModel.findOne({ 
       email: email.toLowerCase().trim() 
-    }).select('slug currentSessionId firstName lastName email occupation bio isSubscribed +password'); 
+    }).select('slug currentSessionId firstName lastName email occupation bio isSubscribed devices +password'); 
     
     if (!agent || !(await bcrypt.compare(password, agent.password))) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
@@ -832,42 +830,46 @@ app.post('/api/agents/login', async (req, res, next) => {
     const newSessionId = crypto.randomBytes(16).toString('hex');
     agent.currentSessionId = newSessionId;
     await agent.save();
-console.log("DEBUG: Session updated for Agent:", agent._id, "New Session:", newSessionId);
-    // PRIME THE CACHE
+
+    // 2. PRIME THE CACHE with isCryptoReady virtual
+    // Using agent.toJSON() ensures the virtual 'isCryptoReady' is included
     const cacheKey = `agent:profile:${agent._id}`;
+    const agentJson = agent.toJSON(); 
+    
     const cacheableAgent = {
-      id: agent._id,
-      firstName: agent.firstName,
-      lastName: agent.lastName,
-      email: agent.email,
-      occupation: agent.occupation,
-      bio: agent.bio,
-      slug: agent.slug,
-      isSubscribed: !!agent.isSubscribed
+      id: agentJson._id,
+      firstName: agentJson.firstName,
+      lastName: agentJson.lastName,
+      email: agentJson.email,
+      occupation: agentJson.occupation,
+      bio: agentJson.bio,
+      slug: agentJson.slug,
+      isSubscribed: !!agentJson.isSubscribed,
+      isCryptoReady: agentJson.isCryptoReady // Include the virtual
     };
+    
     await redisClient.setEx(cacheKey, 3600, JSON.stringify(cacheableAgent));
 
     const token = jwt.sign(
-      { 
-        id: agent._id, 
-        slug: agent.slug, 
-        role: 'agent',
-        sessionId: newSessionId
-      }, 
+      { id: agent._id, slug: agent.slug, role: 'agent', sessionId: newSessionId }, 
       process.env.JWT_SECRET, 
       { expiresIn: '7d' } 
     );
-res.cookie('token', token, {
-  httpOnly: true,
-  secure: true,        // Required for HTTPS (must be true in production)
-  sameSite: 'Lax',     // Perfect for same-domain communication
-  path: '/',           // Ensures the cookie is sent for all routes
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  signed: true
-});
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      signed: true
+    });
+
     return res.json({ 
       success: true, 
-      slug: agent.slug 
+      slug: agent.slug,
+      // 3. Return the crypto readiness status so frontend knows immediately
+      isCryptoReady: agent.isCryptoReady 
     });
 
   } catch (err) {
@@ -958,7 +960,7 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
 
     const AgentModel = getAgentModel();
     const agent = await AgentModel.findById(req.user.id)
-      .select('+currentSessionId +expiryDate +voicePackageExpiry email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive publicKeyJwk lastActive createdAt');
+      .select('+currentSessionId +expiryDate +voicePackageExpiry devices email firstName lastName occupation program bio address photoUrl slug plan isSubscribed subscriptionAmount subscriptionDate paymentDetails voiceId voicePackageActive publicKeyJwk lastActive createdAt');
 
     if (!agent) {
       return res.status(404).json({ success: false, message: "Agent not found" });
@@ -1030,7 +1032,8 @@ app.get('/api/agents/profile/me', authenticateToken, async (req, res, next) => {
       expiryDate: agent.expiryDate || null,
       voiceId: agent.voiceId || "nPczCjzB2QC9zZ6ULpFM",
       voicePackageActive: !!agent.voicePackageActive, 
-      publicKeyJwk: agent.publicKeyJwk || null, // ADD THIS
+     devices: agent.devices || [],      // Include the devices array
+      isCryptoReady: agent.isCryptoReady,
       status: isOnline ? 'online' : 'offline',
       lastActive: agent.lastActive,
       paymentDetails: {
@@ -1107,71 +1110,74 @@ app.post('/api/agents/update-plan', authenticateToken, async (req, res, next) =>
     next(err);
   }
 });
-
 app.post('/api/users/handshake', async (req, res, next) => {
   try {
     await connectToDatabase();
-    const { email, agentSlug, userPublicKeyJwk } = req.body;
+    // Added deviceId to input: The user chooses which agent device to talk to
+    const { email, agentSlug, userPublicKeyJwk, deviceId } = req.body;
     
     if (!email || !agentSlug) {
       return res.status(400).json({ success: false, message: "Email and Agent context required" });
     }
 
     const normalizedSlug = agentSlug.toLowerCase().trim();
-
-    // 1. Atomic User Persistence
     const normalizedEmail = email.toLowerCase().trim();
+
+    // 1. User Persistence (Unchanged)
     const agentLookup = await Agent.findOne({ slug: normalizedSlug }).select('_id');
-    
-    if (!agentLookup) {
-      return res.status(404).json({ success: false, message: "Agent not found." });
-    }
+    if (!agentLookup) return res.status(404).json({ success: false, message: "Agent not found." });
 
     const user = await User.findOneAndUpdate(
       { email: normalizedEmail },
       { 
-        $set: { publicKeyJwk: userPublicKeyJwk, lastLogin: new Date() },
+        $set: { lastLogin: new Date() }, // publicKeyJwk handled elsewhere now
         $addToSet: { connectedAgents: agentLookup._id }
       },
       { upsert: true, new: true }
     );
 
-    // 2. Safely Identify and Pull the PreKey
-    // We find the agent first to grab the specific key object
+    // 2. Safely Identify the Agent's SPECIFIC device
+    // We use $elemMatch to find the agent AND the specific device in one query
     const agent = await Agent.findOne({ 
       slug: normalizedSlug,
-      "publicKeyJwk.preKeys.0": { $exists: true } 
+      devices: { $elemMatch: { deviceId: deviceId || { $exists: true } } }
     });
 
-    if (!agent) {
-      return res.status(404).json({ success: false, message: "No pre-keys available." });
+    if (!agent) return res.status(404).json({ success: false, message: "Agent or device not found." });
+
+    // Select the device requested, or default to the first one available
+    const device = deviceId 
+      ? agent.devices.find(d => d.deviceId === deviceId) 
+      : agent.devices[0];
+
+    if (!device || !device.preKeys || device.preKeys.length === 0) {
+      return res.status(404).json({ success: false, message: "No pre-keys available for this device." });
     }
 
-    const keyToConsume = agent.publicKeyJwk.preKeys[0];
+    const keyToConsume = device.preKeys[0];
 
-    // 3. ATOMIC PULL: Remove ONLY the key with this specific ID
+    // 3. ATOMIC PULL: Remove ONLY the key from the specific device
     const updateResult = await Agent.updateOne(
-      { _id: agent._id },
-      { $pull: { "publicKeyJwk.preKeys": { keyId: keyToConsume.keyId } } }
+      { _id: agent._id, "devices.deviceId": device.deviceId },
+      { $pull: { "devices.$.preKeys": { keyId: keyToConsume.keyId } } }
     );
 
     if (updateResult.modifiedCount === 0) {
       return res.status(500).json({ success: false, message: "Concurrency error: Key already consumed." });
     }
 
-    // 4. Token generation
+    // 4. Token & Return Bundle
     const token = jwt.sign({ id: user._id, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', signed: true });
 
-    // 5. Return the bundle
     return res.json({ 
       success: true, 
       user: { id: user._id },
       agentIdentity: {
-        registrationId: agent.publicKeyJwk.registrationId,
-        identityKey: agent.publicKeyJwk.identityKey,
-        signedPreKey: agent.publicKeyJwk.signedPreKey,
-        preKey: keyToConsume // The key we safely pulled
+        registrationId: device.registrationId,
+        identityKey: device.identityKey,
+        signedPreKey: device.signedPreKey,
+        preKey: keyToConsume
       }
     });
 
@@ -1345,9 +1351,8 @@ app.get('/api/users/my-session', authenticateToken, async (req, res, next) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 // ==============================================================================
-// 🛡️ HARDENED ROUTE: PUT /api/users/update-user-onboarding (Corrected Mapping)
+// 🛡️ HARDENED ROUTE: PUT /api/users/update-user-onboarding (Multi-Device Ready)
 // ==============================================================================
 app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('photo'), async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
@@ -1384,7 +1389,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       firstName: firstName ? String(firstName).trim() : "",
       lastName: lastName ? String(lastName).trim() : "",
       phone: parsedPhone, 
-      dob: dob || null,      // Ensure DOB is mapped
+      dob: dob || null,
       gender: gender ? String(gender).toLowerCase().trim() : undefined,
       city: city ? String(city).trim() : "",
       state: state ? String(state).trim() : "",
@@ -1392,7 +1397,7 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       isVerified: true
     };
 
-    // 3. Handle File Upload (Only update if a new file is present)
+    // 3. Handle File Upload
     if (req.file) {
       const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
       const allowedExtensions = /.(jpg|jpeg|png|webp)$/i;
@@ -1419,11 +1424,12 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
     }
 
     // 4. Update Database
+    // Note: Removed 'publicKeyJwk' and added 'devices' to the select statement
     const updatedUser = await User.findByIdAndUpdate(
       userId, 
       { $set: updateData }, 
       { new: true, runValidators: true }
-    ).select('email firstName lastName dob gender isProfileComplete city state photoUrl phone publicKeyJwk');
+    ).select('email firstName lastName dob gender isProfileComplete city state photoUrl phone devices');
 
     if (!updatedUser) {
       return res.status(404).json({ success: false, message: "User account not found" });
@@ -1437,10 +1443,16 @@ app.put('/api/users/update-user-onboarding', authenticateToken, upload.single('p
       }
     }
 
+    // 6. Return response including the 'isCryptoReady' virtual property
+    const userJson = updatedUser.toJSON();
+
     return res.json({ 
       success: true, 
       message: "Onboarding complete", 
-      user: updatedUser 
+      user: {
+        ...userJson,
+        isCryptoReady: userJson.isCryptoReady // Frontend relies on this to trigger handshake
+      }
     });
 
   } catch (err) {
@@ -1620,16 +1632,15 @@ app.get('/api/users/me', authenticateToken, async (req, res, next) => {
   const cacheKey = `user:profile:full:${req.user.id}`;
 
   try {
-    // 1. ATTEMPT CACHE HIT
-const cachedData = await getCachedData(cacheKey);
+    const cachedData = await getCachedData(cacheKey);
     if (cachedData) {
       return res.status(200).json(JSON.parse(cachedData));
     }
 
-    // 2. FALLBACK TO DATABASE
     await connectToDatabase();
+    // Added 'devices' to select to support isCryptoReady virtual
     const user = await User.findById(req.user.id)
-      .select('firstName lastName email phone dob gender city state photoUrl isProfileComplete connectedAgents')
+      .select('firstName lastName email phone dob gender city state photoUrl isProfileComplete connectedAgents devices')
       .populate({
         path: 'connectedAgents',
         select: '_id name firstName lastName slug photoUrl avatarUrl profileImage'  
@@ -1639,7 +1650,7 @@ const cachedData = await getCachedData(cacheKey);
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // Process URLs (The heavy lifting)
+    // Process URLs
     let signedPhotoUrl = user.photoUrl || null;
     if (signedPhotoUrl && !signedPhotoUrl.startsWith('data:') && !signedPhotoUrl.startsWith('http')) {
       try { signedPhotoUrl = await getPrivateUrl(signedPhotoUrl); } catch (e) { console.error(e); }
@@ -1669,12 +1680,13 @@ const cachedData = await getCachedData(cacheKey);
         city: userObj.city || "",
         state: userObj.state || "",
         isProfileComplete: !!userObj.isProfileComplete,
+        isCryptoReady: user.isCryptoReady, // Added: Critical for frontend handshake logic
         photoUrl: signedPhotoUrl,
         connectedAgents: userObj.connectedAgents || []
       } 
     };
 
-    // 4. SET CACHE (Expires in 1 hour)
+    // 4. SET CACHE
     await redisClient.setEx(cacheKey, 3600, JSON.stringify(responsePayload));
 
     return res.json(responsePayload);
@@ -2227,47 +2239,86 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
   }
 });
 
+app.post('/api/agents/check-device', authenticateAgent, async (req, res) => {
+  const { deviceId } = req.body;
+  const agentId = req.user.id;
+
+  try {
+    const device = await Device.findOne({ agentId, deviceId });
+
+    if (device) {
+      // Device is known and authorized
+      return res.json({ authorized: true });
+    } else {
+      // Device is unknown; create a "pending" entry for approval
+      await Device.create({
+        agentId,
+        deviceId,
+        status: 'pending',
+        lastUsed: new Date()
+      });
+      return res.json({ authorized: false, reason: 'PENDING_APPROVAL' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Security lookup failed' });
+  }
+});
+
 app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
   const myId = req.user.id;
 
   try {
     await connectToDatabase();
+    
     let senderDoc = await Agent.findById(myId) || await User.findById(myId);
     if (!senderDoc) {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
     const senderRole = await Agent.exists({ _id: myId }) ? 'Agent' : 'User';
-    const { conversationId, receiverId, text, receiverModel, fileType, replyToId, isEncrypted, payload } = req.body;
+
+    // 1. Added senderDeviceId to destructuring
+    const { 
+      conversationId, receiverId, text, receiverModel, fileType, 
+      replyToId, isEncrypted, payload, senderDeviceId 
+    } = req.body;
 
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier structure." });
     }
+
+    // Security Check: Must have deviceId for multi-device messaging
+    if (!senderDeviceId) {
+      return res.status(400).json({ success: false, message: "Sender device identifier is required." });
+    }
+
     const sanitizedModel = ['Agent', 'User'].includes(receiverModel) ? receiverModel : 'User';
 
- let payloadData = null;
-if (isEncrypted) {
-  if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
-      payload.counter === undefined || payload.previousCounter === undefined) {
-    return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
-  }
+    let payloadData = null;
+    if (isEncrypted) {
+      if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
+          payload.counter === undefined || payload.previousCounter === undefined) {
+        return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
+      }
 
-  payloadData = {
-    ciphertext: payload.ciphertext,
-    iv: payload.iv,
-    ephemeralKey: payload.ephemeralKey,
-    counter: payload.counter,
-    previousCounter: payload.previousCounter,
-    type: payload.type || 'message'
-  };
-}
-    // 2. Create message with fully structured payload
+      payloadData = {
+        ciphertext: payload.ciphertext,
+        iv: payload.iv,
+        ephemeralKey: payload.ephemeralKey,
+        counter: payload.counter,
+        previousCounter: payload.previousCounter,
+        type: payload.type || 'message'
+      };
+    }
+
+    // 2. Create message with senderDeviceId
     const newMessage = new Message({
       conversationId,
       senderId: myId,
+      senderDeviceId, // Persist device context
       senderModel: senderRole,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: sanitizedModel,
-      text: isEncrypted ? null : String(text).trim(), 
+      text: isEncrypted ? null : String(text || "").trim(), 
       payload: payloadData, 
       isEncrypted: !!isEncrypted,
       fileType: fileType || 'text',
@@ -2289,13 +2340,17 @@ if (isEncrypted) {
     try {
       const io = req.app.get('socketio');
       if (io) {
-        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
+        // Emit the message with the senderDeviceId so the receiver knows which session to use
+        io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
+          ...newMessage.toObject(),
+          senderDeviceId 
+        });
       }
     } catch (socketErr) {
       console.error("⚠️ Socket emission warning:", socketErr.message);
     }
 
-    // 4. Notifications Logic (Unchanged)
+    // 4. Notifications Logic
     const baseUrl = "https://www.zingconnect.chat";
     const path = sanitizedModel === 'Agent' ? `/agent/dashboard?userId=${myId}` : `/user/dashboard?agentId=${myId}`;
     const senderName = senderDoc.firstName || senderDoc.email?.split('@')[0] || 'ZingConnect';
@@ -2318,24 +2373,13 @@ if (isEncrypted) {
       }
     }
 
-    try {
-      const COOLDOWN = 30 * 60 * 1000;
-      const lastEmailTime = receiver.lastNotificationEmail?.getTime() || 0;
-      if (Date.now() - lastEmailTime > COOLDOWN) {
-        await sendOfflineNotification(receiver, senderDoc, newMessage.isEncrypted ? "Please login to view." : text, sanitizedModel);
-        await TargetModel.findByIdAndUpdate(receiverId, { $set: { lastNotificationEmail: new Date() } });
-      }
-    } catch (mailErr) {
-      console.error("❌ Email Error:", mailErr.message);
-    }
-
     const savedMsg = newMessage.toObject();
     return res.status(201).json({ 
       success: true, 
       message: {
         ...savedMsg,
         id: savedMsg._id,
-        sender: { id: myId }
+        sender: { id: myId, deviceId: senderDeviceId }
       } 
     });
 

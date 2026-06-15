@@ -14,6 +14,7 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
   },
 });
 
+
 const areKeysEqual = (key1, key2) => {
   // If they are buffers, compare their bytes
   if (key1 instanceof ArrayBuffer && key2 instanceof ArrayBuffer) {
@@ -29,63 +30,43 @@ const areKeysEqual = (key1, key2) => {
 
 export class ZingSignalStore {
   constructor(lib) {
-    // This assignment will now successfully trigger the setter below
-    this.lib = lib; 
+    this.lib = lib;
   }
 
-  set lib(value) {
-    this._lib = value;
+  _getKey(key, deviceId) {
+    return deviceId ? `${key}_${deviceId}` : key;
   }
 
-  // The getter remains for access
+  set lib(value) { this._lib = value; }
   get lib() {
-    if (!this._lib) {
-      console.error(`ZingSignalStore: libsignal was undefined at construction.`);
-    }
+    if (!this._lib) console.error(`ZingSignalStore: libsignal undefined.`);
     return this._lib;
   }
 
-  async ensureReady() {
-    await dbPromise; // Wait for the DB to be opened/upgraded
-  }
+  async ensureReady() { await dbPromise; }
 
-async getIdentityKey(identifier) {
-    return await this.loadIdentity(identifier);
-  }
-
-async getIdentityKeyPair() {
+  // --- IDENTITY ---
+  async saveIdentityKeyPair(identityKeyPair, deviceId) {
     const db = await dbPromise;
-    const pubKeyBase64 = await db.get('identity', 'local');
-    const privKey = await db.get('identity', 'local_priv');
-
-    if (!pubKeyBase64 || !privKey) return null;
-    const keyBuffer = toBuffer(pubKeyBase64);
-    
-    if (!this.lib || !this.lib.Curve) {
-        throw new Error("libsignal library not loaded in ZingSignalStore");
-    }
-    return {
-      pubKey: this.lib.Curve.decodePoint(keyBuffer),
-      privKey: privKey
-    };
+    const tx = db.transaction(['identity'], 'readwrite');
+    await tx.objectStore('identity').put(identityKeyPair.pubKey, this._getKey('local_pub', deviceId));
+    await tx.objectStore('identity').put(identityKeyPair.privKey, this._getKey('local_priv', deviceId));
+    await tx.done;
   }
 
-  async isTrustedIdentity(identifier, identityKey, direction) {
-    const savedKey = await this.loadIdentityKey(identifier);
-    if (!savedKey) return true; // Trust on first use
-    return areKeysEqual(savedKey, identityKey); 
-  }
-
-  async getOurIdentity() {
-  return await this.loadIdentity('local');
-}
-
-  async saveIdentity(identifier, identityKey) {
+  async getIdentityKeyPair(deviceId) {
     const db = await dbPromise;
-    // Extract pubKey if it's an object, otherwise use the key directly
+    const pubKey = await db.get('identity', this._getKey('local_pub', deviceId));
+    const privKey = await db.get('identity', this._getKey('local_priv', deviceId));
+    return (pubKey && privKey) ? { pubKey, privKey } : null;
+  }
+
+  async saveIdentity(identifier, identityKey, deviceId) {
+    const db = await dbPromise;
     const rawKey = identityKey.pubKey || identityKey;
-    // Convert to Base64 for consistent storage
-    const base64Key = bufferToBase64(rawKey); 
+    const base64Key = bufferToBase64(rawKey);
+    // Identifier here usually refers to the remote peer's ID, 
+    // so we don't necessarily need deviceId unless it's for local identity
     await db.put('identity', base64Key, identifier);
   }
 
@@ -96,108 +77,65 @@ async getIdentityKeyPair() {
     return base64Key ? toBuffer(base64Key) : null;
   }
 
-  async loadIdentityKey(identifier) {
-    return await this.loadIdentity(identifier);
-}
-
-async loadIdentityKeyPair() {
-  const db = await dbPromise;
-  const pubKey = await db.get('identity', 'local_pub');
-  const privKey = await db.get('identity', 'local_priv');
-  
-  if (!pubKey || !privKey) return null;
-  return {
-    pubKey: pubKey, 
-    privKey: privKey
-  };
-}
-
-  // --- SESSIONS & BUNDLES ---
-  async savePeerBundle(identifier, bundle) {
+  // --- REGISTRATION ---
+  async saveRegistrationId(id, deviceId) {
     const db = await dbPromise;
-    await db.put('session', bundle, identifier);
+    await db.put('misc', id, this._getKey('registrationId', deviceId));
   }
 
-  async getPeerBundle(identifier) {
+  async getLocalRegistrationId(deviceId) {
     const db = await dbPromise;
-    return await db.get('session', identifier);
+    return await db.get('misc', this._getKey('registrationId', deviceId));
   }
 
-async saveSession(identifier, record) {
-  const db = await dbPromise;
-  const data = record.serialize(); 
-  await db.put('session', data, identifier);
-}
-
-async loadSession(identifier) {
-  const db = await dbPromise;
-  const record = await db.get('session', identifier);
-  
-  if (!record) return null;
-
-  try {
-    return this.lib.SessionRecord.deserialize(record);
-  } catch (err) {
-    console.error("Critical: Deserialization failed for", identifier, err);
-    await db.delete('session', identifier);
-    return null;
-  }
-}
-
-async loadSignedPreKey(keyId) {
+  // --- SESSIONS ---
+  // Sessions are usually indexed by remote user ID, but if you want 
+  // multi-device support for the SAME remote user, append deviceId to identifier
+  async saveSession(identifier, record, deviceId) {
     const db = await dbPromise;
-    const record = await db.get('prekeys', keyId);
-    return record; 
-}
-
-async containsKey(identifier) {
-    const db = await dbPromise;
-    return !!(await db.get('identity', identifier));
-}
-
-  async getLocalRegistrationId() {
-    const db = await dbPromise;
-    return await db.get('misc', 'registrationId');
+    const data = record.serialize();
+    await db.put('session', data, this._getKey(identifier, deviceId));
   }
 
- 
-
-  async saveSignedPreKey(keyId, keyPair) {
+  async loadSession(identifier, deviceId) {
     const db = await dbPromise;
-    await db.put('prekeys', keyPair, keyId);
+    const record = await db.get('session', this._getKey(identifier, deviceId));
+    if (!record) return null;
+    try {
+      return this.lib.SessionRecord.deserialize(record);
+    } catch (err) {
+      await db.delete('session', this._getKey(identifier, deviceId));
+      return null;
+    }
   }
 
-async saveIdentityKeyPair(identityKeyPair) {
-  const db = await dbPromise;
-  const tx = db.transaction(['identity'], 'readwrite');
-  
-  // Store the raw Uint8Array (binary), NOT the Base64 string
-  await tx.objectStore('identity').put(identityKeyPair.pubKey, 'local_pub');
-  await tx.objectStore('identity').put(identityKeyPair.privKey, 'local_priv');
-  
-  await tx.done;
-}
-
-  async saveRegistrationId(id) {
-    const db = await dbPromise;
-    await db.put('misc', id, 'registrationId');
-  }
-  
   // --- PREKEYS ---
-  async loadPreKey(keyId) {
+  async saveSignedPreKey(keyId, keyPair, deviceId) {
     const db = await dbPromise;
-    return await db.get('prekeys', keyId);
+    await db.put('prekeys', keyPair, this._getKey(keyId, deviceId));
   }
 
-  async savePreKey(keyId, keyPair) {
+  async loadSignedPreKey(keyId, deviceId) {
     const db = await dbPromise;
-    await db.put('prekeys', keyPair, keyId);
+    return await db.get('prekeys', this._getKey(keyId, deviceId));
   }
 
-  async removePreKey(keyId) {
+  async savePreKey(keyId, keyPair, deviceId) {
     const db = await dbPromise;
-    await db.delete('prekeys', keyId);
+    await db.put('prekeys', keyPair, this._getKey(keyId, deviceId));
   }
+
+  async loadPreKey(keyId, deviceId) {
+    const db = await dbPromise;
+    return await db.get('prekeys', this._getKey(keyId, deviceId));
+  }
+
+  async removePreKey(keyId, deviceId) {
+    const db = await dbPromise;
+    await db.delete('prekeys', this._getKey(keyId, deviceId));
+  }
+  
+
 
   async clearAll() {
     const db = await dbPromise;

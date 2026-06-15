@@ -105,37 +105,46 @@ router.post('/send', authenticateToken, async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Sender identity not found." });
     }
 
-    // 1. Extract payload object (the full schema-compliant object)
-    const { conversationId, receiverId, text, receiverModel, fileType, replyToId, isEncrypted, payload } = req.body;
+    // 1. Extract payload AND senderDeviceId
+    const { 
+      conversationId, receiverId, text, receiverModel, fileType, 
+      replyToId, isEncrypted, payload, senderDeviceId 
+    } = req.body;
 
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid recipient identifier." });
+    }
+
+    // Security check for multi-device messaging
+    if (!senderDeviceId) {
+      return res.status(400).json({ success: false, message: "Sender device identifier is required." });
     }
 
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
     const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
 
     let payloadData = null;
-if (isEncrypted) {
-  if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
-      payload.counter === undefined || payload.previousCounter === undefined) {
-    return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
-  }
+    if (isEncrypted) {
+      if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
+          payload.counter === undefined || payload.previousCounter === undefined) {
+        return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
+      }
 
-  payloadData = {
-    ciphertext: payload.ciphertext,
-    iv: payload.iv,
-    ephemeralKey: payload.ephemeralKey,
-    counter: payload.counter,
-    previousCounter: payload.previousCounter,
-    type: payload.type || 'message'
-  };
-}
+      payloadData = {
+        ciphertext: payload.ciphertext,
+        iv: payload.iv,
+        ephemeralKey: payload.ephemeralKey,
+        counter: payload.counter,
+        previousCounter: payload.previousCounter,
+        type: payload.type || 'message'
+      };
+    }
 
-    // 3. Create message using the nested payload
+    // 3. Create message with senderDeviceId
     const newMessage = await Message.create({
       conversationId,
       senderId: myId,
+      senderDeviceId, // Added for session tracking
       senderModel: senderModelName,
       receiverId: new mongoose.Types.ObjectId(receiverId),
       receiverModel: targetModelName,
@@ -147,26 +156,22 @@ if (isEncrypted) {
       notificationSent: false
     });
 
-    // 4. Socket emission
+    // 4. Socket emission including senderDeviceId
     const io = req.app.get('socketio');
     if (io) {
-      io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", newMessage);
+      io.to(receiverId.toString()).emit("RECEIVE_PRIVATE_MESSAGE", {
+        ...newMessage.toObject(),
+        senderDeviceId 
+      });
     }
 
     // 5. Sanitized DTO for the response
     const savedMsg = newMessage.toObject();
     const responseMsg = {
-      _id: savedMsg._id,
+      ...savedMsg,
       id: savedMsg._id,
-      text: savedMsg.text || "",
-      isEncrypted: !!savedMsg.isEncrypted,
-      payload: savedMsg.payload || null,
       senderId: myId,
-      senderModel: senderModelName,
-      receiverId: receiverId,
-      receiverModel: targetModelName,
-      fileType: savedMsg.fileType,
-      createdAt: savedMsg.createdAt,
+      senderDeviceId, // Return to client for confirmation
       senderName: `${senderDoc.firstName || ''} ${senderDoc.lastName || ''}`.trim(),
       senderPhoto: senderDoc.photoUrl || "",
       fileUrl: null
