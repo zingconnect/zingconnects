@@ -1419,11 +1419,12 @@ useEffect(() => {
 useEffect(() => {
   let isMounted = true;
 
-  // Load external dependency safely
+  // 1. Safe Script Loading
   if (!document.querySelector('script[src*="flutterwave"]')) {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
     script.async = true;
+    script.id = "flutterwave-script"; // Added ID for easier tracking
     document.body.appendChild(script);
   }
 
@@ -1454,14 +1455,37 @@ useEffect(() => {
       
       const profileData = await profileResponse.value.json();
       
-    if (profileData.agent) {
-        // 1. Set agent state - Only focus on UI/Context data here
-        setAgentData(profileData.agent);
-        setIsSubscribed(!!profileData.agent.isSubscribed); 
-        if (profileData.agent.plan) setSelectedPlan(profileData.agent.plan);
+      if (profileData.agent) {
+        const agent = profileData.agent;
 
-        // 2. Handle User Request
-        if (profileData.agent.isSubscribed && usersResponse.status === 'fulfilled') {
+        // 🛡️ CRITICAL: CRYPTO INTEGRITY CHECK
+        // If keys were purged, the array will be empty/missing. Repair immediately.
+        const hasValidKeys = agent.publicKeyJwk?.preKeys && agent.publicKeyJwk.preKeys.length > 0;
+        
+        if (!hasValidKeys) {
+          console.warn("Crypto keys missing/corrupted. Repairing...");
+          try {
+            // Re-generate your bundle via SignalEngine
+            const newBundle = await SignalEngine.generateBundle(); 
+            await secureFetch('/api/update-crypto-key', { 
+              method: 'PUT', 
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newBundle) 
+            });
+            // Recursively re-fetch to get the newly populated profile
+            return fetchInitialData(); 
+          } catch (cryptoErr) {
+            console.error("Auto-repair of keys failed:", cryptoErr);
+          }
+        }
+
+        // 2. Set State
+        setAgentData(agent);
+        setIsSubscribed(!!agent.isSubscribed); 
+        if (agent.plan) setSelectedPlan(agent.plan);
+
+        // 3. Handle User Request
+        if (agent.isSubscribed && usersResponse.status === 'fulfilled') {
           const uRes = usersResponse.value;
           if (uRes.ok) {
             const userData = await uRes.json();
