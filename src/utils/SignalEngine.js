@@ -146,56 +146,48 @@ async initialize(userId) {
     return true;
   },
 
-async sendMessage(remoteUserId, receiverModel, messageText, conversationId) {
+async sendMessage(remoteUserId, receiverModel, messageText, conversationId, isRetry = false) {
   const lib = getLib();
   const store = getStore();
-  
-  // 1. CRITICAL: Ensure local identity exists
-  const identity = await store.loadIdentity('local');
-  if (!identity) {
-    throw new Error("Local identity not found. Call setupIdentity() first.");
-  }
-
   const address = new lib.ProtocolAddress(remoteUserId, 1);
 
-  // 2. Session Handshake Logic
+  // 1. Session Handshake Logic (Symmetric for both User & Agent)
   let session = await store.loadSession(remoteUserId);
-  if (!session) {
-    if (!this.handshakeLock) {
-      this.handshakeLock = (async () => {
-        try {
-          const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
-          if (!response.ok) throw new Error("Could not fetch crypto bundle");
+  
+  // If no session exists, or if we are retrying after a failure, force a new handshake
+  if (!session || isRetry) {
+    if (isRetry) await store.removeSession(remoteUserId);
 
-          const data = await response.json();
-          if (!data.success) throw new Error("Bundle data missing");
+    try {
+      const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
+      if (!response.ok) throw new Error("Could not fetch crypto bundle");
 
-          const sessionBuilder = new lib.SessionBuilder(store, address);
-          await sessionBuilder.initOutgoing(prepareBundleForSignal(data));
-        } catch (err) {
-          this.handshakeLock = null; // Clear lock on failure
-          throw err;
-        }
-      })();
+      const data = await response.json();
+      if (!data.success) throw new Error("Bundle data missing");
+
+      // Initialize session using the bundle
+      const sessionBuilder = new lib.SessionBuilder(store, address);
+      await sessionBuilder.initOutgoing(prepareBundleForSignal(data));
+      
+      // Crucial: Manually persist the identity to prevent signature verification drift
+      await store.saveIdentity(remoteUserId, toBuffer(data.identityKey));
+    } catch (err) {
+      throw new Error(`Handshake failed: ${err.message}`);
     }
-    await this.handshakeLock;
-    this.handshakeLock = null;
-    
-    session = await store.loadSession(remoteUserId);
-    if (!session) throw new Error("Session failed to persist.");
   }
 
-  // 3. Encrypt
+  // 2. Encryption
   let encrypted;
   try {
     encrypted = await this.encrypt(remoteUserId, messageText);
   } catch (err) {
-    await this.store.removeSession(remoteUserId);
-    throw new Error("Ratchet desync detected. Please try sending again.");
+    console.error("Encryption failed, resetting session...", err);
+    // If encryption fails, the session is corrupted; wipe it and retry exactly once
+    if (!isRetry) return await this.sendMessage(remoteUserId, receiverModel, messageText, conversationId, true);
+    throw new Error("Ratchet desync: Persistent encryption failure.");
   }
 
-  // 4. Transmission: Properly convert Buffers to Base64 strings
-  // This prevents [object Object] or binary data corruption in JSON
+  // 3. Transmission
   const payload = {
     ciphertext: bufferToBase64(encrypted.body),
     iv: encrypted.iv ? bufferToBase64(encrypted.iv) : '',
@@ -212,12 +204,20 @@ async sendMessage(remoteUserId, receiverModel, messageText, conversationId) {
       receiverId: remoteUserId,
       receiverModel,
       isEncrypted: true,
-      payload // Now correctly formatted as Base64 strings
+      payload
     })
   });
 
   const result = await response.json();
-  if (!result.success) throw new Error(result.message || "Transmission rejected.");
+
+  // 4. Handle Server-Side Signature Rejection
+  if (!result.success) {
+    if (result.error === 'INVALID_SIGNATURE' && !isRetry) {
+      console.warn("Signature rejected by server. Recovering...");
+      return await this.sendMessage(remoteUserId, receiverModel, messageText, conversationId, true);
+    }
+    throw new Error(result.message || "Transmission rejected.");
+  }
 
   return result;
 },
