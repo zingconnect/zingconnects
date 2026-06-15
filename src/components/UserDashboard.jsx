@@ -24,7 +24,7 @@ import { useDrag } from "@use-gesture/react";
 import ReactPhoneInput from 'react-phone-input-2';
 import 'react-phone-input-2/lib/style.css';
 import { 
-  BsTelephoneFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill,
+  BsTelephoneFill, BsReplyFill, BsPlusLg, BsSendFill, BsCheckAll,BsChevronLeft,BsShieldLockFill,BsGearFill,
   BsArrowRight, BsCameraFill, BsMicFill, BsVolumeUpFill,BsMicMuteFill, BsPaperclip,BsDownload,
   BsPlayFill, BsXLg, BsX 
 } from 'react-icons/bs';
