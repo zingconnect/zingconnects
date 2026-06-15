@@ -100,6 +100,19 @@ async getIdentityKeyPair() {
     return await this.loadIdentity(identifier);
 }
 
+async loadIdentityKeyPair() {
+  const db = await dbPromise;
+  const pubKeyBase64 = await db.get('identity', 'local');
+  const privKey = await db.get('identity', 'local_priv');
+  
+  if (!pubKeyBase64 || !privKey) return null;
+
+  return {
+    pubKey: this.lib.Curve.decodePoint(toBuffer(pubKeyBase64)),
+    privKey: privKey // Ensure this matches what your libsignal version expects (Buffer vs object)
+  };
+}
+
   // --- SESSIONS & BUNDLES ---
   async savePeerBundle(identifier, bundle) {
     const db = await dbPromise;

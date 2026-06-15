@@ -428,9 +428,6 @@ app.get('/api/test-routes', (req, res) => {
   res.json({ registeredRoutes: routes });
 });
 
-// ==========================================
-// 🛡️ HARDENED ENDPOINT: POST /api/agents/register-init
-// ==========================================
 app.post('/api/agents/register-init', upload.single('photo'), async (req, res, next) => {
   try {
     await connectToDatabase();
@@ -1120,47 +1117,61 @@ app.post('/api/users/handshake', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Email and Agent context required" });
     }
 
+    const normalizedSlug = agentSlug.toLowerCase().trim();
+
     // 1. Atomic User Persistence
     const normalizedEmail = email.toLowerCase().trim();
+    const agentLookup = await Agent.findOne({ slug: normalizedSlug }).select('_id');
+    
+    if (!agentLookup) {
+      return res.status(404).json({ success: false, message: "Agent not found." });
+    }
+
     const user = await User.findOneAndUpdate(
       { email: normalizedEmail },
       { 
         $set: { publicKeyJwk: userPublicKeyJwk, lastLogin: new Date() },
-        $addToSet: { connectedAgents: (await Agent.findOne({ slug: agentSlug.toLowerCase().trim() }))._id }
+        $addToSet: { connectedAgents: agentLookup._id }
       },
       { upsert: true, new: true }
     );
 
-    // 2. Atomic PreKey Consumption
-    // $pop removes and returns the first element (-1) of the preKeys array.
-    // We set { new: false } to capture the document state BEFORE the removal,
-    // so we can return the key that was just consumed.
-    const agentResult = await Agent.findOneAndUpdate(
-      { 
-        slug: agentSlug.toLowerCase().trim(),
-        "publicKeyJwk.preKeys.0": { $exists: true } 
-      },
-      { $pop: { "publicKeyJwk.preKeys": -1 } },
-      { new: false }
-    );
+    // 2. Safely Identify and Pull the PreKey
+    // We find the agent first to grab the specific key object
+    const agent = await Agent.findOne({ 
+      slug: normalizedSlug,
+      "publicKeyJwk.preKeys.0": { $exists: true } 
+    });
 
-    if (!agentResult) {
+    if (!agent) {
       return res.status(404).json({ success: false, message: "No pre-keys available." });
     }
 
-    // 3. Token generation
+    const keyToConsume = agent.publicKeyJwk.preKeys[0];
+
+    // 3. ATOMIC PULL: Remove ONLY the key with this specific ID
+    const updateResult = await Agent.updateOne(
+      { _id: agent._id },
+      { $pull: { "publicKeyJwk.preKeys": { keyId: keyToConsume.keyId } } }
+    );
+
+    if (updateResult.modifiedCount === 0) {
+      return res.status(500).json({ success: false, message: "Concurrency error: Key already consumed." });
+    }
+
+    // 4. Token generation
     const token = jwt.sign({ id: user._id, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', signed: true });
 
-    // 4. Return the identity bundle + the consumed preKey
+    // 5. Return the bundle
     return res.json({ 
       success: true, 
       user: { id: user._id },
       agentIdentity: {
-        registrationId: agentResult.publicKeyJwk.registrationId,
-        identityKey: agentResult.publicKeyJwk.identityKey,
-        signedPreKey: agentResult.publicKeyJwk.signedPreKey,
-        preKey: agentResult.publicKeyJwk.preKeys[0] // The specific key consumed
+        registrationId: agent.publicKeyJwk.registrationId,
+        identityKey: agent.publicKeyJwk.identityKey,
+        signedPreKey: agent.publicKeyJwk.signedPreKey,
+        preKey: keyToConsume // The key we safely pulled
       }
     });
 
@@ -2233,15 +2244,22 @@ app.post('/api/messages/send', authenticateToken, async (req, res, next) => {
     }
     const sanitizedModel = ['Agent', 'User'].includes(receiverModel) ? receiverModel : 'User';
 
-    // 1. Construct and validate payload
-    let payloadData = null;
-   if (isEncrypted) {
+ let payloadData = null;
+if (isEncrypted) {
   if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
-      payload.counter === undefined || payload.previousCounter === undefined) { // ADDED previousCounter
+      payload.counter === undefined || payload.previousCounter === undefined) {
     return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
   }
-}
 
+  payloadData = {
+    ciphertext: payload.ciphertext,
+    iv: payload.iv,
+    ephemeralKey: payload.ephemeralKey,
+    counter: payload.counter,
+    previousCounter: payload.previousCounter,
+    type: payload.type || 'message'
+  };
+}
     // 2. Create message with fully structured payload
     const newMessage = new Message({
       conversationId,

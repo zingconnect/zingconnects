@@ -145,26 +145,31 @@ async initialize(userId) {
 async sendMessage(remoteUserId, receiverModel = 'User', messageText, conversationId) {
   const lib = getLib();
   const store = getStore();
+  
+  // 1. CRITICAL: Ensure local identity exists
+  const identity = await store.loadIdentity('local');
+  if (!identity) {
+    throw new Error("Local identity not found. Call setupIdentity() first.");
+  }
+
   const address = new lib.ProtocolAddress(remoteUserId, 1);
 
-  // 1. Ensure the session exists using a lock to prevent race conditions
+  // 2. Session Handshake Logic
   let session = await store.loadSession(remoteUserId);
-
   if (!session) {
     if (!this.handshakeLock) {
       this.handshakeLock = (async () => {
         try {
-          console.log("DEBUG: Performing X3DH Handshake for:", remoteUserId);
           const response = await secureFetch(`/api/crypto/bundle/${remoteUserId}?model=${receiverModel}`);
           if (!response.ok) throw new Error("Could not fetch crypto bundle");
 
           const data = await response.json();
-          if (!data.success) throw new Error("Bundle data missing from response");
+          if (!data.success) throw new Error("Bundle data missing");
 
           const sessionBuilder = new lib.SessionBuilder(store, address);
           await sessionBuilder.initOutgoing(prepareBundleForSignal(data));
         } catch (err) {
-          console.error("Handshake failed:", err);
+          this.handshakeLock = null; // Clear lock on failure
           throw err;
         }
       })();
@@ -173,38 +178,37 @@ async sendMessage(remoteUserId, receiverModel = 'User', messageText, conversatio
     this.handshakeLock = null;
     
     session = await store.loadSession(remoteUserId);
-    if (!session) throw new Error("Session handshake completed but failed to persist.");
+    if (!session) throw new Error("Session failed to persist.");
   }
-  let encrypted;
- try {
-  encrypted = await this.encrypt(remoteUserId, messageText);
-} catch (err) {
-  console.error("Encryption failed: Ratchet Desync.", err);
-  
-  // PURGE the corrupted session to allow re-handshake
-  await this.store.removeSession(remoteUserId); 
-  
-  // Trigger a re-handshake immediately
-  this.handshakeLock = null; 
-  throw new Error("Ratchet desync detected. Refreshing session...");
-}
 
-  // 3. Transmission with schema-compliant payload
+  // 3. Encrypt
+  let encrypted;
+  try {
+    encrypted = await this.encrypt(remoteUserId, messageText);
+  } catch (err) {
+    await this.store.removeSession(remoteUserId);
+    throw new Error("Ratchet desync detected. Please try sending again.");
+  }
+
+  // 4. Transmission: Properly convert Buffers to Base64 strings
+  // This prevents [object Object] or binary data corruption in JSON
+  const payload = {
+    ciphertext: bufferToBase64(encrypted.body),
+    iv: encrypted.iv ? bufferToBase64(encrypted.iv) : '',
+    ephemeralKey: encrypted.ephemeralKey ? bufferToBase64(encrypted.ephemeralKey) : '',
+    counter: encrypted.counter ?? 0,
+    previousCounter: encrypted.previousCounter ?? 0,
+    type: encrypted.type === 3 ? 'prekey' : 'message'
+  };
+
   const response = await secureFetch('/api/messages/send', {
     method: 'POST',
     body: JSON.stringify({
-      conversationId, // Required by Message schema
+      conversationId,
       receiverId: remoteUserId,
       receiverModel,
       isEncrypted: true,
-      payload: {
-        ciphertext: encrypted.body,
-        iv: encrypted.iv || '',
-        ephemeralKey: encrypted.ephemeralKey || '',
-        counter: encrypted.counter ?? 0,
-        previousCounter: encrypted.previousCounter ?? 0, // Required by Message schema
-        type: encrypted.type === 3 ? 'prekey' : 'message'
-      }
+      payload // Now correctly formatted as Base64 strings
     })
   });
 

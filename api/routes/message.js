@@ -115,13 +115,21 @@ router.post('/send', authenticateToken, async (req, res, next) => {
     const targetModelName = receiverModel || (req.user.role === 'agent' ? 'User' : 'Agent');
     const senderModelName = req.user.role === 'agent' ? 'Agent' : 'User';
 
-    // 2. Validate encryption payload against Schema requirements
     let payloadData = null;
-   if (isEncrypted) {
+if (isEncrypted) {
   if (!payload || !payload.ciphertext || !payload.iv || !payload.ephemeralKey || 
-      payload.counter === undefined || payload.previousCounter === undefined) { // ADDED previousCounter
+      payload.counter === undefined || payload.previousCounter === undefined) {
     return res.status(400).json({ success: false, message: "Security violation: Incomplete encrypted payload." });
   }
+
+  payloadData = {
+    ciphertext: payload.ciphertext,
+    iv: payload.iv,
+    ephemeralKey: payload.ephemeralKey,
+    counter: payload.counter,
+    previousCounter: payload.previousCounter,
+    type: payload.type || 'message'
+  };
 }
 
     // 3. Create message using the nested payload
