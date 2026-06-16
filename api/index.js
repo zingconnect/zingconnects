@@ -634,18 +634,40 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid cryptographic bundle." });
     }
 
-    // Atomic Update: Set verified status and overwrite devices array with the new single entry
-    const updatedAgent = await AgentModel.findOneAndUpdate(
-      { email: agent.email },
-      { 
-        $set: { 
-          isVerified: true, status: 'active', failedOtpAttempts: 0,
-          devices: [{ deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() }] 
+    // 1. First, check if this specific deviceId already exists for this agent
+    const existingDevice = await AgentModel.findOne({
+      _id: agent._id,
+      "devices.deviceId": deviceId
+    });
+
+    let updatedAgent;
+    const newDeviceEntry = { deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() };
+
+    if (existingDevice) {
+      // 2. If it exists, update the existing entry (the "Upsert" logic)
+      updatedAgent = await AgentModel.findOneAndUpdate(
+        { _id: agent._id, "devices.deviceId": deviceId },
+        { 
+          $set: { 
+            "devices.$": newDeviceEntry,
+            isVerified: true, status: 'active', failedOtpAttempts: 0 
+          },
+          $unset: { otp: "", otpExpires: "" }
         },
-        $unset: { otp: "", otpExpires: "" }
-      },
-      { new: true }
-    );
+        { new: true }
+      );
+    } else {
+      // 3. If it doesn't exist, push a new device entry to the array
+      updatedAgent = await AgentModel.findOneAndUpdate(
+        { _id: agent._id },
+        { 
+          $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
+          $push: { devices: newDeviceEntry },
+          $unset: { otp: "", otpExpires: "" }
+        },
+        { new: true }
+      );
+    }
 
     if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent not found." });
 
@@ -657,6 +679,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     next(err); 
   }
 });
+
 // POST: Register or Add a new Device
 app.post('/api/crypto/add-device', authenticateToken, async (req, res, next) => {
   try {

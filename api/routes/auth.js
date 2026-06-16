@@ -275,27 +275,49 @@ router.post('/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Cryptographic keys invalid." });
     }
 
-    // 3. Atomic Update: Overwrite the devices array with the new, single, valid entry
-    const updatedAgent = await AgentModel.findOneAndUpdate(
-      { email: lowerEmail },
-      { 
-        $set: {
-          isVerified: true,
-          status: 'active',
-          failedOtpAttempts: 0,
-          devices: [{ // Overwrite the entire array to prevent conflicts
-            deviceId,
-            registrationId,
-            identityKey,
-            signedPreKey,
-            preKeys,
-            createdAt: new Date()
-          }]
+    const newDeviceEntry = {
+      deviceId,
+      registrationId,
+      identityKey,
+      signedPreKey,
+      preKeys,
+      createdAt: new Date(),
+      lastActive: new Date()
+    };
+
+    // 3. Multi-Device Upsert Strategy
+    // Check if this specific device already exists for this agent
+    const existingDevice = await AgentModel.findOne({
+      email: lowerEmail,
+      "devices.deviceId": deviceId
+    });
+
+    let updatedAgent;
+    if (existingDevice) {
+      // Update existing device entry using positional operator
+      updatedAgent = await AgentModel.findOneAndUpdate(
+        { email: lowerEmail, "devices.deviceId": deviceId },
+        { 
+          $set: { 
+            "devices.$": newDeviceEntry,
+            isVerified: true, status: 'active', failedOtpAttempts: 0 
+          },
+          $unset: { otp: "", otpExpires: "" }
         },
-        $unset: { otp: "", otpExpires: "" }
-      },
-      { new: true, runValidators: true }
-    );
+        { new: true, runValidators: true }
+      );
+    } else {
+      // Add new device entry to the array
+      updatedAgent = await AgentModel.findOneAndUpdate(
+        { email: lowerEmail },
+        { 
+          $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
+          $push: { devices: newDeviceEntry },
+          $unset: { otp: "", otpExpires: "" }
+        },
+        { new: true, runValidators: true }
+      );
+    }
 
     if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent profile not found." });
 

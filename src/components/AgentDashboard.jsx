@@ -1467,10 +1467,13 @@ useEffect(() => {
       if (profileData.agent) {
         const agent = profileData.agent;
         
-        // Log status instead of attempting to repair
-        const hasValidKeys = agent.publicKeyJwk?.preKeys && agent.publicKeyJwk.preKeys.length > 0;
+        // 2. MODIFIED: Correctly validate against the new 'devices' array
+        const currentDeviceId = await SignalEngine.store.getOrGenerateDeviceId();
+        const hasValidKeys = agent.devices && agent.devices.some(d => String(d.deviceId) === String(currentDeviceId));
+        
         if (!hasValidKeys) {
           console.error("Crypto keys missing or invalid for this device. Please re-authenticate.");
+          // Optionally trigger a state to show a "Device Not Authorized" UI
         }
 
         setAgentData(agent);
@@ -1497,6 +1500,7 @@ useEffect(() => {
   fetchInitialData();
   return () => { isMounted = false; };
 }, [navigate, slug, isForcedRefresh]);
+
 
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
