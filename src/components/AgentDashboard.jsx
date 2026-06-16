@@ -696,32 +696,45 @@ handleEndCall();
 
 
 useEffect(() => {
-  if (isLoading || !token || !agentData?._id) return;
+  // 1. Guard clauses
+  if (isLoading || !token || !agentData?._id || isEngineReady) return;
 
   const runSecurityPipeline = async () => {
     try {
       const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
+      
       const authRes = await secureFetch('/api/agents/check-device', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId })
       });
+
+      if (!authRes.ok) throw new Error("Security check failed");
+      
       const { authorized } = await authRes.json();
 
       if (!authorized) {
+        console.warn("Device unauthorized. Triggering re-auth flow.");
         setDeviceStatus('UNAUTHORIZED');
-        return; // Block everything
+        // Force logout or redirect to a re-verification page instead of reloading
+        handleDisconnect(new Event('click')); 
+        return;
       }
       const success = await initializeUserE2EEKeys(String(agentData._id), token);
+      
       if (success) {
         await SignalEngine.initialize(String(agentData._id));
         setIsEngineReady(true);
+      } else {
+        console.error("E2EE Key initialization failed. Check local storage.");
       }
     } catch (err) {
       console.error("Security Pipeline Failure:", err);
     }
   };
+
   runSecurityPipeline();
-}, [token, isLoading, agentData?._id]);
+}, [token, isLoading, agentData?._id, isEngineReady]);
 
   useEffect(() => {
     if (!room) return;
@@ -1453,25 +1466,11 @@ useEffect(() => {
       
       if (profileData.agent) {
         const agent = profileData.agent;
-        const hasValidKeys = agent.publicKeyJwk?.preKeys && agent.publicKeyJwk.preKeys.length > 0;
         
-        // MODIFIED: Use the Ref circuit breaker instead of recursion
-        if (!hasValidKeys && !repairAttemptedRef.current) {
-          repairAttemptedRef.current = true; 
-          console.warn("Crypto keys missing/corrupted. Repairing...");
-          try {
-            const newBundle = await SignalEngine.generateBundle(); 
-            await secureFetch('/api/crypto/add-device', { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newBundle) 
-            });
-            // Force a reload to ensure clean state initialization
-            window.location.reload();
-            return; 
-          } catch (cryptoErr) {
-            console.error("Auto-repair of keys failed:", cryptoErr);
-          }
+        // Log status instead of attempting to repair
+        const hasValidKeys = agent.publicKeyJwk?.preKeys && agent.publicKeyJwk.preKeys.length > 0;
+        if (!hasValidKeys) {
+          console.error("Crypto keys missing or invalid for this device. Please re-authenticate.");
         }
 
         setAgentData(agent);
