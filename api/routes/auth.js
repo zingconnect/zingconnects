@@ -256,7 +256,6 @@ router.post('/verify-otp', async (req, res, next) => {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     
-    // Deconstruct the new fields sent from the frontend
     const { 
       email, otp, deviceId, registrationId, 
       identityKey, signedPreKey, preKeys 
@@ -286,7 +285,14 @@ router.post('/verify-otp', async (req, res, next) => {
       });
     }
 
-    // 3. Atomic Update: Push new device to the 'devices' array
+    // 3. IDEMPOTENT UPDATE: Remove any existing entry for this deviceId first
+    // This prevents duplicates and ensures we don't end up with partial/null key objects.
+    await AgentModel.updateOne(
+      { email: lowerEmail },
+      { $pull: { devices: { deviceId: deviceId } } }
+    );
+
+    // 4. Atomic Update: Set verified status and push the clean device bundle
     const updatedAgent = await AgentModel.findOneAndUpdate(
       { email: lowerEmail },
       { 
@@ -313,7 +319,7 @@ router.post('/verify-otp', async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Agent profile not found." });
     }
 
-    // 4. Create Session Token
+    // 5. Create Session Token
     const token = jwt.sign(
       { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
       process.env.JWT_SECRET,

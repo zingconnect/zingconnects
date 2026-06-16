@@ -612,7 +612,6 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    // Expecting the new device structure from req.body
     const { email, otp, deviceId, registrationId, identityKey, signedPreKey, preKeys } = req.body;
 
     if (!email || !otp) {
@@ -636,7 +635,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle for the NEW device
+    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
     if (!deviceId || !identityKey || !preKeys || !Array.isArray(preKeys) || preKeys.length === 0 || !signedPreKey) {
       return res.status(400).json({ 
         success: false, 
@@ -644,7 +643,14 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       });
     }
 
-    // 4. Atomic Update: Add the device to the devices array
+    // 4. Atomic Upsert Logic: Prevent duplicates or corrupted partial entries
+    // Remove existing device if it exists to replace it with fresh data (prevents duplicates)
+    await AgentModel.updateOne(
+      { email: lowerEmail },
+      { $pull: { devices: { deviceId: deviceId } } }
+    );
+
+    // Now safely push the fresh, valid device record
     const updatedAgent = await AgentModel.findOneAndUpdate(
       { email: lowerEmail },
       { 
@@ -653,7 +659,6 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
           status: 'active',
           failedOtpAttempts: 0
         },
-        // Push the new device object into the array
         $push: { 
           devices: {
             deviceId,
@@ -664,19 +669,15 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
             createdAt: new Date()
           } 
         },
-        $unset: { 
-          otp: "", 
-          otpExpires: "" 
-        }
+        $unset: { otp: "", otpExpires: "" }
       },
-      { new: true } 
+      { new: true }
     );
 
     if (!updatedAgent) {
       return res.status(404).json({ success: false, message: "Agent profile not found." });
     }
 
-    // 5. Create Session Token
     const token = jwt.sign(
       { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
       process.env.JWT_SECRET,

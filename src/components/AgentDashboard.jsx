@@ -147,7 +147,7 @@ export const AgentDashboard = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [callTime, setCallTime] = useState(0);
-
+  const [repairAttempted, setRepairAttempted] = useState(false);
   const [timeTicker, setTimeTicker] = useState(Date.now());
 
   // Subscription States
@@ -392,16 +392,10 @@ const fetchMessages = async (userId, limit = 30) => {
     const data = await res.json();
 
     if (data.success && data.messages) {
-      // The Engine now handles the state, so we don't need refs for keys.
-      // We map the messages through the SignalEngine.
       return await Promise.all(data.messages.map(async (msg) => {
-        
-        // 1. If it's a message we sent, it's already plain text (or handled by DB)
-        if (String(msg.senderId) === String(agentData?._id)) {
+                if (String(msg.senderId) === String(agentData?._id)) {
           return { ...msg, decryptedText: msg.text || msg.content, isEncrypted: false };
         }
-
-        // 2. If it's encrypted, let the Engine handle the Double-Ratchet decryption
         if (msg.isEncrypted && msg.payload) {
           try {
             const clearText = await SignalEngine.decrypt(msg.senderId, msg.payload);
@@ -1436,15 +1430,11 @@ useEffect(() => {
       if (isForcedRefresh) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-
       const [profileResponse, usersResponse] = await Promise.allSettled([
         secureFetch(`/api/agents/profile/me?fresh=true&t=${Date.now()}`, { method: 'GET' }),
         secureFetch(`/api/agents/my-users?t=${Date.now()}`, { method: 'GET' })
       ]);
-
       if (!isMounted) return;
-
-      // Handle Profile Request
       if (profileResponse.status === 'rejected' || !profileResponse.value.ok) {
         const res = profileResponse.value;
         if (res?.status === 401 || res?.status === 403) {
@@ -1454,32 +1444,39 @@ useEffect(() => {
         }
         throw new Error("Profile data retrieval failed");
       }
-      
       const profileData = await profileResponse.value.json();
-      
       if (profileData.agent) {
         const agent = profileData.agent;
+       
+       const hasValidKeys = agent.devices && agent.devices.length > 0;
 
-        // 🛡️ CRITICAL: CRYPTO INTEGRITY CHECK
-        // If keys were purged, the array will be empty/missing. Repair immediately.
-        const hasValidKeys = agent.publicKeyJwk?.preKeys && agent.publicKeyJwk.preKeys.length > 0;
-        
-        if (!hasValidKeys) {
-          console.warn("Crypto keys missing/corrupted. Repairing...");
-          try {
-            // Re-generate your bundle via SignalEngine
-            const newBundle = await SignalEngine.generateBundle(); 
-            await secureFetch('/api/crypto/add-device', { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newBundle) 
-            });
-            // Recursively re-fetch to get the newly populated profile
-            return fetchInitialData(); 
-          } catch (cryptoErr) {
-            console.error("Auto-repair of keys failed:", cryptoErr);
-          }
-        }
+if (!hasValidKeys && !repairAttempted) {
+  setRepairAttempted(true); // Prevent re-entry
+  console.warn("Crypto keys missing/corrupted. Repairing...");
+  try {
+    const deviceId = await SignalEngine.getOrGenerateDeviceId();
+    const bundle = await SignalEngine.setupIdentity(deviceId); // Ensure this matches your Engine method
+    
+    const response = await secureFetch('/api/crypto/add-device', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId,
+        registrationId: bundle.preKeyBundle.registrationId,
+        identityKey: bundle.preKeyBundle.identityKey,
+        signedPreKey: bundle.preKeyBundle.signedPreKey,
+        preKeys: bundle.preKeyBundle.preKeys
+      }) 
+    });
+
+    if (!response.ok) throw new Error("Repair registration failed");
+
+   return fetchInitialData();
+  } catch (cryptoErr) {
+    setRepairAttempted(false); // Allow retry on next trigger if needed
+    setDeviceStatus('REPAIR_FAILED');
+  }
+}
 
         // 2. Set State
         setAgentData(agent);

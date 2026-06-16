@@ -158,24 +158,23 @@ agentSchema.virtual('isCryptoReady').get(function() {
   // Now checks if the devices array is populated
   return Array.isArray(this.devices) && this.devices.length > 0;
 });
+agentSchema.index({ _id: 1, "devices.deviceId": 1 }, { unique: true });
 
 export async function rotatePreKeys(agentId, deviceId, newPreKeys) {
   return await Agent.updateOne(
-    { 
-      _id: agentId, 
-      "devices.deviceId": deviceId // Target the specific device
-    },
+    { _id: agentId, "devices.deviceId": deviceId },
     { 
       $push: { 
         "devices.$.preKeys": { 
           $each: newPreKeys,
-          $slice: -100 // Keeps only the most recent 100 keys for THIS device
+          $sort: { keyId: -1 }, // Sorts by keyId descending
+          $slice: 100           // Keeps the 100 newest keys
         } 
       }
     }
   );
 }
-// ✨ FIXED: Added early validation guard clauses to prevent registration loop crashes
+
 agentSchema.pre('validate', async function() {
   if (!this.firstName || !this.lastName) return; // Prevent loop execution if base names aren't present yet
 
