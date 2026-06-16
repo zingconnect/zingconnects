@@ -47,32 +47,36 @@ const handleVerify = async (e) => {
   setIsVerifying(true);
 
   try {
-    // 1. Get/Generate unique device ID first
     const deviceId = await SignalEngine.getOrGenerateDeviceId();
-    
-    // 2. Generate identity bound to this specific device
     const result = await SignalEngine.setupIdentity(deviceId);
     
-    // 3. Robust guard to ensure bundle generation succeeded
+    // 1. Validate bundle
     if (!result?.preKeyBundle?.preKeys || result.preKeyBundle.preKeys.length === 0) {
-      console.error("DEBUG: setupIdentity returned invalid bundle:", result);
       throw new Error("Security initialization failed: Cryptographic keys missing.");
     }
 
     const { preKeyBundle } = result;
 
-    // 4. Map the payload to exactly match your backend's expected structure
+    // 2. Clean the keys to ensure no nulls reach the server
+    const cleanedPreKeys = preKeyBundle.preKeys.filter(
+      pk => pk !== null && typeof pk === 'object' && pk.keyId && pk.publicKey
+    );
+
+    if (cleanedPreKeys.length === 0) {
+      throw new Error("Security initialization failed: No valid keys found.");
+    }
+
+    // 3. Construct payload using cleanedPreKeys
     const payload = {
       email,
       otp,
       deviceId,
       identityKey: preKeyBundle.identityKey,
       signedPreKey: preKeyBundle.signedPreKey,
-      preKeys: preKeyBundle.preKeys,
+      preKeys: cleanedPreKeys, // Correctly using the cleaned array
       registrationId: preKeyBundle.registrationId
     };
 
-    // 5. Send registration request
     const response = await secureFetch('/api/agents/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -82,7 +86,6 @@ const handleVerify = async (e) => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "Registration Failure");
 
-    // 6. Success: Save the device context
     console.log("✅ Agent Verified. Identity linked to device:", deviceId);
     setServerSlug(data.slug);
     setIsSuccess(true);

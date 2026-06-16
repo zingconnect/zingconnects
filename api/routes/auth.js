@@ -255,11 +255,7 @@ router.post('/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    
-    const { 
-      email, otp, deviceId, registrationId, 
-      identityKey, signedPreKey, preKeys 
-    } = req.body;
+    const { email, otp, deviceId, registrationId, identityKey, signedPreKey, preKeys } = req.body;
 
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: "Email and OTP are required." });
@@ -270,58 +266,40 @@ router.post('/verify-otp', async (req, res, next) => {
 
     // 1. Validate OTP and Expiry
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid or expired verification code." 
-      });
+      return res.status(400).json({ success: false, message: "Invalid or expired verification code." });
     }
 
     // 2. 🛡️ CRITICAL SECURITY GATE: Validate Device Bundle
-    if (!deviceId || !identityKey || !preKeys || !Array.isArray(preKeys) || preKeys.length === 0 || !signedPreKey) {
-      console.error(`❌ Crypto validation failed: Missing device fields for: ${lowerEmail}`);
-      return res.status(400).json({ 
-        success: false, 
-        message: "Cryptographic keys invalid. Ensure your browser is generating keys correctly." 
-      });
+    if (!deviceId || !identityKey || !preKeys?.length || !signedPreKey) {
+      console.error(`❌ Crypto validation failed for: ${lowerEmail}`);
+      return res.status(400).json({ success: false, message: "Cryptographic keys invalid." });
     }
 
-  // 1. Remove existing device (Cleanup)
-await AgentModel.updateOne(
-  { email: lowerEmail },
-  { 
-    $pull: { devices: { deviceId: deviceId } } 
-  }
-);
+    // 3. Atomic Update: Overwrite the devices array with the new, single, valid entry
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { email: lowerEmail },
+      { 
+        $set: {
+          isVerified: true,
+          status: 'active',
+          failedOtpAttempts: 0,
+          devices: [{ // Overwrite the entire array to prevent conflicts
+            deviceId,
+            registrationId,
+            identityKey,
+            signedPreKey,
+            preKeys,
+            createdAt: new Date()
+          }]
+        },
+        $unset: { otp: "", otpExpires: "" }
+      },
+      { new: true, runValidators: true }
+    );
 
-// 2. Perform the main update (Atomic push + settings)
-const updatedAgent = await AgentModel.findOneAndUpdate(
-  { email: lowerEmail },
-  { 
-    $set: {
-      isVerified: true,
-      status: 'active',
-      failedOtpAttempts: 0
-    },
-    $push: { 
-      devices: {
-        deviceId,
-        registrationId,
-        identityKey,
-        signedPreKey,
-        preKeys,
-        createdAt: new Date()
-      } 
-    },
-    $unset: { otp: "", otpExpires: "" }
-  },
-  { new: true, runValidators: true }
-);
+    if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent profile not found." });
 
-    if (!updatedAgent) {
-      return res.status(404).json({ success: false, message: "Agent profile not found." });
-    }
-
-    // 5. Create Session Token
+    // 4. Create Session Token
     const token = jwt.sign(
       { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
       process.env.JWT_SECRET,
@@ -329,12 +307,8 @@ const updatedAgent = await AgentModel.findOneAndUpdate(
     );
 
     res.cookie('token', token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Lax',
-      path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      signed: true
+      httpOnly: true, secure: true, sameSite: 'Lax', path: '/', 
+      maxAge: 7 * 24 * 60 * 60 * 1000, signed: true
     });
 
     return res.status(200).json({
@@ -344,7 +318,7 @@ const updatedAgent = await AgentModel.findOneAndUpdate(
     });
 
   } catch (err) {
-    console.error("Verification Error:", err);
+    console.error("❌ Verification Error:", err);
     next(err); 
   }
 });

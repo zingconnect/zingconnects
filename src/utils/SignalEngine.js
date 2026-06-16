@@ -49,7 +49,7 @@ async setupIdentity(deviceId = 1) {
   };
 
   const preKeys = await Promise.all(
-    Array.from({ length: 100 }, async (_, i) => {
+    Array.from({ length: 20 }, async (_, i) => {
       const pk = await KeyHelper.generatePreKey(i + 1);
       const pubKey = pk.keyPair ? pk.keyPair.pubKey : pk.pubKey;
       
@@ -63,12 +63,14 @@ await store.saveIdentityKeyPair(identityKeyPair, deviceId);
   await store.saveRegistrationId(registrationId, deviceId);
   await store.saveSignedPreKey(signedPreKey.keyId, signedPreKey, deviceId);
   
-  for (const pk of preKeys) {
+ for (const pk of preKeys) {
+  if (pk && pk.keyId && pk.extractedPubKey) {
     await store.savePreKey(pk.keyId, pk, deviceId);
+  } else {
+    console.warn("Skipping malformed PreKey:", pk);
   }
-  
-  // 3. Return a bundle structured for your new 'devices' schema
-  return {
+}
+    return {
     deviceId, // <--- Return the device ID used
     identityKeyPair,
     preKeyBundle: {

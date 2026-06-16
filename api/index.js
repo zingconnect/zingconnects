@@ -614,19 +614,13 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const AgentModel = getAgentModel();
     const { email, otp, deviceId, registrationId, identityKey, signedPreKey, preKeys } = req.body;
 
-    if (!email || !otp) {
-      return res.status(400).json({ success: false, message: "Email and OTP are required." });
-    }
+    if (!email || !otp) return res.status(400).json({ success: false, message: "Required fields missing." });
 
-    const lowerEmail = email.toLowerCase().trim();
-    const agent = await AgentModel.findOne({ email: lowerEmail });
+    const agent = await AgentModel.findOne({ email: email.toLowerCase().trim() });
 
-    // 1. Security: Check for account lockout
-    if (agent?.failedOtpAttempts >= 5) {
-      return res.status(429).json({ success: false, message: "Account locked." });
-    }
+    if (agent?.failedOtpAttempts >= 5) return res.status(429).json({ success: false, message: "Account locked." });
 
-    // 2. Validate OTP and Expiry
+    // Validate OTP
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
       if (agent) {
         agent.failedOtpAttempts = (agent.failedOtpAttempts || 0) + 1;
@@ -635,74 +629,34 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // 3. 🛡️ CRITICAL SECURITY GATE: Validate Cryptographic Bundle
-    if (!deviceId || !identityKey || !preKeys || !Array.isArray(preKeys) || preKeys.length === 0 || !signedPreKey) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Cryptographic keys invalid. Ensure your browser is generating keys correctly." 
-      });
-    }
-await AgentModel.updateOne(
-  { email: lowerEmail },
-  { 
-    $pull: { devices: { deviceId: deviceId } } 
-  }
-);
-
-const updatedAgent = await AgentModel.findOneAndUpdate(
-  { email: lowerEmail },
-  { 
-    $set: {
-      isVerified: true,
-      status: 'active',
-      failedOtpAttempts: 0
-    },
-    $push: { 
-      devices: {
-        deviceId,
-        registrationId,
-        identityKey,
-        signedPreKey,
-        preKeys,
-        createdAt: new Date()
-      } 
-    },
-    $unset: { otp: "", otpExpires: "" }
-  },
-  { new: true, runValidators: true }
-);
-
-    if (!updatedAgent) {
-      return res.status(404).json({ success: false, message: "Agent profile not found." });
+    // Cryptographic Guard
+    if (!deviceId || !identityKey || !preKeys?.length || !signedPreKey) {
+      return res.status(400).json({ success: false, message: "Invalid cryptographic bundle." });
     }
 
-    const token = jwt.sign(
-      { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+    // Atomic Update: Set verified status and overwrite devices array with the new single entry
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { email: agent.email },
+      { 
+        $set: { 
+          isVerified: true, status: 'active', failedOtpAttempts: 0,
+          devices: [{ deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() }] 
+        },
+        $unset: { otp: "", otpExpires: "" }
+      },
+      { new: true }
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Lax',
-      path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      signed: true
-    });
+    if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent not found." });
 
-    return res.status(200).json({
-      success: true,
-      slug: updatedAgent.slug,
-      message: "Device registered and profile live!"
-    });
+    const token = jwt.sign({ id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: 604800000, signed: true });
 
+    return res.status(200).json({ success: true, slug: updatedAgent.slug, message: "Device registered!" });
   } catch (err) {
-    console.error("❌ Verification Error:", err);
     next(err); 
   }
 });
-
 // POST: Register or Add a new Device
 app.post('/api/crypto/add-device', authenticateToken, async (req, res, next) => {
   try {

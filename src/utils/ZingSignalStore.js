@@ -134,6 +134,12 @@ export class ZingSignalStore {
     const db = await dbPromise;
     await db.delete('prekeys', this._getKey(keyId, deviceId));
   }
+
+  async savePreKey(keyId, keyPair, deviceId) {
+  if (!deviceId) throw new Error("CRITICAL: DeviceID missing in savePreKey");
+  const db = await dbPromise;
+  await db.put('prekeys', keyPair, this._getKey(keyId, deviceId));
+}
   
 async getOrGenerateDeviceId() {
   const db = await dbPromise;
