@@ -59,15 +59,12 @@ async setupIdentity(deviceId = 1) {
       return { ...pk, extractedPubKey: pubKey };
     })
   );
-
-  // 2. Local Persistence (Key: include deviceId in the store to separate sessions)
-  // We suffix the storage keys with deviceId to allow 1000s of devices on one browser
-  await store.saveIdentityKeyPair(identityKeyPair); // Note: You might need to update store to save by deviceId if needed
-  await store.saveRegistrationId(registrationId);
-  await store.saveSignedPreKey(signedPreKey.keyId, signedPreKey);
+await store.saveIdentityKeyPair(identityKeyPair, deviceId); 
+  await store.saveRegistrationId(registrationId, deviceId);
+  await store.saveSignedPreKey(signedPreKey.keyId, signedPreKey, deviceId);
   
   for (const pk of preKeys) {
-    await store.savePreKey(pk.keyId, pk);
+    await store.savePreKey(pk.keyId, pk, deviceId);
   }
   
   // 3. Return a bundle structured for your new 'devices' schema

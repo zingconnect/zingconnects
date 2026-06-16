@@ -42,53 +42,58 @@ const handleResend = async () => {
     }
   };
 
-  const handleVerify = async (e) => {
-    e.preventDefault();
-    setIsVerifying(true);
+const handleVerify = async (e) => {
+  e.preventDefault();
+  setIsVerifying(true);
 
-    try {
-      // 1. Generate identity
-      const result = await SignalEngine.setupIdentity();
-      if (!result?.preKeyBundle || !result?.identityKeyPair) {
-        throw new Error("Security initialization failed.");
-      }
-const deviceId = await SignalEngine.getOrGenerateDeviceId();      
-      const { preKeyBundle } = result;
-     const payload = {
-  email,
-  otp,
-  deviceId,
-  identityKey: preKeyBundle.identityKey,
-  signedPreKey: preKeyBundle.signedPreKey,
-  preKeys: preKeyBundle.preKeys,
-  registrationId: preKeyBundle.registrationId
-};
-
-      if (!payload.publicKeyJwk.preKeys || payload.publicKeyJwk.preKeys.length === 0) {
-        throw new Error("Key bundle generation failed.");
-      }
-
-      const response = await secureFetch('/api/agents/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Registration Failure");
-
-      // 4. Success: Save the device context
-      console.log("✅ Agent Verified. Identity linked to device:", deviceId);
-      setServerSlug(data.slug);
-      setIsSuccess(true);
-
-    } catch (err) {
-      console.error("Verification Error:", err);
-      alert(err.message || "Connection error. Try again.");
-    } finally {
-      setIsVerifying(false);
+  try {
+    // 1. Get/Generate unique device ID first
+    const deviceId = await SignalEngine.getOrGenerateDeviceId();
+    
+    // 2. Generate identity bound to this specific device
+    const result = await SignalEngine.setupIdentity(deviceId);
+    
+    // 3. Robust guard to ensure bundle generation succeeded
+    if (!result?.preKeyBundle?.preKeys || result.preKeyBundle.preKeys.length === 0) {
+      console.error("DEBUG: setupIdentity returned invalid bundle:", result);
+      throw new Error("Security initialization failed: Cryptographic keys missing.");
     }
-  };
+
+    const { preKeyBundle } = result;
+
+    // 4. Map the payload to exactly match your backend's expected structure
+    const payload = {
+      email,
+      otp,
+      deviceId,
+      identityKey: preKeyBundle.identityKey,
+      signedPreKey: preKeyBundle.signedPreKey,
+      preKeys: preKeyBundle.preKeys,
+      registrationId: preKeyBundle.registrationId
+    };
+
+    // 5. Send registration request
+    const response = await secureFetch('/api/agents/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Registration Failure");
+
+    // 6. Success: Save the device context
+    console.log("✅ Agent Verified. Identity linked to device:", deviceId);
+    setServerSlug(data.slug);
+    setIsSuccess(true);
+
+  } catch (err) {
+    console.error("Verification Error:", err);
+    alert(err.message || "Connection error. Please try again.");
+  } finally {
+    setIsVerifying(false);
+  }
+};
 
   const fullLink = `${window.location.origin}/${serverSlug}`;
 
