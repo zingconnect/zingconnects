@@ -208,6 +208,16 @@ agentSchema.pre('validate', async function() {
   }
 });
 
+agentSchema.pre('save', function(next) {
+  if (this.devices) {
+    this.devices.forEach(device => {
+      if (device.preKeys) {
+        device.preKeys = device.preKeys.filter(pk => pk !== null && pk.keyId);
+      }
+    });
+  }
+  next();
+});
 
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 

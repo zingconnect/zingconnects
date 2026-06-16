@@ -642,12 +642,14 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
         message: "Cryptographic keys invalid. Ensure your browser is generating keys correctly." 
       });
     }
-    await AgentModel.updateOne(
-      { email: lowerEmail },
-      { $pull: { devices: { deviceId: deviceId } } }
-    );
+await AgentModel.updateOne(
+  { email: lowerEmail },
+  { 
+    $pull: { devices: { deviceId: deviceId } } 
+  }
+);
 
-    const updatedAgent = await AgentModel.findOneAndUpdate(
+const updatedAgent = await AgentModel.findOneAndUpdate(
   { email: lowerEmail },
   { 
     $set: {
@@ -655,9 +657,6 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       status: 'active',
       failedOtpAttempts: 0
     },
-    // 1. Remove the old device entry IF it exists for this ID
-    $pull: { devices: { deviceId: deviceId } },
-    // 2. Add the fresh entry
     $push: { 
       devices: {
         deviceId,
@@ -670,7 +669,7 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     },
     $unset: { otp: "", otpExpires: "" }
   },
-  { new: true, runValidators: true } // 'runValidators' ensures the schema is enforced
+  { new: true, runValidators: true }
 );
 
     if (!updatedAgent) {

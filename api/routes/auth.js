@@ -285,12 +285,15 @@ router.post('/verify-otp', async (req, res, next) => {
       });
     }
 
-    // 3. IDEMPOTENT UPDATE: Remove any existing entry for this deviceId first
-    // This prevents duplicates and ensures we don't end up with partial/null key objects.
-    await AgentModel.updateOne(
-      { email: lowerEmail },
-      { $pull: { devices: { deviceId: deviceId } } }
-    );
+  // 1. Remove existing device (Cleanup)
+await AgentModel.updateOne(
+  { email: lowerEmail },
+  { 
+    $pull: { devices: { deviceId: deviceId } } 
+  }
+);
+
+// 2. Perform the main update (Atomic push + settings)
 const updatedAgent = await AgentModel.findOneAndUpdate(
   { email: lowerEmail },
   { 
@@ -299,9 +302,6 @@ const updatedAgent = await AgentModel.findOneAndUpdate(
       status: 'active',
       failedOtpAttempts: 0
     },
-    // 1. Remove the old device entry IF it exists for this ID
-    $pull: { devices: { deviceId: deviceId } },
-    // 2. Add the fresh entry
     $push: { 
       devices: {
         deviceId,
@@ -314,7 +314,7 @@ const updatedAgent = await AgentModel.findOneAndUpdate(
     },
     $unset: { otp: "", otpExpires: "" }
   },
-  { new: true, runValidators: true } // 'runValidators' ensures the schema is enforced
+  { new: true, runValidators: true }
 );
 
     if (!updatedAgent) {
