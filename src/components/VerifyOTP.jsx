@@ -52,19 +52,17 @@ const handleResend = async () => {
       if (!result?.preKeyBundle || !result?.identityKeyPair) {
         throw new Error("Security initialization failed.");
       }
-
-      // 2. Generate or retrieve the unique deviceId for this browser session
-      const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
-      
+const deviceId = await SignalEngine.getOrGenerateDeviceId();      
       const { preKeyBundle } = result;
-
-      // 3. Prepare payload with deviceId
-      const payload = {
-        email,
-        otp,
-        publicKeyJwk: preKeyBundle,
-        deviceId // Now including device identification
-      };
+     const payload = {
+  email,
+  otp,
+  deviceId,
+  identityKey: preKeyBundle.identityKey,
+  signedPreKey: preKeyBundle.signedPreKey,
+  preKeys: preKeyBundle.preKeys,
+  registrationId: preKeyBundle.registrationId
+};
 
       if (!payload.publicKeyJwk.preKeys || payload.publicKeyJwk.preKeys.length === 0) {
         throw new Error("Key bundle generation failed.");

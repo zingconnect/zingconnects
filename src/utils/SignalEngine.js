@@ -27,6 +27,10 @@ get store() { return getStore(); },
 
 isReady: () => isEngineReady,
 
+async getOrGenerateDeviceId() {
+    return await getStore().getOrGenerateDeviceId();
+  },
+
 /**
  * @param {number} deviceId - Unique ID for this specific browser/client instance
  */

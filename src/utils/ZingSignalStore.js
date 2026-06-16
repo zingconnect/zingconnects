@@ -135,8 +135,16 @@ export class ZingSignalStore {
     await db.delete('prekeys', this._getKey(keyId, deviceId));
   }
   
-
-
+async getOrGenerateDeviceId() {
+  const db = await dbPromise;
+  let deviceId = await db.get('misc', 'current_device_id');
+  
+  if (!deviceId) {
+    deviceId = Math.floor(Math.random() * 1000000).toString();
+    await db.put('misc', deviceId, 'current_device_id');
+  }
+  return deviceId;
+}
   async clearAll() {
     const db = await dbPromise;
     const tx = db.transaction(['identity', 'session', 'prekeys', 'misc'], 'readwrite');
