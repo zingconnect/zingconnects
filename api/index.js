@@ -642,37 +642,36 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
         message: "Cryptographic keys invalid. Ensure your browser is generating keys correctly." 
       });
     }
-
-    // 4. Atomic Upsert Logic: Prevent duplicates or corrupted partial entries
-    // Remove existing device if it exists to replace it with fresh data (prevents duplicates)
     await AgentModel.updateOne(
       { email: lowerEmail },
       { $pull: { devices: { deviceId: deviceId } } }
     );
 
-    // Now safely push the fresh, valid device record
     const updatedAgent = await AgentModel.findOneAndUpdate(
-      { email: lowerEmail },
-      { 
-        $set: {
-          isVerified: true,
-          status: 'active',
-          failedOtpAttempts: 0
-        },
-        $push: { 
-          devices: {
-            deviceId,
-            registrationId,
-            identityKey,
-            signedPreKey,
-            preKeys,
-            createdAt: new Date()
-          } 
-        },
-        $unset: { otp: "", otpExpires: "" }
-      },
-      { new: true }
-    );
+  { email: lowerEmail },
+  { 
+    $set: {
+      isVerified: true,
+      status: 'active',
+      failedOtpAttempts: 0
+    },
+    // 1. Remove the old device entry IF it exists for this ID
+    $pull: { devices: { deviceId: deviceId } },
+    // 2. Add the fresh entry
+    $push: { 
+      devices: {
+        deviceId,
+        registrationId,
+        identityKey,
+        signedPreKey,
+        preKeys,
+        createdAt: new Date()
+      } 
+    },
+    $unset: { otp: "", otpExpires: "" }
+  },
+  { new: true, runValidators: true } // 'runValidators' ensures the schema is enforced
+);
 
     if (!updatedAgent) {
       return res.status(404).json({ success: false, message: "Agent profile not found." });

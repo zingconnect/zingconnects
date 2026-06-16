@@ -291,29 +291,31 @@ router.post('/verify-otp', async (req, res, next) => {
       { email: lowerEmail },
       { $pull: { devices: { deviceId: deviceId } } }
     );
-
-    // 4. Atomic Update: Set verified status and push the clean device bundle
-    const updatedAgent = await AgentModel.findOneAndUpdate(
-      { email: lowerEmail },
-      { 
-        $set: { 
-          isVerified: true, 
-          status: 'active' 
-        },
-        $push: { 
-          devices: {
-            deviceId,
-            registrationId,
-            identityKey,
-            signedPreKey,
-            preKeys,
-            lastActive: new Date()
-          }
-        },
-        $unset: { otp: "", otpExpires: "" } 
-      },
-      { new: true }
-    );
+const updatedAgent = await AgentModel.findOneAndUpdate(
+  { email: lowerEmail },
+  { 
+    $set: {
+      isVerified: true,
+      status: 'active',
+      failedOtpAttempts: 0
+    },
+    // 1. Remove the old device entry IF it exists for this ID
+    $pull: { devices: { deviceId: deviceId } },
+    // 2. Add the fresh entry
+    $push: { 
+      devices: {
+        deviceId,
+        registrationId,
+        identityKey,
+        signedPreKey,
+        preKeys,
+        createdAt: new Date()
+      } 
+    },
+    $unset: { otp: "", otpExpires: "" }
+  },
+  { new: true, runValidators: true } // 'runValidators' ensures the schema is enforced
+);
 
     if (!updatedAgent) {
       return res.status(404).json({ success: false, message: "Agent profile not found." });
