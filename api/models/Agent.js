@@ -208,17 +208,16 @@ agentSchema.pre('validate', async function() {
   }
 });
 
-agentSchema.pre('save', function(next) {
-  if (this.devices) {
+agentSchema.pre('save', function() {
+  if (this.devices && Array.isArray(this.devices)) {
     this.devices.forEach(device => {
       if (device.preKeys) {
         device.preKeys = device.preKeys.filter(pk => pk !== null && pk.keyId);
       }
     });
   }
-  next();
+  // No next() required, Mongoose detects the completion of this function
 });
-
 const Agent = mongoose.models.Agent || mongoose.model('Agent', agentSchema);
 
 export default Agent;
