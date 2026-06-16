@@ -61,22 +61,45 @@ export class ZingSignalStore {
     return (pubKey && privKey) ? { pubKey, privKey } : null;
   }
 
-  async saveIdentity(identifier, identityKey, deviceId) {
-    const db = await dbPromise;
-    const rawKey = identityKey.pubKey || identityKey;
-    const base64Key = bufferToBase64(rawKey);
-    // Identifier here usually refers to the remote peer's ID, 
-    // so we don't necessarily need deviceId unless it's for local identity
-    await db.put('identity', base64Key, identifier);
-  }
+async saveIdentity(identifier, identityKey, deviceId) {
+  if (!deviceId) throw new Error("CRITICAL: DeviceID missing in saveIdentity");
+  
+  const db = await dbPromise;
+  const rawKey = identityKey.pubKey || identityKey;
+  const base64Key = bufferToBase64(rawKey);
+  
+  // Now we scope the identity to the device + the remote peer
+  await db.put('identity', base64Key, this._getKey(identifier, deviceId));
+}
 
-  async loadIdentity(identifier) {
-    await this.ensureReady();
-    const db = await dbPromise;
-    const base64Key = await db.get('identity', identifier);
-    return base64Key ? toBuffer(base64Key) : null;
-  }
+async loadIdentity(identifier, deviceId) {
+  if (!deviceId) throw new Error("CRITICAL: DeviceID missing in loadIdentity");
+  await this.ensureReady();
+  const db = await dbPromise;
+  const base64Key = await db.get('identity', this._getKey(identifier, deviceId));
+  return base64Key ? toBuffer(base64Key) : null;
+}
 
+async cleanupGhostDevices() {
+    const db = await dbPromise;
+    const stores = ['identity', 'session', 'prekeys'];
+    
+    for (const storeName of stores) {
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      const keys = await store.getAllKeys();
+      
+      for (const key of keys) {
+        // If the key doesn't contain an underscore, it's a legacy/ghost key 
+        // (assuming your new keys are always identifier_deviceId)
+        if (typeof key === 'string' && !key.includes('_')) {
+          await store.delete(key);
+        }
+      }
+      await tx.done;
+    }
+    console.log("Ghost devices cleaned up successfully.");
+  }
   // --- REGISTRATION ---
   async saveRegistrationId(id, deviceId) {
     const db = await dbPromise;
@@ -135,7 +158,7 @@ export class ZingSignalStore {
     await db.delete('prekeys', this._getKey(keyId, deviceId));
   }
 
-  async savePreKey(keyId, keyPair, deviceId) {
+ async savePreKey(keyId, keyPair, deviceId) {
   if (!deviceId) throw new Error("CRITICAL: DeviceID missing in savePreKey");
   const db = await dbPromise;
   await db.put('prekeys', keyPair, this._getKey(keyId, deviceId));

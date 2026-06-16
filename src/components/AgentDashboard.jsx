@@ -702,10 +702,9 @@ useEffect(() => {
   const runSecurityPipeline = async () => {
     try {
       const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
-      
+      console.log("Security Pipeline: Checking DeviceID:", deviceId);
       const authRes = await secureFetch('/api/agents/check-device', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId })
       });
 
@@ -716,7 +715,6 @@ useEffect(() => {
       if (!authorized) {
         console.warn("Device unauthorized. Triggering re-auth flow.");
         setDeviceStatus('UNAUTHORIZED');
-        // Force logout or redirect to a re-verification page instead of reloading
         handleDisconnect(new Event('click')); 
         return;
       }

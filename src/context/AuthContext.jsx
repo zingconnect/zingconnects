@@ -3,17 +3,6 @@ import { secureFetch } from "../../api/utils/api";
 
 const AuthContext = createContext(null);
 
-// Helper to persist/generate deviceId per browser instance
-const getOrGenerateDeviceId = () => {
-  let deviceId = localStorage.getItem('zing_device_id');
-  if (!deviceId) {
-    // Generate a simple numeric ID for the array index
-    deviceId = Math.floor(Math.random() * 1000000).toString();
-    localStorage.setItem('zing_device_id', deviceId);
-  }
-  return parseInt(deviceId);
-};
-
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
@@ -22,25 +11,35 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   
-  // Track deviceId in state
-  const [deviceId] = useState(() => getOrGenerateDeviceId());
+  // 1. Initialize deviceId as null; it will be populated via Effect
+  const [deviceId, setDeviceId] = useState(null);
 
   useEffect(() => {
-    verifySession();
+    const initEngine = async () => {
+      // 2. Load engine and ID asynchronously to avoid race conditions
+      const module = await import('../utils/SignalEngine');
+      const SignalEngine = module.SignalEngine || module.default;
+      const id = await SignalEngine.store.getOrGenerateDeviceId();
+      
+      setDeviceId(id);
+      // 3. Verify session only after we have a confirmed deviceId
+      verifySession(id);
+    };
+    initEngine();
   }, []);
 
   const initializeCrypto = async () => {
+    if (!deviceId) return false;
     setIsCryptoReady(false);
     try {
       const module = await import('../utils/SignalEngine');
       const SignalEngine = module.SignalEngine || module.default;
 
-      // Pass deviceId to engine to scope keys
       const { identityKeyPair, preKeyBundle } = await SignalEngine.setupIdentity(deviceId);
       const bufferToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 
       const devicePayload = {
-        deviceId, // Send unique device ID to server
+        deviceId,
         registrationId: preKeyBundle.registrationId,
         identityKey: bufferToBase64(identityKeyPair.pubKey),
         signedPreKey: {
@@ -60,17 +59,15 @@ export const AuthProvider = ({ children }) => {
       });
 
       if (!response.ok) throw new Error(`Server returned ${response.status}`);
-
       setIsCryptoReady(true);
       return true;
     } catch (err) {
       console.error("Crypto init failed:", err);
-      setIsCryptoReady(false);
       return false;
     }
   };
 
-  const verifySession = async () => {
+  const verifySession = async (id) => {
     setIsLoading(true);
     try {
       const response = await secureFetch('/api/agents/me');
@@ -80,26 +77,28 @@ export const AuthProvider = ({ children }) => {
       }
 
       const data = await response.json();
-      setUser(data.profile);
+      const profile = data.profile;
+      
+      setUser(profile);
       setIsAuthenticated(true);
       setUserRole(data.role);
 
       const module = await import('../utils/SignalEngine');
       const SignalEngine = module.SignalEngine || module.default;
 
-      // Check local store specifically for this deviceId
-      const savedIdentity = await SignalEngine.store.getIdentityKeyPair(deviceId);
-      const isReadyOnServer = !!data.profile.isCryptoReady;
+      const isThisDeviceRegistered = profile.devices?.some(
+        (d) => String(d.deviceId) === String(id)
+      );
 
-      if (!savedIdentity || !isReadyOnServer) {
-        console.log("Device crypto not initialized. Running setup...");
-        const success = await initializeCrypto();
-        setIsCryptoReady(success);
-      } else {
+      const savedIdentity = await SignalEngine.store.getIdentityKeyPair(id);
+
+      if (savedIdentity && isThisDeviceRegistered) {
         setIsCryptoReady(true);
+      } else {
+        setIsCryptoReady(false);
+        console.warn("Device not fully registered.");
       }
     } catch (err) {
-      console.error("Auth verification failed:", err);
       setIsCryptoReady(false);
     } finally {
       setIsLoading(false);
@@ -109,9 +108,9 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     const { SignalEngine } = await import('../utils/SignalEngine');
     await SignalEngine.store.clearAll();
-    localStorage.removeItem('zing_device_id'); // Clear device ID on logout
     setIsAuthenticated(false);
     setIsCryptoReady(false);
+    window.location.reload(); // Hard refresh to clear memory state
   };
 
   return (
@@ -119,7 +118,7 @@ export const AuthProvider = ({ children }) => {
       user, setUser, token, setToken, 
       isAuthenticated, userRole, isLoading, 
       isCryptoReady, verifySession, initializeCrypto, 
-      logout, deviceId // Exposed for sendMessage
+      logout, deviceId 
     }}>
       {children}
     </AuthContext.Provider>
