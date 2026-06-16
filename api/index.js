@@ -2239,7 +2239,7 @@ app.get('/api/agents/my-users', authenticateToken, async (req, res, next) => {
   }
 });
 
-app.post('/api/agents/check-device', authenticateAgent, async (req, res) => {
+app.post('/api/agents/check-device', authenticateToken, async (req, res, next) => {
   const { deviceId } = req.body;
   const agentId = req.user.id;
 
@@ -2247,10 +2247,8 @@ app.post('/api/agents/check-device', authenticateAgent, async (req, res) => {
     const device = await Device.findOne({ agentId, deviceId });
 
     if (device) {
-      // Device is known and authorized
       return res.json({ authorized: true });
     } else {
-      // Device is unknown; create a "pending" entry for approval
       await Device.create({
         agentId,
         deviceId,
