@@ -161,6 +161,7 @@ const [isSubscribed, setIsSubscribed] = useState(agentData?.isSubscribed ?? fals
   const [caption, setCaption] = useState("");  
 
   const isFetchingRef = useRef(false);
+  const repairAttemptedRef = useRef(false);
   const activeSessionRef = useRef(null);
 const hasProcessedDeepLink = useRef(false);
   const messagesEndRef = useRef(null);
@@ -699,7 +700,6 @@ useEffect(() => {
 
   const runSecurityPipeline = async () => {
     try {
-      // 1. Device Authorization Check
       const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
       const authRes = await secureFetch('/api/agents/check-device', {
         method: 'POST',
@@ -711,8 +711,6 @@ useEffect(() => {
         setDeviceStatus('UNAUTHORIZED');
         return; // Block everything
       }
-
-      // 2. If Authorized, then provision keys
       const success = await initializeUserE2EEKeys(String(agentData._id), token);
       if (success) {
         await SignalEngine.initialize(String(agentData._id));
@@ -722,7 +720,6 @@ useEffect(() => {
       console.error("Security Pipeline Failure:", err);
     }
   };
-
   runSecurityPipeline();
 }, [token, isLoading, agentData?._id]);
 
@@ -1424,7 +1421,7 @@ useEffect(() => {
     const script = document.createElement('script');
     script.src = "https://checkout.flutterwave.com/v3.js";
     script.async = true;
-    script.id = "flutterwave-script"; // Added ID for easier tracking
+    script.id = "flutterwave-script";
     document.body.appendChild(script);
   }
 
@@ -1442,7 +1439,6 @@ useEffect(() => {
 
       if (!isMounted) return;
 
-      // Handle Profile Request
       if (profileResponse.status === 'rejected' || !profileResponse.value.ok) {
         const res = profileResponse.value;
         if (res?.status === 401 || res?.status === 403) {
@@ -1457,34 +1453,31 @@ useEffect(() => {
       
       if (profileData.agent) {
         const agent = profileData.agent;
-
-        // 🛡️ CRITICAL: CRYPTO INTEGRITY CHECK
-        // If keys were purged, the array will be empty/missing. Repair immediately.
         const hasValidKeys = agent.publicKeyJwk?.preKeys && agent.publicKeyJwk.preKeys.length > 0;
         
-        if (!hasValidKeys) {
+        // MODIFIED: Use the Ref circuit breaker instead of recursion
+        if (!hasValidKeys && !repairAttemptedRef.current) {
+          repairAttemptedRef.current = true; 
           console.warn("Crypto keys missing/corrupted. Repairing...");
           try {
-            // Re-generate your bundle via SignalEngine
             const newBundle = await SignalEngine.generateBundle(); 
             await secureFetch('/api/crypto/add-device', { 
               method: 'POST', 
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(newBundle) 
             });
-            // Recursively re-fetch to get the newly populated profile
-            return fetchInitialData(); 
+            // Force a reload to ensure clean state initialization
+            window.location.reload();
+            return; 
           } catch (cryptoErr) {
             console.error("Auto-repair of keys failed:", cryptoErr);
           }
         }
 
-        // 2. Set State
         setAgentData(agent);
         setIsSubscribed(!!agent.isSubscribed); 
         if (agent.plan) setSelectedPlan(agent.plan);
 
-        // 3. Handle User Request
         if (agent.isSubscribed && usersResponse.status === 'fulfilled') {
           const uRes = usersResponse.value;
           if (uRes.ok) {
@@ -1900,9 +1893,6 @@ useEffect(() => {
       // 2. Fetch encrypted payload from server
       const incomingMsgs = await fetchMessages(selectedUser._id, limit);
       if (!incomingMsgs || incomingMsgs.length === 0) return;
-
-      // 3. Decrypt via SignalEngine
-      // We pass the payload to the engine; it handles the internal Ratchet state.
       const processedMsgs = await Promise.all(
         incomingMsgs.map(async (msg) => {
           if (!msg.isEncrypted) return msg;
