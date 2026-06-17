@@ -613,7 +613,6 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     
-    // Added isNewRegistration from your frontend
     const { 
       email, otp, deviceId, registrationId, identityKey, 
       signedPreKey, preKeys, isNewRegistration 
@@ -625,56 +624,49 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
 
     const agent = await AgentModel.findOne({ email: email.toLowerCase().trim() });
 
-    if (agent?.failedOtpAttempts >= 5) {
-      return res.status(429).json({ success: false, message: "Account locked." });
+    if (!agent || agent.failedOtpAttempts >= 5) {
+      return res.status(429).json({ success: false, message: "Account locked or not found." });
     }
 
-    // Validate OTP
-    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      if (agent) {
-        agent.failedOtpAttempts = (agent.failedOtpAttempts || 0) + 1;
-        await agent.save();
-      }
+    // 1. Validate OTP
+    if (agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
+      agent.failedOtpAttempts = (agent.failedOtpAttempts || 0) + 1;
+      await agent.save();
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // --- CRYPTOGRAPHIC LOGIC ---
+    // 2. Cryptographic & Device Logic
+    // Use findOneAndUpdate with conditional logic to handle race conditions
+    let updateQuery = { 
+      $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
+      $unset: { otp: "", otpExpires: "" }
+    };
+
     const existingDevice = agent.devices.find(d => String(d.deviceId) === String(deviceId));
 
     if (isNewRegistration) {
-      // 1. Guard against incomplete bundles
       if (!identityKey || !preKeys?.length || !signedPreKey) {
         return res.status(400).json({ success: false, message: "Invalid cryptographic bundle." });
       }
-
-      // 2. Prevent duplicate registration
       if (existingDevice) {
         return res.status(403).json({ success: false, message: "Device already registered." });
       }
-
-      // 3. Atomically add the new device
-      const newDeviceEntry = { 
-        deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() 
-      };
-      await AgentModel.updateOne({ _id: agent._id }, { $push: { devices: newDeviceEntry } });
+      // Add the new device to the update query
+      updateQuery.$push = { devices: { deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() } };
     } else {
-      // Returning device: Ensure it exists in the user's registry
       if (!existingDevice) {
-        return res.status(401).json({ success: false, message: "Device not recognized." });
+        return res.status(401).json({ success: false, message: "Device not recognized. Please re-register." });
       }
     }
 
-    // --- FINAL AGENT STATE UPDATE ---
+    // 3. Atomic State Update
     const updatedAgent = await AgentModel.findOneAndUpdate(
       { _id: agent._id },
-      { 
-        $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
-        $unset: { otp: "", otpExpires: "" }
-      },
+      updateQuery,
       { new: true }
     );
 
-    // Issue Session Token
+    // 4. Session Handling
     const token = jwt.sign(
       { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 

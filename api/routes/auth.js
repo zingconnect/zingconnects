@@ -256,7 +256,6 @@ router.post('/verify-otp', async (req, res, next) => {
     await connectToDatabase();
     const AgentModel = getAgentModel();
     
-    // Add isNewRegistration to the destructuring
     const { 
       email, otp, deviceId, registrationId, identityKey, 
       signedPreKey, preKeys, isNewRegistration 
@@ -269,48 +268,49 @@ router.post('/verify-otp', async (req, res, next) => {
     const lowerEmail = email.toLowerCase().trim();
     const agent = await AgentModel.findOne({ email: lowerEmail });
 
-    // 1. Validate OTP and Expiry
-    if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
-      return res.status(400).json({ success: false, message: "Invalid or expired verification code." });
+    // 1. Validate OTP and Security Lockout
+    if (!agent || agent.failedOtpAttempts >= 5) {
+      return res.status(429).json({ success: false, message: "Account locked or not found." });
     }
 
-    // 2. Device Registration Logic
+    if (agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
+      agent.failedOtpAttempts = (agent.failedOtpAttempts || 0) + 1;
+      await agent.save();
+      return res.status(400).json({ success: false, message: "Invalid or expired code." });
+    }
+
+    // 2. Prepare Atomic Update Operations
     const existingDevice = agent.devices.find(d => String(d.deviceId) === String(deviceId));
+    let updateQuery = { 
+      $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
+      $unset: { otp: "", otpExpires: "" }
+    };
 
     if (isNewRegistration) {
-      // 🛡️ GATE: Require valid crypto bundle for NEW registrations
       if (!identityKey || !preKeys?.length || !signedPreKey) {
-        return res.status(400).json({ success: false, message: "Cryptographic bundle required for new devices." });
+        return res.status(400).json({ success: false, message: "Cryptographic bundle required." });
       }
-
       if (existingDevice) {
-        return res.status(403).json({ success: false, message: "Device already registered to this account." });
+        return res.status(403).json({ success: false, message: "Device already registered." });
       }
-
-      const newDeviceEntry = {
-        deviceId, registrationId, identityKey, signedPreKey, preKeys, 
-        createdAt: new Date(), lastActive: new Date()
+      // Merge device push into the atomic update
+      updateQuery.$push = { 
+        devices: { deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date(), lastActive: new Date() } 
       };
-      
-      await AgentModel.updateOne({ _id: agent._id }, { $push: { devices: newDeviceEntry } });
     } else {
-      // 🛡️ GATE: Ensure device IS registered for returning users
       if (!existingDevice) {
-        return res.status(401).json({ success: false, message: "Device not authorized. Please re-register." });
+        return res.status(401).json({ success: false, message: "Device not authorized." });
       }
     }
 
-    // 3. Final Agent State Update
+    // 3. Perform SINGLE Atomic Operation
     const updatedAgent = await AgentModel.findOneAndUpdate(
       { _id: agent._id },
-      { 
-        $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
-        $unset: { otp: "", otpExpires: "" }
-      },
+      updateQuery,
       { new: true }
     );
 
-    // 4. Create Session Token
+    // 4. Issue Token
     const token = jwt.sign(
       { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
       process.env.JWT_SECRET,
@@ -325,7 +325,7 @@ router.post('/verify-otp', async (req, res, next) => {
     return res.status(200).json({
       success: true,
       slug: updatedAgent.slug,
-      message: isNewRegistration ? "Device registered and profile live!" : "Login successful!"
+      message: isNewRegistration ? "Device registered!" : "Login successful!"
     });
 
   } catch (err) {

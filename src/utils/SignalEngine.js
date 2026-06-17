@@ -132,8 +132,10 @@ async setupIdentity(identifier, deviceId) {
         const sessionBuilder = new lib.SessionBuilder(store, address);
         const bundle = prepareBundleForSignal(data);
         
+        let session = await store.loadSession(identifier, remoteUserId, deviceId);
+        
         await sessionBuilder.initOutgoing(bundle);
-        await store.saveIdentity(identifier, bundle.identityKey, deviceId);
+      await store.saveSession(identifier, remoteUserId, await store.loadSession(identifier, remoteUserId, deviceId), deviceId);
       } catch (err) {
         throw new Error(`Handshake failed: ${err.message}`);
       }

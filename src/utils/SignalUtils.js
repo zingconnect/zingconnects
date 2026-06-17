@@ -13,20 +13,19 @@ export const toBuffer = (base64) => {
   return Buffer.from(base64, 'base64');
 };
 
-// SignalUtils.js - Update this function
 export const prepareBundleForSignal = (bundle) => {
   return {
     registrationId: parseInt(bundle.registrationId),
-    // Use the raw buffer, but ensure it's not a generic object
     identityKey: toBuffer(bundle.identityKey), 
     signedPreKey: {
       keyId: bundle.signedPreKey.keyId,
       publicKey: toBuffer(bundle.signedPreKey.publicKey),
       signature: toBuffer(bundle.signedPreKey.signature),
     },
-    preKey: bundle.preKey ? {
-      keyId: bundle.preKey.keyId,
-      publicKey: toBuffer(bundle.preKey.publicKey)
+    // Fix: Handle the preKeys array correctly
+    preKey: bundle.preKeys && bundle.preKeys.length > 0 ? {
+      keyId: bundle.preKeys[0].keyId,
+      publicKey: toBuffer(bundle.preKeys[0].publicKey)
     } : null 
   };
 };

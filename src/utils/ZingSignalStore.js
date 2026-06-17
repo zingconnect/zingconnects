@@ -18,11 +18,9 @@ export class ZingSignalStore {
     this.lib = lib;
   }
 
-  // Consistent key scoping: identifier (agentId) + deviceId + type
-  _getKey(identifier, deviceId, type) {
-    return `${identifier}_${deviceId}_${type}`;
-  }
-
+_getKey(identifier, deviceId, type, remoteUserId = '') {
+  return `${identifier}_${deviceId}_${type}_${remoteUserId}`;
+}
   async ensureReady() { await dbPromise; }
 
   // --- IDENTITY ---
@@ -54,17 +52,17 @@ export class ZingSignalStore {
     return await db.get('misc', this._getKey(identifier, deviceId, 'regId'));
   }
 
-  // --- SESSIONS ---
-  async saveSession(identifier, record, deviceId) {
-    const db = await dbPromise;
-    const data = record.serialize();
-    await db.put('session', data, this._getKey(identifier, deviceId, 'session'));
-  }
+ async saveSession(identifier, remoteUserId, record, deviceId) {
+  const db = await dbPromise;
+  const data = record.serialize();
+  await db.put('session', data, this._getKey(identifier, remoteUserId, 'session', remoteUserId));
+}
 
-  async loadSession(identifier, deviceId) {
-    const db = await dbPromise;
-    const record = await db.get('session', this._getKey(identifier, deviceId, 'session'));
-    if (!record) return null;
+  async loadSession(identifier, remoteUserId, deviceId) {
+  await this.ensureReady();
+  const db = await dbPromise;
+  const record = await db.get('session', this._getKey(identifier, deviceId, 'session', remoteUserId));
+  if (!record) return null;
     try {
       return this.lib.SessionRecord.deserialize(record);
     } catch (err) {
