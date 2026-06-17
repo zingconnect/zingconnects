@@ -593,7 +593,6 @@ router.post('/heartbeat', authenticateToken, async (req, res, next) => {
 });
 
 router.post('/verify', authenticateToken, async (req, res, next) => {
-  // 1. Access Redis from the app context
   const redisClient = req.app.get('redisClient');
 
   try {
@@ -604,23 +603,17 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Transaction ID and target plan choice are required" });
     }
 
-    const planPricesInNGN = {
-      'BASIC': 8500,
-      'GROWTH': 51000,
-      'PROFESSIONAL': 102000
-    };
-
+    const planPricesInNGN = { 'BASIC': 8500, 'GROWTH': 51000, 'PROFESSIONAL': 102000 };
     const targetPlan = String(plan).toUpperCase().trim();
     if (!planPricesInNGN[targetPlan]) {
       return res.status(400).json({ success: false, message: "Invalid tier classification choice." });
     }
-    const expectedNairaPrice = planPricesInNGN[targetPlan];
 
     // 2. Verify with Flutterwave
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
 
-    if (data.status === "successful" && data.currency === "NGN" && Number(data.amount) >= expectedNairaPrice) {
+    if (data.status === "successful" && data.currency === "NGN" && Number(data.amount) >= planPricesInNGN[targetPlan]) {
       const AgentModel = getAgentModel();
       const agent = await AgentModel.findById(req.user.id);
 
@@ -634,66 +627,56 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
         ? new Date(agent.expiryDate) 
         : new Date();
 
-      let calculatedMonths = 1;
-      if (targetPlan === 'BASIC') {
-        baseDate.setMonth(baseDate.getMonth() + 1);
-        calculatedMonths = 1;
-      } else if (targetPlan === 'GROWTH') {
-        baseDate.setMonth(baseDate.getMonth() + 6);
-        calculatedMonths = 6;
-      } else if (targetPlan === 'PROFESSIONAL') {
-        baseDate.setFullYear(baseDate.getFullYear() + 1);
-        calculatedMonths = 12;
-      }
+      const monthsMap = { 'BASIC': 1, 'GROWTH': 6, 'PROFESSIONAL': 12 };
+      const calculatedMonths = monthsMap[targetPlan];
+      baseDate.setMonth(baseDate.getMonth() + calculatedMonths);
 
-      // 4. Persist Updates
-      const finalNumericAmount = Number(data.amount);
-      
-      agent.isSubscribed = true;
-      agent.plan = targetPlan;
-      agent.status = 'active';
-      if (!agent.subscriptionDate) agent.subscriptionDate = now;
-      agent.expiryDate = baseDate;
-      agent.expiryNotificationSent = false;
-      agent.lastTransactionId = String(transaction_id);
-      agent.subscriptionAmount = finalNumericAmount;
-      agent.paymentDetails = {
-        amountNgn: finalNumericAmount,
-        currency: "NGN",
-        verifiedAt: now
-      };
+      // 4. ATOMIC PERSISTENCE (Bypasses Schema Validation on 'devices')
+      const updatedAgent = await AgentModel.findOneAndUpdate(
+        { _id: req.user.id },
+        {
+          $set: {
+            isSubscribed: true,
+            plan: targetPlan,
+            status: 'active',
+            subscriptionDate: agent.subscriptionDate || now,
+            expiryDate: baseDate,
+            expiryNotificationSent: false,
+            lastTransactionId: String(transaction_id),
+            subscriptionAmount: Number(data.amount),
+            paymentDetails: {
+              amountNgn: Number(data.amount),
+              currency: "NGN",
+              verifiedAt: now
+            }
+          }
+        },
+        { new: true, runValidators: false } // runValidators: false skips checking the devices array
+      );
 
-      syncBilling(agent, finalNumericAmount);
-      await agent.save();
+      syncBilling(updatedAgent, Number(data.amount));
 
-      // 🚀 CACHE INVALIDATION: Force remove the cached profile 
-      // This ensures the next GET /profile call fetches the fresh DB state
+      // 5. CACHE INVALIDATION
       await redisClient.del(`agent:profile:${req.user.id}`);
+      await redisClient.del(`agent:profile:full:${req.user.id}`);
 
       return res.status(200).json({
         success: true,
         message: "Payment verified successfully. Secure node activated.",
-        redirectUrl: `/agent/dashboard/${agent.slug}`, // Add this field
-        agent: {
-          id: agent._id,
-          email: agent.email,
-          plan: agent.plan,
-          isSubscribed: !!agent.isSubscribed,
-          expiryDate: agent.expiryDate,
-          subscriptionAmount: agent.subscriptionAmount,
-          paymentDetails: agent.paymentDetails
-        }
+        redirectUrl: `/agent/dashboard/${updatedAgent.slug}`,
+        agent: updatedAgent
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: "Payment verification failed. Paid amount does not match plan price index."
+        message: "Payment verification failed."
       });
     }
   } catch (err) {
     next(err);
   }
 });
+
 router.put('/update-profile', authenticateToken, async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
   

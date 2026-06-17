@@ -1845,131 +1845,91 @@ app.get('/api/subscriptions/rate/:planPrice', async (req, res, next) => {
     next(err);
   }
 });
-
-// =========================================================================
-// 🛡️ HARDENED ROUTE: POST /api/subscriptions/verify (With Cache Invalidation)
-// =========================================================================
 app.post('/api/subscriptions/verify', authenticateToken, async (req, res, next) => {
   const redisClient = req.app.get('redisClient');
 
   try {
     await connectToDatabase();
-
-    // Use req.user.id populated by the authenticateToken middleware
     const agentId = req.user.id;
-
     const { transaction_id, plan } = req.body || {};
 
     if (!transaction_id || !plan) {
       return res.status(400).json({ message: "Transaction ID and target plan choice are required" });
     }
 
-    const planPricesInNGN = {
-      'BASIC': 8500,
-      'GROWTH': 51000,
-      'PROFESSIONAL': 102000
-    };
-
+    const planPricesInNGN = { 'BASIC': 8500, 'GROWTH': 51000, 'PROFESSIONAL': 102000 };
     const targetPlan = String(plan).toUpperCase().trim();
+    
     if (!planPricesInNGN[targetPlan]) {
-      return res.status(400).json({ success: false, message: "Invalid tier classification choice." });
+      return res.status(400).json({ success: false, message: "Invalid tier classification." });
     }
-    const expectedNairaPrice = planPricesInNGN[targetPlan];
     
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
     
-    if (
-      data.status === "successful" &&
-      data.currency === "NGN" &&
-      Number(data.amount) >= expectedNairaPrice
-    ) {
-      
-      const AgentModel = getAgentModel(); 
-      // Using agentId from the secure session
+    if (data.status === "successful" && data.currency === "NGN" && Number(data.amount) >= planPricesInNGN[targetPlan]) {
+      const AgentModel = getAgentModel();
       const agent = await AgentModel.findById(agentId);
-      if (!agent) {
-        return res.status(404).json({ message: "Agent profile mapping context missing." });
-      }
+      if (!agent) return res.status(404).json({ message: "Agent profile not found." });
 
+      // Date Logic
       const now = new Date();
-      let baseDate = new Date();
-      let calculatedMonths = 1;
+      let baseDate = (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate) > now) 
+                     ? new Date(agent.expiryDate) : new Date();
+      
+      const months = { 'BASIC': 1, 'GROWTH': 6, 'PROFESSIONAL': 12 };
+      baseDate.setMonth(baseDate.getMonth() + months[targetPlan]);
 
-      if (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate).getTime() > Date.now()) {
-        baseDate = new Date(agent.expiryDate);
-      }
-
-      if (targetPlan === 'BASIC') {
-        baseDate.setMonth(baseDate.getMonth() + 1);
-        calculatedMonths = 1;
-      } else if (targetPlan === 'GROWTH') {
-        baseDate.setMonth(baseDate.getMonth() + 6);
-        calculatedMonths = 6;
-      } else if (targetPlan === 'PROFESSIONAL') {
-        baseDate.setFullYear(baseDate.getFullYear() + 1);
-        calculatedMonths = 12;
-      }
-
+      // 1. Log Transaction
       await Transaction.create({
         agentId: agent._id,
         transactionId: String(transaction_id),
         txRef: data.tx_ref || `ZING-VRF-${Date.now()}`,
         plan: targetPlan,
-        months: calculatedMonths,
+        months: months[targetPlan],
         amount: Number(data.amount),
         currency: "NGN",
         status: "successful",
         paidAt: now
       });
 
-      const finalNumericAmount = Number(data.amount);
+      // 2. ATOMIC UPDATE (Bypasses 'devices' schema validation)
+      const updatedAgent = await AgentModel.findOneAndUpdate(
+        { _id: agentId },
+        {
+          $set: {
+            isSubscribed: true,
+            plan: targetPlan,
+            status: 'active',
+            subscriptionDate: agent.subscriptionDate || now,
+            expiryDate: baseDate,
+            expiryNotificationSent: false,
+            lastTransactionId: String(transaction_id),
+            subscriptionAmount: Number(data.amount),
+            paymentDetails: { amountNgn: Number(data.amount), currency: "NGN", verifiedAt: now }
+          }
+        },
+        { new: true, runValidators: false } // <--- CRITICAL: Skips Mongoose validation
+      );
 
-      agent.isSubscribed = true;
-      agent.plan = targetPlan;
-      agent.status = 'active';
-      if (!agent.subscriptionDate) agent.subscriptionDate = now;
-      agent.expiryDate = baseDate;
-      agent.expiryNotificationSent = false;
-      agent.lastTransactionId = String(transaction_id);
-      agent.subscriptionAmount = finalNumericAmount; 
-      agent.paymentDetails = {
-        amountNgn: finalNumericAmount,
-        currency: "NGN",
-        verifiedAt: now
-      };
-      
-      syncBilling(agent, finalNumericAmount);
-      await agent.save();
-// 🚀 CRITICAL: CLEAR BOTH CACHE VARIANTS
+      // 3. Cleanup
+      syncBilling(updatedAgent, Number(data.amount));
       await redisClient.del(`agent:profile:${agent._id}`);
       await redisClient.del(`agent:profile:full:${agent._id}`);
 
-      console.log(`Subscription ACTIVATED for: ${agent.email} | Cache invalidated for both keys.`);
       return res.json({
         success: true,
-        message: "Payment verified successfully. Secure node activated.",
-        redirectUrl: `/agent/dashboard/${agent.slug}`, // Add this field
-        agent: {
-          id: agent._id,
-          email: agent.email,
-          plan: agent.plan,
-          isSubscribed: !!agent.isSubscribed,
-          expiryDate: agent.expiryDate,
-          subscriptionAmount: agent.subscriptionAmount,
-          paymentDetails: agent.paymentDetails
-        }
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "Payment verification failed."
+        message: "Payment verified successfully.",
+        redirectUrl: `/agent/dashboard/${updatedAgent.slug}`,
+        agent: updatedAgent
       });
     }
+    return res.status(400).json({ success: false, message: "Payment verification failed." });
   } catch (err) {
     next(err);
   }
 });
+
 // =========================================================================
 // 💳 EXTEND/UPGRADE SUBSCRIPTION PIPELINE (WITH CACHE INVALIDATION)
 // =========================================================================
