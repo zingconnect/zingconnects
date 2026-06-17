@@ -51,9 +51,8 @@ const handleVerify = async (e) => {
 
   try {
     const deviceId = await SignalEngine.getOrGenerateDeviceId();
-    
-    // 1. Check if identity already exists locally
     const existingIdentity = await SignalEngine.store.loadIdentity(email, deviceId);
+    
     let preKeyBundle = null;
     let isNewRegistration = false;
 
@@ -63,25 +62,35 @@ const handleVerify = async (e) => {
       preKeyBundle = result.preKeyBundle;
       isNewRegistration = true;
     } else {
-      console.log("Identity already exists locally.");
+      console.log("Loading existing identity for payload...");
+      // FIX: Fetch the existing identity to populate the payload
+      const identityKeyPair = await SignalEngine.store.loadIdentityKeyPair(email, deviceId);
+      const registrationId = await SignalEngine.store.loadRegistrationId(email, deviceId);
+      
+      preKeyBundle = {
+        identityKey: identityKeyPair.pubKey,
+        registrationId: registrationId
+        // Note: For existing sessions, you usually don't need to re-send 
+        // the full preKeyBundle, but your backend current requires it.
+      };
     }
 
-const payload = {
+    const payload = {
       email,
       otp,
       deviceId,
       isNewRegistration,
       identityKey: preKeyBundle?.identityKey ? bufferToBase64(preKeyBundle.identityKey) : null,
       registrationId: preKeyBundle?.registrationId,
-      signedPreKey: preKeyBundle?.signedPreKey ? {
+      signedPreKey: isNewRegistration ? {
         keyId: preKeyBundle.signedPreKey.keyId,
         publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
         signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-      } : null,
-      preKeys: preKeyBundle?.preKeys?.map(pk => ({
+      } : undefined,
+      preKeys: isNewRegistration ? preKeyBundle?.preKeys?.map(pk => ({
         keyId: pk.keyId,
         publicKey: bufferToBase64(pk.publicKey || pk.extractedPubKey)
-      })) || []
+      })) : []
     };
 
     console.log("Payload sending to API:", payload);
