@@ -275,6 +275,15 @@ router.post('/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Cryptographic keys invalid." });
     }
 
+    // 3. STRICT REGISTRATION STRATEGY
+    // Check if this specific deviceId is ALREADY in the agent's device list
+    const isAlreadyRegistered = agent.devices.some(d => String(d.deviceId) === String(deviceId));
+    
+    if (isAlreadyRegistered) {
+      // If the device is already registered, reject the request to prevent overwriting
+      return res.status(403).json({ success: false, message: "This device is already registered to this account." });
+    }
+
     const newDeviceEntry = {
       deviceId,
       registrationId,
@@ -285,39 +294,16 @@ router.post('/verify-otp', async (req, res, next) => {
       lastActive: new Date()
     };
 
-    // 3. Multi-Device Upsert Strategy
-    // Check if this specific device already exists for this agent
-    const existingDevice = await AgentModel.findOne({
-      email: lowerEmail,
-      "devices.deviceId": deviceId
-    });
-
-    let updatedAgent;
-    if (existingDevice) {
-      // Update existing device entry using positional operator
-      updatedAgent = await AgentModel.findOneAndUpdate(
-        { email: lowerEmail, "devices.deviceId": deviceId },
-        { 
-          $set: { 
-            "devices.$": newDeviceEntry,
-            isVerified: true, status: 'active', failedOtpAttempts: 0 
-          },
-          $unset: { otp: "", otpExpires: "" }
-        },
-        { new: true, runValidators: true }
-      );
-    } else {
-      // Add new device entry to the array
-      updatedAgent = await AgentModel.findOneAndUpdate(
-        { email: lowerEmail },
-        { 
-          $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
-          $push: { devices: newDeviceEntry },
-          $unset: { otp: "", otpExpires: "" }
-        },
-        { new: true, runValidators: true }
-      );
-    }
+    // Push the new device only if it passed the existence check above
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { email: lowerEmail },
+      { 
+        $push: { devices: newDeviceEntry },
+        $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
+        $unset: { otp: "", otpExpires: "" }
+      },
+      { new: true, runValidators: true }
+    );
 
     if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent profile not found." });
 

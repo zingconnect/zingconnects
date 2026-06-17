@@ -27,6 +27,10 @@ get store() { return getStore(); },
 
 isReady: () => isEngineReady,
 
+get deviceId() {
+  return this.store.getOrGenerateDeviceId();
+}, 
+
 async getOrGenerateDeviceId() {
     return await getStore().getOrGenerateDeviceId();
   },
@@ -143,18 +147,23 @@ async initializeSession(remoteUserId, peerBundle) {
   },
   
 async loadIdentity(identifier) {
-    return await this.store.loadIdentity(identifier);
-  },
+  const deviceId = await this.getOrGenerateDeviceId();
+  return await this.store.loadIdentity(identifier, deviceId);
+}, 
 
 async initialize(userId) {
-    console.log("🛡️ Initializing Engine for:", userId);
-    const identity = await store.loadIdentity('local');
-    if (!identity) {
-      await this.setupIdentity();
-    }
-    isEngineReady = true; // Mark as ready
-    return true;
-  },
+  console.log("🛡️ Initializing Engine for:", userId);
+    const deviceId = await this.getOrGenerateDeviceId();
+  const identity = await store.loadIdentity(userId, deviceId);
+  
+  if (!identity) {
+    console.log(`Identity not found for ${userId}, setting up new identity...`);
+    await this.setupIdentity(deviceId);
+  }
+  
+  isEngineReady = true;
+  return true;
+},
 
 async sendMessage(remoteUserId, receiverModel, messageText, conversationId, deviceId, isRetry = false) {
   const lib = getLib();

@@ -634,51 +634,60 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid cryptographic bundle." });
     }
 
-    // 1. First, check if this specific deviceId already exists for this agent
-    const existingDevice = await AgentModel.findOne({
-      _id: agent._id,
-      "devices.deviceId": deviceId
-    });
-
-    let updatedAgent;
-    const newDeviceEntry = { deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() };
-
+    // --- ATOMIC REGISTRATION GUARD ---
+    // Check if this specific deviceId already exists in the array
+    const existingDevice = agent.devices.find(d => String(d.deviceId) === String(deviceId));
+    
     if (existingDevice) {
-      // 2. If it exists, update the existing entry (the "Upsert" logic)
-      updatedAgent = await AgentModel.findOneAndUpdate(
-        { _id: agent._id, "devices.deviceId": deviceId },
-        { 
-          $set: { 
-            "devices.$": newDeviceEntry,
-            isVerified: true, status: 'active', failedOtpAttempts: 0 
-          },
-          $unset: { otp: "", otpExpires: "" }
-        },
-        { new: true }
-      );
-    } else {
-      // 3. If it doesn't exist, push a new device entry to the array
-      updatedAgent = await AgentModel.findOneAndUpdate(
-        { _id: agent._id },
-        { 
-          $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
-          $push: { devices: newDeviceEntry },
-          $unset: { otp: "", otpExpires: "" }
-        },
-        { new: true }
-      );
+      return res.status(403).json({ success: false, message: "Device already registered." });
     }
+
+    // Create the new entry
+    const newDeviceEntry = { 
+      deviceId, 
+      registrationId, 
+      identityKey, 
+      signedPreKey, 
+      preKeys, 
+      createdAt: new Date() 
+    };
+
+    // Perform a single, atomic operation to register the device
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { _id: agent._id },
+      { 
+        $push: { devices: newDeviceEntry },
+        $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
+        $unset: { otp: "", otpExpires: "" }
+      },
+      { new: true }
+    );
 
     if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent not found." });
 
-    const token = jwt.sign({ id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: 604800000, signed: true });
+    // Issue Session Token
+    const token = jwt.sign(
+      { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '7d' }
+    );
+    
+    res.cookie('token', token, { 
+      httpOnly: true, 
+      secure: true, 
+      sameSite: 'Lax', 
+      path: '/', 
+      maxAge: 604800000, 
+      signed: true 
+    });
 
     return res.status(200).json({ success: true, slug: updatedAgent.slug, message: "Device registered!" });
+    
   } catch (err) {
     next(err); 
   }
 });
+
 
 // POST: Register or Add a new Device
 app.post('/api/crypto/add-device', authenticateToken, async (req, res, next) => {

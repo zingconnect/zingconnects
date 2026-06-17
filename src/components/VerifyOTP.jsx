@@ -44,6 +44,7 @@ const handleResend = async () => {
 
 const handleVerify = async (e) => {
   e.preventDefault();
+  if (isVerifying) return; // Prevent concurrent submissions
   setIsVerifying(true);
 
   try {
@@ -57,7 +58,7 @@ const handleVerify = async (e) => {
 
     const { preKeyBundle } = result;
 
-    // 2. Clean the keys to ensure no nulls reach the server
+    // 2. Clean the keys
     const cleanedPreKeys = preKeyBundle.preKeys.filter(
       pk => pk !== null && typeof pk === 'object' && pk.keyId && pk.publicKey
     );
@@ -66,14 +67,14 @@ const handleVerify = async (e) => {
       throw new Error("Security initialization failed: No valid keys found.");
     }
 
-    // 3. Construct payload using cleanedPreKeys
+    // 3. Construct payload
     const payload = {
       email,
       otp,
       deviceId,
       identityKey: preKeyBundle.identityKey,
       signedPreKey: preKeyBundle.signedPreKey,
-      preKeys: cleanedPreKeys, // Correctly using the cleaned array
+      preKeys: cleanedPreKeys,
       registrationId: preKeyBundle.registrationId
     };
 
@@ -84,11 +85,19 @@ const handleVerify = async (e) => {
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || "Registration Failure");
 
-    console.log("✅ Agent Verified. Identity linked to device:", deviceId);
-    setServerSlug(data.slug);
-    setIsSuccess(true);
+    // 4. Handle Specific Server Responses
+    if (response.status === 403) {
+      // Device is already registered, treat as success to allow login
+      console.warn("Device already registered, skipping push.");
+      setIsSuccess(true); 
+    } else if (!response.ok) {
+      throw new Error(data.message || "Registration Failure");
+    } else {
+      console.log("✅ Agent Verified. Identity linked to device:", deviceId);
+      setServerSlug(data.slug);
+      setIsSuccess(true);
+    }
 
   } catch (err) {
     console.error("Verification Error:", err);

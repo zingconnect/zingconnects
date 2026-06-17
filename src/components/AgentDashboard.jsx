@@ -695,14 +695,16 @@ handleEndCall();
   }, []);
 
 
+// Change this part in your useEffect inside AgentDashboard
 useEffect(() => {
-  // 1. Guard clauses
   if (isLoading || !token || !agentData?._id || isEngineReady) return;
 
   const runSecurityPipeline = async () => {
     try {
       const deviceId = await SignalEngine.store.getOrGenerateDeviceId();
-      console.log("Security Pipeline: Checking DeviceID:", deviceId);
+      if (!deviceId) throw new Error("DeviceID could not be generated.");
+
+      console.log("Security Pipeline: Verified DeviceID:", deviceId);
       const authRes = await secureFetch('/api/agents/check-device', {
         method: 'POST',
         body: JSON.stringify({ deviceId })
@@ -711,21 +713,12 @@ useEffect(() => {
       if (!authRes.ok) throw new Error("Security check failed");
       
       const { authorized } = await authRes.json();
-
       if (!authorized) {
-        console.warn("Device unauthorized. Triggering re-auth flow.");
-        setDeviceStatus('UNAUTHORIZED');
-        handleDisconnect(new Event('click')); 
         return;
       }
-      const success = await initializeUserE2EEKeys(String(agentData._id), token);
+      await SignalEngine.initialize(String(agentData._id), deviceId); 
+      setIsEngineReady(true);
       
-      if (success) {
-        await SignalEngine.initialize(String(agentData._id));
-        setIsEngineReady(true);
-      } else {
-        console.error("E2EE Key initialization failed. Check local storage.");
-      }
     } catch (err) {
       console.error("Security Pipeline Failure:", err);
     }
