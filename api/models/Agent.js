@@ -160,15 +160,22 @@ agentSchema.virtual('isCryptoReady').get(function() {
 });
 agentSchema.index({ _id: 1, "devices.deviceId": 1 }, { unique: true });
 
+deviceSchema.set('toJSON', { getters: true });
+deviceSchema.set('toObject', { getters: true });
+
+// Ensure rotatePreKeys handles the slice correctly
 export async function rotatePreKeys(agentId, deviceId, newPreKeys) {
+  // Ensure newPreKeys are cleaned before being pushed
+  const cleanedKeys = newPreKeys.filter(pk => pk?.keyId && pk.publicKey);
+  
   return await Agent.updateOne(
     { _id: agentId, "devices.deviceId": deviceId },
     { 
       $push: { 
         "devices.$.preKeys": { 
-          $each: newPreKeys,
-          $sort: { keyId: -1 }, // Sorts by keyId descending
-          $slice: 100           // Keeps the 100 newest keys
+          $each: cleanedKeys,
+          $sort: { keyId: -1 },
+          $slice: 100
         } 
       }
     }
