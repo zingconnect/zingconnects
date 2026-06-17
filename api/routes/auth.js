@@ -255,10 +255,15 @@ router.post('/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { email, otp, deviceId, registrationId, identityKey, signedPreKey, preKeys } = req.body;
+    
+    // Add isNewRegistration to the destructuring
+    const { 
+      email, otp, deviceId, registrationId, identityKey, 
+      signedPreKey, preKeys, isNewRegistration 
+    } = req.body;
 
-    if (!email || !otp) {
-      return res.status(400).json({ success: false, message: "Email and OTP are required." });
+    if (!email || !otp || !deviceId) {
+      return res.status(400).json({ success: false, message: "Required fields missing." });
     }
 
     const lowerEmail = email.toLowerCase().trim();
@@ -269,43 +274,41 @@ router.post('/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid or expired verification code." });
     }
 
-    // 2. 🛡️ CRITICAL SECURITY GATE: Validate Device Bundle
-    if (!deviceId || !identityKey || !preKeys?.length || !signedPreKey) {
-      console.error(`❌ Crypto validation failed for: ${lowerEmail}`);
-      return res.status(400).json({ success: false, message: "Cryptographic keys invalid." });
+    // 2. Device Registration Logic
+    const existingDevice = agent.devices.find(d => String(d.deviceId) === String(deviceId));
+
+    if (isNewRegistration) {
+      // 🛡️ GATE: Require valid crypto bundle for NEW registrations
+      if (!identityKey || !preKeys?.length || !signedPreKey) {
+        return res.status(400).json({ success: false, message: "Cryptographic bundle required for new devices." });
+      }
+
+      if (existingDevice) {
+        return res.status(403).json({ success: false, message: "Device already registered to this account." });
+      }
+
+      const newDeviceEntry = {
+        deviceId, registrationId, identityKey, signedPreKey, preKeys, 
+        createdAt: new Date(), lastActive: new Date()
+      };
+      
+      await AgentModel.updateOne({ _id: agent._id }, { $push: { devices: newDeviceEntry } });
+    } else {
+      // 🛡️ GATE: Ensure device IS registered for returning users
+      if (!existingDevice) {
+        return res.status(401).json({ success: false, message: "Device not authorized. Please re-register." });
+      }
     }
 
-    // 3. STRICT REGISTRATION STRATEGY
-    // Check if this specific deviceId is ALREADY in the agent's device list
-    const isAlreadyRegistered = agent.devices.some(d => String(d.deviceId) === String(deviceId));
-    
-    if (isAlreadyRegistered) {
-      // If the device is already registered, reject the request to prevent overwriting
-      return res.status(403).json({ success: false, message: "This device is already registered to this account." });
-    }
-
-    const newDeviceEntry = {
-      deviceId,
-      registrationId,
-      identityKey,
-      signedPreKey,
-      preKeys,
-      createdAt: new Date(),
-      lastActive: new Date()
-    };
-
-    // Push the new device only if it passed the existence check above
+    // 3. Final Agent State Update
     const updatedAgent = await AgentModel.findOneAndUpdate(
-      { email: lowerEmail },
+      { _id: agent._id },
       { 
-        $push: { devices: newDeviceEntry },
         $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
         $unset: { otp: "", otpExpires: "" }
       },
-      { new: true, runValidators: true }
+      { new: true }
     );
-
-    if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent profile not found." });
 
     // 4. Create Session Token
     const token = jwt.sign(
@@ -322,7 +325,7 @@ router.post('/verify-otp', async (req, res, next) => {
     return res.status(200).json({
       success: true,
       slug: updatedAgent.slug,
-      message: "Device registered and profile live!"
+      message: isNewRegistration ? "Device registered and profile live!" : "Login successful!"
     });
 
   } catch (err) {
@@ -600,78 +603,77 @@ router.post('/verify', authenticateToken, async (req, res, next) => {
     const { transaction_id, plan } = req.body;
     
     if (!transaction_id || !plan) {
-      return res.status(400).json({ success: false, message: "Transaction ID and target plan choice are required" });
+      return res.status(400).json({ success: false, message: "Transaction ID and target plan are required." });
     }
 
-    const planPricesInNGN = { 'BASIC': 8500, 'GROWTH': 51000, 'PROFESSIONAL': 102000 };
-    const targetPlan = String(plan).toUpperCase().trim();
-    if (!planPricesInNGN[targetPlan]) {
-      return res.status(400).json({ success: false, message: "Invalid tier classification choice." });
+    const AgentModel = getAgentModel();
+    const agent = await AgentModel.findById(req.user.id);
+
+    if (!agent) {
+      return res.status(404).json({ success: false, message: "Agent profile not found." });
+    }
+
+    // 1. DUAL PROTECTION: Transaction Idempotency Check
+    // Prevents the same transaction from being used twice to stack time
+    if (agent.lastTransactionId === String(transaction_id)) {
+      return res.status(400).json({ success: false, message: "Transaction already processed." });
     }
 
     // 2. Verify with Flutterwave
     const response = await flw.Transaction.verify({ id: transaction_id });
     const data = response.data;
 
-    if (data.status === "successful" && data.currency === "NGN" && Number(data.amount) >= planPricesInNGN[targetPlan]) {
-      const AgentModel = getAgentModel();
-      const agent = await AgentModel.findById(req.user.id);
-
-      if (!agent) {
-        return res.status(404).json({ success: false, message: "Agent profile mapping context missing." });
-      }
-
-      // 3. Calculate Expiry with Stacking Logic
-      const now = new Date();
-      let baseDate = (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate) > now) 
-        ? new Date(agent.expiryDate) 
-        : new Date();
-
-      const monthsMap = { 'BASIC': 1, 'GROWTH': 6, 'PROFESSIONAL': 12 };
-      const calculatedMonths = monthsMap[targetPlan];
-      baseDate.setMonth(baseDate.getMonth() + calculatedMonths);
-
-      // 4. ATOMIC PERSISTENCE (Bypasses Schema Validation on 'devices')
-      const updatedAgent = await AgentModel.findOneAndUpdate(
-        { _id: req.user.id },
-        {
-          $set: {
-            isSubscribed: true,
-            plan: targetPlan,
-            status: 'active',
-            subscriptionDate: agent.subscriptionDate || now,
-            expiryDate: baseDate,
-            expiryNotificationSent: false,
-            lastTransactionId: String(transaction_id),
-            subscriptionAmount: Number(data.amount),
-            paymentDetails: {
-              amountNgn: Number(data.amount),
-              currency: "NGN",
-              verifiedAt: now
-            }
-          }
-        },
-        { new: true, runValidators: false } // runValidators: false skips checking the devices array
-      );
-
-      syncBilling(updatedAgent, Number(data.amount));
-
-      // 5. CACHE INVALIDATION
-      await redisClient.del(`agent:profile:${req.user.id}`);
-      await redisClient.del(`agent:profile:full:${req.user.id}`);
-
-      return res.status(200).json({
-        success: true,
-        message: "Payment verified successfully. Secure node activated.",
-        redirectUrl: `/agent/dashboard/${updatedAgent.slug}`,
-        agent: updatedAgent
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "Payment verification failed."
-      });
+    const planPricesInNGN = { 'BASIC': 8500, 'GROWTH': 51000, 'PROFESSIONAL': 102000 };
+    const targetPlan = String(plan).toUpperCase().trim();
+    
+    if (!planPricesInNGN[targetPlan] || Number(data.amount) < planPricesInNGN[targetPlan] || data.status !== "successful") {
+      return res.status(400).json({ success: false, message: "Invalid payment or plan mismatch." });
     }
+
+    // 3. Subscription Stacking Logic
+    const now = new Date();
+    let baseDate = (agent.isSubscribed && agent.expiryDate && new Date(agent.expiryDate) > now) 
+      ? new Date(agent.expiryDate) 
+      : now;
+
+    const monthsMap = { 'BASIC': 1, 'GROWTH': 6, 'PROFESSIONAL': 12 };
+    baseDate.setMonth(baseDate.getMonth() + monthsMap[targetPlan]);
+
+    // 4. ATOMIC UPDATE (using findOneAndUpdate)
+    const updatedAgent = await AgentModel.findOneAndUpdate(
+      { _id: req.user.id },
+      {
+        $set: {
+          isSubscribed: true,
+          plan: targetPlan,
+          status: 'active',
+          subscriptionDate: agent.subscriptionDate || now,
+          expiryDate: baseDate,
+          expiryNotificationSent: false,
+          lastTransactionId: String(transaction_id),
+          subscriptionAmount: Number(data.amount),
+          paymentDetails: {
+            amountNgn: Number(data.amount),
+            currency: "NGN",
+            verifiedAt: now
+          }
+        }
+      },
+      { new: true, runValidators: false }
+    );
+
+    // 5. Background Task & Cache Invalidation
+    syncBilling(updatedAgent, Number(data.amount));
+    await redisClient.del(`agent:profile:${req.user.id}`);
+    await redisClient.del(`agent:profile:full:${req.user.id}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscription activated successfully.",
+      redirectUrl: `/agent/dashboard/${updatedAgent.slug}`,
+      agent: updatedAgent
+    });
+
   } catch (err) {
     next(err);
   }

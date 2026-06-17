@@ -44,39 +44,38 @@ const handleResend = async () => {
 
 const handleVerify = async (e) => {
   e.preventDefault();
-  if (isVerifying) return; // Prevent concurrent submissions
+  if (isVerifying) return;
   setIsVerifying(true);
 
   try {
     const deviceId = await SignalEngine.getOrGenerateDeviceId();
-    let result;
+    
+    // 1. Check if identity already exists locally
     const existingIdentity = await SignalEngine.store.loadIdentity(email, deviceId);
+    let preKeyBundle = null;
+    let isNewRegistration = false;
+
     if (!existingIdentity) {
       console.log("Generating new identity...");
-      result = await SignalEngine.setupIdentity(email, deviceId);
+      const result = await SignalEngine.setupIdentity(email, deviceId);
+      preKeyBundle = result.preKeyBundle;
+      isNewRegistration = true;
     } else {
-      console.log("Identity already exists, constructing bundle from local store...");
-      const regId = await SignalEngine.store.getLocalRegistrationId(email, deviceId);
-      result = await reconstructBundle(email, deviceId, regId); 
-    }
-    const { preKeyBundle } = result;
-    const cleanedPreKeys = preKeyBundle.preKeys.filter(
-      pk => pk !== null && typeof pk === 'object' && pk.keyId && pk.publicKey
-    );
-
-    if (cleanedPreKeys.length === 0) {
-      throw new Error("Security initialization failed: No valid keys found.");
+      console.log("Identity already exists locally.");
     }
 
-    // 3. Construct payload
+    // 2. Prepare payload
+    // If it's a new registration, we send the bundle. 
+    // If it's an existing device, we just send email/otp/deviceId to verify access.
     const payload = {
       email,
       otp,
       deviceId,
-      identityKey: preKeyBundle.identityKey,
-      signedPreKey: preKeyBundle.signedPreKey,
-      preKeys: cleanedPreKeys,
-      registrationId: preKeyBundle.registrationId
+      isNewRegistration,
+      identityKey: preKeyBundle?.identityKey || null,
+      signedPreKey: preKeyBundle?.signedPreKey || null,
+      preKeys: preKeyBundle?.preKeys?.filter(pk => pk?.keyId && pk.publicKey) || [],
+      registrationId: preKeyBundle?.registrationId || null
     };
 
     const response = await secureFetch('/api/agents/verify-otp', {
@@ -87,15 +86,13 @@ const handleVerify = async (e) => {
 
     const data = await response.json();
 
-    // 4. Handle Specific Server Responses
     if (response.status === 403) {
-      // Device is already registered, treat as success to allow login
-      console.warn("Device already registered, skipping push.");
-      setIsSuccess(true); 
+      console.warn("Device already registered on server.");
+      setIsSuccess(true);
     } else if (!response.ok) {
       throw new Error(data.message || "Registration Failure");
     } else {
-      console.log("✅ Agent Verified. Identity linked to device:", deviceId);
+      console.log("✅ Agent Verified.");
       setServerSlug(data.slug);
       setIsSuccess(true);
     }

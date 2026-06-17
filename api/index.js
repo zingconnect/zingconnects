@@ -612,13 +612,22 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
   try {
     await connectToDatabase();
     const AgentModel = getAgentModel();
-    const { email, otp, deviceId, registrationId, identityKey, signedPreKey, preKeys } = req.body;
+    
+    // Added isNewRegistration from your frontend
+    const { 
+      email, otp, deviceId, registrationId, identityKey, 
+      signedPreKey, preKeys, isNewRegistration 
+    } = req.body;
 
-    if (!email || !otp) return res.status(400).json({ success: false, message: "Required fields missing." });
+    if (!email || !otp || !deviceId) {
+      return res.status(400).json({ success: false, message: "Required fields missing." });
+    }
 
     const agent = await AgentModel.findOne({ email: email.toLowerCase().trim() });
 
-    if (agent?.failedOtpAttempts >= 5) return res.status(429).json({ success: false, message: "Account locked." });
+    if (agent?.failedOtpAttempts >= 5) {
+      return res.status(429).json({ success: false, message: "Account locked." });
+    }
 
     // Validate OTP
     if (!agent || agent.otp !== otp || (agent.otpExpires && agent.otpExpires < Date.now())) {
@@ -629,41 +638,41 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Invalid or expired code." });
     }
 
-    // Cryptographic Guard
-    if (!deviceId || !identityKey || !preKeys?.length || !signedPreKey) {
-      return res.status(400).json({ success: false, message: "Invalid cryptographic bundle." });
-    }
-
-    // --- ATOMIC REGISTRATION GUARD ---
-    // Check if this specific deviceId already exists in the array
+    // --- CRYPTOGRAPHIC LOGIC ---
     const existingDevice = agent.devices.find(d => String(d.deviceId) === String(deviceId));
-    
-    if (existingDevice) {
-      return res.status(403).json({ success: false, message: "Device already registered." });
+
+    if (isNewRegistration) {
+      // 1. Guard against incomplete bundles
+      if (!identityKey || !preKeys?.length || !signedPreKey) {
+        return res.status(400).json({ success: false, message: "Invalid cryptographic bundle." });
+      }
+
+      // 2. Prevent duplicate registration
+      if (existingDevice) {
+        return res.status(403).json({ success: false, message: "Device already registered." });
+      }
+
+      // 3. Atomically add the new device
+      const newDeviceEntry = { 
+        deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() 
+      };
+      await AgentModel.updateOne({ _id: agent._id }, { $push: { devices: newDeviceEntry } });
+    } else {
+      // Returning device: Ensure it exists in the user's registry
+      if (!existingDevice) {
+        return res.status(401).json({ success: false, message: "Device not recognized." });
+      }
     }
 
-    // Create the new entry
-    const newDeviceEntry = { 
-      deviceId, 
-      registrationId, 
-      identityKey, 
-      signedPreKey, 
-      preKeys, 
-      createdAt: new Date() 
-    };
-
-    // Perform a single, atomic operation to register the device
+    // --- FINAL AGENT STATE UPDATE ---
     const updatedAgent = await AgentModel.findOneAndUpdate(
       { _id: agent._id },
       { 
-        $push: { devices: newDeviceEntry },
         $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
         $unset: { otp: "", otpExpires: "" }
       },
       { new: true }
     );
-
-    if (!updatedAgent) return res.status(404).json({ success: false, message: "Agent not found." });
 
     // Issue Session Token
     const token = jwt.sign(
@@ -673,21 +682,19 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     );
     
     res.cookie('token', token, { 
-      httpOnly: true, 
-      secure: true, 
-      sameSite: 'Lax', 
-      path: '/', 
-      maxAge: 604800000, 
-      signed: true 
+      httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: 604800000, signed: true 
     });
 
-    return res.status(200).json({ success: true, slug: updatedAgent.slug, message: "Device registered!" });
+    return res.status(200).json({ 
+      success: true, 
+      slug: updatedAgent.slug, 
+      message: isNewRegistration ? "Device registered!" : "Login successful!" 
+    });
     
   } catch (err) {
     next(err); 
   }
 });
-
 
 // POST: Register or Add a new Device
 app.post('/api/crypto/add-device', authenticateToken, async (req, res, next) => {
