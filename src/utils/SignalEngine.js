@@ -50,7 +50,14 @@ async setupIdentity(identifier, deviceId) {
     }
   }
 
-  return { deviceId, identityKeyPair, registrationId };
+ return { 
+    preKeyBundle: {
+      registrationId,
+      identityKey: identityKeyPair.pubKey, // Ensure this matches your library's output
+      signedPreKey,
+      preKeys // You were missing this!
+    }
+  };
 },
 
   async encrypt(identifier, remoteUserId, clearText) {
