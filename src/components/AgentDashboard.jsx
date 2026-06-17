@@ -694,16 +694,17 @@ handleEndCall();
     return () => clearInterval(interval);
   }, []);
 
-
 useEffect(() => {
   if (isLoading || !token || !agentData?._id || isEngineReady) return;
 
   const runSecurityPipeline = async () => {
     try {
-      // 1. Get ID locally first to ensure it exists
+      // 1. Force the engine's store to prepare first
+      await SignalEngine.store.ensureReady(); 
+      
+      // 2. Now it is safe to get the ID
       const deviceId = await SignalEngine.getOrGenerateDeviceId();
       
-      // 2. Perform your security check
       const authRes = await secureFetch('/api/agents/check-device', {
         method: 'POST',
         body: JSON.stringify({ deviceId })
@@ -711,17 +712,15 @@ useEffect(() => {
 
       if (!authRes.ok) throw new Error("Security check failed");
       
-      // 3. Initialize the Engine using ONLY the userId. 
-      // The Engine will fetch the deviceId from the store internally.
+      // 3. Initialize
       const initialized = await SignalEngine.initialize(String(agentData._id)); 
       
       if (initialized) {
         setIsEngineReady(true);
-        console.log("✅ Security Pipeline: Engine Ready.");
       }
     } catch (err) {
       console.error("Security Pipeline Failure:", err);
-      // If it fails, force a reset so the next refresh tries a clean handshake
+      // Only reset if it's a catastrophic error
       await SignalEngine.reset();
     }
   };

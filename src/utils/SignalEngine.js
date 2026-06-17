@@ -89,15 +89,34 @@ async initialize(userId) {
   
   if (!identity) {
     console.log(`Registering new identity for: ${userId}`);
-    // Capture the bundle returned by setupIdentity
     const bundle = await this.setupIdentity(userId, deviceId);
-        await secureFetch('/api/crypto/add-device', {
+
+    // FIX: Serialize the bundle into a JSON-safe payload
+    const payload = {
+      deviceId,
+      registrationId: bundle.preKeyBundle.registrationId,
+      identityKey: bufferToBase64(bundle.preKeyBundle.identityKey),
+      signedPreKey: {
+        keyId: bundle.preKeyBundle.signedPreKey.keyId,
+        publicKey: bufferToBase64(bundle.preKeyBundle.signedPreKey.publicKey),
+        signature: bufferToBase64(bundle.preKeyBundle.signedPreKey.signature)
+      },
+      preKeys: bundle.preKeyBundle.preKeys.map(pk => ({
+        keyId: pk.keyId,
+        publicKey: bufferToBase64(pk.extractedPubKey)
+      }))
+    };
+
+    await secureFetch('/api/crypto/add-device', {
       method: 'POST',
-      body: JSON.stringify({ deviceId, ...bundle.preKeyBundle })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
+   if (!response.ok) {
+        throw new Error(`Registration failed: ${response.statusText}`);
+    }
     
-    isEngineReady = true;
-    return true;
+    console.log("✅ Identity successfully synced with server.");
   }
   
   isEngineReady = true;
