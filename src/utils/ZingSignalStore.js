@@ -1,6 +1,5 @@
 import { openDB } from 'idb';
 import { bufferToBase64, toBuffer } from './SignalUtils'; 
-import * as libsignalModule from 'libsignal';
 
 const DB_NAME = 'ZingConnectStorage';
 const DB_VERSION = 1;
@@ -14,165 +13,95 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
   },
 });
 
-
-const areKeysEqual = (key1, key2) => {
-  // If they are buffers, compare their bytes
-  if (key1 instanceof ArrayBuffer && key2 instanceof ArrayBuffer) {
-    const b1 = new Uint8Array(key1);
-    const b2 = new Uint8Array(key2);
-    if (b1.length !== b2.length) return false;
-    for (let i = 0; i < b1.length; i++) if (b1[i] !== b2[i]) return false;
-    return true;
-  }
-  return key1 === key2;
-};
-
 export class ZingSignalStore {
   constructor(lib) {
     this.lib = lib;
   }
 
-  _getKey(key, deviceId) {
-    return deviceId ? `${key}_${deviceId}` : key;
-  }
-
-  set lib(value) { this._lib = value; }
-  get lib() {
-    if (!this._lib) console.error(`ZingSignalStore: libsignal undefined.`);
-    return this._lib;
+  // Consistent key scoping: identifier (agentId) + deviceId + type
+  _getKey(identifier, deviceId, type) {
+    return `${identifier}_${deviceId}_${type}`;
   }
 
   async ensureReady() { await dbPromise; }
 
   // --- IDENTITY ---
-  async saveIdentityKeyPair(identityKeyPair, deviceId) {
-    const db = await dbPromise;
-    const tx = db.transaction(['identity'], 'readwrite');
-    await tx.objectStore('identity').put(identityKeyPair.pubKey, this._getKey('local_pub', deviceId));
-    await tx.objectStore('identity').put(identityKeyPair.privKey, this._getKey('local_priv', deviceId));
-    await tx.done;
-  }
-
-  async getIdentityKeyPair(deviceId) {
-    const db = await dbPromise;
-    const pubKey = await db.get('identity', this._getKey('local_pub', deviceId));
-    const privKey = await db.get('identity', this._getKey('local_priv', deviceId));
-    return (pubKey && privKey) ? { pubKey, privKey } : null;
-  }
-
-async saveIdentity(identifier, identityKey, deviceId) {
-  if (!deviceId) throw new Error("CRITICAL: DeviceID missing in saveIdentity");
-  
-  const db = await dbPromise;
-  const rawKey = identityKey.pubKey || identityKey;
-  const base64Key = bufferToBase64(rawKey);
-  
-  // Now we scope the identity to the device + the remote peer
-  await db.put('identity', base64Key, this._getKey(identifier, deviceId));
-}
-
-async loadIdentity(identifier, deviceId) {
-  if (!deviceId) throw new Error("CRITICAL: DeviceID missing in loadIdentity");
-  await this.ensureReady();
-  const db = await dbPromise;
-  const base64Key = await db.get('identity', this._getKey(identifier, deviceId));
-  return base64Key ? toBuffer(base64Key) : null;
-}
-
-async cleanupGhostDevices() {
-    const db = await dbPromise;
-    const stores = ['identity', 'session', 'prekeys'];
+  async saveIdentity(identifier, identityKey, deviceId) {
+    if (!identifier || !deviceId) throw new Error("Missing identifier or deviceId");
     
-    for (const storeName of stores) {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const keys = await store.getAllKeys();
-      
-      for (const key of keys) {
-        // If the key doesn't contain an underscore, it's a legacy/ghost key 
-        // (assuming your new keys are always identifier_deviceId)
-        if (typeof key === 'string' && !key.includes('_')) {
-          await store.delete(key);
-        }
-      }
-      await tx.done;
-    }
-    console.log("Ghost devices cleaned up successfully.");
-  }
-  // --- REGISTRATION ---
-  async saveRegistrationId(id, deviceId) {
     const db = await dbPromise;
-    await db.put('misc', id, this._getKey('registrationId', deviceId));
+    const rawKey = identityKey.pubKey || identityKey;
+    const base64Key = bufferToBase64(rawKey);
+    
+    await db.put('identity', base64Key, this._getKey(identifier, deviceId, 'identity'));
   }
 
-  async getLocalRegistrationId(deviceId) {
+  async loadIdentity(identifier, deviceId) {
+    await this.ensureReady();
     const db = await dbPromise;
-    return await db.get('misc', this._getKey('registrationId', deviceId));
+    const base64Key = await db.get('identity', this._getKey(identifier, deviceId, 'identity'));
+    return base64Key ? toBuffer(base64Key) : null;
+  }
+
+  // --- REGISTRATION ---
+  async saveRegistrationId(identifier, id, deviceId) {
+    const db = await dbPromise;
+    await db.put('misc', id, this._getKey(identifier, deviceId, 'regId'));
+  }
+
+  async getLocalRegistrationId(identifier, deviceId) {
+    const db = await dbPromise;
+    return await db.get('misc', this._getKey(identifier, deviceId, 'regId'));
   }
 
   // --- SESSIONS ---
-  // Sessions are usually indexed by remote user ID, but if you want 
-  // multi-device support for the SAME remote user, append deviceId to identifier
   async saveSession(identifier, record, deviceId) {
     const db = await dbPromise;
     const data = record.serialize();
-    await db.put('session', data, this._getKey(identifier, deviceId));
+    await db.put('session', data, this._getKey(identifier, deviceId, 'session'));
   }
 
   async loadSession(identifier, deviceId) {
     const db = await dbPromise;
-    const record = await db.get('session', this._getKey(identifier, deviceId));
+    const record = await db.get('session', this._getKey(identifier, deviceId, 'session'));
     if (!record) return null;
     try {
       return this.lib.SessionRecord.deserialize(record);
     } catch (err) {
-      await db.delete('session', this._getKey(identifier, deviceId));
+      await db.delete('session', this._getKey(identifier, deviceId, 'session'));
       return null;
     }
   }
 
   // --- PREKEYS ---
-  async saveSignedPreKey(keyId, keyPair, deviceId) {
+  async savePreKey(identifier, keyId, keyPair, deviceId) {
+    if (!identifier || !deviceId) throw new Error("Missing identifier or deviceId");
     const db = await dbPromise;
-    await db.put('prekeys', keyPair, this._getKey(keyId, deviceId));
+    await db.put('prekeys', keyPair, this._getKey(identifier, deviceId, `pk_${keyId}`));
   }
 
-  async loadSignedPreKey(keyId, deviceId) {
+  async loadPreKey(identifier, keyId, deviceId) {
     const db = await dbPromise;
-    return await db.get('prekeys', this._getKey(keyId, deviceId));
+    return await db.get('prekeys', this._getKey(identifier, deviceId, `pk_${keyId}`));
   }
 
-  async savePreKey(keyId, keyPair, deviceId) {
+  async removePreKey(identifier, keyId, deviceId) {
     const db = await dbPromise;
-    await db.put('prekeys', keyPair, this._getKey(keyId, deviceId));
+    await db.delete('prekeys', this._getKey(identifier, deviceId, `pk_${keyId}`));
   }
 
-  async loadPreKey(keyId, deviceId) {
+  // --- DEVICE MANAGEMENT ---
+  async getOrGenerateDeviceId() {
     const db = await dbPromise;
-    return await db.get('prekeys', this._getKey(keyId, deviceId));
+    let deviceId = await db.get('misc', 'current_device_id');
+    
+    if (!deviceId) {
+      deviceId = Math.floor(Math.random() * 1000000).toString();
+      await db.put('misc', deviceId, 'current_device_id');
+    }
+    return deviceId;
   }
 
-  async removePreKey(keyId, deviceId) {
-    const db = await dbPromise;
-    await db.delete('prekeys', this._getKey(keyId, deviceId));
-  }
-
- async savePreKey(keyId, keyPair, deviceId) {
-  if (!deviceId) throw new Error("CRITICAL: DeviceID missing in savePreKey");
-  const db = await dbPromise;
-  await db.put('prekeys', keyPair, this._getKey(keyId, deviceId));
-}
-  
-async getOrGenerateDeviceId() {
-  const db = await dbPromise;
-  let deviceId = await db.get('misc', 'current_device_id');
-  
-  if (!deviceId) {
-    deviceId = Math.floor(Math.random() * 1000000).toString();
-    await db.put('misc', deviceId, 'current_device_id');
-  }
-  return deviceId;
-}
   async clearAll() {
     const db = await dbPromise;
     const tx = db.transaction(['identity', 'session', 'prekeys', 'misc'], 'readwrite');
