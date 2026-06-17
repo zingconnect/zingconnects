@@ -15,12 +15,10 @@ export const SignalEngine = {
   async getOrGenerateDeviceId() {
     return await store.getOrGenerateDeviceId();
   },
-
 /**
  * Generates new identity and registers with store using scoped identifier
  */
 async setupIdentity(identifier, deviceId) {
-  // CRITICAL: Prevent execution if parameters are missing
   if (!identifier) throw new Error("setupIdentity: identifier (userId) is required.");
   if (!deviceId) throw new Error("setupIdentity: deviceId is required.");
   
@@ -29,33 +27,44 @@ async setupIdentity(identifier, deviceId) {
   
   const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
   const registrationId = KeyHelper.generateRegistrationId();
-  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
   
+  // 1. Generate and CORRECTLY extract the signedPreKey
+  const rawSignedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+  const signedPreKey = {
+    ...rawSignedPreKey,
+    // Extracting the public key into a consistent field
+    publicKey: rawSignedPreKey.keyPair?.pubKey || rawSignedPreKey.pubKey
+  };
+  
+  // 2. Generate preKeys
   const preKeys = await Promise.all(
     Array.from({ length: 20 }, async (_, i) => {
       const pk = await KeyHelper.generatePreKey(i + 1);
-      return { ...pk, extractedPubKey: pk.keyPair?.pubKey || pk.pubKey };
+      // Normalize public key extraction
+      return { 
+        ...pk, 
+        publicKey: pk.keyPair?.pubKey || pk.pubKey 
+      };
     })
   );
 
-  // Save to store with identifier scope
-  // The store uses these to create the 'identifier_deviceId_type' key
+  // 3. Save to store
   await store.saveIdentity(identifier, identityKeyPair, deviceId);
   await store.saveRegistrationId(identifier, registrationId, deviceId);
   await store.savePreKey(identifier, signedPreKey.keyId, signedPreKey, deviceId);
   
   for (const pk of preKeys) {
-    if (pk?.keyId && pk.extractedPubKey) {
+    if (pk?.keyId && pk.publicKey) {
       await store.savePreKey(identifier, pk.keyId, pk, deviceId);
     }
   }
 
- return { 
+  return { 
     preKeyBundle: {
       registrationId,
-      identityKey: identityKeyPair.pubKey, // Ensure this matches your library's output
+      identityKey: identityKeyPair.pubKey,
       signedPreKey,
-      preKeys // You were missing this!
+      preKeys
     }
   };
 },

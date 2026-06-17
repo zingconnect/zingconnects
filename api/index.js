@@ -636,7 +636,6 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     }
 
     // 2. Cryptographic & Device Logic
-    // Use findOneAndUpdate with conditional logic to handle race conditions
     let updateQuery = { 
       $set: { isVerified: true, status: 'active', failedOtpAttempts: 0 },
       $unset: { otp: "", otpExpires: "" }
@@ -645,14 +644,33 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
     const existingDevice = agent.devices.find(d => String(d.deviceId) === String(deviceId));
 
     if (isNewRegistration) {
-      if (!identityKey || !preKeys?.length || !signedPreKey) {
-        return res.status(400).json({ success: false, message: "Invalid cryptographic bundle." });
+      // Validate incoming bundle structure
+      if (!identityKey || !preKeys?.length || !signedPreKey || !signedPreKey.publicKey) {
+        return res.status(400).json({ success: false, message: "Invalid cryptographic bundle: missing keys." });
       }
+      
       if (existingDevice) {
         return res.status(403).json({ success: false, message: "Device already registered." });
       }
-      // Add the new device to the update query
-      updateQuery.$push = { devices: { deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date() } };
+
+      // Normalize and push new device
+      updateQuery.$push = { 
+        devices: { 
+          deviceId, 
+          registrationId, 
+          identityKey, 
+          signedPreKey: {
+            keyId: signedPreKey.keyId,
+            publicKey: signedPreKey.publicKey, // Now guaranteed to exist by validation above
+            signature: signedPreKey.signature
+          }, 
+          preKeys: preKeys.map(pk => ({
+            keyId: pk.keyId,
+            publicKey: pk.publicKey // Assumes frontend sends normalized 'publicKey'
+          })), 
+          createdAt: new Date() 
+        } 
+      };
     } else {
       if (!existingDevice) {
         return res.status(401).json({ success: false, message: "Device not recognized. Please re-register." });

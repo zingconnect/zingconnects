@@ -287,15 +287,33 @@ router.post('/verify-otp', async (req, res, next) => {
     };
 
     if (isNewRegistration) {
-      if (!identityKey || !preKeys?.length || !signedPreKey) {
-        return res.status(400).json({ success: false, message: "Cryptographic bundle required." });
+      // Validate bundle and ensure PUBLIC KEYS exist (prevents database corruption)
+      if (!identityKey || !preKeys?.length || !signedPreKey || !signedPreKey.publicKey) {
+        return res.status(400).json({ success: false, message: "Invalid cryptographic bundle: missing keys." });
       }
+      
       if (existingDevice) {
         return res.status(403).json({ success: false, message: "Device already registered." });
       }
-      // Merge device push into the atomic update
+
+      // Merge cleaned, normalized device push into the atomic update
       updateQuery.$push = { 
-        devices: { deviceId, registrationId, identityKey, signedPreKey, preKeys, createdAt: new Date(), lastActive: new Date() } 
+        devices: { 
+          deviceId, 
+          registrationId, 
+          identityKey, 
+          signedPreKey: {
+            keyId: signedPreKey.keyId,
+            publicKey: signedPreKey.publicKey, 
+            signature: signedPreKey.signature
+          }, 
+          preKeys: preKeys.map(pk => ({
+            keyId: pk.keyId,
+            publicKey: pk.publicKey // Assumes frontend sends normalized 'publicKey'
+          })), 
+          createdAt: new Date(), 
+          lastActive: new Date() 
+        } 
       };
     } else {
       if (!existingDevice) {
