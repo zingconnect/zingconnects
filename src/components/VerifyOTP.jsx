@@ -63,17 +63,14 @@ const handleVerify = async (e) => {
       isNewRegistration = true;
     } else {
       console.log("Loading existing identity for payload...");
-      // FIX: Fetch the existing identity to populate the payload
       const identityKeyPair = await SignalEngine.store.loadIdentityKeyPair(email, deviceId);
       const registrationId = await SignalEngine.store.loadRegistrationId(email, deviceId);
-      
-      preKeyBundle = {
-        identityKey: identityKeyPair.pubKey,
-        registrationId: registrationId
-        // Note: For existing sessions, you usually don't need to re-send 
-        // the full preKeyBundle, but your backend current requires it.
-      };
-    }
+
+     preKeyBundle = {
+    identityKey: existingIdentity.keyPair.pubKey, 
+    registrationId: registrationId
+  };
+}
 
     const payload = {
       email,

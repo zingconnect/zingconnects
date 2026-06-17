@@ -33,13 +33,21 @@ _getKey(identifier, deviceId, type, remoteUserId = '') {
     
     await db.put('identity', base64Key, this._getKey(identifier, deviceId, 'identity'));
   }
-
-  async loadIdentity(identifier, deviceId) {
-    await this.ensureReady();
-    const db = await dbPromise;
-    const base64Key = await db.get('identity', this._getKey(identifier, deviceId, 'identity'));
-    return base64Key ? toBuffer(base64Key) : null;
-  }
+  
+async loadIdentity(identifier, deviceId) {
+  await this.ensureReady();
+  const db = await dbPromise;
+    const identityObj = await db.get('identity', this._getKey(identifier, deviceId, 'identity'));
+  
+  if (!identityObj) return null;
+  return {
+    ...identityObj,
+    keyPair: {
+      pubKey: toBuffer(identityObj.keyPair.pubKey),
+      privKey: toBuffer(identityObj.keyPair.privKey)
+    }
+  };
+}
 
   // --- REGISTRATION ---
   async saveRegistrationId(identifier, id, deviceId) {
