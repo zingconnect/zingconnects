@@ -61,17 +61,21 @@ const handleVerify = async (e) => {
       const result = await SignalEngine.setupIdentity(email, deviceId);
       preKeyBundle = result.preKeyBundle;
       isNewRegistration = true;
-    } else {
-      console.log("Loading existing identity for payload...");
-      const identityKeyPair = await SignalEngine.store.loadIdentityKeyPair(email, deviceId);
-      const registrationId = await SignalEngine.store.loadRegistrationId(email, deviceId);
-
-     preKeyBundle = {
-    identityKey: existingIdentity.keyPair.pubKey, 
-    registrationId: registrationId
-  };
+   } else {
+  console.log("Loading existing identity for payload...");
+  const identity = await SignalEngine.store.loadIdentity(email, deviceId);
+  const registrationId = await SignalEngine.store.loadRegistrationId(email, deviceId);
+    if (identity && identity.keyPair) {
+    preKeyBundle = {
+      identityKey: identity.keyPair.pubKey,
+      registrationId: registrationId
+    };
+  } else {
+    console.error("Local identity found but corrupted.");
+    preKeyBundle = null; 
+    isNewRegistration = true; // Force re-registration
+  }
 }
-
     const payload = {
       email,
       otp,
