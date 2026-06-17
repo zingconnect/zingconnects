@@ -49,16 +49,17 @@ const handleVerify = async (e) => {
 
   try {
     const deviceId = await SignalEngine.getOrGenerateDeviceId();
-    const result = await SignalEngine.setupIdentity(deviceId);
-    
-    // 1. Validate bundle
-    if (!result?.preKeyBundle?.preKeys || result.preKeyBundle.preKeys.length === 0) {
-      throw new Error("Security initialization failed: Cryptographic keys missing.");
+    let result;
+    const existingIdentity = await SignalEngine.store.loadIdentity(email, deviceId);
+    if (!existingIdentity) {
+      console.log("Generating new identity...");
+      result = await SignalEngine.setupIdentity(email, deviceId);
+    } else {
+      console.log("Identity already exists, constructing bundle from local store...");
+      const regId = await SignalEngine.store.getLocalRegistrationId(email, deviceId);
+      result = await reconstructBundle(email, deviceId, regId); 
     }
-
     const { preKeyBundle } = result;
-
-    // 2. Clean the keys
     const cleanedPreKeys = preKeyBundle.preKeys.filter(
       pk => pk !== null && typeof pk === 'object' && pk.keyId && pk.publicKey
     );

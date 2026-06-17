@@ -15,6 +15,7 @@ export const SignalEngine = {
   async getOrGenerateDeviceId() {
     return await store.getOrGenerateDeviceId();
   },
+
 /**
  * Generates new identity and registers with store using scoped identifier
  */
@@ -72,27 +73,37 @@ async setupIdentity(identifier, deviceId) {
   },
 
 
-  async initialize(userId) {
-    if (!userId) {
-      console.error("SignalEngine: Cannot initialize without a userId (identifier).");
-      return false;
-    }
-    console.log("🛡️ Initializing Engine for:", userId);
-    const deviceId = await this.getOrGenerateDeviceId();
-    if (!deviceId) {
-      throw new Error("CRITICAL: Failed to generate or retrieve deviceId");
-    }
-    const identity = await this.store.loadIdentity(userId, deviceId);
-    if (!identity) {
-      console.log(`Identity not found for ${userId} (Device: ${deviceId}), setting up new identity...`);
-      await this.setupIdentity(userId, deviceId);
-    } else {
-      console.log("Identity found, reusing existing state.");
-    }
+ async initialize(userId) {
+  if (!userId) {
+    console.error("SignalEngine: initialize called without userId.");
+    return false;
+  }
 
-    isEngineReady = true;
-    return true;
-  },
+  // 1. Force retrieval of a validated string
+  const deviceId = await this.getOrGenerateDeviceId();
+  
+  // 2. Strict type check (prevents undefined or null from passing)
+  if (!deviceId || typeof deviceId !== 'string') {
+    throw new Error("CRITICAL: deviceId failed to resolve to a valid string.");
+  }
+
+  console.log(`🛡️ Initializing Engine for ${userId} | Target DeviceID: ${deviceId}`);
+  
+  // 3. Load identity using the exact same variable
+  const identity = await this.store.loadIdentity(userId, deviceId);
+  
+  if (!identity) {
+    console.log(`No identity found. Registering new one for: ${userId} / ${deviceId}`);
+    
+    // 4. Pass the validated variables directly
+    await this.setupIdentity(userId, deviceId);
+  } else {
+    console.log("Identity found. Reusing existing session state.");
+  }
+
+  isEngineReady = true;
+  return true;
+},
 
   async sendMessage(remoteUserId, receiverModel, messageText, conversationId, identifier, isRetry = false) {
     const deviceId = await this.getOrGenerateDeviceId();
