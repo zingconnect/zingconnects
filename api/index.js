@@ -677,14 +677,11 @@ app.post('/api/agents/verify-otp', async (req, res, next) => {
       }
     }
 
-    // 3. Atomic State Update
-    const updatedAgent = await AgentModel.findOneAndUpdate(
-      { _id: agent._id },
-      updateQuery,
-      { new: true }
-    );
-
-    // 4. Session Handling
+   const updatedAgent = await AgentModel.findOneAndUpdate(
+  { _id: agent._id },
+  updateQuery,
+  { returnDocument: 'after' } 
+);
     const token = jwt.sign(
       { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' }, 
       process.env.JWT_SECRET, 

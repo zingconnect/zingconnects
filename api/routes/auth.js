@@ -320,15 +320,12 @@ router.post('/verify-otp', async (req, res, next) => {
         return res.status(401).json({ success: false, message: "Device not authorized." });
       }
     }
+const updatedAgent = await AgentModel.findOneAndUpdate(
+  { _id: agent._id },
+  updateQuery,
+  { returnDocument: 'after' } 
+);
 
-    // 3. Perform SINGLE Atomic Operation
-    const updatedAgent = await AgentModel.findOneAndUpdate(
-      { _id: agent._id },
-      updateQuery,
-      { new: true }
-    );
-
-    // 4. Issue Token
     const token = jwt.sign(
       { id: updatedAgent._id, slug: updatedAgent.slug, role: 'agent' },
       process.env.JWT_SECRET,
