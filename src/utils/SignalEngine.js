@@ -79,35 +79,27 @@ async setupIdentity(identifier, deviceId) {
     return new TextDecoder().decode(decrypted);
   },
 
+async initialize(userId) {
+  if (!userId) return false;
 
- async initialize(userId) {
-  if (!userId) {
-    console.error("SignalEngine: initialize called without userId.");
-    return false;
-  }
-
-  // 1. Force retrieval of a validated string
   const deviceId = await this.getOrGenerateDeviceId();
-  
-  // 2. Strict type check (prevents undefined or null from passing)
-  if (!deviceId || typeof deviceId !== 'string') {
-    throw new Error("CRITICAL: deviceId failed to resolve to a valid string.");
-  }
+  if (!deviceId) throw new Error("CRITICAL: deviceId failed to resolve.");
 
-  console.log(`🛡️ Initializing Engine for ${userId} | Target DeviceID: ${deviceId}`);
-  
-  // 3. Load identity using the exact same variable
   const identity = await this.store.loadIdentity(userId, deviceId);
   
   if (!identity) {
-    console.log(`No identity found. Registering new one for: ${userId} / ${deviceId}`);
+    console.log(`Registering new identity for: ${userId}`);
+    // Capture the bundle returned by setupIdentity
+    const bundle = await this.setupIdentity(userId, deviceId);
+        await secureFetch('/api/crypto/add-device', {
+      method: 'POST',
+      body: JSON.stringify({ deviceId, ...bundle.preKeyBundle })
+    });
     
-    // 4. Pass the validated variables directly
-    await this.setupIdentity(userId, deviceId);
-  } else {
-    console.log("Identity found. Reusing existing session state.");
+    isEngineReady = true;
+    return true;
   }
-
+  
   isEngineReady = true;
   return true;
 },
@@ -133,7 +125,7 @@ async setupIdentity(identifier, deviceId) {
         const bundle = prepareBundleForSignal(data);
         
         let session = await store.loadSession(identifier, remoteUserId, deviceId);
-        
+
         await sessionBuilder.initOutgoing(bundle);
       await store.saveSession(identifier, remoteUserId, await store.loadSession(identifier, remoteUserId, deviceId), deviceId);
       } catch (err) {
