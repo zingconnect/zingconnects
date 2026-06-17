@@ -694,17 +694,16 @@ handleEndCall();
     return () => clearInterval(interval);
   }, []);
 
+// Inside your AgentDashboard.jsx
 useEffect(() => {
   if (isLoading || !token || !agentData?._id || isEngineReady) return;
 
   const runSecurityPipeline = async () => {
     try {
-      // 1. Force the engine's store to prepare first
-      await SignalEngine.store.ensureReady(); 
-      
-      // 2. Now it is safe to get the ID
+      // 1. Get the deviceId from your IndexedDB store
       const deviceId = await SignalEngine.getOrGenerateDeviceId();
       
+      // 2. Perform your security check
       const authRes = await secureFetch('/api/agents/check-device', {
         method: 'POST',
         body: JSON.stringify({ deviceId })
@@ -712,7 +711,9 @@ useEffect(() => {
 
       if (!authRes.ok) throw new Error("Security check failed");
       
-      // 3. Initialize
+      // 3. Initialize the Engine
+      // Ensure your SignalEngine.initialize(userId) method is updated 
+      // to use the resolved deviceId when calling setupIdentity internally.
       const initialized = await SignalEngine.initialize(String(agentData._id)); 
       
       if (initialized) {
@@ -720,14 +721,13 @@ useEffect(() => {
       }
     } catch (err) {
       console.error("Security Pipeline Failure:", err);
-      // Only reset if it's a catastrophic error
+      // If the engine state is mismatched, force a reset
       await SignalEngine.reset();
     }
   };
 
   runSecurityPipeline();
 }, [token, isLoading, agentData?._id, isEngineReady]);
-
   useEffect(() => {
     if (!room) return;
 
