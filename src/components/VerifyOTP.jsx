@@ -64,19 +64,24 @@ const handleVerify = async (e) => {
       console.log("Identity already exists locally.");
     }
 
-    // 2. Prepare payload
-    // If it's a new registration, we send the bundle. 
-    // If it's an existing device, we just send email/otp/deviceId to verify access.
     const payload = {
-      email,
-      otp,
-      deviceId,
-      isNewRegistration,
-      identityKey: preKeyBundle?.identityKey || null,
-      signedPreKey: preKeyBundle?.signedPreKey || null,
-      preKeys: preKeyBundle?.preKeys?.filter(pk => pk?.keyId && pk.publicKey) || [],
-      registrationId: preKeyBundle?.registrationId || null
-    };
+  email,
+  otp,
+  deviceId,
+  isNewRegistration,
+  // Convert all complex keys to Base64
+  identityKey: preKeyBundle?.identityKey ? bufferToBase64(preKeyBundle.identityKey) : null,
+  registrationId: preKeyBundle?.registrationId,
+  signedPreKey: preKeyBundle?.signedPreKey ? {
+    keyId: preKeyBundle.signedPreKey.keyId,
+    publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+    signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+  } : null,
+  preKeys: preKeyBundle?.preKeys?.map(pk => ({
+    keyId: pk.keyId,
+    publicKey: bufferToBase64(pk.publicKey || pk.extractedPubKey)
+  })) || []
+};
 
     const response = await secureFetch('/api/agents/verify-otp', {
       method: 'POST',
