@@ -24,7 +24,6 @@ const areKeysEqual = (key1, key2) => {
     for (let i = 0; i < b1.length; i++) if (b1[i] !== b2[i]) return false;
     return true;
   }
-  // Otherwise default to standard comparison
   return key1 === key2;
 };
 
