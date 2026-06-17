@@ -15,38 +15,42 @@ export const SignalEngine = {
   async getOrGenerateDeviceId() {
     return await store.getOrGenerateDeviceId();
   },
+/**
+ * Generates new identity and registers with store using scoped identifier
+ */
+async setupIdentity(identifier, deviceId) {
+  // CRITICAL: Prevent execution if parameters are missing
+  if (!identifier) throw new Error("setupIdentity: identifier (userId) is required.");
+  if (!deviceId) throw new Error("setupIdentity: deviceId is required.");
+  
+  const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
+  if (!KeyHelper) throw new Error("KeyHelper not found");
+  
+  const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
+  const registrationId = KeyHelper.generateRegistrationId();
+  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
+  
+  const preKeys = await Promise.all(
+    Array.from({ length: 20 }, async (_, i) => {
+      const pk = await KeyHelper.generatePreKey(i + 1);
+      return { ...pk, extractedPubKey: pk.keyPair?.pubKey || pk.pubKey };
+    })
+  );
 
-  /**
-   * Generates new identity and registers with store using scoped identifier
-   */
-  async setupIdentity(identifier, deviceId) {
-    const KeyHelper = lib.KeyHelper || lib.keyhelper || lib.default?.KeyHelper;
-    if (!KeyHelper) throw new Error("KeyHelper not found");
-    
-    const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
-    const registrationId = KeyHelper.generateRegistrationId();
-    const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, 1);
-    
-    const preKeys = await Promise.all(
-      Array.from({ length: 20 }, async (_, i) => {
-        const pk = await KeyHelper.generatePreKey(i + 1);
-        return { ...pk, extractedPubKey: pk.keyPair?.pubKey || pk.pubKey };
-      })
-    );
-
-    // Save to store with identifier scope
-    await store.saveIdentity(identifier, identityKeyPair, deviceId);
-    await store.saveRegistrationId(identifier, registrationId, deviceId);
-    await store.savePreKey(identifier, signedPreKey.keyId, signedPreKey, deviceId);
-    
-    for (const pk of preKeys) {
-      if (pk?.keyId && pk.extractedPubKey) {
-        await store.savePreKey(identifier, pk.keyId, pk, deviceId);
-      }
+  // Save to store with identifier scope
+  // The store uses these to create the 'identifier_deviceId_type' key
+  await store.saveIdentity(identifier, identityKeyPair, deviceId);
+  await store.saveRegistrationId(identifier, registrationId, deviceId);
+  await store.savePreKey(identifier, signedPreKey.keyId, signedPreKey, deviceId);
+  
+  for (const pk of preKeys) {
+    if (pk?.keyId && pk.extractedPubKey) {
+      await store.savePreKey(identifier, pk.keyId, pk, deviceId);
     }
+  }
 
-    return { deviceId, identityKeyPair, registrationId };
-  },
+  return { deviceId, identityKeyPair, registrationId };
+},
 
   async encrypt(identifier, remoteUserId, clearText) {
     const SessionCipher = lib.SessionCipher || lib.sessioncipher || lib.default?.SessionCipher;
@@ -67,20 +71,25 @@ export const SignalEngine = {
     return new TextDecoder().decode(decrypted);
   },
 
+
   async initialize(userId) {
+    if (!userId) {
+      console.error("SignalEngine: Cannot initialize without a userId (identifier).");
+      return false;
+    }
     console.log("🛡️ Initializing Engine for:", userId);
     const deviceId = await this.getOrGenerateDeviceId();
-    
-    // Check if identity exists for this specific User ID and Device ID
-    const identity = await store.loadIdentity(userId, deviceId);
-    
+    if (!deviceId) {
+      throw new Error("CRITICAL: Failed to generate or retrieve deviceId");
+    }
+    const identity = await this.store.loadIdentity(userId, deviceId);
     if (!identity) {
-      console.log(`Identity not found for ${userId}, setting up new identity...`);
+      console.log(`Identity not found for ${userId} (Device: ${deviceId}), setting up new identity...`);
       await this.setupIdentity(userId, deviceId);
     } else {
       console.log("Identity found, reusing existing state.");
     }
-    
+
     isEngineReady = true;
     return true;
   },
