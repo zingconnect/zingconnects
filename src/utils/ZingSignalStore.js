@@ -52,24 +52,29 @@ _getKey(identifier, deviceId, type, remoteUserId = '') {
     return await db.get('misc', this._getKey(identifier, deviceId, 'regId'));
   }
 
- async saveSession(identifier, remoteUserId, record, deviceId) {
+// --- SESSIONS ---
+async saveSession(identifier, remoteUserId, record, deviceId) {
   const db = await dbPromise;
   const data = record.serialize();
-  await db.put('session', data, this._getKey(identifier, remoteUserId, 'session', remoteUserId));
+  // FIX: Include deviceId here to match loadSession
+  await db.put('session', data, this._getKey(identifier, deviceId, 'session', remoteUserId));
 }
 
-  async loadSession(identifier, remoteUserId, deviceId) {
+async loadSession(identifier, remoteUserId, deviceId) {
   await this.ensureReady();
   const db = await dbPromise;
+  // This looks correct now
   const record = await db.get('session', this._getKey(identifier, deviceId, 'session', remoteUserId));
+  
   if (!record) return null;
-    try {
-      return this.lib.SessionRecord.deserialize(record);
-    } catch (err) {
-      await db.delete('session', this._getKey(identifier, deviceId, 'session'));
-      return null;
-    }
+  try {
+    return this.lib.SessionRecord.deserialize(record);
+  } catch (err) {
+    // FIX: Include remoteUserId in the delete call as well
+    await db.delete('session', this._getKey(identifier, deviceId, 'session', remoteUserId));
+    return null;
   }
+}
 
   // --- PREKEYS ---
   async savePreKey(identifier, keyId, keyPair, deviceId) {
