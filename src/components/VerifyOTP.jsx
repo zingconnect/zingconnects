@@ -4,6 +4,8 @@ import { BsShieldCheck, BsCheckCircleFill, BsArrowLeft } from 'react-icons/bs';
 import ZingConnectLogo from '../../public/logo.png';
 import { secureFetch } from "../../api/utils/api";
 import { SignalEngine } from "../utils/SignalEngine";
+import { bufferToBase64 } from "../utils/SignalUtils";
+
 
 export const VerifyOTP = () => {
   const location = useLocation();
@@ -64,25 +66,25 @@ const handleVerify = async (e) => {
       console.log("Identity already exists locally.");
     }
 
-    const payload = {
-  email,
-  otp,
-  deviceId,
-  isNewRegistration,
-  // Convert all complex keys to Base64
-  identityKey: preKeyBundle?.identityKey ? bufferToBase64(preKeyBundle.identityKey) : null,
-  registrationId: preKeyBundle?.registrationId,
-  signedPreKey: preKeyBundle?.signedPreKey ? {
-    keyId: preKeyBundle.signedPreKey.keyId,
-    publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
-    signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
-  } : null,
-  preKeys: preKeyBundle?.preKeys?.map(pk => ({
-    keyId: pk.keyId,
-    publicKey: bufferToBase64(pk.publicKey || pk.extractedPubKey)
-  })) || []
-};
+const payload = {
+      email,
+      otp,
+      deviceId,
+      isNewRegistration,
+      identityKey: preKeyBundle?.identityKey ? bufferToBase64(preKeyBundle.identityKey) : null,
+      registrationId: preKeyBundle?.registrationId,
+      signedPreKey: preKeyBundle?.signedPreKey ? {
+        keyId: preKeyBundle.signedPreKey.keyId,
+        publicKey: bufferToBase64(preKeyBundle.signedPreKey.publicKey),
+        signature: bufferToBase64(preKeyBundle.signedPreKey.signature)
+      } : null,
+      preKeys: preKeyBundle?.preKeys?.map(pk => ({
+        keyId: pk.keyId,
+        publicKey: bufferToBase64(pk.publicKey || pk.extractedPubKey)
+      })) || []
+    };
 
+    console.log("Payload sending to API:", payload);
     const response = await secureFetch('/api/agents/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
