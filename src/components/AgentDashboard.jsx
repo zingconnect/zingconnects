@@ -694,40 +694,6 @@ handleEndCall();
     return () => clearInterval(interval);
   }, []);
 
-// Inside your AgentDashboard.jsx
-useEffect(() => {
-  if (isLoading || !token || !agentData?._id || isEngineReady) return;
-
-  const runSecurityPipeline = async () => {
-    try {
-      // 1. Get the deviceId from your IndexedDB store
-      const deviceId = await SignalEngine.getOrGenerateDeviceId();
-      
-      // 2. Perform your security check
-      const authRes = await secureFetch('/api/agents/check-device', {
-        method: 'POST',
-        body: JSON.stringify({ deviceId })
-      });
-
-      if (!authRes.ok) throw new Error("Security check failed");
-      
-      // 3. Initialize the Engine
-      // Ensure your SignalEngine.initialize(userId) method is updated 
-      // to use the resolved deviceId when calling setupIdentity internally.
-      const initialized = await SignalEngine.initialize(String(agentData._id)); 
-      
-      if (initialized) {
-        setIsEngineReady(true);
-      }
-    } catch (err) {
-      console.error("Security Pipeline Failure:", err);
-      // If the engine state is mismatched, force a reset
-      await SignalEngine.reset();
-    }
-  };
-
-  runSecurityPipeline();
-}, [token, isLoading, agentData?._id, isEngineReady]);
   useEffect(() => {
     if (!room) return;
 
@@ -1421,78 +1387,54 @@ useEffect(() => {
 useEffect(() => {
   let isMounted = true;
 
-  // 1. Safe Script Loading
-  if (!document.querySelector('script[src*="flutterwave"]')) {
-    const script = document.createElement('script');
-    script.src = "https://checkout.flutterwave.com/v3.js";
-    script.async = true;
-    script.id = "flutterwave-script";
-    document.body.appendChild(script);
-  }
-
-  const fetchInitialData = async () => {
+  const initializeDashboard = async () => {
     setLoading(true);
     try {
-      if (isForcedRefresh) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      const [profileResponse, usersResponse] = await Promise.allSettled([
-        secureFetch(`/api/agents/profile/me?fresh=true&t=${Date.now()}`, { method: 'GET' }),
-        secureFetch(`/api/agents/my-users?t=${Date.now()}`, { method: 'GET' })
+      // 1. Load Profile & User Data
+      const [profileRes, usersRes] = await Promise.allSettled([
+        secureFetch(`/api/agents/profile/me?fresh=true`),
+        secureFetch(`/api/agents/my-users`)
       ]);
 
       if (!isMounted) return;
+      if (profileRes.status === 'rejected' || !profileRes.value.ok) throw new Error("Profile load failed");
 
-      if (profileResponse.status === 'rejected' || !profileResponse.value.ok) {
-        const res = profileResponse.value;
-        if (res?.status === 401 || res?.status === 403) {
-          const errorData = await res.json().catch(() => ({}));
-          errorData.reason === 'dual_login' ? setIsDualLoginConflict(true) : navigate(`/agent/login/${slug}`);
-          return;
-        }
-        throw new Error("Profile data retrieval failed");
+      const { agent } = await profileRes.json();
+      setAgentData(agent);
+
+      // 2. Cryptographic Device Validation
+      const deviceId = await SignalEngine.getOrGenerateDeviceId();
+      const isDeviceRegistered = agent.devices?.some(d => String(d.deviceId) === String(deviceId));
+
+      if (!isDeviceRegistered) {
+        console.warn("Device not authorized. Triggering re-auth flow.");
+        // Optional: set a state to prompt user for re-verification
+        return;
       }
-      
-      const profileData = await profileResponse.value.json();
-      
-      if (profileData.agent) {
-        const agent = profileData.agent;
-        
-        // 2. MODIFIED: Correctly validate against the new 'devices' array
-        const currentDeviceId = await SignalEngine.store.getOrGenerateDeviceId();
-        const hasValidKeys = agent.devices && agent.devices.some(d => String(d.deviceId) === String(currentDeviceId));
-        
-        if (!hasValidKeys) {
-          console.error("Crypto keys missing or invalid for this device. Please re-authenticate.");
-          // Optionally trigger a state to show a "Device Not Authorized" UI
-        }
 
-        setAgentData(agent);
-        setIsSubscribed(!!agent.isSubscribed); 
-        if (agent.plan) setSelectedPlan(agent.plan);
-
-        if (agent.isSubscribed && usersResponse.status === 'fulfilled') {
-          const uRes = usersResponse.value;
-          if (uRes.ok) {
-            const userData = await uRes.json();
-            if (userData.success) setUsers(userData.users);
-          } else if (uRes.status === 403) {
-            setIsDualLoginConflict(true);
-          }
-        }
+      // 3. Initialize Engine (Passing deviceId explicitly if needed)
+      const initialized = await SignalEngine.initialize(String(agent._id));
+      if (initialized) {
+        setIsEngineReady(true);
+        console.log("✅ Encryption Engine Ready.");
       }
+
+      // 4. Load remaining UI data
+      if (agent.isSubscribed && usersRes.status === 'fulfilled' && usersRes.value.ok) {
+        const userData = await usersRes.json();
+        setUsers(userData.users);
+      }
+
     } catch (err) {
-      console.error("Initialization error:", err);
+      console.error("Initialization Pipeline Error:", err);
     } finally {
       if (isMounted) setLoading(false);
     }
   };
 
-  fetchInitialData();
+  if (token && !isLoading) initializeDashboard();
   return () => { isMounted = false; };
-}, [navigate, slug, isForcedRefresh]);
-
+}, [token, isLoading, slug]); // Dependencies reduced to essential triggers
 
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
