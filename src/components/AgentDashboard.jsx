@@ -150,7 +150,6 @@ export const AgentDashboard = () => {
 
   const [timeTicker, setTimeTicker] = useState(Date.now());
 
-  // Subscription States
 const [isSubscribed, setIsSubscribed] = useState(agentData?.isSubscribed ?? false);
   const [selectedPlan, setSelectedPlan] = useState("BASIC");
   const [paymentProcessing, setPaymentProcessing] = useState(false);
@@ -160,10 +159,11 @@ const [isSubscribed, setIsSubscribed] = useState(agentData?.isSubscribed ?? fals
   const [previewUrl, setPreviewUrl] = useState(null);   
   const [caption, setCaption] = useState("");  
 
+  const isInitialized = useRef(false);
   const isFetchingRef = useRef(false);
   const repairAttemptedRef = useRef(false);
   const activeSessionRef = useRef(null);
-const hasProcessedDeepLink = useRef(false);
+  const hasProcessedDeepLink = useRef(false);
   const messagesEndRef = useRef(null);
   const connectionTimeoutRef = useRef(null);
   const localAudioRef = useRef(null);
@@ -1383,58 +1383,54 @@ useEffect(() => {
 
   return () => clearInterval(heartBeat);
 }, [isDualLoginConflict]);
-
 useEffect(() => {
-  let isMounted = true;
+  // 2. Prevent re-running if already done, or if dependencies aren't ready
+  if (isInitialized.current || !token || isAuthLoading) return;
 
-  const initializeDashboard = async () => {
+  const bootstrap = async () => {
+    isInitialized.current = true; // Set lock immediately
     setLoading(true);
+
     try {
-      // 1. Load Profile & User Data
-      const [profileRes, usersRes] = await Promise.allSettled([
-        secureFetch(`/api/agents/profile/me?fresh=true`),
-        secureFetch(`/api/agents/my-users`)
+      const [profileRes, usersRes] = await Promise.all([
+        secureFetch('/api/agents/profile/me?fresh=true'),
+        secureFetch('/api/agents/my-users')
       ]);
 
-      if (!isMounted) return;
-      if (profileRes.status === 'rejected' || !profileRes.value.ok) throw new Error("Profile load failed");
-
+      if (!profileRes.ok) throw new Error("Auth failed");
+      
       const { agent } = await profileRes.json();
       setAgentData(agent);
 
-      // 2. Cryptographic Device Validation
+      // Verify Device
       const deviceId = await SignalEngine.getOrGenerateDeviceId();
       const isDeviceRegistered = agent.devices?.some(d => String(d.deviceId) === String(deviceId));
 
       if (!isDeviceRegistered) {
-        console.warn("Device not authorized. Triggering re-auth flow.");
-        // Optional: set a state to prompt user for re-verification
-        return;
+        console.warn("Device unauthorized: Registration required.");
+        return; 
       }
 
-      // 3. Initialize Engine (Passing deviceId explicitly if needed)
-      const initialized = await SignalEngine.initialize(String(agent._id));
-      if (initialized) {
-        setIsEngineReady(true);
-        console.log("✅ Encryption Engine Ready.");
-      }
-
-      // 4. Load remaining UI data
-      if (agent.isSubscribed && usersRes.status === 'fulfilled' && usersRes.value.ok) {
+      // Initialize Engine
+      await SignalEngine.initialize(String(agent._id));
+      setIsEngineReady(true);
+      
+      // Load users
+      if (usersRes.ok) {
         const userData = await usersRes.json();
         setUsers(userData.users);
       }
-
     } catch (err) {
-      console.error("Initialization Pipeline Error:", err);
+      console.error("Dashboard Bootstrap Failed:", err);
+      isInitialized.current = false; // Allow retry on error if desired
     } finally {
-      if (isMounted) setLoading(false);
+      setLoading(false);
     }
   };
 
-  if (token && !isLoading) initializeDashboard();
-  return () => { isMounted = false; };
-}, [token, isLoading, slug]); // Dependencies reduced to essential triggers
+  bootstrap();
+}, [token, isAuthLoading]);
+
 
 const handlePayment = useCallback(async () => {
   if (!agentData?.email) {
